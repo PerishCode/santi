@@ -11,7 +11,7 @@
 
 export const STAMP_FLAG = "--santi-stamp";
 export const STAMP_VERSION = 1;
-export const APP = "santi-api";
+export const APP = "santi";
 export const DEFAULT_NAMESPACE = "default";
 
 export interface Stamp {

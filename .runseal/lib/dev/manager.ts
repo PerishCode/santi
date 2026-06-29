@@ -1,10 +1,10 @@
-//! A pm2-like, lightweight process manager for the local santi-api dev server,
+//! A pm2-like, lightweight process manager for the local santi dev server,
 //! built on Deno-native APIs.
 //!
 //! Process tree:
 //!   runseal :dev start                      (short-lived operator)
 //!     └─ deno dev.ts __run --santi-stamp=…   (stamped launcher, persistent)
-//!          └─ target/debug/santi-api serve   (the actual server)
+//!          └─ target/debug/santi service serve   (the actual server)
 //!
 //! The launcher carries the arg-stamp, so `ps` discovery is the single source
 //! of truth for liveness and identity. The JSON cache holds only convenience
@@ -20,7 +20,7 @@ import {
 } from "@/lib/dev/stamp.ts";
 import { killHard, psList, term } from "@/lib/std/proc.ts";
 
-const BIN_REL = "target/debug/santi-api";
+const BIN_REL = "target/debug/santi";
 const HEALTH_TIMEOUT_MS = 15_000;
 const STOP_TIMEOUT_MS = 15_000;
 
@@ -80,14 +80,14 @@ async function start(): Promise<number> {
   const paths = resolvePaths();
   const running = await discover();
   if (running.length > 0) {
-    console.log(`santi-api already running (launcher pid ${running[0].pid})`);
+    console.log(`santi already running (launcher pid ${running[0].pid})`);
     return 0;
   }
   Deno.mkdirSync(paths.runDir, { recursive: true });
 
-  console.log("building santi-api ...");
+  console.log("building santi ...");
   const build = await new Deno.Command("cargo", {
-    args: ["build", "-p", "santi-api"],
+    args: ["build", "-p", "santi"],
     cwd: paths.repo,
     stdout: "inherit",
     stderr: "inherit",
@@ -133,11 +133,11 @@ async function start(): Promise<number> {
   const healthy = await waitHealth(host, port, HEALTH_TIMEOUT_MS);
   if (healthy) {
     console.log(
-      `santi-api up on http://${host}:${port} (launcher pid ${child.pid})\nlogs: ${paths.log}`,
+      `santi up on http://${host}:${port} (launcher pid ${child.pid})\nlogs: ${paths.log}`,
     );
   } else {
     console.log(
-      `santi-api launched (launcher pid ${child.pid}) but health was not confirmed within ` +
+      `santi launched (launcher pid ${child.pid}) but health was not confirmed within ` +
         `${HEALTH_TIMEOUT_MS / 1000}s — inspect: runseal :dev logs`,
     );
   }
@@ -151,7 +151,7 @@ async function stop(): Promise<number> {
   if (running.length === 0) {
     if (cache?.serverPid) term(cache.serverPid); // defensive: clear a possible orphan
     clearCache(paths);
-    console.log("santi-api not running");
+    console.log("santi not running");
     return 0;
   }
   for (const found of running) {
@@ -165,7 +165,7 @@ async function stop(): Promise<number> {
   }
   if (cache?.serverPid) term(cache.serverPid); // belt-and-suspenders against SIGKILL orphans
   clearCache(paths);
-  console.log("santi-api stopped");
+  console.log("santi stopped");
   return 0;
 }
 
@@ -180,7 +180,7 @@ async function status(): Promise<number> {
   const running = await discover();
   if (running.length === 0) {
     clearCache(paths); // stale cache, if any
-    console.log("santi-api: stopped");
+    console.log("santi: stopped");
     return 0;
   }
   const found = running[0];
@@ -190,7 +190,7 @@ async function status(): Promise<number> {
   const uptime = cache?.startedAt
     ? `${Math.round((Date.now() - Date.parse(cache.startedAt)) / 1000)}s`
     : "?";
-  console.log("santi-api: running");
+  console.log("santi: running");
   console.log(`  launcher pid : ${found.pid}`);
   if (cache?.serverPid) console.log(`  server pid   : ${cache.serverPid}`);
   console.log(
@@ -227,7 +227,7 @@ async function logs(args: string[]): Promise<number> {
 }
 
 /**
- * Launcher mode (internal). Carries the arg-stamp, supervises one santi-api
+ * Launcher mode (internal). Carries the arg-stamp, supervises one santi
  * child, pumps its output to the log file, and forwards termination so a kill
  * of the launcher cleanly stops the server.
  */
@@ -244,7 +244,7 @@ async function launcherRun(): Promise<number> {
   const logFile = Deno.openSync(paths.log, { create: true, write: true, truncate: true });
 
   const server = new Deno.Command(paths.bin, {
-    args: ["serve"],
+    args: ["service", "serve"],
     cwd: paths.repo,
     stdin: "null",
     stdout: "piped",
@@ -352,8 +352,8 @@ function resolvePaths(): Paths {
   return {
     repo,
     runDir,
-    log: join(runDir, "santi-api.log"),
-    cache: join(runDir, "santi-api.json"),
+    log: join(runDir, "santi.log"),
+    cache: join(runDir, "santi.json"),
     bin: join(repo, BIN_REL),
     wrapper: Deno.env.get("RUNSEAL_WRAPPER_FILE") ?? join(repo, ".runseal/wrappers/dev.ts"),
     denoConfig: join(repo, ".runseal/deno.json"),

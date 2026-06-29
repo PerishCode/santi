@@ -8,14 +8,14 @@ It keeps the architecture deliberately small:
 crates/
   santi-core/      # soul runtime: sessions, turns, context assembly, store, objects, workspace
   santi-provider/  # provider-agnostic ProviderClient boundary (OpenAI Responses, chat-completions)
-  santi-api/       # HTTP/SSE + OpenAPI boundary over santi-core (the canonical entry)
-  santi-cli/       # thin HTTP wrapper over santi-api (no santi-core linkage)
+  santi-api/       # HTTP/SSE + OpenAPI server library over santi-core
+  santi/           # the `santi` binary: `service` runs the server; other commands are an HTTP client
 ```
 
 The runtime owns soul identity, per-session runtime state, turn execution with
 streaming events (thinking / text / tool calls / tool results), context
 assembly into provider input, a local object protocol (`santi://`), and
-workspace/memory. The only way in from outside is HTTP.
+workspace/memory. The only way into the runtime is HTTP.
 
 ## Crates
 
@@ -25,10 +25,11 @@ workspace/memory. The only way in from outside is HTTP.
 - `santi-provider` — the `ProviderClient` trait and its OpenAI Responses /
   chat-completions implementations. `santi-core` stays provider-agnostic
   behind this boundary.
-- `santi-api` — Axum HTTP server, SSE streaming, and OpenAPI export. The
-  canonical foreground entry: `cargo run -p santi-api`.
-- `santi-cli` — a transport-only HTTP client for `santi-api`. Every command
-  maps to one endpoint; it never links `santi-core`.
+- `santi-api` — Axum HTTP server, SSE streaming, and OpenAPI export as a
+  library. Owns the HTTP boundary and links `santi-core`.
+- `santi` — the single binary. `santi service ...` runs the server in-process
+  (via `santi-api`); every other command is a transport-only HTTP client that
+  reaches the runtime only over HTTP.
 
 ## Running locally
 
@@ -37,22 +38,22 @@ cp santi.example.toml santi.toml   # fill in a provider api_key + model
 cp .env.example .env               # SANTI_DB / SANTI_HOST / SANTI_PORT
 
 mkdir -p .tmp
-cargo run -p santi-api -- serve
+cargo run -p santi -- service serve
 ```
 
 Then, against a running server:
 
 ```sh
-cargo run -p santi-cli -- health
-cargo run -p santi-cli -- session create
-cargo run -p santi-cli -- session send <session_id> "hello"
-cargo run -p santi-cli -- session events <session_id>
+cargo run -p santi -- health
+cargo run -p santi -- session create
+cargo run -p santi -- session send <session_id> "hello"
+cargo run -p santi -- session events <session_id>
 ```
 
 Export the OpenAPI document:
 
 ```sh
-cargo run -p santi-api -- export-openapi
+cargo run -p santi -- service export-openapi
 ```
 
 ## Configuration

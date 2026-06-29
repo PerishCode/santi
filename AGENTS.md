@@ -9,8 +9,8 @@ is no product layer here, and none should be added speculatively.
 crates/
   santi-core/      # runtime model + service (store, turns, assembly, objects, workspace)
   santi-provider/  # ProviderClient boundary; keeps santi-core provider-agnostic
-  santi-api/       # HTTP/SSE/OpenAPI boundary; canonical entry (cargo run -p santi-api)
-  santi-cli/       # HTTP-only wrapper over santi-api; never links santi-core
+  santi-api/       # HTTP/SSE/OpenAPI server library over santi-core
+  santi/           # the `santi` binary: `service` runs the server; else HTTP client
 ```
 
 ## Boundaries
@@ -19,8 +19,10 @@ crates/
   `santi-provider::ProviderClient`.
 - `santi-api` is the only network boundary. Browser/host-facing shapes are
   owned here, not in `santi-core`.
-- `santi-cli` reaches the runtime exclusively over HTTP. Do not give it a
-  direct `santi-core` dependency.
+- `santi` ships one binary with two faces: `santi service ...` runs the server
+  in-process (links `santi-core` via `santi-api`); every other command is a
+  transport-only HTTP client. The client path must reach the runtime only over
+  HTTP — never call `santi-core` in-process. HTTP stays the only way in.
 
 ## Build & checks
 

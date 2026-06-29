@@ -1,9 +1,11 @@
 .DS_Store
 .env
 .env.local
+.env.release
 santi.toml
 .local/
 .task/
 .tmp/
 __pycache__/
 target/
+dist/

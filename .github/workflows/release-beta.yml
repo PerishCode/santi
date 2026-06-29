@@ -1,0 +1,174 @@
+name: release-beta
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to release from"
+        required: true
+        default: main
+        type: string
+      version_override:
+        description: "Optional beta version override, for example v0.1.0-beta.3"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: santi-release-beta
+  cancel-in-progress: false
+
+env:
+  RELEASE_CHANNEL: beta
+
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    env:
+      R2_ACCESS_PROBE_NAME: release-beta
+      BETA_VERSION_OVERRIDE: ${{ inputs.version_override }}
+      SANTI_RELEASES_PUBLIC_URL: ${{ vars.SANTI_RELEASES_PUBLIC_URL }}
+      SANTI_RELEASES_S3_AK: ${{ secrets.SANTI_RELEASES_S3_AK }}
+      SANTI_RELEASES_S3_SK: ${{ secrets.SANTI_RELEASES_S3_SK }}
+      SANTI_RELEASES_S3_BUCKET: ${{ secrets.SANTI_RELEASES_S3_BUCKET }}
+      SANTI_RELEASES_S3_URL: ${{ secrets.SANTI_RELEASES_S3_URL }}
+    outputs:
+      release_version: ${{ steps.meta.outputs.release_version }}
+      base_version: ${{ steps.meta.outputs.base_version }}
+      beta_number: ${{ steps.meta.outputs.beta_number }}
+      state_source: ${{ steps.meta.outputs.state_source }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Validate R2 access
+        run: deno run --allow-all --config .runseal/deno.json .runseal/wrappers/release.ts access-check
+      - name: Resolve beta metadata
+        id: meta
+        run: deno run --allow-all --config .runseal/deno.json .runseal/wrappers/release.ts metadata
+
+  verify:
+    needs: metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Guard
+        run: deno run --allow-all --config .runseal/deno.json .runseal/wrappers/guard.ts
+
+  build:
+    needs: [metadata, verify]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: santi-x86_64-unknown-linux-gnu.tar.gz
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+            archive: santi-aarch64-apple-darwin.tar.gz
+          - runner: macos-latest
+            target: x86_64-apple-darwin
+            archive: santi-x86_64-apple-darwin.tar.gz
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: santi-x86_64-pc-windows-msvc.zip
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Package release artifact
+        env:
+          RELEASE_VERSION: ${{ needs.metadata.outputs.release_version }}
+          TARGET: ${{ matrix.target }}
+        run: deno run --allow-all --config .runseal/deno.json .runseal/wrappers/release.ts package
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/${{ needs.metadata.outputs.release_version }}/${{ matrix.archive }}
+
+  publish:
+    needs: [metadata, build]
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ needs.metadata.outputs.release_version }}
+      BASE_VERSION: ${{ needs.metadata.outputs.base_version }}
+      BETA_NUMBER: ${{ needs.metadata.outputs.beta_number }}
+      STATE_SOURCE: ${{ needs.metadata.outputs.state_source }}
+      SANTI_RELEASES_PUBLIC_URL: ${{ vars.SANTI_RELEASES_PUBLIC_URL }}
+      SANTI_RELEASES_S3_AK: ${{ secrets.SANTI_RELEASES_S3_AK }}
+      SANTI_RELEASES_S3_SK: ${{ secrets.SANTI_RELEASES_S3_SK }}
+      SANTI_RELEASES_S3_BUCKET: ${{ secrets.SANTI_RELEASES_S3_BUCKET }}
+      SANTI_RELEASES_S3_URL: ${{ secrets.SANTI_RELEASES_S3_URL }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist/${{ needs.metadata.outputs.release_version }}
+          merge-multiple: true
+      - name: Publish to R2
+        id: publish
+        run: deno run --allow-all --config .runseal/deno.json .runseal/wrappers/release.ts publish
+      - name: Verify R2 publish
+        env:
+          R2_METADATA_URL: ${{ steps.publish.outputs.metadata_url }}
+        run: deno run --allow-all --config .runseal/deno.json .runseal/wrappers/release.ts verify-publish
+      - name: Cleanup workflow artifacts
+        if: ${{ success() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.expired | not) | .id' \
+          | while read -r id; do
+              [ -n "$id" ] || continue
+              gh api -X DELETE "/repos/${{ github.repository }}/actions/artifacts/$id" >/dev/null
+            done
+
+  smoke:
+    needs: [metadata, publish]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_VERSION: ${{ needs.metadata.outputs.release_version }}
+      SANTI_RELEASES_PUBLIC_URL: ${{ vars.SANTI_RELEASES_PUBLIC_URL }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Smoke install + help + service health
+        run: deno run --allow-all --config .runseal/deno.json .runseal/wrappers/release.ts smoke

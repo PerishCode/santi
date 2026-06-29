@@ -19,6 +19,7 @@ const DEFAULT_BASE_URL: &str = "http://127.0.0.1:43307";
 #[derive(Parser)]
 #[command(
     name = "santi",
+    version,
     about = "santi runtime: server (`service`) and HTTP client"
 )]
 struct Cli {

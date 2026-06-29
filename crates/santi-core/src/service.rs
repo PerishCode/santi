@@ -236,6 +236,7 @@ impl SantiService {
         if let Err(error) = self.store.complete_turn(
             &turn_id,
             assistant_message.relation.session_seq,
+            &self.provider.metadata().provider,
             provider_response_id,
         ) {
             self.fail_background_turn(&session_id, &turn_id, error, String::new());

@@ -76,7 +76,9 @@ async fn main() -> Result<()> {
             get(&client, &format!("{base}/api/v1/sessions/{id}/runtime")).await
         }
         Command::Session(SessionCommand::Send { id, text }) => {
-            let body = serde_json::json!({ "text": text });
+            let body = serde_json::json!({
+                "content": [{ "type": "text", "text": text }]
+            });
             post(
                 &client,
                 &format!("{base}/api/v1/sessions/{id}/send"),

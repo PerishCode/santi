@@ -1,12 +1,13 @@
-use std::{convert::Infallible, env, fs, net::SocketAddr, path::PathBuf};
+use std::{convert::Infallible, env, fs, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use crate::{config, provider};
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Path, Request, State},
     http::StatusCode,
+    middleware::{self, Next},
     response::{
-        IntoResponse, Sse,
+        IntoResponse, Response, Sse,
         sse::{Event, KeepAlive},
     },
     routing::{get, post},
@@ -60,8 +61,18 @@ pub async fn serve(config: config::ConfigService) -> Result<(), String> {
     let listener = tokio::net::TcpListener::bind(address)
         .await
         .map_err(|error| error.to_string())?;
+    // Optional bearer auth: when SANTI_API_KEY is set, every endpoint except
+    // /health requires `Authorization: Bearer <key>`. Unset = open (default).
+    let api_key: Option<Arc<str>> = env::var("SANTI_API_KEY")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(Arc::from);
+    if api_key.is_some() {
+        println!("santi-api: bearer auth enabled");
+    }
     println!("santi-api listening on http://{address}");
-    axum::serve(listener, router(service))
+    axum::serve(listener, router(service, api_key))
         .await
         .map_err(|error| error.to_string())
 }
@@ -75,9 +86,9 @@ fn bind_addr_string() -> String {
     format!("{host}:{port}")
 }
 
-fn router(service: SantiService) -> Router {
-    Router::new()
-        .route("/api/v1/health", get(health))
+fn router(service: SantiService, api_key: Option<Arc<str>>) -> Router {
+    // Everything except /health is bearer-gated when a key is configured.
+    let protected = Router::new()
         .route("/api/v1/openapi.json", get(openapi))
         .route("/api/v1/sessions", post(create_session).get(list_sessions))
         .route(
@@ -99,6 +110,11 @@ fn router(service: SantiService) -> Router {
             "/api/v1/bucket/{soul_id}/{session_id}/{*key}",
             get(crate::bucket::get_bucket_object),
         )
+        .route_layer(middleware::from_fn_with_state(api_key, require_bearer));
+
+    Router::new()
+        .route("/api/v1/health", get(health))
+        .merge(protected)
         .layer(TraceLayer::new_for_http())
         .layer(
             CorsLayer::new()
@@ -107,6 +123,25 @@ fn router(service: SantiService) -> Router {
                 .allow_headers(Any),
         )
         .with_state(service)
+}
+
+/// Enforce `Authorization: Bearer <key>` when an API key is configured.
+async fn require_bearer(
+    State(expected): State<Option<Arc<str>>>,
+    request: Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    if let Some(expected) = expected.as_deref() {
+        let presented = request
+            .headers()
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "));
+        if presented != Some(expected) {
+            return Err(ApiError::unauthorized("missing or invalid bearer token"));
+        }
+    }
+    Ok(next.run(request).await)
 }
 
 #[utoipa::path(
@@ -368,6 +403,14 @@ impl ApiError {
         Self {
             status: StatusCode::BAD_REQUEST,
             code: "bad-request",
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn unauthorized(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            code: "unauthorized",
             message: message.into(),
         }
     }

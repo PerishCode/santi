@@ -28,6 +28,11 @@ struct Cli {
     #[arg(long, global = true, env = "SANTI_API_URL", default_value = DEFAULT_BASE_URL)]
     base_url: String,
 
+    /// Bearer token sent on client requests when the server requires one.
+    /// Falls back to SANTI_API_KEY. Only used by the HTTP client commands.
+    #[arg(long, global = true, env = "SANTI_API_KEY")]
+    api_key: Option<String>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -72,7 +77,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Service { args } => run_service(args).await,
-        other => run_client(&cli.base_url, other).await,
+        other => run_client(&cli.base_url, cli.api_key.as_deref(), other).await,
     }
 }
 
@@ -95,8 +100,8 @@ async fn run_service(args: Vec<String>) -> Result<()> {
 }
 
 /// Transport-only HTTP client against a running server.
-async fn run_client(base_url: &str, command: Command) -> Result<()> {
-    let client = reqwest::Client::new();
+async fn run_client(base_url: &str, api_key: Option<&str>, command: Command) -> Result<()> {
+    let client = build_client(api_key)?;
     let base = base_url.trim_end_matches('/').to_string();
     match command {
         Command::Service { .. } => unreachable!("service is handled before the client path"),
@@ -131,6 +136,21 @@ async fn run_client(base_url: &str, command: Command) -> Result<()> {
             follow(&client, &format!("{base}/api/v1/sessions/{id}/events")).await
         }
     }
+}
+
+/// Build an HTTP client that attaches `Authorization: Bearer <key>` to every
+/// request when an api key is configured.
+fn build_client(api_key: Option<&str>) -> Result<reqwest::Client> {
+    let mut builder = reqwest::Client::builder();
+    if let Some(key) = api_key {
+        let mut headers = reqwest::header::HeaderMap::new();
+        let mut value = reqwest::header::HeaderValue::from_str(&format!("Bearer {key}"))
+            .context("invalid api key")?;
+        value.set_sensitive(true);
+        headers.insert(reqwest::header::AUTHORIZATION, value);
+        builder = builder.default_headers(headers);
+    }
+    builder.build().context("build http client")
 }
 
 async fn get(client: &reqwest::Client, url: &str) -> Result<()> {

@@ -77,6 +77,7 @@ its own variable (and the provider config follows `--flag` > config file > env):
 | `SANTI_EXECUTION_ROOT` | `$SANTI_HOME/execution` | Shell tool working area |
 | `SANTI_PROVIDER` | `openai` | Selected provider profile |
 | `SANTI_HOST` / `SANTI_PORT` | `127.0.0.1` / `43307` | Bind address |
+| `SANTI_API_KEY` | unset (open) | Optional bearer key. Server: when set, every endpoint except `/health` requires `Authorization: Bearer <key>`. Client: sent on requests (`--api-key` overrides). |
 | `SANTI_API_URL` | `http://127.0.0.1:43307` | Client target (`--base-url` overrides) |
 
 A `.env` in the working directory is loaded and overrides the process

@@ -1,0 +1,37 @@
+[workspace]
+members = [
+  "crates/santi-api",
+  "crates/santi-cli",
+  "crates/santi-core",
+  "crates/santi-provider",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+version = "0.1.0"
+
+[workspace.dependencies]
+anyhow = "1.0.100"
+async-stream = "0.3.6"
+async-trait = "0.1.89"
+axum = { version = "0.8.9", features = ["macros"] }
+bytes = "1.11.1"
+clap = { version = "4.6.1", features = ["derive", "env"] }
+dotenvy = "0.15.7"
+futures-core = "0.3.32"
+futures-util = "0.3.32"
+jiff = "0.2.28"
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "stream"] }
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+santi-core = { path = "crates/santi-core" }
+santi-provider = { path = "crates/santi-provider" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+tokio = { version = "1.52.3", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-stream = "0.1.18"
+toml = "1.1.2"
+tower-http = { version = "0.6.11", features = ["cors", "trace"] }
+utoipa = { version = "5.5.0", features = ["axum_extras"] }
+uuid = { version = "1.23.3", features = ["v4"] }

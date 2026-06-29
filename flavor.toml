@@ -1,0 +1,13 @@
+[scan]
+include = [
+  "crates/*/src/**/*.rs",
+  "crates/*/tests/**/*.rs",
+]
+exclude = [
+  "**/target/**",
+  "**/.task/**",
+  "**/.tmp/**",
+  "**/.git/**",
+]
+
+overrides = []

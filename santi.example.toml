@@ -1,0 +1,25 @@
+provider = "openai"
+
+[providers.openai]
+kind = "openai_responses"
+api_key = ""
+model = ""
+base_url = "https://api.openai.com/v1"
+reasoning_effort = ""
+reasoning_summary = ""
+
+[providers.deepseek]
+kind = "chat_completions"
+api_key = ""
+model = "deepseek-v4-pro"
+base_url = "https://api.deepseek.com"
+thinking = ""
+reasoning_effort = ""
+
+[providers.siliconflow]
+kind = "chat_completions"
+api_key = ""
+model = "zai-org/GLM-5.2"
+base_url = "https://api.siliconflow.cn/v1"
+thinking = ""
+reasoning_effort = ""

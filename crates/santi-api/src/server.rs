@@ -1,5 +1,6 @@
 use std::{convert::Infallible, env, net::SocketAddr, path::PathBuf};
 
+use crate::{config, provider};
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -11,7 +12,6 @@ use axum::{
     routing::{get, post},
 };
 use futures_core::Stream;
-use santi_api::{config, provider};
 use santi_core::{
     CreateSessionResponse, ErrorResponse, HealthResponse, MaterialRequest, SantiService,
     SantiServiceConfig, SantiStreamEvent, SantiStreamPayload, SendSessionAcceptedResponse,
@@ -25,26 +25,11 @@ use tower_http::{
 };
 use utoipa::OpenApi;
 
-mod bucket;
-
-#[tokio::main]
-async fn main() -> Result<(), String> {
-    dotenvy::dotenv_override().ok();
-    let config = config::ConfigService::from_env_args()?;
-    match config.command() {
-        config::AppCommand::ExportOpenApi => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&ApiDoc::openapi())
-                    .map_err(|error| error.to_string())?
-            );
-            Ok(())
-        }
-        config::AppCommand::Serve => serve(config).await,
-    }
+pub fn export_openapi_json() -> Result<String, String> {
+    serde_json::to_string_pretty(&ApiDoc::openapi()).map_err(|error| error.to_string())
 }
 
-async fn serve(config: config::ConfigService) -> Result<(), String> {
+pub async fn serve(config: config::ConfigService) -> Result<(), String> {
     let provider = provider::from_config(config.provider_config()?);
     let database_path = env::var("SANTI_DB").map_err(|_| "SANTI_DB is required".to_string())?;
     let runtime_root = env::var("SANTI_RUNTIME_ROOT").unwrap_or_else(|_| {
@@ -118,7 +103,7 @@ fn router(service: SantiService) -> Router {
         )
         .route(
             "/api/v1/bucket/{soul_id}/{session_id}/{*key}",
-            get(bucket::get_bucket_object),
+            get(crate::bucket::get_bucket_object),
         )
         .layer(TraceLayer::new_for_http())
         .layer(
@@ -433,7 +418,7 @@ impl IntoResponse for ApiError {
         session_material,
         send_session,
         runtime_snapshot,
-        bucket::get_bucket_object
+        crate::bucket::get_bucket_object
     ),
     components(schemas(
         CreateSessionResponse,

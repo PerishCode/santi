@@ -37,9 +37,12 @@ workspace/memory. The only way into the runtime is HTTP.
 cp santi.example.toml santi.toml   # fill in a provider api_key + model
 cp .env.example .env               # SANTI_DB / SANTI_HOST / SANTI_PORT
 
-mkdir -p .tmp
 cargo run -p santi -- service serve
 ```
+
+With no `.env`/config at all, santi runs zero-config from its home directory
+(`SANTI_HOME`, default `~/.santi`): it reads `~/.santi/santi.toml` and creates
+`~/.santi/{runtime,execution}` automatically.
 
 Then, against a running server:
 
@@ -58,10 +61,26 @@ cargo run -p santi -- service export-openapi
 
 ## Configuration
 
-- `santi.toml` (gitignored) holds real provider credentials. Start from
-  `santi.example.toml`.
-- Runtime is configured by environment (`.env`): `SANTI_DB` is required;
-  `SANTI_HOST` / `SANTI_PORT` default to `127.0.0.1:43307`.
+`santi.toml` (gitignored) holds real provider credentials. Start from
+`santi.example.toml`.
+
+Everything anchors on the santi home — `SANTI_HOME`, default `~/.santi` — so the
+runtime works with zero explicit configuration. Each path can be overridden by
+its own variable (and the provider config follows `--flag` > config file > env):
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SANTI_HOME` | `~/.santi` | Anchor for the defaults below |
+| `SANTI_CONFIG` | `$SANTI_HOME/santi.toml` | Provider config file (`--config` overrides) |
+| `SANTI_DB` | `$SANTI_HOME/runtime/db` | SQLite store |
+| `SANTI_RUNTIME_ROOT` | `$SANTI_HOME/runtime` | Soul/session memory, objects |
+| `SANTI_EXECUTION_ROOT` | `$SANTI_HOME/execution` | Shell tool working area |
+| `SANTI_PROVIDER` | `openai` | Selected provider profile |
+| `SANTI_HOST` / `SANTI_PORT` | `127.0.0.1` / `43307` | Bind address |
+| `SANTI_API_URL` | `http://127.0.0.1:43307` | Client target (`--base-url` overrides) |
+
+A `.env` in the working directory is loaded and overrides the process
+environment (via `dotenvy::dotenv_override`).
 
 ## License
 

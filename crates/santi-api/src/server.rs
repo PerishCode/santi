@@ -1,4 +1,4 @@
-use std::{convert::Infallible, env, net::SocketAddr, path::PathBuf};
+use std::{convert::Infallible, env, fs, net::SocketAddr, path::PathBuf};
 
 use crate::{config, provider};
 use axum::{
@@ -31,19 +31,20 @@ pub fn export_openapi_json() -> Result<String, String> {
 
 pub async fn serve(config: config::ConfigService) -> Result<(), String> {
     let provider = provider::from_config(config.provider_config()?);
-    let database_path = env::var("SANTI_DB").map_err(|_| "SANTI_DB is required".to_string())?;
-    let runtime_root = env::var("SANTI_RUNTIME_ROOT").unwrap_or_else(|_| {
-        db_parent(&database_path)
-            .join("runtime")
-            .display()
-            .to_string()
-    });
-    let execution_root = env::var("SANTI_EXECUTION_ROOT").unwrap_or_else(|_| {
-        db_parent(&database_path)
-            .join("execution")
-            .display()
-            .to_string()
-    });
+    // Defaults anchor on the santi home (`SANTI_HOME`, else `~/.santi`); explicit
+    // env always overrides. The data dirs are created so a zero-config run works.
+    let home = config::santi_home();
+    let database_path = env::var("SANTI_DB")
+        .unwrap_or_else(|_| home.join("runtime").join("db").display().to_string());
+    let runtime_root = env::var("SANTI_RUNTIME_ROOT")
+        .unwrap_or_else(|_| home.join("runtime").display().to_string());
+    let execution_root = env::var("SANTI_EXECUTION_ROOT")
+        .unwrap_or_else(|_| home.join("execution").display().to_string());
+    if let Some(parent) = PathBuf::from(&database_path).parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::create_dir_all(&runtime_root).map_err(|error| error.to_string())?;
+    fs::create_dir_all(&execution_root).map_err(|error| error.to_string())?;
     let service = SantiService::open(
         SantiServiceConfig {
             database_path,
@@ -63,13 +64,6 @@ pub async fn serve(config: config::ConfigService) -> Result<(), String> {
     axum::serve(listener, router(service))
         .await
         .map_err(|error| error.to_string())
-}
-
-fn db_parent(database_path: &str) -> PathBuf {
-    PathBuf::from(database_path)
-        .parent()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn bind_addr_string() -> String {

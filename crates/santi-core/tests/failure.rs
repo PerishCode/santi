@@ -85,7 +85,9 @@ async fn records_failed_system() {
             response.turn.id, response.turn.id
         )
     );
-    assert!(!system_message.content_text.contains("401"));
+    // Use leak markers that cannot appear in a hex turn_id ("401" can, since
+    // turn_ids are hex): the raw error's words, not its numeric status code.
+    assert!(!system_message.content_text.contains("Unauthorized"));
     assert!(!system_message.content_text.contains("secret detail"));
 
     let retry = send_text(&service, &session.session.id, "continue after failure").await;

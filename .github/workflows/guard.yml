@@ -17,6 +17,7 @@ concurrency:
 jobs:
   repo:
     name: repo
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -30,8 +31,8 @@ jobs:
       - name: Repo guard
         run: flavor check --root . --config flavor.toml
 
-  rust-pr:
-    name: rust (ubuntu-latest)
+  smoke:
+    name: smoke (ubuntu-latest)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:

@@ -1,6 +1,7 @@
 use std::{
     fs,
     path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -95,11 +96,14 @@ fn args<const N: usize>(values: [&str; N]) -> impl IntoIterator<Item = String> {
 }
 
 fn write_config(content: &str) -> PathBuf {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
     let id = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock")
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("santi-config-{id}.toml"));
+    // A per-call counter keeps parallel tests from colliding on the same name.
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!("santi-config-{id}-{seq}.toml"));
     fs::write(&path, content).expect("write config");
     path
 }

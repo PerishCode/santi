@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, env, fs};
+use std::{collections::BTreeMap, env, fs, path::PathBuf};
 
 use clap::{Parser, Subcommand};
 use serde::Deserialize;
@@ -54,7 +54,7 @@ impl ConfigService {
     fn config_path(&self) -> String {
         trim_optional_string(&self.cli.config)
             .or_else(|| optional_env("SANTI_CONFIG"))
-            .unwrap_or_else(|| APP_CONFIG_PATH.to_string())
+            .unwrap_or_else(|| santi_home().join(APP_CONFIG_PATH).display().to_string())
     }
 }
 
@@ -247,6 +247,28 @@ fn optional_profile_u32(
 
 fn optional_env(name: &str) -> Option<String> {
     env::var(name).ok().and_then(|value| trim_string(&value))
+}
+
+/// The santi home directory: `SANTI_HOME` if set, else `~/.santi`. It anchors
+/// the default config path and runtime/execution/db locations, so santi runs
+/// with zero explicit configuration. Explicit flags/env always override.
+pub(crate) fn santi_home() -> PathBuf {
+    if let Some(home) = optional_env("SANTI_HOME") {
+        return expand_home(&home);
+    }
+    let base = env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(base).join(".santi")
+}
+
+fn expand_home(path: &str) -> PathBuf {
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Ok(home) = env::var("HOME")
+    {
+        return PathBuf::from(home).join(rest);
+    }
+    PathBuf::from(path)
 }
 
 fn trim_optional_string(value: &Option<String>) -> Option<String> {

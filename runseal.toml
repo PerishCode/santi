@@ -1,0 +1,15 @@
+# runseal profile for santi — dev-plane tooling only.
+# The runtime (santi-api) stays product-unaware and runseal-unaware; this
+# profile drives local development wrappers, not the runtime itself.
+
+[deno]
+config = ".runseal/deno.json"
+# No lock: the wrappers carry zero remote dependencies, so a frozen lock would
+# add friction with no benefit. Add one here if remote imports are introduced.
+permissions = [
+  "--allow-run",
+  "--allow-read",
+  "--allow-write",
+  "--allow-env",
+  "--allow-net",
+]

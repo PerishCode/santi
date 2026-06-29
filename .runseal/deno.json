@@ -1,0 +1,12 @@
+{
+  "imports": {
+    "@/lib/": "./lib/"
+  },
+  "compilerOptions": {
+    "strict": true
+  },
+  "fmt": {
+    "lineWidth": 100,
+    "semiColons": true
+  }
+}

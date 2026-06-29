@@ -187,13 +187,14 @@ impl SantiStore {
         &self,
         turn_id: &str,
         assistant_message_seq: i64,
+        provider: &str,
         provider_response_id: Option<String>,
     ) -> Result<Turn, String> {
         let conn = self.conn.lock().unwrap();
         let now = timestamp_now();
         let provider_state = provider_response_id.map(|response_id| {
             json!({
-                "provider": "openai",
+                "provider": provider,
                 "opaque": { "response_id": response_id },
                 "schema_version": "santi-v1"
             })

@@ -8,8 +8,8 @@ use serde_json::{Map, Value, json};
 use std::sync::Arc;
 
 use crate::{
-    FunctionCallOutput, ProviderClient, ProviderEvent, ProviderFunctionCall, ProviderMessage,
-    ProviderMetadata, ProviderRequest, ProviderStream, ProviderStreamTrace, ProviderTool,
+    ProviderClient, ProviderEvent, ProviderFunctionCall, ProviderItem, ProviderMetadata,
+    ProviderRequest, ProviderStream, ProviderStreamTrace, ProviderTool,
 };
 
 #[derive(Debug, Clone)]
@@ -114,127 +114,41 @@ fn messages(request: &ProviderRequest) -> Value {
             "content": instructions,
         }));
     }
-    for message in &request.input {
-        match message {
-            ProviderMessage::Text { role, content } => messages.push(json!({
+    // Flatten the typed item timeline into the chat_completions messages array.
+    // Reasoning is dropped: GLM has no hard requirement for replayed
+    // reasoning_content (DC5), and the encrypted payload isn't modeled yet.
+    for item in &request.input {
+        match item {
+            ProviderItem::Message { role, content } => messages.push(json!({
                 "role": role,
                 "content": content,
             })),
-            ProviderMessage::ToolCalls { calls } => messages.push(json!({
+            ProviderItem::Reasoning { .. } => {}
+            ProviderItem::FunctionCall {
+                call_id,
+                name,
+                arguments_raw,
+                ..
+            } => messages.push(json!({
                 "role": "assistant",
                 "content": Value::Null,
-                "tool_calls": calls
-                    .iter()
-                    .map(|call| {
-                        json!({
-                            "id": call.call_id,
-                            "type": "function",
-                            "function": {
-                                "name": call.name,
-                                "arguments": call.arguments_raw,
-                            },
-                        })
-                    })
-                    .collect::<Vec<_>>(),
+                "tool_calls": [{
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": arguments_raw,
+                    },
+                }],
             })),
-            ProviderMessage::ToolResult { call_id, content } => messages.push(json!({
+            ProviderItem::FunctionCallOutput { call_id, output } => messages.push(json!({
                 "role": "tool",
                 "tool_call_id": call_id,
-                "content": content,
+                "content": output,
             })),
         }
     }
-    if let Some(outputs) = &request.function_call_outputs {
-        messages.extend(tool_messages(outputs));
-    }
     json!(messages)
-}
-
-fn tool_messages(outputs: &[FunctionCallOutput]) -> Vec<Value> {
-    let mut messages = Vec::new();
-    for group in output_groups(outputs) {
-        let mut assistant = Map::from_iter([
-            ("role".to_string(), json!("assistant")),
-            (
-                "content".to_string(),
-                group
-                    .assistant_content
-                    .filter(|content| !content.is_empty())
-                    .map(Value::String)
-                    .unwrap_or(Value::Null),
-            ),
-            (
-                "tool_calls".to_string(),
-                json!(
-                    group
-                        .outputs
-                        .iter()
-                        .map(|output| {
-                            json!({
-                                "id": output.call_id,
-                                "type": "function",
-                                "function": {
-                                    "name": output.call.name,
-                                    "arguments": output.call.arguments_raw,
-                                },
-                            })
-                        })
-                        .collect::<Vec<_>>()
-                ),
-            ),
-        ]);
-        if let Some(reasoning_content) = group
-            .reasoning_content
-            .filter(|content| !content.is_empty())
-        {
-            assistant.insert(
-                "reasoning_content".to_string(),
-                Value::String(reasoning_content),
-            );
-        }
-        messages.push(Value::Object(assistant));
-        messages.extend(group.outputs.iter().map(|output| {
-            json!({
-                "role": "tool",
-                "tool_call_id": output.call_id,
-                "content": output.output,
-            })
-        }));
-    }
-    messages
-}
-
-struct OutputGroup<'a> {
-    outputs: Vec<&'a FunctionCallOutput>,
-    assistant_content: Option<String>,
-    reasoning_content: Option<String>,
-}
-
-fn output_groups(outputs: &[FunctionCallOutput]) -> Vec<OutputGroup<'_>> {
-    let mut groups: Vec<OutputGroup<'_>> = Vec::new();
-    for output in outputs {
-        let response_id = output.call.response_id.as_str();
-        let current_response_id = groups
-            .last()
-            .and_then(|group| group.outputs.first())
-            .map(|first| first.call.response_id.as_str());
-        if current_response_id != Some(response_id) {
-            groups.push(OutputGroup {
-                outputs: Vec::new(),
-                assistant_content: output.assistant_content.clone(),
-                reasoning_content: output.reasoning_content.clone(),
-            });
-        }
-        let group = groups.last_mut().expect("output group");
-        if group.assistant_content.is_none() {
-            group.assistant_content = output.assistant_content.clone();
-        }
-        if group.reasoning_content.is_none() {
-            group.reasoning_content = output.reasoning_content.clone();
-        }
-        group.outputs.push(output);
-    }
-    groups
 }
 
 fn map_tools(tools: Vec<ProviderTool>) -> Vec<Value> {

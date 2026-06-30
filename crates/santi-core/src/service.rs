@@ -13,7 +13,7 @@ use std::{
 };
 use tokio::sync::broadcast;
 
-use crate::assembly::input::provider_messages;
+use crate::assembly::input::provider_input;
 use crate::service_prompt::provider_tools;
 use crate::{
     ActorType, CreateSessionResponse, MaterialKind, MessageContent, MessageState, SantiStore,
@@ -226,13 +226,9 @@ impl SantiService {
                 return;
             }
         };
-        if let Err(error) = self
-            .store
-            .append_message_ref(&soul_session_id, &assistant_message.message.id)
-        {
-            self.fail_background_turn(&session_id, &turn_id, error, String::new());
-            return;
-        }
+        // The soul_session replay timeline already holds this turn's assistant
+        // output as per-round items (DC4b); the session message is the lumped,
+        // user-visible reply and is NOT re-referenced into the timeline.
         if let Err(error) = self.store.complete_turn(
             &turn_id,
             assistant_message.relation.session_seq,
@@ -258,7 +254,6 @@ impl SantiService {
         turn_id: &str,
     ) -> Result<(String, Option<String>), ProviderTurnFailure> {
         let mut assistant_text = String::new();
-        let mut function_call_outputs = Vec::new();
         let mut timing = ProviderTurnTiming::new(turn_id);
         let mut round = 0;
         macro_rules! provider_try {
@@ -270,14 +265,12 @@ impl SantiService {
             };
         }
 
-        let tools_through_seq = provider_try!(self.store.turn_base_soul_session_seq(turn_id));
         let final_response_id = loop {
             round += 1;
-            let input = provider_try!(provider_messages(
-                &self.store,
-                soul_session_id,
-                tools_through_seq
-            ));
+            // The timeline is the single source of truth: each round re-derives
+            // input from it, including any tool calls/results just persisted by
+            // the previous round (no function_call_outputs side-channel).
+            let input = provider_try!(provider_input(&self.store, soul_session_id));
             let metadata = self.provider.metadata();
             let request = ProviderRequest {
                 model: metadata.model,
@@ -287,20 +280,11 @@ impl SantiService {
                 input,
                 tools: Some(provider_tools()),
                 previous_response_id: None,
-                function_call_outputs: if function_call_outputs.is_empty() {
-                    None
-                } else {
-                    Some(function_call_outputs.clone())
-                },
             };
             timing.request_built(
                 round,
                 request.input.len(),
                 request.instructions.as_ref().map_or(0, |text| text.len()),
-                request
-                    .function_call_outputs
-                    .as_ref()
-                    .map_or(0, |outputs| outputs.len()),
             );
             self.publish_turn_activity(session_id, turn_id, TurnActivityState::Requesting, None);
             let mut stream = match self.provider.stream_response(request).await {
@@ -434,12 +418,23 @@ impl SantiService {
                 }
             }
 
+            // Persist this round's assistant text as a timeline item before its
+            // tool calls (or as the final item), so the replay timeline stays a
+            // faithful interleaved log (DC4b). The lumped session-visible reply is
+            // stored once at turn end.
+            if !round_assistant_text.is_empty() {
+                provider_try!(
+                    self.store
+                        .append_soul_assistant_text(soul_session_id, &round_assistant_text)
+                );
+            }
+
             if calls.is_empty() {
                 break completed_response_id;
             }
 
-            let mut outputs = Vec::new();
             timing.tool_outputs_started(round, calls.len());
+            let call_count = calls.len();
             for call in calls {
                 self.publish_turn_activity(
                     session_id,
@@ -447,22 +442,9 @@ impl SantiService {
                     TurnActivityState::RunningTool,
                     active_provider_response_id.clone(),
                 );
-                let mut output = provider_try!(self.handle_tool_call(
-                    session_id,
-                    soul_session_id,
-                    turn_id,
-                    call
-                ));
-                if !round_assistant_text.is_empty() {
-                    output.assistant_content = Some(round_assistant_text.clone());
-                }
-                if !reasoning_summary.is_empty() {
-                    output.reasoning_content = Some(reasoning_summary.clone());
-                }
-                outputs.push(output);
+                provider_try!(self.handle_tool_call(session_id, soul_session_id, turn_id, call));
             }
-            timing.tool_outputs_completed(round, outputs.len());
-            function_call_outputs.extend(outputs);
+            timing.tool_outputs_completed(round, call_count);
         };
 
         Ok((assistant_text, final_response_id))

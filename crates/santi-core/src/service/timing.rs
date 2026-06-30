@@ -39,16 +39,13 @@ impl<'a> ProviderTurnTiming<'a> {
         round: usize,
         input_len: usize,
         instructions_len: usize,
-        function_outputs_len: usize,
     ) {
         self.round_started = Some(Instant::now());
         self.response_started = None;
         self.log(
             "request_built",
             round,
-            &format!(
-                "input_len={input_len} instructions_len={instructions_len} function_outputs_len={function_outputs_len}"
-            ),
+            &format!("input_len={input_len} instructions_len={instructions_len}"),
         );
     }
 

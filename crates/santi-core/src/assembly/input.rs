@@ -1,11 +1,10 @@
-use santi_provider::ProviderMessage;
+use santi_provider::ProviderItem;
 
 use crate::SantiStore;
 
-pub(crate) fn provider_messages(
+pub(crate) fn provider_input(
     store: &SantiStore,
     soul_session_id: &str,
-    tools_through_seq: i64,
-) -> Result<Vec<ProviderMessage>, String> {
-    store.assembly_input(soul_session_id, tools_through_seq)
+) -> Result<Vec<ProviderItem>, String> {
+    store.assembly_input(soul_session_id)
 }

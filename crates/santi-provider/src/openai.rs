@@ -8,8 +8,8 @@ use serde_json::{Map, Value, json};
 use std::sync::Arc;
 
 use crate::{
-    FunctionCallOutput, ProviderClient, ProviderEvent, ProviderFunctionCall, ProviderMessage,
-    ProviderMetadata, ProviderRequest, ProviderStream, ProviderStreamTrace, ProviderTool,
+    ProviderClient, ProviderEvent, ProviderFunctionCall, ProviderItem, ProviderMetadata,
+    ProviderRequest, ProviderStream, ProviderStreamTrace, ProviderTool,
 };
 
 #[derive(Debug, Clone)]
@@ -130,14 +130,10 @@ fn reasoning_options(config: &OpenAIProviderConfig) -> Option<Value> {
 }
 
 fn response_input(request: &ProviderRequest) -> Value {
-    if let Some(outputs) = &request.function_call_outputs {
-        return json!(map_function_call_outputs(outputs));
-    }
-
     let mut items = Vec::new();
-    for message in &request.input {
-        match message {
-            ProviderMessage::Text { role, content } => {
+    for item in &request.input {
+        match item {
+            ProviderItem::Message { role, content } => {
                 let content_type = if role == "assistant" {
                     "output_text"
                 } else {
@@ -153,21 +149,32 @@ fn response_input(request: &ProviderRequest) -> Value {
                     ],
                 }));
             }
-            ProviderMessage::ToolCalls { calls } => {
-                items.extend(calls.iter().map(|call| {
+            // Reasoning replay needs the encrypted reasoning item, not modeled
+            // yet (DC1a) — skip until a Responses reasoning model is live.
+            ProviderItem::Reasoning { .. } => {}
+            ProviderItem::FunctionCall {
+                call_id,
+                name,
+                arguments_raw,
+                item,
+                ..
+            } => {
+                // Replay the provider's raw item verbatim when present; else
+                // synthesize a function_call item from stored fields.
+                items.push(item.clone().unwrap_or_else(|| {
                     json!({
                         "type": "function_call",
-                        "call_id": call.call_id,
-                        "name": call.name,
-                        "arguments": call.arguments_raw,
+                        "call_id": call_id,
+                        "name": name,
+                        "arguments": arguments_raw,
                     })
                 }));
             }
-            ProviderMessage::ToolResult { call_id, content } => {
+            ProviderItem::FunctionCallOutput { call_id, output } => {
                 items.push(json!({
                     "type": "function_call_output",
                     "call_id": call_id,
-                    "output": content,
+                    "output": output,
                 }));
             }
         }
@@ -187,18 +194,6 @@ fn map_tools(tools: Vec<ProviderTool>) -> Vec<Value> {
             }),
         })
         .collect()
-}
-
-fn map_function_call_outputs(outputs: &[FunctionCallOutput]) -> Vec<Value> {
-    outputs.iter().fold(Vec::new(), |mut items, output| {
-        items.push(output.call.item.clone());
-        items.push(json!({
-                "type": "function_call_output",
-                "call_id": output.call_id,
-                "output": output.output,
-        }));
-        items
-    })
 }
 
 fn parse_sse(

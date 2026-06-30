@@ -20,7 +20,7 @@ use db::*;
 use rows::{actor_type_db, collect_rows, map_session_summary_row, message_state_db};
 use schema::SCHEMA;
 
-const SANTI_SCHEMA_VERSION: u32 = 9;
+const SANTI_SCHEMA_VERSION: u32 = 10;
 const DEFAULT_ACCOUNT_ID: &str = "account_local";
 const DEFAULT_SOUL_ID: &str = "soul_default";
 const SANTI_SYSTEM_ACTOR_ID: &str = "santi";

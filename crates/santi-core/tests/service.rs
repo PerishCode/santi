@@ -5,7 +5,7 @@ use santi_core::{
     SantiServiceConfig, SendSessionRequest, session_memory_uri, soul_memory_uri,
 };
 use santi_provider::{
-    ProviderClient, ProviderEvent, ProviderFunctionCall, ProviderMessage, ProviderMetadata,
+    ProviderClient, ProviderEvent, ProviderFunctionCall, ProviderItem, ProviderMetadata,
     ProviderRequest, ProviderStream,
 };
 use serde_json::json;
@@ -113,7 +113,7 @@ async fn sends_with_runtime() {
     assert_eq!(requests[0].model, "fake-model");
     assert_eq!(requests[0].input.len(), 1);
     match &requests[0].input[0] {
-        ProviderMessage::Text { role, content } => {
+        ProviderItem::Message { role, content } => {
             assert_eq!(role, "user");
             assert_eq!(content, "hello provider");
         }
@@ -253,7 +253,20 @@ async fn dispatches_tools() {
     let requests = provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
     assert!(requests[1].previous_response_id.is_none());
-    assert!(requests[1].function_call_outputs.is_some());
+    // Round 2 re-derives input from the timeline: the prior tool call + result
+    // are replayed as items (no function_call_outputs side-channel).
+    assert!(
+        requests[1]
+            .input
+            .iter()
+            .any(|item| matches!(item, ProviderItem::FunctionCall { .. }))
+    );
+    assert!(
+        requests[1]
+            .input
+            .iter()
+            .any(|item| matches!(item, ProviderItem::FunctionCallOutput { .. }))
+    );
 }
 
 async fn wait_for_completed_turn(

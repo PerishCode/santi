@@ -123,6 +123,9 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     turn_id TEXT NOT NULL,
     tool_name TEXT NOT NULL,
     arguments TEXT NOT NULL,
+    provider_item TEXT,
+    item_id TEXT,
+    response_id TEXT,
     created_at TEXT NOT NULL
 );
 

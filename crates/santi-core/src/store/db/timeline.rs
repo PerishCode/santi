@@ -35,7 +35,7 @@ pub(in crate::store) fn soul_tool_calls(
     let mut stmt = conn
         .prepare(
             r#"
-            SELECT c.id, c.turn_id, c.tool_name, c.arguments, c.created_at
+            SELECT c.id, c.turn_id, c.tool_name, c.arguments, c.provider_item, c.item_id, c.response_id, c.created_at
             FROM tool_calls c
             JOIN turns t ON t.id = c.turn_id
             WHERE t.soul_session_id = ?1
@@ -55,7 +55,7 @@ pub(in crate::store) fn tool_calls_for_turn(
 ) -> Result<Vec<ToolCall>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, turn_id, tool_name, arguments, created_at FROM tool_calls WHERE turn_id = ?1 ORDER BY created_at ASC",
+            "SELECT id, turn_id, tool_name, arguments, provider_item, item_id, response_id, created_at FROM tool_calls WHERE turn_id = ?1 ORDER BY created_at ASC",
         )
         .map_err(|error| error.to_string())?;
     let rows = stmt

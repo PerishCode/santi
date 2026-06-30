@@ -5,15 +5,14 @@ use santi_core::{
     SendSessionRequest,
 };
 use santi_provider::{
-    ProviderClient, ProviderEvent, ProviderMessage, ProviderMetadata, ProviderRequest,
-    ProviderStream,
+    ProviderClient, ProviderEvent, ProviderItem, ProviderMetadata, ProviderRequest, ProviderStream,
 };
 use std::sync::{Arc, Mutex};
 use tokio::time::{Duration, sleep};
 
-fn as_text(message: &ProviderMessage) -> Option<(&str, &str)> {
-    match message {
-        ProviderMessage::Text { role, content } => Some((role.as_str(), content.as_str())),
+fn as_text(item: &ProviderItem) -> Option<(&str, &str)> {
+    match item {
+        ProviderItem::Message { role, content } => Some((role.as_str(), content.as_str())),
         _ => None,
     }
 }

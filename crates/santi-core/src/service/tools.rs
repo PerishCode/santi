@@ -1,6 +1,6 @@
 use std::{path::PathBuf, process::Command};
 
-use santi_provider::{FunctionCallOutput, ProviderFunctionCall};
+use santi_provider::ProviderFunctionCall;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -15,10 +15,20 @@ impl SantiService {
         soul_session_id: &str,
         turn_id: &str,
         call: ProviderFunctionCall,
-    ) -> Result<FunctionCallOutput, String> {
-        let tool_call =
-            self.store
-                .append_tool_call(turn_id, &call.call_id, &call.name, &call.arguments)?;
+    ) -> Result<(), String> {
+        // Persist the provider's raw item + ids so the Responses adapter can
+        // replay the call verbatim; chat_completions rebuilds from name/args.
+        let tool_call = self.store.append_tool_call(
+            turn_id,
+            &call.call_id,
+            &call.name,
+            &call.arguments,
+            &crate::ToolCallProvenance {
+                item: Some(call.item.clone()),
+                item_id: call.item_id.clone(),
+                response_id: Some(call.response_id.clone()),
+            },
+        )?;
         self.publish_stream(
             session_id,
             SantiStreamPayload::ToolCallCreated {
@@ -30,27 +40,16 @@ impl SantiService {
             Ok(output) => (Some(output), None),
             Err(error) => (None, Some(error)),
         };
-        let result =
-            self.store
-                .append_tool_result(&call.call_id, output.clone(), error_text.clone())?;
+        let result = self
+            .store
+            .append_tool_result(&call.call_id, output, error_text)?;
         self.publish_stream(
             session_id,
             SantiStreamPayload::ToolResultCreated {
-                tool_result: result.clone(),
+                tool_result: result,
             },
         );
-        Ok(FunctionCallOutput {
-            call_id: call.call_id.clone(),
-            call,
-            output: serde_json::to_string(&json!({
-                "ok": error_text.is_none(),
-                "output": result.output,
-                "error": result.error_text,
-            }))
-            .map_err(|error| error.to_string())?,
-            assistant_content: None,
-            reasoning_content: None,
-        })
+        Ok(())
     }
 
     fn dispatch_tool(

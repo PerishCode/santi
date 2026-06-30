@@ -1,9 +1,13 @@
 //! Webhook adaptors — the boundary where integration knowledge lives.
 //!
-//! An adaptor verifies an external request's authenticity against a shared secret
-//! and normalizes it into santi's generic shape (an opaque `santi-system` text + a
-//! session label). Core stays unaware of any provider's payload; everything
-//! integration-specific (signatures, event types, self-identity, labels) is here.
+//! An adaptor is a DOORBELL, not a delivery: it verifies an external request's
+//! authenticity against a shared secret, then normalizes it into the minimum
+//! needed to (a) map it to a session and (b) tell the soul an occurrence happened
+//! at an address. It does NOT push world-content (issue body, comment list, state,
+//! history) — the soul perceives that itself by looking through its carrier and
+//! remembers it in its own memory, like a natural person who hears a knock and
+//! then goes to see. Core stays unaware of any provider's payload; everything
+//! integration-specific (signatures, event types, locators) is here.
 
 use std::env;
 
@@ -18,15 +22,17 @@ type HmacSha256 = Hmac<Sha256>;
 /// integration knowledge; core sees only the opaque `santi_system_text` + `label`.
 #[derive(Debug, Clone)]
 pub(crate) struct NormalizedEvent {
-    /// The `santi-system` message text addressed to the soul (curated fields).
+    /// The doorbell text: occurrence kind + address (e.g. repo#N + url), NOT
+    /// world-content. Enough for the soul to know what happened and where to look.
     pub santi_system_text: String,
     /// The opaque external label that anchors the session (per-thread identity).
     pub label: String,
     /// Whether this event type is in scope for santi. Out-of-scope events (a
     /// GitHub `ping`, an unhandled action) verify fine but produce no turn.
     pub in_scope: bool,
-    /// Whether the event was authored by santi's own identity — the loop guard.
-    /// When true the route drops it without waking the soul.
+    /// Whether the event is the box vessel's own echo — a vessel-level loop guard
+    /// (NOT the soul's identity, which lives in memory). When true the route drops
+    /// it without waking the soul.
     pub self_authored: bool,
 }
 
@@ -71,13 +77,14 @@ pub(crate) fn adaptor_for(adaptor: &str) -> Option<Box<dyn WebhookAdaptor>> {
 }
 
 /// GitHub webhook adaptor. Verifies `X-Hub-Signature-256` (HMAC-SHA256 over the
-/// raw body) and normalizes `issues` / `issue_comment` events. Self-authored
-/// events (those whose sender matches the box's configured GitHub login) are
-/// dropped to break the act→observe→act loop; with no login configured the
-/// backstop is the soul reading its own comment and choosing to do nothing.
+/// raw body) and turns `issues` / `issue_comment` events into a doorbell (locator
+/// plus url), pushing no issue/comment content. Events whose sender matches the
+/// box vessel's configured GitHub login are dropped to break the act-then-observe
+/// loop; with no login configured the backstop is the soul reading the thread and
+/// choosing to do nothing.
 struct GithubAdaptor;
 
-/// Env var naming the box's own GitHub login, for the self-authored loop guard.
+/// Env var naming the box vessel's GitHub login, for the self-echo loop guard.
 const GITHUB_SELF_LOGIN_ENV: &str = "SANTI_WEBHOOK_GITHUB_LOGIN";
 
 impl WebhookAdaptor for GithubAdaptor {
@@ -129,45 +136,46 @@ impl WebhookAdaptor for GithubAdaptor {
             });
         }
 
+        // A doorbell, not a delivery: extract only enough to LOCATE the
+        // occurrence (repo + issue number → the address) and name what happened.
+        // The issue's title, body, comment list, current state and history are
+        // NOT pushed — the soul reads them itself from the world (its carrier)
+        // and remembers in its own memory. So we keep no `title`/`body` here.
         let repo = string_at(&payload, &["repository", "full_name"]).unwrap_or_default();
         let number = payload
             .pointer("/issue/number")
             .and_then(Value::as_i64)
             .unwrap_or_default();
-        let title = string_at(&payload, &["issue", "title"]).unwrap_or_default();
         let action = payload
             .get("action")
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        let sender = string_at(&payload, &["sender", "login"]).unwrap_or_default();
+        let url = if event_type == "issue_comment" {
+            string_at(&payload, &["comment", "html_url"])
+        } else {
+            string_at(&payload, &["issue", "html_url"])
+        }
+        .unwrap_or_default();
+        let delivery = headers
+            .get("X-GitHub-Delivery")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_string();
 
+        // Self-authored loop guard: `sender.login` is read ONLY to drop the
+        // box vessel's own echoes — it is not pushed as content. It is not the
+        // soul's identity (that lives in memory); just a vessel-level echo drop.
+        let sender = string_at(&payload, &["sender", "login"]).unwrap_or_default();
         let self_authored = env::var(GITHUB_SELF_LOGIN_ENV)
             .ok()
             .map(|login| login.trim().to_string())
             .filter(|login| !login.is_empty())
             .is_some_and(|login| login.eq_ignore_ascii_case(&sender));
 
-        let (body, url) = if event_type == "issue_comment" {
-            (
-                string_at(&payload, &["comment", "body"]).unwrap_or_default(),
-                string_at(&payload, &["comment", "html_url"]).unwrap_or_default(),
-            )
-        } else {
-            (
-                string_at(&payload, &["issue", "body"]).unwrap_or_default(),
-                string_at(&payload, &["issue", "html_url"]).unwrap_or_default(),
-            )
-        };
-
+        // The doorbell: occurrence kind + address. The soul goes and looks.
         let santi_system_text = format!(
-            "[github] {event_type}.{action}\n\
-             repo: {repo}\n\
-             issue: #{number} {title:?}\n\
-             url: {url}\n\
-             author: {sender}\n\
-             ---\n\
-             {body}"
+            "[github] {event_type}.{action} on {repo}#{number}\nurl: {url}\ndelivery: {delivery}"
         );
         // One session per issue thread, scoped by subscription name so two
         // subscriptions never share a thread.
@@ -255,24 +263,31 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_issue_comment() {
+    fn normalizes_issue_comment_to_a_doorbell() {
         let event = GithubAdaptor
             .normalize(&headers("issue_comment", None), issue_comment_body(), "ops")
             .expect("normalize");
         assert!(event.in_scope);
         assert!(!event.self_authored);
         assert_eq!(event.label, "github:ops:issue:PerishCode/santi#42");
+        // Doorbell: occurrence kind + address.
         assert!(
             event
                 .santi_system_text
-                .contains("[github] issue_comment.created")
+                .contains("[github] issue_comment.created on PerishCode/santi#42")
         );
-        assert!(event.santi_system_text.contains("repo: PerishCode/santi"));
         assert!(
             event
+                .santi_system_text
+                .contains("https://github.com/PerishCode/santi/issues/42#issuecomment-1")
+        );
+        // NOT a delivery: world-content is never pushed — the soul reads it itself.
+        assert!(
+            !event
                 .santi_system_text
                 .contains("hey santi, can you take a look?")
         );
+        assert!(!event.santi_system_text.contains("Give santi senses"));
     }
 
     #[test]

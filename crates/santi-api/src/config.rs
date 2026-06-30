@@ -177,15 +177,15 @@ fn resolve_openai(provider: &str, profile: &RawProviderProfile) -> Result<Provid
     Ok(ProviderConfig::OpenAiResponses(OpenAiResponsesConfig {
         api_key: required_profile_string(api_key, provider, "api_key")?,
         model: required_profile_string(model, provider, "model")?,
-        base_url: optional_profile_string(base_url, provider, "base_url")
+        base_url: optional_profile_string(base_url, provider, "base_url")?
             .unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
-        reasoning_effort: optional_profile_string(reasoning_effort, provider, "reasoning_effort"),
+        reasoning_effort: optional_profile_string(reasoning_effort, provider, "reasoning_effort")?,
         reasoning_summary: optional_profile_string(
             reasoning_summary,
             provider,
             "reasoning_summary",
-        ),
-        max_output_tokens: optional_profile_u32(max_output_tokens, provider, "max_output_tokens")?,
+        )?,
+        max_output_tokens: *max_output_tokens,
     }))
 }
 
@@ -209,9 +209,9 @@ fn resolve_chat_completions(
         api_key: required_profile_string(api_key, provider, "api_key")?,
         model: required_profile_string(model, provider, "model")?,
         base_url: required_profile_string(base_url, provider, "base_url")?,
-        thinking: optional_profile_string(thinking, provider, "thinking"),
-        reasoning_effort: optional_profile_string(reasoning_effort, provider, "reasoning_effort"),
-        max_tokens: optional_profile_u32(max_tokens, provider, "max_tokens")?,
+        thinking: optional_profile_string(thinking, provider, "thinking")?,
+        reasoning_effort: optional_profile_string(reasoning_effort, provider, "reasoning_effort")?,
+        max_tokens: *max_tokens,
     }))
 }
 
@@ -220,29 +220,44 @@ fn required_profile_string(
     provider: &str,
     field: &str,
 ) -> Result<String, String> {
-    optional_profile_string(value, provider, field)
+    optional_profile_string(value, provider, field)?
         .ok_or_else(|| format!("provider {provider} field {field} is required"))
 }
 
-fn optional_profile_string(value: &Option<String>, provider: &str, field: &str) -> Option<String> {
-    trim_optional_string(value).or_else(|| optional_env(&profile_env_name(provider, field)))
-}
-
-fn optional_profile_u32(
-    value: &Option<u32>,
+fn optional_profile_string(
+    value: &Option<String>,
     provider: &str,
     field: &str,
-) -> Result<Option<u32>, String> {
-    match value {
-        Some(value) => Ok(Some(*value)),
-        None => optional_env(&profile_env_name(provider, field))
-            .map(|value| {
-                value.parse::<u32>().map_err(|_| {
-                    format!("provider {provider} field {field} must be an unsigned integer")
-                })
-            })
-            .transpose(),
+) -> Result<Option<String>, String> {
+    resolve_value(value, provider, field)
+}
+
+/// Resolve a config value that may be an `env://VAR` reference. A plain value is
+/// used literally; `env://VAR` reads VAR from the environment. This is the same
+/// `scheme://locator` vocabulary as the `session://` / `soul://` workspace URIs —
+/// one indirection convention, so a toml can carry secrets as `env://` references
+/// while the real values live only in the process environment. Fail-closed: an
+/// `env://` reference to an unset/empty variable is an error, never silently empty.
+fn resolve_value(
+    value: &Option<String>,
+    provider: &str,
+    field: &str,
+) -> Result<Option<String>, String> {
+    let Some(raw) = trim_optional_string(value) else {
+        return Ok(None);
+    };
+    let Some(var) = raw.strip_prefix("env://") else {
+        return Ok(Some(raw));
+    };
+    let var = var.trim();
+    if var.is_empty() {
+        return Err(format!(
+            "provider {provider} field {field}: env:// reference is missing a variable name"
+        ));
     }
+    optional_env(var).map(Some).ok_or_else(|| {
+        format!("provider {provider} field {field} references env://{var}, which is unset or empty")
+    })
 }
 
 fn optional_env(name: &str) -> Option<String> {
@@ -282,25 +297,4 @@ fn trim_string(value: &str) -> Option<String> {
     } else {
         Some(value.to_string())
     }
-}
-
-fn profile_env_name(provider: &str, field: &str) -> String {
-    format!(
-        "SANTI_PROVIDERS_{}_{}",
-        env_token(provider),
-        env_token(field)
-    )
-}
-
-fn env_token(value: &str) -> String {
-    value
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() {
-                character.to_ascii_uppercase()
-            } else {
-                '_'
-            }
-        })
-        .collect()
 }

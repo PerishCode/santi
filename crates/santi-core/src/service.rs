@@ -16,11 +16,11 @@ use tokio::sync::broadcast;
 use crate::assembly::input::provider_input;
 use crate::service_prompt::provider_tools;
 use crate::{
-    ActorType, CreateSessionResponse, MaterialKind, MessageContent, MessageState, SantiStore,
-    SantiStreamEvent, SantiStreamPayload, SendSessionAcceptedResponse, SendSessionRequest,
-    SessionDetail, SessionMaterial, SessionRuntimeSnapshot, SessionSummary,
-    ThinkingCompletionReason, ThinkingSpan, TurnActivityState, UpdateSessionRequest, prefixed_id,
-    timestamp_now,
+    ActorType, CreateSessionResponse, MaterialKind, MessageContent, MessageIntake, MessageState,
+    SantiStore, SantiStreamEvent, SantiStreamPayload, SendSessionAcceptedResponse,
+    SendSessionRequest, SessionDetail, SessionMaterial, SessionRuntimeSnapshot, SessionSummary,
+    ThinkingCompletionReason, ThinkingSpan, Turn, TurnActivityState, UpdateSessionRequest,
+    prefixed_id, timestamp_now,
 };
 use failure::ProviderTurnFailure;
 use text_delta::TextDeltaUpdate;
@@ -51,6 +51,11 @@ impl SantiService {
         provider: Arc<dyn ProviderClient>,
     ) -> Result<Self, String> {
         let store = SantiStore::open(&config.database_path)?;
+        // Boot recovery (honest occurrence): any turn still `running` is orphaned
+        // by the restart — reconcile it to an interrupted terminal so the soul
+        // sees the truth and its soul_session is idle again. Re-driving stranded
+        // requests is liveness; call `resume_pending` once inside the runtime.
+        store.reconcile_orphaned_turns()?;
         Ok(Self {
             store,
             provider,
@@ -58,6 +63,20 @@ impl SantiService {
             material_cache: Arc::new(Mutex::new(HashMap::new())),
             stream_events: broadcast::channel(1024).0,
         })
+    }
+
+    /// Re-drive soul_sessions left "behind" by a crash (durable requests never
+    /// covered by a turn). Liveness only — no retry of attempted/failed turns.
+    /// Call once at server startup (inside the tokio runtime).
+    pub fn resume_pending(&self) {
+        match self.store.soul_sessions_with_pending_requests() {
+            Ok(pending) => {
+                for (session_id, soul_session_id) in pending {
+                    self.poke(&session_id, &soul_session_id, "session_send");
+                }
+            }
+            Err(error) => eprintln!("santi: resume_pending scan failed: {error}"),
+        }
     }
 
     pub fn subscribe_stream(&self) -> broadcast::Receiver<SantiStreamEvent> {
@@ -114,6 +133,10 @@ impl SantiService {
             return Err("send content must contain text".to_string());
         }
 
+        // Ingest is decoupled from drive: append the user message as a REQUEST,
+        // then poke the driver. If a turn is already running for this soul_session,
+        // this send simply joins the thread (coalesced) and the running turn (or
+        // its completion re-check) will see it — no second concurrent turn.
         let user_message = self
             .store
             .append_message(
@@ -124,6 +147,7 @@ impl SantiService {
                     parts: request.content,
                 },
                 MessageState::Fixed,
+                MessageIntake::Request,
             )?
             .session_message;
         let soul_session = self.store.acquire_soul_session(session_id)?.soul_session;
@@ -135,18 +159,13 @@ impl SantiService {
                 message: user_message.clone(),
             },
         );
-        let turn = self
-            .store
-            .start_turn(
-                &soul_session.id,
-                &user_message.message.id,
-                user_message.relation.session_seq,
-            )?
-            .turn;
-        self.publish_stream(
-            session_id,
-            SantiStreamPayload::TurnStarted { turn: turn.clone() },
-        );
+        let turn = match self.poke(session_id, &soul_session.id, "session_send") {
+            Some(turn) => turn,
+            None => self
+                .store
+                .latest_turn(&soul_session.id)?
+                .ok_or_else(|| "no active turn after send".to_string())?,
+        };
 
         let snapshot = self
             .store
@@ -158,19 +177,6 @@ impl SantiService {
         let soul_profile = snapshot
             .soul_profile
             .ok_or_else(|| "soul_profile disappeared".to_string())?;
-        let background = self.clone();
-        let background_session_id = session_id.to_string();
-        let background_soul_session_id = soul_session.id.clone();
-        let background_turn_id = turn.id.clone();
-        tokio::spawn(async move {
-            background
-                .complete_provider_turn(
-                    background_session_id,
-                    background_soul_session_id,
-                    background_turn_id,
-                )
-                .await;
-        });
 
         Ok(SendSessionAcceptedResponse {
             session: SessionSummary {
@@ -184,18 +190,53 @@ impl SantiService {
         })
     }
 
+    /// Drive a turn if the soul_session is behind and idle, spawning the runner.
+    /// Returns the started turn, or None when a turn is already running (this
+    /// request coalesces) or there is nothing pending. The atomic guard in
+    /// `try_start_turn` keeps "one present per thread of experience".
+    fn poke(&self, session_id: &str, soul_session_id: &str, trigger_type: &str) -> Option<Turn> {
+        match self
+            .store
+            .try_start_turn(soul_session_id, trigger_type, None)
+        {
+            Ok(Some(turn)) => {
+                self.publish_stream(
+                    session_id,
+                    SantiStreamPayload::TurnStarted { turn: turn.clone() },
+                );
+                let background = self.clone();
+                let background_session_id = session_id.to_string();
+                let background_soul_session_id = soul_session_id.to_string();
+                let background_turn_id = turn.id.clone();
+                tokio::spawn(async move {
+                    background
+                        .complete_provider_turn(
+                            background_session_id,
+                            background_soul_session_id,
+                            background_turn_id,
+                        )
+                        .await;
+                });
+                Some(turn)
+            }
+            Ok(None) => None,
+            Err(error) => {
+                eprintln!("santi: try_start_turn failed for {soul_session_id}: {error}");
+                None
+            }
+        }
+    }
+
     async fn complete_provider_turn(
         &self,
         session_id: String,
         soul_session_id: String,
         turn_id: String,
     ) {
-        let send_result = self
+        match self
             .run_provider_turn(&session_id, &soul_session_id, &turn_id)
-            .await;
-
-        let (assistant_text, provider_response_id) = match send_result {
-            Ok(value) => value,
+            .await
+        {
             Err(failure) => {
                 self.fail_background_turn(
                     &session_id,
@@ -203,48 +244,65 @@ impl SantiService {
                     failure.error,
                     failure.partial_assistant_text,
                 );
-                return;
             }
-        };
-
-        if assistant_text.trim().is_empty() {
-            let error = "provider completed without assistant output".to_string();
-            self.fail_background_turn(&session_id, &turn_id, error, String::new());
-            return;
+            Ok((assistant_text, provider_response_id)) => {
+                self.finalize_turn(&session_id, &turn_id, assistant_text, provider_response_id);
+            }
         }
+        // Re-check: a turn is one thread "catching up"; requests that arrived
+        // during it (seq past this turn's start) make the soul_session behind
+        // again → drive the next turn now.
+        self.poke(&session_id, &soul_session_id, "session_send");
+    }
 
-        let assistant_message = match self.store.append_message(
-            &session_id,
-            ActorType::Soul,
-            self.store.default_soul_id(),
-            MessageContent::text(assistant_text.clone()),
-            MessageState::Fixed,
-        ) {
-            Ok(message) => message.session_message,
-            Err(error) => {
-                self.fail_background_turn(&session_id, &turn_id, error, assistant_text);
-                return;
+    /// Finalize a completed provider turn. Speech is optional (N6): an empty
+    /// assistant_text is a valid silent completion, not a failure. The lumped,
+    /// user-visible reply is a RECORD (it does not wake the soul); the replay
+    /// timeline already holds this turn's per-round output.
+    fn finalize_turn(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        assistant_text: String,
+        provider_response_id: Option<String>,
+    ) {
+        let assistant_seq = if assistant_text.trim().is_empty() {
+            None
+        } else {
+            match self.store.append_message(
+                session_id,
+                ActorType::Soul,
+                self.store.default_soul_id(),
+                MessageContent::text(assistant_text.clone()),
+                MessageState::Fixed,
+                MessageIntake::Record,
+            ) {
+                Ok(message) => {
+                    let assistant_message = message.session_message;
+                    let seq = assistant_message.relation.session_seq;
+                    self.publish_stream(
+                        session_id,
+                        SantiStreamPayload::MessageCompleted {
+                            turn_id: turn_id.to_string(),
+                            message: assistant_message,
+                        },
+                    );
+                    Some(seq)
+                }
+                Err(error) => {
+                    self.fail_background_turn(session_id, turn_id, error, assistant_text);
+                    return;
+                }
             }
         };
-        // The soul_session replay timeline already holds this turn's assistant
-        // output as per-round items (DC4b); the session message is the lumped,
-        // user-visible reply and is NOT re-referenced into the timeline.
         if let Err(error) = self.store.complete_turn(
-            &turn_id,
-            assistant_message.relation.session_seq,
+            turn_id,
+            assistant_seq,
             &self.provider.metadata().provider,
             provider_response_id,
         ) {
-            self.fail_background_turn(&session_id, &turn_id, error, String::new());
-            return;
+            self.fail_background_turn(session_id, turn_id, error, String::new());
         }
-        self.publish_stream(
-            &session_id,
-            SantiStreamPayload::MessageCompleted {
-                turn_id,
-                message: assistant_message,
-            },
-        );
     }
 
     async fn run_provider_turn(

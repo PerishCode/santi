@@ -308,6 +308,11 @@ pub struct UpdateSessionRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SendSessionRequest {
     pub content: Vec<MessagePart>,
+    /// Soul to address this send to. Empty/absent → the runtime's default soul,
+    /// preserving the pre-multi-soul path. The (soul, session) pair is acquired
+    /// at send time, so this is the only place a non-default soul is selected.
+    #[serde(default)]
+    pub soul_id: Option<String>,
 }
 
 impl SendSessionRequest {
@@ -393,6 +398,9 @@ pub enum SantiStreamPayload {
     },
     TurnActivity {
         activity: TurnActivity,
+    },
+    TurnCompleted {
+        turn_id: String,
     },
     TurnFailed {
         turn_id: String,

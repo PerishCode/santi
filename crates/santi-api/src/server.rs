@@ -523,6 +523,7 @@ fn sse_event_name(payload: &SantiStreamPayload) -> &'static str {
         SantiStreamPayload::MaterialUpdated { .. } => "material_updated",
         SantiStreamPayload::TurnStarted { .. } => "turn_started",
         SantiStreamPayload::TurnActivity { .. } => "turn_activity",
+        SantiStreamPayload::TurnCompleted { .. } => "turn_completed",
         SantiStreamPayload::TurnFailed { .. } => "turn_failed",
     }
 }

@@ -223,6 +223,7 @@ impl SantiStore {
 
     pub fn runtime_snapshot(
         &self,
+        soul_id: &str,
         session_id: &str,
     ) -> Result<Option<crate::SessionRuntimeSnapshot>, String> {
         let conn = self.conn.lock().unwrap();
@@ -231,8 +232,8 @@ impl SantiStore {
         };
         let profile = session_profile_by_id(&conn, session_id)?
             .ok_or_else(|| "session profile missing".to_string())?;
-        let soul_session = soul_session_by_pair(&conn, DEFAULT_SOUL_ID, session_id)?;
-        let soul_profile = soul_profile_by_id(&conn, DEFAULT_SOUL_ID)?;
+        let soul_session = soul_session_by_pair(&conn, soul_id, session_id)?;
+        let soul_profile = soul_profile_by_id(&conn, soul_id)?;
         Ok(Some(crate::SessionRuntimeSnapshot {
             session,
             profile,

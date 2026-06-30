@@ -8,11 +8,19 @@
 //!   runtime exclusively over HTTP against a running server, never calling
 //!   `santi-core` in-process. HTTP stays the only way into the runtime.
 
+use std::collections::HashSet;
 use std::io::Write as _;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use futures_util::StreamExt;
+use futures_util::{Stream, StreamExt};
+
+/// Grace window after the in-flight turn set empties, before declaring the
+/// soul_session idle. A completed turn re-checks for newer requests and may
+/// start a follow-on turn (coalescing); its `turn_started` lands just after the
+/// `turn_completed`, so we wait briefly to catch it rather than exit early.
+const WATCH_IDLE_GRACE: Duration = Duration::from_millis(1500);
 
 const DEFAULT_BASE_URL: &str = "http://127.0.0.1:43307";
 
@@ -32,6 +40,16 @@ struct Cli {
     /// Falls back to SANTI_API_KEY. Only used by the HTTP client commands.
     #[arg(long, global = true, env = "SANTI_API_KEY")]
     api_key: Option<String>,
+
+    /// Default session id used when a session subcommand omits an explicit id.
+    /// Falls back to SANTI_SESSION. Empty/absent → an id must be passed.
+    #[arg(long, global = true, env = "SANTI_SESSION")]
+    session: Option<String>,
+
+    /// Default soul addressed by `session send`. Falls back to SANTI_SOUL.
+    /// Empty/absent → the runtime's default soul (the pre-multi-soul path).
+    #[arg(long, global = true, env = "SANTI_SOUL")]
+    soul: Option<String>,
 
     #[command(subcommand)]
     command: Command,
@@ -59,16 +77,28 @@ enum SessionCommand {
     Create,
     /// GET /api/v1/sessions
     List,
-    /// GET /api/v1/sessions/{id}
-    Get { id: String },
-    /// GET /api/v1/sessions/{id}/messages
-    Messages { id: String },
-    /// GET /api/v1/sessions/{id}/runtime
-    Runtime { id: String },
-    /// POST /api/v1/sessions/{id}/send
-    Send { id: String, text: String },
-    /// GET /api/v1/sessions/{id}/events (server-sent events, follows the stream)
-    Events { id: String },
+    /// GET /api/v1/sessions/{id} (id falls back to --session/SANTI_SESSION)
+    Get { id: Option<String> },
+    /// GET /api/v1/sessions/{id}/messages (id falls back to --session)
+    Messages { id: Option<String> },
+    /// GET /api/v1/sessions/{id}/runtime (id falls back to --session)
+    Runtime { id: Option<String> },
+    /// POST /api/v1/sessions/{id}/send.
+    ///
+    /// Positional forms: `send <id> <text>` or `send <text>` (id then falls
+    /// back to --session/SANTI_SESSION). The soul comes from --soul/SANTI_SOUL.
+    Send {
+        /// Either `<id> <text>` or just `<text>`.
+        #[arg(num_args = 1..=2, required = true)]
+        args: Vec<String>,
+        /// After sending, follow the stream until the soul_session goes idle,
+        /// then exit. Robust to coalescing and silent (speechless) completions.
+        #[arg(long)]
+        watch: bool,
+    },
+    /// GET /api/v1/sessions/{id}/events — follows the SSE stream (id falls back
+    /// to --session). Runs until interrupted; use `send --watch` to stop on idle.
+    Events { id: Option<String> },
 }
 
 #[tokio::main]
@@ -77,7 +107,43 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Service { args } => run_service(args).await,
-        other => run_client(&cli.base_url, cli.api_key.as_deref(), other).await,
+        other => {
+            let defaults = ClientDefaults {
+                session: cli.session,
+                soul: cli.soul,
+            };
+            run_client(&cli.base_url, cli.api_key.as_deref(), &defaults, other).await
+        }
+    }
+}
+
+/// Client-side defaults resolved from global flags / env. They never reach the
+/// runtime as concepts: `session` only fills an omitted path id, and `soul` is
+/// forwarded on `send` (empty → the runtime keeps its default-soul path).
+struct ClientDefaults {
+    session: Option<String>,
+    soul: Option<String>,
+}
+
+impl ClientDefaults {
+    /// Resolve a session id: an explicit positional wins, else the default.
+    /// Both empty is a usage error — same "you must name a session" path as before.
+    fn resolve_session(&self, explicit: Option<String>) -> Result<String> {
+        explicit
+            .or_else(|| self.session.clone())
+            .map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| {
+                anyhow::anyhow!("no session id: pass one or set --session / SANTI_SESSION")
+            })
+    }
+
+    /// The soul to address, or None to let the runtime use its default soul.
+    fn soul(&self) -> Option<&str> {
+        self.soul
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
     }
 }
 
@@ -100,7 +166,12 @@ async fn run_service(args: Vec<String>) -> Result<()> {
 }
 
 /// Transport-only HTTP client against a running server.
-async fn run_client(base_url: &str, api_key: Option<&str>, command: Command) -> Result<()> {
+async fn run_client(
+    base_url: &str,
+    api_key: Option<&str>,
+    defaults: &ClientDefaults,
+    command: Command,
+) -> Result<()> {
     let client = build_client(api_key)?;
     let base = base_url.trim_end_matches('/').to_string();
     match command {
@@ -113,28 +184,48 @@ async fn run_client(base_url: &str, api_key: Option<&str>, command: Command) -> 
             get(&client, &format!("{base}/api/v1/sessions")).await
         }
         Command::Session(SessionCommand::Get { id }) => {
+            let id = defaults.resolve_session(id)?;
             get(&client, &format!("{base}/api/v1/sessions/{id}")).await
         }
         Command::Session(SessionCommand::Messages { id }) => {
+            let id = defaults.resolve_session(id)?;
             get(&client, &format!("{base}/api/v1/sessions/{id}/messages")).await
         }
         Command::Session(SessionCommand::Runtime { id }) => {
+            let id = defaults.resolve_session(id)?;
             get(&client, &format!("{base}/api/v1/sessions/{id}/runtime")).await
         }
-        Command::Session(SessionCommand::Send { id, text }) => {
-            let body = serde_json::json!({
+        Command::Session(SessionCommand::Send { args, watch }) => {
+            let (id, text) = split_send_args(args, defaults)?;
+            let mut content = serde_json::json!({
                 "content": [{ "type": "text", "text": text }]
             });
-            post(
-                &client,
-                &format!("{base}/api/v1/sessions/{id}/send"),
-                Some(body),
-            )
-            .await
+            if let Some(soul) = defaults.soul() {
+                content["soul_id"] = serde_json::Value::from(soul);
+            }
+            send(&client, &base, &id, content, watch).await
         }
         Command::Session(SessionCommand::Events { id }) => {
+            let id = defaults.resolve_session(id)?;
             follow(&client, &format!("{base}/api/v1/sessions/{id}/events")).await
         }
+    }
+}
+
+/// Split `send` positionals into `(session_id, text)`. Two args = explicit
+/// `<id> <text>`; one arg = `<text>` with the id from --session/SANTI_SESSION.
+fn split_send_args(mut args: Vec<String>, defaults: &ClientDefaults) -> Result<(String, String)> {
+    match args.len() {
+        2 => {
+            let text = args.pop().expect("len == 2");
+            let id = args.pop().expect("len == 2");
+            Ok((defaults.resolve_session(Some(id))?, text))
+        }
+        1 => {
+            let text = args.pop().expect("len == 1");
+            Ok((defaults.resolve_session(None)?, text))
+        }
+        _ => anyhow::bail!("send takes `<id> <text>` or `<text>`"),
     }
 }
 
@@ -207,4 +298,255 @@ async fn follow(client: &reqwest::Client, url: &str) -> Result<()> {
         stdout.flush().ok();
     }
     Ok(())
+}
+
+/// POST a send, then optionally `--watch` the stream until the soul_session is
+/// idle again. Without `--watch` this is the prior fire-and-return behavior.
+async fn send(
+    client: &reqwest::Client,
+    base: &str,
+    session_id: &str,
+    body: serde_json::Value,
+    watch: bool,
+) -> Result<()> {
+    let url = format!("{base}/api/v1/sessions/{session_id}/send");
+    let response = client
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .with_context(|| format!("POST {url}"))?;
+    let status = response.status();
+    let text = response.text().await.context("read response body")?;
+    let accepted = serde_json::from_str::<serde_json::Value>(&text).ok();
+    if !watch {
+        match &accepted {
+            Some(value) => println!("{}", serde_json::to_string_pretty(value)?),
+            None => println!("{text}"),
+        }
+    }
+    if !status.is_success() {
+        if watch {
+            println!("{text}");
+        }
+        anyhow::bail!("request failed with status {status}");
+    }
+    if !watch {
+        return Ok(());
+    }
+    // Seed the in-flight set with the turn this send landed on (a fresh turn, or
+    // the running one it coalesced into), so a follow-on that handles our message
+    // is still awaited even if its `turn_started` arrives after the seed's end.
+    let seed_turn = accepted
+        .as_ref()
+        .and_then(|value| value.get("turn"))
+        .and_then(|turn| turn.get("id"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    watch_until_idle(client, base, session_id, seed_turn).await
+}
+
+/// Follow the session's SSE stream, tracking which turns are in flight, and
+/// return once none remain (the soul_session has caught up). Each event is
+/// relayed to stdout as one compact JSON line; the client models only the
+/// turn-lifecycle events it needs to decide "idle", nothing more.
+async fn watch_until_idle(
+    client: &reqwest::Client,
+    base: &str,
+    session_id: &str,
+    seed_turn: Option<String>,
+) -> Result<()> {
+    let url = format!("{base}/api/v1/sessions/{session_id}/events");
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .with_context(|| format!("GET {url}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        anyhow::bail!("request failed with status {status}");
+    }
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+    let mut inflight: HashSet<String> = HashSet::new();
+    let mut seeded = false;
+    if let Some(turn) = seed_turn {
+        inflight.insert(turn);
+        seeded = true;
+    }
+    let mut stdout = std::io::stdout();
+    loop {
+        // Once nothing is in flight, allow only a short grace for a coalesced
+        // follow-on turn before declaring idle. Before seeding (no known turn),
+        // wait without a deadline so we don't exit before the turn appears.
+        let frame = if seeded && inflight.is_empty() {
+            match tokio::time::timeout(WATCH_IDLE_GRACE, next_sse_frame(&mut stream, &mut buffer))
+                .await
+            {
+                Ok(frame) => frame?,
+                Err(_) => break,
+            }
+        } else {
+            next_sse_frame(&mut stream, &mut buffer).await?
+        };
+        let Some((event, data)) = frame else {
+            break; // stream closed
+        };
+        if event != "stream_open" {
+            writeln!(stdout, "{data}").ok();
+            stdout.flush().ok();
+        }
+        match event.as_str() {
+            "turn_started" => {
+                if let Some(id) = json_field(&data, &["payload", "turn", "id"]) {
+                    inflight.insert(id);
+                    seeded = true;
+                }
+            }
+            "turn_completed" | "turn_failed" => {
+                if let Some(id) = json_field(&data, &["payload", "turn_id"]) {
+                    inflight.remove(&id);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Pull the next complete SSE frame, returning its `(event, data)` lines.
+/// Comment-only frames (keep-alives) and frames without an event are skipped.
+/// Returns `Ok(None)` when the stream ends.
+async fn next_sse_frame<B: AsRef<[u8]>>(
+    stream: &mut (impl Stream<Item = reqwest::Result<B>> + Unpin),
+    buffer: &mut String,
+) -> Result<Option<(String, String)>> {
+    loop {
+        while let Some(boundary) = buffer.find("\n\n") {
+            let frame: String = buffer.drain(..boundary + 2).collect();
+            if let Some(parsed) = parse_sse_frame(&frame) {
+                return Ok(Some(parsed));
+            }
+        }
+        match stream.next().await {
+            Some(chunk) => {
+                let chunk = chunk.context("read event stream")?;
+                buffer.push_str(&String::from_utf8_lossy(chunk.as_ref()));
+            }
+            None => return Ok(None),
+        }
+    }
+}
+
+/// Parse one SSE frame into `(event, data)`. Returns None if it has no event
+/// line (e.g. a `:` keep-alive comment).
+fn parse_sse_frame(frame: &str) -> Option<(String, String)> {
+    let mut event = None;
+    let mut data = String::new();
+    for line in frame.lines() {
+        if let Some(rest) = line.strip_prefix("event:") {
+            event = Some(rest.trim().to_string());
+        } else if let Some(rest) = line.strip_prefix("data:") {
+            if !data.is_empty() {
+                data.push('\n');
+            }
+            data.push_str(rest.strip_prefix(' ').unwrap_or(rest));
+        }
+    }
+    event.map(|event| (event, data))
+}
+
+/// Read a nested string field from a compact JSON document by key path.
+fn json_field(data: &str, path: &[&str]) -> Option<String> {
+    let mut value = serde_json::from_str::<serde_json::Value>(data).ok()?;
+    for key in path {
+        value = value.get(key)?.clone();
+    }
+    value.as_str().map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn defaults(session: Option<&str>, soul: Option<&str>) -> ClientDefaults {
+        ClientDefaults {
+            session: session.map(str::to_string),
+            soul: soul.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn resolve_session_prefers_explicit_then_default() {
+        let d = defaults(Some("sess_default"), None);
+        assert_eq!(d.resolve_session(Some("sess_x".into())).unwrap(), "sess_x");
+        assert_eq!(d.resolve_session(None).unwrap(), "sess_default");
+    }
+
+    #[test]
+    fn resolve_session_errors_when_both_empty() {
+        assert!(defaults(None, None).resolve_session(None).is_err());
+        // A blank default is treated as absent, not a valid id.
+        assert!(defaults(Some("  "), None).resolve_session(None).is_err());
+    }
+
+    #[test]
+    fn soul_blank_is_none() {
+        assert_eq!(defaults(None, Some("soul_x")).soul(), Some("soul_x"));
+        assert_eq!(defaults(None, Some("   ")).soul(), None);
+        assert_eq!(defaults(None, None).soul(), None);
+    }
+
+    #[test]
+    fn split_send_args_two_then_one() {
+        let d = defaults(Some("sess_default"), None);
+        let (id, text) = split_send_args(vec!["sess_x".into(), "hi".into()], &d).unwrap();
+        assert_eq!((id.as_str(), text.as_str()), ("sess_x", "hi"));
+
+        let (id, text) = split_send_args(vec!["hello".into()], &d).unwrap();
+        assert_eq!((id.as_str(), text.as_str()), ("sess_default", "hello"));
+
+        // One arg with no default session is a usage error, not a silent send.
+        assert!(split_send_args(vec!["hello".into()], &defaults(None, None)).is_err());
+    }
+
+    #[test]
+    fn parse_sse_frame_extracts_event_and_data() {
+        let frame = "id: e1\nevent: turn_completed\ndata: {\"payload\":{\"turn_id\":\"t1\"}}\n";
+        let (event, data) = parse_sse_frame(frame).expect("frame");
+        assert_eq!(event, "turn_completed");
+        assert_eq!(data, "{\"payload\":{\"turn_id\":\"t1\"}}");
+        // A keep-alive comment frame has no event line.
+        assert!(parse_sse_frame(": keep-alive\n").is_none());
+    }
+
+    #[test]
+    fn json_field_reads_nested_path() {
+        let data = "{\"payload\":{\"turn\":{\"id\":\"t9\"}}}";
+        assert_eq!(
+            json_field(data, &["payload", "turn", "id"]).as_deref(),
+            Some("t9")
+        );
+        assert_eq!(json_field(data, &["payload", "missing"]), None);
+    }
+
+    #[tokio::test]
+    async fn next_sse_frame_yields_frames_across_chunk_boundaries() {
+        use futures_util::stream;
+        // A frame split across two chunks, plus a trailing comment-only frame.
+        let chunks: Vec<reqwest::Result<Vec<u8>>> = vec![
+            Ok(b"event: turn_started\ndata: {\"payl".to_vec()),
+            Ok(b"oad\":{\"turn\":{\"id\":\"t1\"}}}\n\n: ka\n\n".to_vec()),
+        ];
+        let mut s = stream::iter(chunks);
+        let mut buf = String::new();
+        let (event, data) = next_sse_frame(&mut s, &mut buf).await.unwrap().unwrap();
+        assert_eq!(event, "turn_started");
+        assert_eq!(
+            json_field(&data, &["payload", "turn", "id"]).as_deref(),
+            Some("t1")
+        );
+        // Only the keep-alive remains → no further parsable frame.
+        assert!(next_sse_frame(&mut s, &mut buf).await.unwrap().is_none());
+    }
 }

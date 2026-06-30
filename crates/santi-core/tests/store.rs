@@ -165,7 +165,7 @@ fn thinking_spans_become_reasoning_items() {
         .expect("thinking exists");
 
     let snapshot = store
-        .runtime_snapshot(&session.session.id)
+        .runtime_snapshot(store.default_soul_id(), &session.session.id)
         .expect("runtime snapshot")
         .expect("session exists");
     assert_eq!(snapshot.thinking_spans.len(), 1);
@@ -233,7 +233,7 @@ fn titles_from_first_message() {
         .expect("load session")
         .expect("session exists");
     let profile = store
-        .runtime_snapshot(&session.id)
+        .runtime_snapshot(store.default_soul_id(), &session.id)
         .expect("runtime snapshot")
         .expect("session exists")
         .profile;

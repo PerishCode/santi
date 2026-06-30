@@ -270,9 +270,14 @@ impl SantiService {
             };
         }
 
+        let tools_through_seq = provider_try!(self.store.turn_base_soul_session_seq(turn_id));
         let final_response_id = loop {
             round += 1;
-            let input = provider_try!(provider_messages(&self.store, soul_session_id));
+            let input = provider_try!(provider_messages(
+                &self.store,
+                soul_session_id,
+                tools_through_seq
+            ));
             let metadata = self.provider.metadata();
             let request = ProviderRequest {
                 model: metadata.model,

@@ -282,6 +282,18 @@ impl SantiStore {
         turn_by_id(&conn, turn_id)?.ok_or_else(|| "failed turn missing".to_string())
     }
 
+    /// The soul-session seq the turn was opened at (its in-flight user message).
+    /// Tool entries above this belong to the still-running turn.
+    pub fn turn_base_soul_session_seq(&self, turn_id: &str) -> Result<i64, String> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT base_soul_session_seq FROM turns WHERE id = ?1 LIMIT 1",
+            params![turn_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())
+    }
+
     pub fn tool_calls_for_turn(&self, turn_id: &str) -> Result<Vec<ToolCall>, String> {
         let conn = self.conn.lock().unwrap();
         tool_calls_for_turn(&conn, turn_id)

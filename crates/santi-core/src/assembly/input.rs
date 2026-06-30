@@ -5,13 +5,7 @@ use crate::SantiStore;
 pub(crate) fn provider_messages(
     store: &SantiStore,
     soul_session_id: &str,
+    tools_through_seq: i64,
 ) -> Result<Vec<ProviderMessage>, String> {
-    Ok(store
-        .assembly_input(soul_session_id)?
-        .into_iter()
-        .map(|message| ProviderMessage {
-            role: message.role,
-            content: message.content,
-        })
-        .collect())
+    store.assembly_input(soul_session_id, tools_through_seq)
 }

@@ -237,12 +237,6 @@ pub struct SoulSessionEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct ProviderInputMessage {
-    pub role: String,
-    pub content: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CreateSessionResponse {
     pub session: SessionSummary,
 }

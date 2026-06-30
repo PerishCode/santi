@@ -8,8 +8,8 @@ use serde_json::{Map, Value, json};
 use std::sync::Arc;
 
 use crate::{
-    FunctionCallOutput, ProviderClient, ProviderEvent, ProviderFunctionCall, ProviderMetadata,
-    ProviderRequest, ProviderStream, ProviderStreamTrace, ProviderTool,
+    FunctionCallOutput, ProviderClient, ProviderEvent, ProviderFunctionCall, ProviderMessage,
+    ProviderMetadata, ProviderRequest, ProviderStream, ProviderStreamTrace, ProviderTool,
 };
 
 #[derive(Debug, Clone)]
@@ -134,28 +134,45 @@ fn response_input(request: &ProviderRequest) -> Value {
         return json!(map_function_call_outputs(outputs));
     }
 
-    json!(
-        request
-            .input
-            .iter()
-            .map(|message| {
-                let content_type = if message.role == "assistant" {
+    let mut items = Vec::new();
+    for message in &request.input {
+        match message {
+            ProviderMessage::Text { role, content } => {
+                let content_type = if role == "assistant" {
                     "output_text"
                 } else {
                     "input_text"
                 };
-                json!({
-                    "role": message.role,
+                items.push(json!({
+                    "role": role,
                     "content": [
                         {
                             "type": content_type,
-                            "text": message.content,
+                            "text": content,
                         }
                     ],
-                })
-            })
-            .collect::<Vec<_>>()
-    )
+                }));
+            }
+            ProviderMessage::ToolCalls { calls } => {
+                items.extend(calls.iter().map(|call| {
+                    json!({
+                        "type": "function_call",
+                        "call_id": call.call_id,
+                        "name": call.name,
+                        "arguments": call.arguments_raw,
+                    })
+                }));
+            }
+            ProviderMessage::ToolResult { call_id, content } => {
+                items.push(json!({
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": content,
+                }));
+            }
+        }
+    }
+    json!(items)
 }
 
 fn map_tools(tools: Vec<ProviderTool>) -> Vec<Value> {

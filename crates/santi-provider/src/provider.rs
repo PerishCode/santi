@@ -5,9 +5,20 @@ use serde_json::Value;
 use std::{pin::Pin, sync::Arc};
 
 #[derive(Debug, Clone)]
-pub struct ProviderMessage {
-    pub role: String,
-    pub content: String,
+pub enum ProviderMessage {
+    /// A plain role/content message (user, assistant text, or system).
+    Text { role: String, content: String },
+    /// A historical assistant turn that requested one or more tool calls.
+    ToolCalls { calls: Vec<ProviderHistoricalCall> },
+    /// A historical tool result, replayed back to the model.
+    ToolResult { call_id: String, content: String },
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderHistoricalCall {
+    pub call_id: String,
+    pub name: String,
+    pub arguments_raw: String,
 }
 
 #[derive(Debug, Clone)]

@@ -5,10 +5,18 @@ use santi_core::{
     SendSessionRequest,
 };
 use santi_provider::{
-    ProviderClient, ProviderEvent, ProviderMetadata, ProviderRequest, ProviderStream,
+    ProviderClient, ProviderEvent, ProviderMessage, ProviderMetadata, ProviderRequest,
+    ProviderStream,
 };
 use std::sync::{Arc, Mutex};
 use tokio::time::{Duration, sleep};
+
+fn as_text(message: &ProviderMessage) -> Option<(&str, &str)> {
+    match message {
+        ProviderMessage::Text { role, content } => Some((role.as_str(), content.as_str())),
+        _ => None,
+    }
+}
 
 #[derive(Clone, Default)]
 struct FailureProvider {
@@ -99,9 +107,11 @@ async fn records_failed_system() {
         requests[1]
             .input
             .iter()
-            .any(|message| message.role == "user"
-                && message.content.contains("<santi-system>")
-                && message.content.contains("kind: turn_failed"))
+            .any(
+                |message| as_text(message).is_some_and(|(role, content)| role == "user"
+                    && content.contains("<santi-system>")
+                    && content.contains("kind: turn_failed"))
+            )
     );
 }
 
@@ -148,10 +158,13 @@ async fn preserves_aborted_output() {
     let requests = provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
     assert!(requests[1].input.iter().any(|message| {
-        message.role == "assistant" && message.content == "partial runtime output"
+        as_text(message).is_some_and(|(role, content)| {
+            role == "assistant" && content == "partial runtime output"
+        })
     }));
     assert!(requests[1].input.iter().any(|message| {
-        message.role == "user" && message.content.contains("kind: turn_failed")
+        as_text(message)
+            .is_some_and(|(role, content)| role == "user" && content.contains("kind: turn_failed"))
     }));
 }
 

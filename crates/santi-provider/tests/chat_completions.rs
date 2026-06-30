@@ -342,7 +342,7 @@ fn base_request(
     ProviderRequest {
         model,
         instructions: Some("system guidance".to_string()),
-        input: vec![ProviderMessage {
+        input: vec![ProviderMessage::Text {
             role: "user".to_string(),
             content: "hello".to_string(),
         }],

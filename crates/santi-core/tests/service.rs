@@ -5,8 +5,8 @@ use santi_core::{
     SantiServiceConfig, SendSessionRequest, session_memory_uri, soul_memory_uri,
 };
 use santi_provider::{
-    ProviderClient, ProviderEvent, ProviderFunctionCall, ProviderMetadata, ProviderRequest,
-    ProviderStream,
+    ProviderClient, ProviderEvent, ProviderFunctionCall, ProviderMessage, ProviderMetadata,
+    ProviderRequest, ProviderStream,
 };
 use serde_json::json;
 use std::{
@@ -112,8 +112,13 @@ async fn sends_with_runtime() {
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].model, "fake-model");
     assert_eq!(requests[0].input.len(), 1);
-    assert_eq!(requests[0].input[0].role, "user");
-    assert_eq!(requests[0].input[0].content, "hello provider");
+    match &requests[0].input[0] {
+        ProviderMessage::Text { role, content } => {
+            assert_eq!(role, "user");
+            assert_eq!(content, "hello provider");
+        }
+        other => panic!("expected text message, got {other:?}"),
+    }
     let instructions = requests[0]
         .instructions
         .as_deref()

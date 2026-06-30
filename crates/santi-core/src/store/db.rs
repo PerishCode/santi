@@ -380,7 +380,7 @@ pub(super) fn session_effects(
 
 pub(super) fn session_message_to_provider(
     message: &SessionMessage,
-) -> Option<crate::ProviderInputMessage> {
+) -> Option<santi_provider::ProviderMessage> {
     let role = match message.message.message_kind {
         MessageKind::SantiSystem => "user",
         MessageKind::Text => match message.message.actor_type {
@@ -393,7 +393,7 @@ pub(super) fn session_message_to_provider(
     if content.trim().is_empty() {
         None
     } else {
-        Some(crate::ProviderInputMessage {
+        Some(santi_provider::ProviderMessage::Text {
             role: role.to_string(),
             content,
         })

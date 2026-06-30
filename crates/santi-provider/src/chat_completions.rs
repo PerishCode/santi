@@ -8,8 +8,8 @@ use serde_json::{Map, Value, json};
 use std::sync::Arc;
 
 use crate::{
-    FunctionCallOutput, ProviderClient, ProviderEvent, ProviderFunctionCall, ProviderMetadata,
-    ProviderRequest, ProviderStream, ProviderStreamTrace, ProviderTool,
+    FunctionCallOutput, ProviderClient, ProviderEvent, ProviderFunctionCall, ProviderMessage,
+    ProviderMetadata, ProviderRequest, ProviderStream, ProviderStreamTrace, ProviderTool,
 };
 
 #[derive(Debug, Clone)]
@@ -114,12 +114,36 @@ fn messages(request: &ProviderRequest) -> Value {
             "content": instructions,
         }));
     }
-    messages.extend(request.input.iter().map(|message| {
-        json!({
-            "role": message.role,
-            "content": message.content,
-        })
-    }));
+    for message in &request.input {
+        match message {
+            ProviderMessage::Text { role, content } => messages.push(json!({
+                "role": role,
+                "content": content,
+            })),
+            ProviderMessage::ToolCalls { calls } => messages.push(json!({
+                "role": "assistant",
+                "content": Value::Null,
+                "tool_calls": calls
+                    .iter()
+                    .map(|call| {
+                        json!({
+                            "id": call.call_id,
+                            "type": "function",
+                            "function": {
+                                "name": call.name,
+                                "arguments": call.arguments_raw,
+                            },
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+            })),
+            ProviderMessage::ToolResult { call_id, content } => messages.push(json!({
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": content,
+            })),
+        }
+    }
     if let Some(outputs) = &request.function_call_outputs {
         messages.extend(tool_messages(outputs));
     }

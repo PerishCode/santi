@@ -175,7 +175,7 @@ async fn capture_body(mut config: OpenAIProviderConfig) -> Value {
         .stream_response(ProviderRequest {
             model: provider.metadata().model,
             instructions: Some("system guidance".to_string()),
-            input: vec![ProviderMessage {
+            input: vec![ProviderMessage::Text {
                 role: "user".to_string(),
                 content: "hello".to_string(),
             }],
@@ -224,7 +224,7 @@ async fn capture_body_without_tools(mut config: OpenAIProviderConfig) -> Value {
         .stream_response(ProviderRequest {
             model: provider.metadata().model,
             instructions: Some("system guidance".to_string()),
-            input: vec![ProviderMessage {
+            input: vec![ProviderMessage::Text {
                 role: "user".to_string(),
                 content: "hello".to_string(),
             }],
@@ -281,7 +281,7 @@ async fn capture_all_events(lines: Vec<&'static str>) -> Vec<ProviderEvent> {
         .stream_response(ProviderRequest {
             model: provider.metadata().model,
             instructions: None,
-            input: vec![ProviderMessage {
+            input: vec![ProviderMessage::Text {
                 role: "user".to_string(),
                 content: "hello".to_string(),
             }],

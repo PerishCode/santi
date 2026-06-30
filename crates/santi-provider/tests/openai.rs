@@ -8,7 +8,7 @@ use std::{
 use futures_util::StreamExt;
 use santi_provider::{
     OpenAIProvider, OpenAIProviderConfig, ProviderClient, ProviderEvent, ProviderFunctionTool,
-    ProviderMessage, ProviderRequest, ProviderStreamTrace, ProviderTool,
+    ProviderItem, ProviderRequest, ProviderStreamTrace, ProviderTool,
 };
 use serde_json::Value;
 
@@ -175,7 +175,7 @@ async fn capture_body(mut config: OpenAIProviderConfig) -> Value {
         .stream_response(ProviderRequest {
             model: provider.metadata().model,
             instructions: Some("system guidance".to_string()),
-            input: vec![ProviderMessage::Text {
+            input: vec![ProviderItem::Message {
                 role: "user".to_string(),
                 content: "hello".to_string(),
             }],
@@ -185,7 +185,6 @@ async fn capture_body(mut config: OpenAIProviderConfig) -> Value {
                 parameters: serde_json::json!({ "type": "object" }),
             })]),
             previous_response_id: None,
-            function_call_outputs: None,
         })
         .await
         .expect("stream response");
@@ -224,13 +223,12 @@ async fn capture_body_without_tools(mut config: OpenAIProviderConfig) -> Value {
         .stream_response(ProviderRequest {
             model: provider.metadata().model,
             instructions: Some("system guidance".to_string()),
-            input: vec![ProviderMessage::Text {
+            input: vec![ProviderItem::Message {
                 role: "user".to_string(),
                 content: "hello".to_string(),
             }],
             tools: None,
             previous_response_id: None,
-            function_call_outputs: None,
         })
         .await
         .expect("stream response");
@@ -281,13 +279,12 @@ async fn capture_all_events(lines: Vec<&'static str>) -> Vec<ProviderEvent> {
         .stream_response(ProviderRequest {
             model: provider.metadata().model,
             instructions: None,
-            input: vec![ProviderMessage::Text {
+            input: vec![ProviderItem::Message {
                 role: "user".to_string(),
                 content: "hello".to_string(),
             }],
             tools: None,
             previous_response_id: None,
-            function_call_outputs: None,
         })
         .await
         .expect("stream response");

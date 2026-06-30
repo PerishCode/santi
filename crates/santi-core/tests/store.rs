@@ -1,19 +1,19 @@
 use rusqlite::Connection;
 use santi_core::{
-    ActorType, MessageContent, MessageKind, MessageState, ProviderMessage, SantiStore,
-    ThinkingCompletionReason,
+    ActorType, MessageContent, MessageKind, MessageState, ProviderItem, SantiStore,
+    ThinkingCompletionReason, ToolCallProvenance,
 };
 
-fn assert_text(message: &ProviderMessage, role: &str, content: &str) {
-    match message {
-        ProviderMessage::Text {
+fn assert_text(item: &ProviderItem, role: &str, content: &str) {
+    match item {
+        ProviderItem::Message {
             role: actual_role,
             content: actual_content,
         } => {
             assert_eq!(actual_role, role);
             assert_eq!(actual_content, content);
         }
-        other => panic!("expected text message, got {other:?}"),
+        other => panic!("expected text item, got {other:?}"),
     }
 }
 
@@ -80,7 +80,7 @@ fn appends_relations_in_order() {
     assert_eq!(user.relation.session_seq, 1);
     assert_eq!(entry.soul_session_seq, 1);
     let input = store
-        .assembly_input(&soul_session.id, i64::MAX)
+        .assembly_input(&soul_session.id)
         .expect("assembly input");
     assert_eq!(input.len(), 1);
     assert_text(&input[0], "user", "hello ordering");
@@ -109,7 +109,7 @@ fn maps_santi_system_input() {
     assert_eq!(message.message.actor_type, ActorType::System);
     assert_eq!(message.message.message_kind, MessageKind::SantiSystem);
     let input = store
-        .assembly_input(&soul_session.id, i64::MAX)
+        .assembly_input(&soul_session.id)
         .expect("assembly input");
     assert_eq!(input.len(), 1);
     assert_text(
@@ -120,7 +120,7 @@ fn maps_santi_system_input() {
 }
 
 #[test]
-fn thinking_spans_skip_input() {
+fn thinking_spans_become_reasoning_items() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let session = store.create_session().expect("create session");
@@ -180,11 +180,20 @@ fn thinking_spans_skip_input() {
         Some(ThinkingCompletionReason::FirstTextDelta)
     );
 
+    // Reasoning is now a first-class timeline item (adapters drop it per DC5,
+    // but the projection includes it when there is real summary text).
     let input = store
-        .assembly_input(&soul_session.id, i64::MAX)
+        .assembly_input(&soul_session.id)
         .expect("assembly input");
-    assert_eq!(input.len(), 1);
+    assert_eq!(input.len(), 2);
     assert_text(&input[0], "user", "hello thinking");
+    match &input[1] {
+        ProviderItem::Reasoning { id, content } => {
+            assert_eq!(id.as_deref(), Some("resp_test"));
+            assert_eq!(content, "Looked at the prompt.");
+        }
+        other => panic!("expected reasoning item, got {other:?}"),
+    }
 }
 
 #[test]
@@ -246,12 +255,13 @@ fn trims_session_title() {
 }
 
 #[test]
-fn replays_completed_tool_history_but_not_in_flight() {
+fn projects_timeline_to_interleaved_items() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let session = store.create_session().expect("create session");
 
-    // Turn 1: user message, a completed shell tool roundtrip, and the answer.
+    // A turn with a shell tool roundtrip and per-round assistant text: the
+    // replay timeline interleaves user, function call, result, assistant text.
     let user = store
         .append_message(
             &session.session.id,
@@ -269,20 +279,25 @@ fn replays_completed_tool_history_but_not_in_flight() {
     store
         .append_message_ref(&soul_session.id, &user.message.id)
         .expect("append user ref");
-    let turn1 = store
+    let turn = store
         .start_turn(
             &soul_session.id,
             &user.message.id,
             user.relation.session_seq,
         )
-        .expect("start turn1")
+        .expect("start turn")
         .turn;
     store
         .append_tool_call(
-            &turn1.id,
+            &turn.id,
             "call_1",
             "shell",
             &serde_json::json!({ "command": "echo hi" }),
+            &ToolCallProvenance {
+                item: Some(serde_json::json!({ "type": "function_call", "id": "fc_1" })),
+                item_id: Some("fc_1".to_string()),
+                response_id: Some("resp_1".to_string()),
+            },
         )
         .expect("append tool call");
     store
@@ -292,86 +307,41 @@ fn replays_completed_tool_history_but_not_in_flight() {
             None,
         )
         .expect("append tool result");
-    let answer = store
-        .append_message(
-            &session.session.id,
-            ActorType::Soul,
-            store.default_soul_id(),
-            MessageContent::text("done"),
-            MessageState::Fixed,
-        )
-        .expect("append answer")
-        .session_message;
+    // The final assistant text is a soul-only timeline item (DC4b); the lumped
+    // session-visible reply is stored separately by the service.
     store
-        .append_message_ref(&soul_session.id, &answer.message.id)
-        .expect("append answer ref");
+        .append_soul_assistant_text(&soul_session.id, "done")
+        .expect("append soul assistant text");
 
-    // Turn 2 opens: the turn-1 tool roundtrip is now completed history.
-    let follow_up = store
-        .append_message(
-            &session.session.id,
-            ActorType::Account,
-            store.default_account_id(),
-            MessageContent::text("and again"),
-            MessageState::Fixed,
-        )
-        .expect("append follow up")
-        .session_message;
-    store
-        .append_message_ref(&soul_session.id, &follow_up.message.id)
-        .expect("append follow up ref");
-    let turn2 = store
-        .start_turn(
-            &soul_session.id,
-            &follow_up.message.id,
-            follow_up.relation.session_seq,
-        )
-        .expect("start turn2")
-        .turn;
-
-    // With turn-2's base as the boundary, turn-1's tools are replayed inline:
-    // user, assistant tool_calls, tool result, assistant answer, follow-up user.
-    let base2 = store
-        .turn_base_soul_session_seq(&turn2.id)
-        .expect("turn2 base seq");
     let input = store
-        .assembly_input(&soul_session.id, base2)
-        .expect("assembly input replay");
-    assert_eq!(input.len(), 5);
+        .assembly_input(&soul_session.id)
+        .expect("assembly input");
+    assert_eq!(input.len(), 4);
     assert_text(&input[0], "user", "run a command");
     match &input[1] {
-        ProviderMessage::ToolCalls { calls } => {
-            assert_eq!(calls.len(), 1);
-            assert_eq!(calls[0].call_id, "call_1");
-            assert_eq!(calls[0].name, "shell");
-            assert!(calls[0].arguments_raw.contains("echo hi"));
+        ProviderItem::FunctionCall {
+            call_id,
+            name,
+            arguments_raw,
+            item,
+            item_id,
+        } => {
+            assert_eq!(call_id, "call_1");
+            assert_eq!(name, "shell");
+            assert!(arguments_raw.contains("echo hi"));
+            // The raw provider item + id round-trip for faithful Responses replay.
+            assert_eq!(item_id.as_deref(), Some("fc_1"));
+            assert_eq!(item.as_ref().expect("raw item")["id"], "fc_1");
         }
-        other => panic!("expected tool calls, got {other:?}"),
+        other => panic!("expected function call, got {other:?}"),
     }
     match &input[2] {
-        ProviderMessage::ToolResult { call_id, content } => {
+        ProviderItem::FunctionCallOutput { call_id, output } => {
             assert_eq!(call_id, "call_1");
-            assert!(content.contains("\"ok\":true"));
-            assert!(content.contains("hi"));
+            assert!(output.contains("\"ok\":true"));
+            assert!(output.contains("hi"));
         }
-        other => panic!("expected tool result, got {other:?}"),
+        other => panic!("expected function call output, got {other:?}"),
     }
     assert_text(&input[3], "assistant", "done");
-    assert_text(&input[4], "user", "and again");
-
-    // With turn-1's base as the boundary, that turn's own tools are in-flight
-    // and excluded (the service drives them via function_call_outputs instead).
-    let base1 = store
-        .turn_base_soul_session_seq(&turn1.id)
-        .expect("turn1 base seq");
-    let in_flight = store
-        .assembly_input(&soul_session.id, base1)
-        .expect("assembly input in flight");
-    assert!(
-        in_flight.iter().all(|message| !matches!(
-            message,
-            ProviderMessage::ToolCalls { .. } | ProviderMessage::ToolResult { .. }
-        )),
-        "in-flight tool entries must be excluded"
-    );
 }

@@ -7,9 +7,8 @@ use std::{
 
 use futures_util::StreamExt;
 use santi_provider::{
-    ChatCompletionsProvider, ChatCompletionsProviderConfig, FunctionCallOutput, ProviderClient,
-    ProviderEvent, ProviderFunctionCall, ProviderFunctionTool, ProviderMessage, ProviderRequest,
-    ProviderStreamTrace, ProviderTool,
+    ChatCompletionsProvider, ChatCompletionsProviderConfig, ProviderClient, ProviderEvent,
+    ProviderFunctionTool, ProviderItem, ProviderRequest, ProviderStreamTrace, ProviderTool,
 };
 use serde_json::Value;
 
@@ -38,12 +37,26 @@ async fn maps_chat_body() {
 }
 
 #[tokio::test]
-async fn maps_tool_outputs() {
-    let body = capture_with_outputs().await;
+async fn flattens_tool_items() {
+    let body = capture_with_items(vec![
+        ProviderItem::FunctionCall {
+            call_id: "call_shell".to_string(),
+            name: "shell".to_string(),
+            arguments_raw: "{\"command\":\"pwd\"}".to_string(),
+            item: None,
+            item_id: None,
+        },
+        ProviderItem::FunctionCallOutput {
+            call_id: "call_shell".to_string(),
+            output: "/tmp".to_string(),
+        },
+    ])
+    .await;
 
+    // Reasoning is dropped (DC5); the function call flattens to an assistant
+    // message with null content + tool_calls, followed by the tool result.
     assert_eq!(body["messages"][2]["role"], "assistant");
-    assert_eq!(body["messages"][2]["reasoning_content"], "need shell");
-    assert_eq!(body["messages"][2]["content"], "checking");
+    assert!(body["messages"][2]["content"].is_null());
     assert_eq!(body["messages"][2]["tool_calls"][0]["id"], "call_shell");
     assert_eq!(
         body["messages"][2]["tool_calls"][0]["function"]["arguments"],
@@ -55,17 +68,27 @@ async fn maps_tool_outputs() {
 }
 
 #[tokio::test]
-async fn maps_output_rounds() {
-    let body = capture_with_output_rounds().await;
+async fn flattens_interleaved_rounds() {
+    let body = capture_with_items(vec![
+        function_call_item("call_one", "pwd"),
+        ProviderItem::FunctionCallOutput {
+            call_id: "call_one".to_string(),
+            output: "one".to_string(),
+        },
+        function_call_item("call_two", "ls"),
+        ProviderItem::FunctionCallOutput {
+            call_id: "call_two".to_string(),
+            output: "two".to_string(),
+        },
+    ])
+    .await;
 
     assert_eq!(body["messages"][2]["role"], "assistant");
-    assert_eq!(body["messages"][2]["reasoning_content"], "round one");
     assert_eq!(body["messages"][2]["tool_calls"][0]["id"], "call_one");
     assert_eq!(body["messages"][3]["role"], "tool");
     assert_eq!(body["messages"][3]["tool_call_id"], "call_one");
 
     assert_eq!(body["messages"][4]["role"], "assistant");
-    assert_eq!(body["messages"][4]["reasoning_content"], "round two");
     assert_eq!(body["messages"][4]["tool_calls"][0]["id"], "call_two");
     assert_eq!(body["messages"][5]["role"], "tool");
     assert_eq!(body["messages"][5]["tool_call_id"], "call_two");
@@ -181,7 +204,7 @@ async fn capture_body(mut config: ChatCompletionsProviderConfig) -> Value {
 
     let provider = ChatCompletionsProvider::new(config);
     let mut stream = provider
-        .stream_response(base_request(provider.metadata().model, None))
+        .stream_response(base_request(provider.metadata().model, vec![]))
         .await
         .expect("stream response");
     assert_completed(&mut stream).await;
@@ -191,7 +214,7 @@ async fn capture_body(mut config: ChatCompletionsProviderConfig) -> Value {
     serde_json::from_slice(&body).expect("json request")
 }
 
-async fn capture_with_outputs() -> Value {
+async fn capture_with_items(items: Vec<ProviderItem>) -> Value {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
     let config = ChatCompletionsProviderConfig {
         provider: "deepseek".to_string(),
@@ -211,24 +234,7 @@ async fn capture_with_outputs() -> Value {
 
     let provider = ChatCompletionsProvider::new(config);
     let mut stream = provider
-        .stream_response(base_request(
-            provider.metadata().model,
-            Some(vec![FunctionCallOutput {
-                call: ProviderFunctionCall {
-                    response_id: "chatcmpl_prev".to_string(),
-                    item_id: Some("call_shell".to_string()),
-                    item: serde_json::json!({}),
-                    call_id: "call_shell".to_string(),
-                    name: "shell".to_string(),
-                    arguments_raw: "{\"command\":\"pwd\"}".to_string(),
-                    arguments: serde_json::json!({ "command": "pwd" }),
-                },
-                call_id: "call_shell".to_string(),
-                output: "/tmp".to_string(),
-                assistant_content: Some("checking".to_string()),
-                reasoning_content: Some("need shell".to_string()),
-            }]),
-        ))
+        .stream_response(base_request(provider.metadata().model, items))
         .await
         .expect("stream response");
     assert_completed(&mut stream).await;
@@ -238,64 +244,13 @@ async fn capture_with_outputs() -> Value {
     serde_json::from_slice(&body).expect("json request")
 }
 
-async fn capture_with_output_rounds() -> Value {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
-    let config = ChatCompletionsProviderConfig {
-        provider: "deepseek".to_string(),
-        api_key: "test-key".to_string(),
-        model: "deepseek-v4-pro".to_string(),
-        base_url: format!("http://{}", listener.local_addr().expect("local address")),
-        thinking: Some("enabled".to_string()),
-        reasoning_effort: Some("high".to_string()),
-        max_tokens: None,
-    };
-    let (tx, rx) = mpsc::channel();
-    let server = response_server(
-        listener,
-        tx,
-        vec![r#"data: {"id":"chatcmpl_test","choices":[{"delta":{},"finish_reason":"stop"}]}"#],
-    );
-
-    let provider = ChatCompletionsProvider::new(config);
-    let mut stream = provider
-        .stream_response(base_request(
-            provider.metadata().model,
-            Some(vec![
-                FunctionCallOutput {
-                    call: function_call("resp_one", "call_one", "pwd"),
-                    call_id: "call_one".to_string(),
-                    output: "one".to_string(),
-                    assistant_content: None,
-                    reasoning_content: Some("round one".to_string()),
-                },
-                FunctionCallOutput {
-                    call: function_call("resp_two", "call_two", "ls"),
-                    call_id: "call_two".to_string(),
-                    output: "two".to_string(),
-                    assistant_content: None,
-                    reasoning_content: Some("round two".to_string()),
-                },
-            ]),
-        ))
-        .await
-        .expect("stream response");
-    assert_completed(&mut stream).await;
-
-    let body = rx.recv().expect("receive request body");
-    server.join().expect("server thread");
-    serde_json::from_slice(&body).expect("json request")
-}
-
-fn function_call(response_id: &str, call_id: &str, command: &str) -> ProviderFunctionCall {
-    let arguments_raw = format!(r#"{{"command":"{command}"}}"#);
-    ProviderFunctionCall {
-        response_id: response_id.to_string(),
-        item_id: Some(call_id.to_string()),
-        item: serde_json::json!({}),
+fn function_call_item(call_id: &str, command: &str) -> ProviderItem {
+    ProviderItem::FunctionCall {
         call_id: call_id.to_string(),
         name: "shell".to_string(),
-        arguments_raw,
-        arguments: serde_json::json!({ "command": command }),
+        arguments_raw: format!(r#"{{"command":"{command}"}}"#),
+        item: None,
+        item_id: None,
     }
 }
 
@@ -323,7 +278,7 @@ async fn capture_all_events(lines: Vec<&'static str>) -> Vec<ProviderEvent> {
 
     let provider = ChatCompletionsProvider::new(config);
     let mut stream = provider
-        .stream_response(base_request(provider.metadata().model, None))
+        .stream_response(base_request(provider.metadata().model, vec![]))
         .await
         .expect("stream response");
     let mut events = Vec::new();
@@ -335,24 +290,22 @@ async fn capture_all_events(lines: Vec<&'static str>) -> Vec<ProviderEvent> {
     events
 }
 
-fn base_request(
-    model: String,
-    function_call_outputs: Option<Vec<FunctionCallOutput>>,
-) -> ProviderRequest {
+fn base_request(model: String, extra_items: Vec<ProviderItem>) -> ProviderRequest {
+    let mut input = vec![ProviderItem::Message {
+        role: "user".to_string(),
+        content: "hello".to_string(),
+    }];
+    input.extend(extra_items);
     ProviderRequest {
         model,
         instructions: Some("system guidance".to_string()),
-        input: vec![ProviderMessage::Text {
-            role: "user".to_string(),
-            content: "hello".to_string(),
-        }],
+        input,
         tools: Some(vec![ProviderTool::Function(ProviderFunctionTool {
             name: "shell".to_string(),
             description: "run shell".to_string(),
             parameters: serde_json::json!({ "type": "object" }),
         })]),
         previous_response_id: None,
-        function_call_outputs,
     }
 }
 

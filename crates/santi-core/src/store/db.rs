@@ -211,6 +211,28 @@ pub(super) fn message_by_id(
     .map_err(|error| error.to_string())
 }
 
+/// Fetch a message's content by id directly from `messages`, independent of any
+/// session relation — so the assembly projection can render both session-visible
+/// messages and soul_session-only assistant text items uniformly.
+pub(super) fn message_record_by_id(
+    conn: &Connection,
+    message_id: &str,
+) -> Result<Option<crate::Message>, String> {
+    conn.query_row(
+        r#"
+        SELECT id, actor_type, actor_id, message_kind, content, state, version,
+               deleted_at, created_at, updated_at
+        FROM messages
+        WHERE id = ?1
+        LIMIT 1
+        "#,
+        params![message_id],
+        map_message_row,
+    )
+    .optional()
+    .map_err(|error| error.to_string())
+}
+
 pub(super) fn session_messages(
     conn: &Connection,
     session_id: &str,
@@ -296,7 +318,7 @@ pub(super) fn tool_call_by_id(
     tool_call_id: &str,
 ) -> Result<Option<ToolCall>, String> {
     conn.query_row(
-        "SELECT id, turn_id, tool_name, arguments, created_at FROM tool_calls WHERE id = ?1 LIMIT 1",
+        "SELECT id, turn_id, tool_name, arguments, provider_item, item_id, response_id, created_at FROM tool_calls WHERE id = ?1 LIMIT 1",
         params![tool_call_id],
         map_tool_call_row,
     )
@@ -378,22 +400,22 @@ pub(super) fn session_effects(
     collect_rows(rows)
 }
 
-pub(super) fn session_message_to_provider(
-    message: &SessionMessage,
-) -> Option<santi_provider::ProviderMessage> {
-    let role = match message.message.message_kind {
+pub(super) fn message_to_provider_item(
+    message: &crate::Message,
+) -> Option<santi_provider::ProviderItem> {
+    let role = match message.message_kind {
         MessageKind::SantiSystem => "user",
-        MessageKind::Text => match message.message.actor_type {
+        MessageKind::Text => match message.actor_type {
             ActorType::Account => "user",
             ActorType::Soul => "assistant",
             ActorType::System => "system",
         },
     };
-    let content = message.message.content.content_text();
+    let content = message.content.content_text();
     if content.trim().is_empty() {
         None
     } else {
-        Some(santi_provider::ProviderMessage::Text {
+        Some(santi_provider::ProviderItem::Message {
             role: role.to_string(),
             content,
         })

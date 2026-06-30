@@ -119,21 +119,31 @@ impl SantiStore {
         tool_call_id: &str,
         tool_name: &str,
         arguments: &Value,
+        provenance: &crate::ToolCallProvenance,
     ) -> Result<ToolCall, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let now = timestamp_now();
         let soul_session_id = turn_soul_session_id(&tx, turn_id)?;
+        let provider_item_text = provenance
+            .item
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| error.to_string())?;
         tx.execute(
             r#"
-            INSERT INTO tool_calls (id, turn_id, tool_name, arguments, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5)
+            INSERT INTO tool_calls (id, turn_id, tool_name, arguments, provider_item, item_id, response_id, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             "#,
             params![
                 tool_call_id,
                 turn_id,
                 tool_name,
                 serde_json::to_string(arguments).map_err(|error| error.to_string())?,
+                provider_item_text,
+                provenance.item_id,
+                provenance.response_id,
                 now
             ],
         )
@@ -181,6 +191,42 @@ impl SantiStore {
         tx.commit().map_err(|error| error.to_string())?;
         tool_result_by_id(&conn, &tool_result_id)?
             .ok_or_else(|| "created tool_result missing".to_string())
+    }
+
+    /// Append a per-round assistant text segment to the soul_session replay
+    /// timeline ONLY (no `r_session_messages` row). The session-visible reply is
+    /// the lumped message stored separately at turn end; this keeps the replay
+    /// timeline a faithful, interleaved item log (DC4b / DC6).
+    pub fn append_soul_assistant_text(
+        &self,
+        soul_session_id: &str,
+        text: &str,
+    ) -> Result<(), String> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction().map_err(|error| error.to_string())?;
+        let message_id = prefixed_id("msg");
+        let now = timestamp_now();
+        let content_json = serde_json::to_string(&crate::MessageContent::text(text))
+            .map_err(|error| error.to_string())?;
+        tx.execute(
+            r#"
+            INSERT INTO messages (
+              id, actor_type, actor_id, message_kind, content, state, version, deleted_at,
+              created_at, updated_at
+            )
+            VALUES (?1, 'soul', ?2, 'text', ?3, 'fixed', 1, NULL, ?4, ?4)
+            "#,
+            params![message_id, self.default_soul_id(), content_json, now],
+        )
+        .map_err(|error| error.to_string())?;
+        append_entry_in_tx(
+            &tx,
+            soul_session_id,
+            SoulSessionTargetType::Message,
+            &message_id,
+        )?;
+        tx.commit().map_err(|error| error.to_string())?;
+        Ok(())
     }
 
     pub fn complete_turn(
@@ -280,18 +326,6 @@ impl SantiStore {
         )
         .map_err(|error| error.to_string())?;
         turn_by_id(&conn, turn_id)?.ok_or_else(|| "failed turn missing".to_string())
-    }
-
-    /// The soul-session seq the turn was opened at (its in-flight user message).
-    /// Tool entries above this belong to the still-running turn.
-    pub fn turn_base_soul_session_seq(&self, turn_id: &str) -> Result<i64, String> {
-        let conn = self.conn.lock().unwrap();
-        conn.query_row(
-            "SELECT base_soul_session_seq FROM turns WHERE id = ?1 LIMIT 1",
-            params![turn_id],
-            |row| row.get(0),
-        )
-        .map_err(|error| error.to_string())
     }
 
     pub fn tool_calls_for_turn(&self, turn_id: &str) -> Result<Vec<ToolCall>, String> {

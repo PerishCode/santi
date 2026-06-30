@@ -9,7 +9,7 @@ mod workspace_uri;
 
 pub use model::*;
 pub use object_store::{LocalObjectStore, ObjectBucket, ObjectMeta, ObjectPayload, ObjectUri};
-pub use santi_provider::{ProviderHistoricalCall, ProviderMessage};
+pub use santi_provider::ProviderItem;
 pub use service::{SantiService, SantiServiceConfig};
 pub use store::SantiStore;
 pub use workspace_uri::{

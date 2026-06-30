@@ -150,7 +150,22 @@ pub struct ToolCall {
     pub turn_id: String,
     pub tool_name: String,
     pub arguments: Value,
+    /// The provider's raw function_call item (replayed verbatim by the Responses
+    /// adapter). Null for older rows / providers that don't surface one.
+    pub provider_item: Option<Value>,
+    pub item_id: Option<String>,
+    pub response_id: Option<String>,
     pub created_at: Timestamp,
+}
+
+/// Provider provenance captured for a tool call so the call can be replayed
+/// faithfully (the Responses adapter echoes the raw `item`). All optional —
+/// chat_completions and older rows may have none.
+#[derive(Debug, Clone, Default)]
+pub struct ToolCallProvenance {
+    pub item: Option<Value>,
+    pub item_id: Option<String>,
+    pub response_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

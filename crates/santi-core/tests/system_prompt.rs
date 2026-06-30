@@ -116,7 +116,12 @@ impl PromptHarness {
     }
 
     fn write_soul(&self, text: &str) {
-        let path = self.runtime_root.join("souls").join("memory");
+        // Per-soul home: the default soul's memory lives under souls/<soul_id>.
+        let path = self
+            .runtime_root
+            .join("souls")
+            .join("soul_default")
+            .join("memory");
         fs::create_dir_all(&path).expect("create soul dir");
         fs::write(path.join("MEMORY.md"), text).expect("write soul");
     }

@@ -71,7 +71,7 @@ fn appends_relations_in_order() {
         .expect("append user")
         .session_message;
     let soul_session = store
-        .acquire_soul_session(&session.session.id)
+        .acquire_soul_session(store.default_soul_id(), &session.session.id)
         .expect("acquire soul session")
         .soul_session;
     let entry = store
@@ -93,7 +93,7 @@ fn maps_santi_system_input() {
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let session = store.create_session().expect("create session");
     let soul_session = store
-        .acquire_soul_session(&session.session.id)
+        .acquire_soul_session(store.default_soul_id(), &session.session.id)
         .expect("acquire soul session")
         .soul_session;
     let message = store
@@ -138,7 +138,7 @@ fn thinking_spans_become_reasoning_items() {
         .expect("append user")
         .session_message;
     let soul_session = store
-        .acquire_soul_session(&session.session.id)
+        .acquire_soul_session(store.default_soul_id(), &session.session.id)
         .expect("acquire soul session")
         .soul_session;
     store
@@ -279,7 +279,7 @@ fn projects_timeline_to_interleaved_items() {
         .expect("append user")
         .session_message;
     let soul_session = store
-        .acquire_soul_session(&session.session.id)
+        .acquire_soul_session(store.default_soul_id(), &session.session.id)
         .expect("acquire soul session")
         .soul_session;
     store
@@ -387,7 +387,7 @@ fn drive_starts_coalesces_and_re_drives() {
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let session = store.create_session().expect("create session");
     let ss = store
-        .acquire_soul_session(&session.session.id)
+        .acquire_soul_session(store.default_soul_id(), &session.session.id)
         .expect("acquire")
         .soul_session;
 
@@ -451,7 +451,7 @@ fn record_messages_do_not_drive() {
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let session = store.create_session().expect("create session");
     let ss = store
-        .acquire_soul_session(&session.session.id)
+        .acquire_soul_session(store.default_soul_id(), &session.session.id)
         .expect("acquire")
         .soul_session;
 
@@ -486,7 +486,7 @@ fn boot_recovery_reconciles_and_does_not_retry() {
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let session = store.create_session().expect("create session");
     let ss = store
-        .acquire_soul_session(&session.session.id)
+        .acquire_soul_session(store.default_soul_id(), &session.session.id)
         .expect("acquire")
         .soul_session;
     append_timeline_message(
@@ -533,5 +533,51 @@ fn boot_recovery_reconciles_and_does_not_retry() {
             .try_start_turn(&ss.id, "session_send", None)
             .expect("try")
             .is_some()
+    );
+}
+
+#[test]
+fn create_soul_and_label_anchoring() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
+
+    // Souls are API-managed individuals; a created soul is distinct from default.
+    let soul = store
+        .create_soul("Echo", "echo", Some("a test soul"))
+        .expect("create soul");
+    assert_ne!(soul.soul_id, store.default_soul_id());
+    assert_eq!(soul.soul_name, "Echo");
+    assert!(store.list_souls().expect("list").len() >= 2);
+    assert_eq!(
+        store
+            .soul_profile(&soul.soul_id)
+            .expect("soul")
+            .expect("exists")
+            .nickname,
+        "echo"
+    );
+
+    // External label anchors a session: same label → same session; new → new.
+    let s1 = store
+        .find_or_create_session_by_label("github:issue:49")
+        .expect("label session");
+    let s1_again = store
+        .find_or_create_session_by_label("github:issue:49")
+        .expect("label session again");
+    assert_eq!(s1.session.id, s1_again.session.id);
+    let s2 = store
+        .find_or_create_session_by_label("github:issue:50")
+        .expect("other label");
+    assert_ne!(s1.session.id, s2.session.id);
+
+    // A non-default soul acquires its own soul_session on the labeled session.
+    let ss = store
+        .acquire_soul_session(&soul.soul_id, &s1.session.id)
+        .expect("acquire")
+        .soul_session;
+    assert_eq!(ss.soul_id, soul.soul_id);
+    assert_eq!(
+        store.soul_id_for_soul_session(&ss.id).expect("soul id"),
+        soul.soul_id
     );
 }

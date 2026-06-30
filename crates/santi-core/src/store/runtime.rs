@@ -204,6 +204,13 @@ impl SantiStore {
     ) -> Result<(), String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
+        let soul_id: String = tx
+            .query_row(
+                "SELECT soul_id FROM soul_sessions WHERE id = ?1 LIMIT 1",
+                params![soul_session_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
         let message_id = prefixed_id("msg");
         let now = timestamp_now();
         let content_json = serde_json::to_string(&crate::MessageContent::text(text))
@@ -216,7 +223,7 @@ impl SantiStore {
             )
             VALUES (?1, 'soul', ?2, 'text', ?3, 'fixed', 1, 0, NULL, ?4, ?4)
             "#,
-            params![message_id, self.default_soul_id(), content_json, now],
+            params![message_id, soul_id, content_json, now],
         )
         .map_err(|error| error.to_string())?;
         append_entry_in_tx(

@@ -28,9 +28,11 @@ CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     parent_session_id TEXT,
     fork_point INTEGER,
+    external_label TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_external_label ON sessions (external_label) WHERE external_label IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS session_profiles (
     session_id TEXT PRIMARY KEY,

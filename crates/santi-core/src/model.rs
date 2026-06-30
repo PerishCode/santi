@@ -251,6 +251,15 @@ pub struct SoulSessionEntry {
     pub created_at: Timestamp,
 }
 
+/// Create a new soul (an individual). Souls are API-managed, never config.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CreateSoulRequest {
+    pub soul_name: String,
+    pub nickname: String,
+    #[serde(default)]
+    pub desc: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CreateSessionResponse {
     pub session: SessionSummary,

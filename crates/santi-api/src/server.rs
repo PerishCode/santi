@@ -14,11 +14,11 @@ use axum::{
 };
 use futures_core::Stream;
 use santi_core::{
-    CreateSessionResponse, ErrorResponse, HealthResponse, MaterialRequest, SantiService,
-    SantiServiceConfig, SantiStreamEvent, SantiStreamPayload, SendSessionAcceptedResponse,
-    SendSessionRequest, Session, SessionDetail, SessionMaterial, SessionProfile,
-    SessionRuntimeSnapshot, SessionSummary, SoulProfile, UpdateSessionRequest, prefixed_id,
-    timestamp_now,
+    CreateSessionResponse, CreateSoulRequest, ErrorResponse, HealthResponse, MaterialRequest,
+    SantiService, SantiServiceConfig, SantiStreamEvent, SantiStreamPayload,
+    SendSessionAcceptedResponse, SendSessionRequest, Session, SessionDetail, SessionMaterial,
+    SessionProfile, SessionRuntimeSnapshot, SessionSummary, SoulProfile, UpdateSessionRequest,
+    prefixed_id, timestamp_now,
 };
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -93,6 +93,8 @@ fn router(service: SantiService, api_key: Option<Arc<str>>) -> Router {
     let protected = Router::new()
         .route("/api/v1/openapi.json", get(openapi))
         .route("/api/v1/sessions", post(create_session).get(list_sessions))
+        .route("/api/v1/souls", post(create_soul).get(list_souls))
+        .route("/api/v1/souls/{soul_id}", get(get_soul))
         .route(
             "/api/v1/sessions/{session_id}",
             get(get_session).patch(update_session),
@@ -184,6 +186,53 @@ async fn list_sessions(
         .list_sessions()
         .map(Json)
         .map_err(ApiError::internal)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/souls",
+    request_body = CreateSoulRequest,
+    responses((status = 200, body = SoulProfile), (status = 500, body = ErrorResponse))
+)]
+async fn create_soul(
+    State(service): State<SantiService>,
+    Json(request): Json<CreateSoulRequest>,
+) -> Result<Json<SoulProfile>, ApiError> {
+    service
+        .create_soul(request)
+        .map(Json)
+        .map_err(ApiError::internal)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/souls",
+    responses((status = 200, body = [SoulProfile]), (status = 500, body = ErrorResponse))
+)]
+async fn list_souls(
+    State(service): State<SantiService>,
+) -> Result<Json<Vec<SoulProfile>>, ApiError> {
+    service.list_souls().map(Json).map_err(ApiError::internal)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/souls/{soul_id}",
+    params(("soul_id" = String, Path)),
+    responses(
+        (status = 200, body = SoulProfile),
+        (status = 404, body = ErrorResponse),
+        (status = 500, body = ErrorResponse)
+    )
+)]
+async fn get_soul(
+    State(service): State<SantiService>,
+    Path(soul_id): Path<String>,
+) -> Result<Json<SoulProfile>, ApiError> {
+    match service.soul(&soul_id).map_err(ApiError::internal)? {
+        Some(soul) => Ok(Json(soul)),
+        None => Err(ApiError::not_found("soul not found")),
+    }
 }
 
 #[utoipa::path(
@@ -451,6 +500,9 @@ impl IntoResponse for ApiError {
         health,
         create_session,
         list_sessions,
+        create_soul,
+        list_souls,
+        get_soul,
         get_session,
         update_session,
         list_messages,
@@ -461,6 +513,7 @@ impl IntoResponse for ApiError {
     ),
     components(schemas(
         CreateSessionResponse,
+        CreateSoulRequest,
         ErrorResponse,
         HealthResponse,
         MaterialRequest,

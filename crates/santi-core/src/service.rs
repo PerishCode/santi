@@ -16,11 +16,11 @@ use tokio::sync::broadcast;
 use crate::assembly::input::provider_input;
 use crate::service_prompt::provider_tools;
 use crate::{
-    ActorType, CreateSessionResponse, MaterialKind, MessageContent, MessageIntake, MessageState,
-    SantiStore, SantiStreamEvent, SantiStreamPayload, SendSessionAcceptedResponse,
-    SendSessionRequest, SessionDetail, SessionMaterial, SessionRuntimeSnapshot, SessionSummary,
-    ThinkingCompletionReason, ThinkingSpan, Turn, TurnActivityState, UpdateSessionRequest,
-    prefixed_id, timestamp_now,
+    ActorType, CreateSessionResponse, CreateSoulRequest, MaterialKind, MessageContent,
+    MessageIntake, MessageState, SantiStore, SantiStreamEvent, SantiStreamPayload,
+    SendSessionAcceptedResponse, SendSessionRequest, SessionDetail, SessionMaterial,
+    SessionRuntimeSnapshot, SessionSummary, SoulProfile, ThinkingCompletionReason, ThinkingSpan,
+    Turn, TurnActivityState, UpdateSessionRequest, prefixed_id, timestamp_now,
 };
 use failure::ProviderTurnFailure;
 use text_delta::TextDeltaUpdate;
@@ -89,6 +89,29 @@ impl SantiService {
         })
     }
 
+    pub fn create_soul(&self, request: CreateSoulRequest) -> Result<SoulProfile, String> {
+        if request.soul_name.trim().is_empty() {
+            return Err("soul_name must not be empty".to_string());
+        }
+        self.store.create_soul(
+            request.soul_name.trim(),
+            request.nickname.trim(),
+            request
+                .desc
+                .as_deref()
+                .map(str::trim)
+                .filter(|d| !d.is_empty()),
+        )
+    }
+
+    pub fn list_souls(&self) -> Result<Vec<SoulProfile>, String> {
+        self.store.list_souls()
+    }
+
+    pub fn soul(&self, soul_id: &str) -> Result<Option<SoulProfile>, String> {
+        self.store.soul_profile(soul_id)
+    }
+
     pub fn list_sessions(&self) -> Result<Vec<SessionSummary>, String> {
         self.store.list_sessions()
     }
@@ -150,7 +173,10 @@ impl SantiService {
                 MessageIntake::Request,
             )?
             .session_message;
-        let soul_session = self.store.acquire_soul_session(session_id)?.soul_session;
+        let soul_session = self
+            .store
+            .acquire_soul_session(self.store.default_soul_id(), session_id)?
+            .soul_session;
         self.store
             .append_message_ref(&soul_session.id, &user_message.message.id)?;
         self.publish_stream(
@@ -246,7 +272,17 @@ impl SantiService {
                 );
             }
             Ok((assistant_text, provider_response_id)) => {
-                self.finalize_turn(&session_id, &turn_id, assistant_text, provider_response_id);
+                let soul_id = self
+                    .store
+                    .soul_id_for_soul_session(&soul_session_id)
+                    .unwrap_or_else(|_| self.store.default_soul_id().to_string());
+                self.finalize_turn(
+                    &session_id,
+                    &turn_id,
+                    &soul_id,
+                    assistant_text,
+                    provider_response_id,
+                );
             }
         }
         // Re-check: a turn is one thread "catching up"; requests that arrived
@@ -263,6 +299,7 @@ impl SantiService {
         &self,
         session_id: &str,
         turn_id: &str,
+        soul_id: &str,
         assistant_text: String,
         provider_response_id: Option<String>,
     ) {
@@ -272,7 +309,7 @@ impl SantiService {
             match self.store.append_message(
                 session_id,
                 ActorType::Soul,
-                self.store.default_soul_id(),
+                soul_id,
                 MessageContent::text(assistant_text.clone()),
                 MessageState::Fixed,
                 MessageIntake::Record,

@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{
     ActorType, MessageContent, MessageIntake, MessageKind, MessageState, Session, SessionMessage,
@@ -21,7 +21,7 @@ use db::*;
 use rows::{actor_type_db, collect_rows, map_session_summary_row, message_state_db};
 use schema::SCHEMA;
 
-const SANTI_SCHEMA_VERSION: u32 = 11;
+const SANTI_SCHEMA_VERSION: u32 = 12;
 const DEFAULT_ACCOUNT_ID: &str = "account_local";
 const DEFAULT_SOUL_ID: &str = "soul_default";
 const SANTI_SYSTEM_ACTOR_ID: &str = "santi";
@@ -378,12 +378,16 @@ impl SantiStore {
         })
     }
 
-    pub fn acquire_soul_session(&self, session_id: &str) -> Result<AcquiredSoulSession, String> {
+    pub fn acquire_soul_session(
+        &self,
+        soul_id: &str,
+        session_id: &str,
+    ) -> Result<AcquiredSoulSession, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         ensure_session(&tx, session_id)?;
         let now = timestamp_now();
-        let existing = soul_session_by_pair(&tx, DEFAULT_SOUL_ID, session_id)?;
+        let existing = soul_session_by_pair(&tx, soul_id, session_id)?;
         let soul_session = if let Some(existing) = existing {
             existing
         } else {
@@ -396,7 +400,7 @@ impl SantiStore {
                 )
                 VALUES (?1, ?2, ?3, '', NULL, 1, 0, NULL, NULL, ?4, ?4)
                 "#,
-                params![soul_session_id, DEFAULT_SOUL_ID, session_id, now],
+                params![soul_session_id, soul_id, session_id, now],
             )
             .map_err(|error| error.to_string())?;
             soul_session_by_id(&tx, &soul_session_id)?
@@ -404,6 +408,111 @@ impl SantiStore {
         };
         tx.commit().map_err(|error| error.to_string())?;
         Ok(AcquiredSoulSession { soul_session })
+    }
+
+    /// Find the session anchored to an opaque external label, or create one and
+    /// bind it. The label is opaque to core (its meaning + any soul-scoping live
+    /// in the adaptor); uniqueness is global, enforced by the partial index.
+    pub fn find_or_create_session_by_label(&self, label: &str) -> Result<SessionSummary, String> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction().map_err(|error| error.to_string())?;
+        let existing: Option<String> = tx
+            .query_row(
+                "SELECT id FROM sessions WHERE external_label = ?1 LIMIT 1",
+                params![label],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        let session_id = if let Some(id) = existing {
+            id
+        } else {
+            let session_id = prefixed_id("sess");
+            let now = timestamp_now();
+            tx.execute(
+                r#"
+                INSERT INTO sessions (id, parent_session_id, fork_point, external_label, created_at, updated_at)
+                VALUES (?1, NULL, NULL, ?2, ?3, ?3)
+                "#,
+                params![session_id, label, now],
+            )
+            .map_err(|error| error.to_string())?;
+            tx.execute(
+                r#"
+                INSERT INTO session_profiles (session_id, title, desc, created_at, updated_at)
+                VALUES (?1, NULL, NULL, ?2, ?2)
+                "#,
+                params![session_id, now],
+            )
+            .map_err(|error| error.to_string())?;
+            session_id
+        };
+        tx.commit().map_err(|error| error.to_string())?;
+        session_summary_by_id(&conn, &session_id)?
+            .ok_or_else(|| "labeled session missing".to_string())
+    }
+
+    /// Create a new soul (an individual). Souls are API-managed, never config.
+    pub fn create_soul(
+        &self,
+        soul_name: &str,
+        nickname: &str,
+        desc: Option<&str>,
+    ) -> Result<crate::SoulProfile, String> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction().map_err(|error| error.to_string())?;
+        let soul_id = prefixed_id("soul");
+        let now = timestamp_now();
+        tx.execute(
+            "INSERT INTO souls (id, memory, created_at, updated_at) VALUES (?1, '', ?2, ?2)",
+            params![soul_id, now],
+        )
+        .map_err(|error| error.to_string())?;
+        tx.execute(
+            r#"
+            INSERT INTO soul_profiles (
+              soul_id, soul_name, nickname, avatar_ref, avatar_seed, desc, created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, NULL, ?1, ?4, ?5, ?5)
+            "#,
+            params![soul_id, soul_name, nickname, desc, now],
+        )
+        .map_err(|error| error.to_string())?;
+        tx.commit().map_err(|error| error.to_string())?;
+        soul_profile_by_id(&conn, &soul_id)?.ok_or_else(|| "created soul missing".to_string())
+    }
+
+    pub fn list_souls(&self) -> Result<Vec<crate::SoulProfile>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                r#"
+                SELECT soul_id, soul_name, nickname, avatar_ref, avatar_seed, desc,
+                       created_at, updated_at
+                FROM soul_profiles ORDER BY created_at ASC, soul_id ASC
+                "#,
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map([], rows::map_soul_profile_row)
+            .map_err(|error| error.to_string())?;
+        collect_rows(rows)
+    }
+
+    pub fn soul_profile(&self, soul_id: &str) -> Result<Option<crate::SoulProfile>, String> {
+        let conn = self.conn.lock().unwrap();
+        soul_profile_by_id(&conn, soul_id)
+    }
+
+    pub fn soul_session(&self, soul_session_id: &str) -> Result<Option<SoulSession>, String> {
+        let conn = self.conn.lock().unwrap();
+        soul_session_by_id(&conn, soul_session_id)
+    }
+
+    pub fn soul_id_for_soul_session(&self, soul_session_id: &str) -> Result<String, String> {
+        self.soul_session(soul_session_id)?
+            .map(|soul_session| soul_session.soul_id)
+            .ok_or_else(|| "soul_session not found".to_string())
     }
 
     pub fn append_message_ref(

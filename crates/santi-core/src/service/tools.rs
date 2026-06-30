@@ -35,7 +35,8 @@ impl SantiService {
                 tool_call: tool_call.clone(),
             },
         );
-        let dispatch = self.dispatch_tool(session_id, soul_session_id, &call);
+        let soul_id = self.store.soul_id_for_soul_session(soul_session_id)?;
+        let dispatch = self.dispatch_tool(session_id, &soul_id, &call);
         let (output, error_text) = match dispatch {
             Ok(output) => (Some(output), None),
             Err(error) => (None, Some(error)),
@@ -55,28 +56,29 @@ impl SantiService {
     fn dispatch_tool(
         &self,
         session_id: &str,
-        _soul_session_id: &str,
+        soul_id: &str,
         call: &ProviderFunctionCall,
     ) -> Result<Value, String> {
         match call.name.as_str() {
             "shell" => {
                 let args = parse_tool_args::<ShellArgs>(&call.arguments)?;
-                self.run_shell(session_id, args)
+                self.run_shell(session_id, soul_id, args)
             }
             name => Err(format!("unsupported tool: {name}")),
         }
     }
 
-    fn run_shell(&self, session_id: &str, args: ShellArgs) -> Result<Value, String> {
-        std::fs::create_dir_all(self.soul_memory_dir()).map_err(|error| error.to_string())?;
+    fn run_shell(&self, session_id: &str, soul_id: &str, args: ShellArgs) -> Result<Value, String> {
+        std::fs::create_dir_all(self.soul_memory_dir(soul_id))
+            .map_err(|error| error.to_string())?;
         std::fs::create_dir_all(self.session_memory_dir(session_id))
             .map_err(|error| error.to_string())?;
-        let cwd = self.resolve_shell_cwd(session_id, args.cwd.as_deref())?;
+        let cwd = self.resolve_shell_cwd(session_id, soul_id, args.cwd.as_deref())?;
         std::fs::create_dir_all(&cwd).map_err(|error| error.to_string())?;
         let mut command = shell_command(&args.command);
         let output = command
             .current_dir(&cwd)
-            .env("SANTI_SOUL_MEMORY_DIR", self.soul_memory_dir())
+            .env("SANTI_SOUL_MEMORY_DIR", self.soul_memory_dir(soul_id))
             .env(
                 "SANTI_SESSION_MEMORY_DIR",
                 self.session_memory_dir(session_id),
@@ -92,13 +94,18 @@ impl SantiService {
         }))
     }
 
-    fn resolve_shell_cwd(&self, session_id: &str, cwd: Option<&str>) -> Result<PathBuf, String> {
+    fn resolve_shell_cwd(
+        &self,
+        session_id: &str,
+        soul_id: &str,
+        cwd: Option<&str>,
+    ) -> Result<PathBuf, String> {
         let Some(cwd) = cwd else {
             return Ok(self.execution_root());
         };
         let uri = parse_workspace_uri(cwd)?;
         let root = match uri.root {
-            WorkspaceRoot::Soul => self.soul_memory_dir(),
+            WorkspaceRoot::Soul => self.soul_memory_dir(soul_id),
             WorkspaceRoot::Session => self.session_memory_dir(session_id),
         };
         Ok(root.join(uri.path))
@@ -112,12 +119,15 @@ impl SantiService {
         PathBuf::from(&self.config.execution_root)
     }
 
-    pub(super) fn soul_memory_dir(&self) -> PathBuf {
-        self.runtime_root().join("souls").join("memory")
+    pub(super) fn soul_memory_dir(&self, soul_id: &str) -> PathBuf {
+        self.runtime_root()
+            .join("souls")
+            .join(soul_id)
+            .join("memory")
     }
 
-    pub(super) fn soul_memory_file(&self) -> PathBuf {
-        self.soul_memory_dir().join("MEMORY.md")
+    pub(super) fn soul_memory_file(&self, soul_id: &str) -> PathBuf {
+        self.soul_memory_dir(soul_id).join("MEMORY.md")
     }
 
     pub(super) fn session_memory_dir(&self, session_id: &str) -> PathBuf {

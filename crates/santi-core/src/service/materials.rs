@@ -16,13 +16,14 @@ impl SantiService {
     ) -> Result<SessionMaterial, String> {
         match request.kind {
             MaterialKind::SystemPrompt => {
-                let soul_session = self.store.acquire_soul_session(session_id)?.soul_session;
-                let snapshot = self
+                // Operator-facing material view: the default soul's prompt.
+                let soul_session = self
                     .store
-                    .runtime_snapshot(session_id)?
-                    .ok_or_else(|| "session not found".to_string())?;
-                let soul_profile = snapshot
-                    .soul_profile
+                    .acquire_soul_session(self.store.default_soul_id(), session_id)?
+                    .soul_session;
+                let soul_profile = self
+                    .store
+                    .soul_profile(&soul_session.soul_id)?
                     .ok_or_else(|| "soul_profile not found".to_string())?;
                 self.system_prompt_material(session_id, &soul_session, &soul_profile)
             }
@@ -34,18 +35,15 @@ impl SantiService {
         session_id: &str,
         soul_session_id: &str,
     ) -> Result<String, String> {
-        let snapshot = self
+        // Load identity + memory from THIS soul_session's soul (not a hardcoded
+        // default) so every soul speaks as itself.
+        let soul_session = self
             .store
-            .runtime_snapshot(session_id)?
-            .ok_or_else(|| "session not found".to_string())?;
-        let soul_session = snapshot
-            .soul_session
+            .soul_session(soul_session_id)?
             .ok_or_else(|| "soul_session not found".to_string())?;
-        if soul_session.id != soul_session_id {
-            return Err("soul_session mismatch".to_string());
-        }
-        let soul_profile = snapshot
-            .soul_profile
+        let soul_profile = self
+            .store
+            .soul_profile(&soul_session.soul_id)?
             .ok_or_else(|| "soul_profile not found".to_string())?;
         Ok(self
             .system_prompt_material(session_id, &soul_session, &soul_profile)?
@@ -62,10 +60,14 @@ impl SantiService {
             session_id,
             soul_session,
             soul_profile,
-            soul_memory_path: self.soul_memory_file(),
+            soul_memory_path: self.soul_memory_file(&soul_profile.soul_id),
             session_memory_path: self.session_memory_file(session_id),
         })?;
-        let key: MaterialCacheKey = (session_id.to_string(), MaterialKind::SystemPrompt);
+        // Cache per (session, soul): two souls on one session must not collide.
+        let key: MaterialCacheKey = (
+            format!("{session_id}:{}", soul_profile.soul_id),
+            MaterialKind::SystemPrompt,
+        );
         let mut cache = self.material_cache.lock().unwrap();
         if let Some(existing) = cache.get(&key)
             && existing.text == text

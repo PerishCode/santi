@@ -63,6 +63,22 @@ impl MessageContent {
     }
 }
 
+/// Whether an appended message is a REQUEST addressed to the soul (a user send /
+/// webhook event → wakes the soul / drives a turn) or a RECORD of something that
+/// happened (the soul's own output, a failure notice, a future compact → does not
+/// wake). The drive trigger keys off this; see PHASE-04 (M3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageIntake {
+    Request,
+    Record,
+}
+
+impl MessageIntake {
+    pub fn is_request(self) -> bool {
+        matches!(self, MessageIntake::Request)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Message {
     pub id: String,

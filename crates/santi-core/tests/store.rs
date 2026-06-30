@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 use santi_core::{
-    ActorType, MessageContent, MessageKind, MessageState, ProviderItem, SantiStore,
+    ActorType, MessageContent, MessageIntake, MessageKind, MessageState, ProviderItem, SantiStore,
     ThinkingCompletionReason, ToolCallProvenance,
 };
 
@@ -66,6 +66,7 @@ fn appends_relations_in_order() {
             store.default_account_id(),
             MessageContent::text("hello ordering"),
             MessageState::Fixed,
+            MessageIntake::Request,
         )
         .expect("append user")
         .session_message;
@@ -99,6 +100,7 @@ fn maps_santi_system_input() {
         .append_santi_system_message(
             &session.session.id,
             MessageContent::text("<santi-system>\nkind: note\n</santi-system>"),
+            MessageIntake::Request,
         )
         .expect("append santi system")
         .session_message;
@@ -131,6 +133,7 @@ fn thinking_spans_become_reasoning_items() {
             store.default_account_id(),
             MessageContent::text("hello thinking"),
             MessageState::Fixed,
+            MessageIntake::Request,
         )
         .expect("append user")
         .session_message;
@@ -211,6 +214,7 @@ fn titles_from_first_message() {
             store.default_account_id(),
             MessageContent::text(format!("  {title}  ")),
             MessageState::Fixed,
+            MessageIntake::Request,
         )
         .expect("append first message");
     store
@@ -220,6 +224,7 @@ fn titles_from_first_message() {
             store.default_account_id(),
             MessageContent::text("should not replace title"),
             MessageState::Fixed,
+            MessageIntake::Request,
         )
         .expect("append second message");
 
@@ -269,6 +274,7 @@ fn projects_timeline_to_interleaved_items() {
             store.default_account_id(),
             MessageContent::text("run a command"),
             MessageState::Fixed,
+            MessageIntake::Request,
         )
         .expect("append user")
         .session_message;
@@ -344,4 +350,188 @@ fn projects_timeline_to_interleaved_items() {
         other => panic!("expected function call output, got {other:?}"),
     }
     assert_text(&input[3], "assistant", "done");
+}
+
+/// Append a REQUEST or RECORD message and reference it into the soul timeline.
+fn append_timeline_message(
+    store: &SantiStore,
+    session_id: &str,
+    soul_session_id: &str,
+    actor_type: ActorType,
+    text: &str,
+    intake: MessageIntake,
+) {
+    let actor_id = match actor_type {
+        ActorType::Soul => store.default_soul_id(),
+        _ => store.default_account_id(),
+    };
+    let message = store
+        .append_message(
+            session_id,
+            actor_type,
+            actor_id,
+            MessageContent::text(text),
+            MessageState::Fixed,
+            intake,
+        )
+        .expect("append message")
+        .session_message;
+    store
+        .append_message_ref(soul_session_id, &message.message.id)
+        .expect("append ref");
+}
+
+#[test]
+fn drive_starts_coalesces_and_re_drives() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
+    let session = store.create_session().expect("create session");
+    let ss = store
+        .acquire_soul_session(&session.session.id)
+        .expect("acquire")
+        .soul_session;
+
+    // No requests → not behind → no turn.
+    assert!(
+        store
+            .try_start_turn(&ss.id, "session_send", None)
+            .expect("try")
+            .is_none()
+    );
+
+    // A REQUEST makes the thread behind → starts a turn.
+    append_timeline_message(
+        &store,
+        &session.session.id,
+        &ss.id,
+        ActorType::Account,
+        "hi",
+        MessageIntake::Request,
+    );
+    let turn = store
+        .try_start_turn(&ss.id, "session_send", None)
+        .expect("try")
+        .expect("turn started");
+    assert_eq!(turn.status, santi_core::TurnStatus::Running);
+
+    // A second request while the turn runs coalesces — no concurrent turn.
+    append_timeline_message(
+        &store,
+        &session.session.id,
+        &ss.id,
+        ActorType::Account,
+        "and again",
+        MessageIntake::Request,
+    );
+    assert!(
+        store
+            .try_start_turn(&ss.id, "session_send", None)
+            .expect("try")
+            .is_none(),
+        "a running turn must block a second concurrent turn"
+    );
+
+    // After the turn completes, the request that arrived during it is past the
+    // turn's start → behind again → drive the next turn.
+    store
+        .complete_turn(&turn.id, None, "fake", None)
+        .expect("complete");
+    assert!(
+        store
+            .try_start_turn(&ss.id, "session_send", None)
+            .expect("try")
+            .is_some(),
+        "accumulated request should drive the next turn at completion"
+    );
+}
+
+#[test]
+fn record_messages_do_not_drive() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
+    let session = store.create_session().expect("create session");
+    let ss = store
+        .acquire_soul_session(&session.session.id)
+        .expect("acquire")
+        .soul_session;
+
+    // A RECORD (the soul's own output / a failure notice) is not a request and
+    // must not wake the soul.
+    append_timeline_message(
+        &store,
+        &session.session.id,
+        &ss.id,
+        ActorType::Soul,
+        "a note to self",
+        MessageIntake::Record,
+    );
+    assert!(
+        store
+            .try_start_turn(&ss.id, "session_send", None)
+            .expect("try")
+            .is_none(),
+        "record messages must not drive a turn"
+    );
+    assert!(
+        store
+            .soul_sessions_with_pending_requests()
+            .expect("scan")
+            .is_empty()
+    );
+}
+
+#[test]
+fn boot_recovery_reconciles_and_does_not_retry() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
+    let session = store.create_session().expect("create session");
+    let ss = store
+        .acquire_soul_session(&session.session.id)
+        .expect("acquire")
+        .soul_session;
+    append_timeline_message(
+        &store,
+        &session.session.id,
+        &ss.id,
+        ActorType::Account,
+        "do a thing",
+        MessageIntake::Request,
+    );
+    // A turn starts and then the process "crashes" (turn left running).
+    store
+        .try_start_turn(&ss.id, "session_send", None)
+        .expect("try")
+        .expect("turn started");
+    // Before recovery it is the only pending-driver; reconcile interrupts it.
+    assert_eq!(store.reconcile_orphaned_turns().expect("reconcile"), 1);
+    // The interrupted turn counts as "attempted" → the request is NOT retried.
+    assert!(
+        store
+            .try_start_turn(&ss.id, "session_send", None)
+            .expect("try")
+            .is_none(),
+        "an interrupted turn must not auto-retry its request"
+    );
+    // But a genuinely new request drives a fresh turn (liveness).
+    append_timeline_message(
+        &store,
+        &session.session.id,
+        &ss.id,
+        ActorType::Account,
+        "a new thing",
+        MessageIntake::Request,
+    );
+    assert!(
+        store
+            .soul_sessions_with_pending_requests()
+            .expect("scan")
+            .iter()
+            .any(|(_, ssid)| ssid == &ss.id)
+    );
+    assert!(
+        store
+            .try_start_turn(&ss.id, "session_send", None)
+            .expect("try")
+            .is_some()
+    );
 }

@@ -6,8 +6,9 @@ use std::{
 use rusqlite::{Connection, params};
 
 use crate::{
-    ActorType, MessageContent, MessageKind, MessageState, Session, SessionMessage, SessionSummary,
-    SoulSession, SoulSessionEntry, SoulSessionTargetType, Turn, prefixed_id, timestamp_now,
+    ActorType, MessageContent, MessageIntake, MessageKind, MessageState, Session, SessionMessage,
+    SessionSummary, SoulSession, SoulSessionEntry, SoulSessionTargetType, Turn, prefixed_id,
+    timestamp_now,
 };
 
 mod assembly;
@@ -20,7 +21,7 @@ use db::*;
 use rows::{actor_type_db, collect_rows, map_session_summary_row, message_state_db};
 use schema::SCHEMA;
 
-const SANTI_SCHEMA_VERSION: u32 = 10;
+const SANTI_SCHEMA_VERSION: u32 = 11;
 const DEFAULT_ACCOUNT_ID: &str = "account_local";
 const DEFAULT_SOUL_ID: &str = "soul_default";
 const SANTI_SYSTEM_ACTOR_ID: &str = "santi";
@@ -271,6 +272,7 @@ impl SantiStore {
         actor_id: &str,
         content: MessageContent,
         state: MessageState,
+        intake: MessageIntake,
     ) -> Result<AppendedMessage, String> {
         self.append_message_with_kind(
             session_id,
@@ -279,6 +281,7 @@ impl SantiStore {
             MessageKind::Text,
             content,
             state,
+            intake,
         )
     }
 
@@ -286,6 +289,7 @@ impl SantiStore {
         &self,
         session_id: &str,
         content: MessageContent,
+        intake: MessageIntake,
     ) -> Result<AppendedMessage, String> {
         self.append_message_with_kind(
             session_id,
@@ -294,9 +298,11 @@ impl SantiStore {
             MessageKind::SantiSystem,
             content,
             MessageState::Fixed,
+            intake,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn append_message_with_kind(
         &self,
         session_id: &str,
@@ -305,6 +311,7 @@ impl SantiStore {
         message_kind: MessageKind,
         content: MessageContent,
         state: MessageState,
+        intake: MessageIntake,
     ) -> Result<AppendedMessage, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
@@ -316,10 +323,10 @@ impl SantiStore {
         tx.execute(
             r#"
             INSERT INTO messages (
-              id, actor_type, actor_id, message_kind, content, state, version, deleted_at,
-              created_at, updated_at
+              id, actor_type, actor_id, message_kind, content, state, version, is_request,
+              deleted_at, created_at, updated_at
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, NULL, ?7, ?7)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, NULL, ?8, ?8)
             "#,
             params![
                 message_id,
@@ -328,6 +335,7 @@ impl SantiStore {
                 rows::message_kind_db(&message_kind),
                 content_json,
                 message_state_db(&state),
+                intake.is_request() as i64,
                 now
             ],
         )

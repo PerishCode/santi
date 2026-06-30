@@ -1,4 +1,4 @@
-use crate::{ActorType, MessageContent, MessageState, SantiStreamPayload};
+use crate::{ActorType, MessageContent, MessageIntake, MessageState, SantiStreamPayload};
 
 use super::SantiService;
 
@@ -34,6 +34,7 @@ impl SantiService {
                     self.store.default_soul_id(),
                     MessageContent::text(partial_assistant_text),
                     MessageState::Aborted,
+                    MessageIntake::Record,
                 )
                 && self
                     .store
@@ -48,13 +49,14 @@ impl SantiService {
                     },
                 );
             }
-            if let Ok(message) = self
+            if let Ok(message) = self.store.append_santi_system_message(
+                session_id,
+                failed_system_message(turn_id),
+                MessageIntake::Record,
+            ) && self
                 .store
-                .append_santi_system_message(session_id, failed_system_message(turn_id))
-                && self
-                    .store
-                    .append_message_ref(&turn.soul_session_id, &message.session_message.message.id)
-                    .is_ok()
+                .append_message_ref(&turn.soul_session_id, &message.session_message.message.id)
+                .is_ok()
             {
                 last_seen_session_seq = Some(message.session_message.relation.session_seq);
                 self.publish_stream(

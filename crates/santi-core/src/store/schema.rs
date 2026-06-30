@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS messages (
     content TEXT NOT NULL,
     state TEXT NOT NULL CHECK (state IN ('pending', 'fixed', 'aborted')),
     version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    is_request INTEGER NOT NULL DEFAULT 0 CHECK (is_request IN (0, 1)),
     deleted_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL

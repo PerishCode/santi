@@ -211,10 +211,10 @@ impl SantiStore {
         tx.execute(
             r#"
             INSERT INTO messages (
-              id, actor_type, actor_id, message_kind, content, state, version, deleted_at,
-              created_at, updated_at
+              id, actor_type, actor_id, message_kind, content, state, version, is_request,
+              deleted_at, created_at, updated_at
             )
-            VALUES (?1, 'soul', ?2, 'text', ?3, 'fixed', 1, NULL, ?4, ?4)
+            VALUES (?1, 'soul', ?2, 'text', ?3, 'fixed', 1, 0, NULL, ?4, ?4)
             "#,
             params![message_id, self.default_soul_id(), content_json, now],
         )
@@ -229,10 +229,138 @@ impl SantiStore {
         Ok(())
     }
 
+    /// Atomically start a turn for a soul_session IFF (a) no turn is currently
+    /// running for it and (b) it is "behind" — there is a REQUEST message whose
+    /// timeline seq is past the newest turn's start. This is the lynchpin of the
+    /// drive model: it makes "one present per thread of experience" an invariant
+    /// (the store mutex serializes the guard+insert), and lets ingest pokes and
+    /// completion re-checks race harmlessly. Returns the started turn, or None.
+    pub fn try_start_turn(
+        &self,
+        soul_session_id: &str,
+        trigger_type: &str,
+        trigger_ref: Option<&str>,
+    ) -> Result<Option<Turn>, String> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction().map_err(|error| error.to_string())?;
+        let running: Option<i64> = tx
+            .query_row(
+                "SELECT 1 FROM turns WHERE soul_session_id = ?1 AND status = 'running' LIMIT 1",
+                params![soul_session_id],
+                |row| row.get(0),
+            )
+            .ok();
+        if running.is_some() {
+            return Ok(None);
+        }
+        let (request_frontier, turn_frontier): (i64, i64) = tx
+            .query_row(
+                r#"
+                SELECT
+                  (SELECT COALESCE(MAX(r.soul_session_seq), 0)
+                     FROM r_soul_session_messages r
+                     JOIN messages m ON m.id = r.target_id
+                    WHERE r.soul_session_id = ?1 AND r.target_type = 'message'
+                      AND m.is_request = 1),
+                  (SELECT COALESCE(MAX(base_soul_session_seq), 0)
+                     FROM turns WHERE soul_session_id = ?1)
+                "#,
+                params![soul_session_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|error| error.to_string())?;
+        // Requests have seq >= 1; absent → 0. So 0 can never exceed the turn
+        // frontier (also >= 0) — no request, or one already covered → no drive.
+        if request_frontier <= turn_frontier {
+            return Ok(None);
+        }
+        let turn_id = prefixed_id("turn");
+        let now = timestamp_now();
+        tx.execute(
+            r#"
+            INSERT INTO turns (
+              id, soul_session_id, trigger_type, trigger_ref, input_through_session_seq,
+              base_soul_session_seq, end_soul_session_seq, status, error_text,
+              created_at, updated_at, finished_at
+            )
+            SELECT ?1, id, ?3, ?4, 0, next_seq - 1, NULL, 'running', NULL, ?5, ?5, NULL
+            FROM soul_sessions WHERE id = ?2
+            "#,
+            params![turn_id, soul_session_id, trigger_type, trigger_ref, now],
+        )
+        .map_err(|error| error.to_string())?;
+        tx.commit().map_err(|error| error.to_string())?;
+        turn_by_id(&conn, &turn_id)
+    }
+
+    /// The most recent turn for a soul_session (the active one under the drive
+    /// model — running if busy, else the latest completed). For response shaping.
+    pub fn latest_turn(&self, soul_session_id: &str) -> Result<Option<Turn>, String> {
+        let conn = self.conn.lock().unwrap();
+        let id: Option<String> = conn
+            .query_row(
+                "SELECT id FROM turns WHERE soul_session_id = ?1 ORDER BY created_at DESC, id DESC LIMIT 1",
+                params![soul_session_id],
+                |row| row.get(0),
+            )
+            .ok();
+        match id {
+            Some(id) => turn_by_id(&conn, &id),
+            None => Ok(None),
+        }
+    }
+
+    /// On startup, every `running` turn is orphaned (its process is gone).
+    /// Reconcile them to an honest "interrupted" terminal — never fabricate a
+    /// result — so the soul_session is idle again and the soul sees the truth.
+    pub fn reconcile_orphaned_turns(&self) -> Result<usize, String> {
+        let conn = self.conn.lock().unwrap();
+        let now = timestamp_now();
+        conn.execute(
+            r#"
+            UPDATE turns
+            SET status = 'failed', error_text = 'interrupted by restart',
+                updated_at = ?1, finished_at = ?1
+            WHERE status = 'running'
+            "#,
+            params![now],
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    /// Soul_sessions that are "behind" (an unconsumed REQUEST exists). Used on
+    /// boot to re-drive durable requests stranded by a crash (liveness).
+    pub fn soul_sessions_with_pending_requests(&self) -> Result<Vec<(String, String)>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                r#"
+                SELECT ss.session_id, ss.id
+                FROM soul_sessions ss
+                WHERE (SELECT COALESCE(MAX(r.soul_session_seq), 0)
+                         FROM r_soul_session_messages r
+                         JOIN messages m ON m.id = r.target_id
+                        WHERE r.soul_session_id = ss.id AND r.target_type = 'message'
+                          AND m.is_request = 1)
+                    > (SELECT COALESCE(MAX(base_soul_session_seq), 0)
+                         FROM turns WHERE soul_session_id = ss.id)
+                "#,
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(|error| error.to_string())?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|error| error.to_string())?);
+        }
+        Ok(out)
+    }
+
     pub fn complete_turn(
         &self,
         turn_id: &str,
-        assistant_message_seq: i64,
+        assistant_message_seq: Option<i64>,
         provider: &str,
         provider_response_id: Option<String>,
     ) -> Result<Turn, String> {
@@ -267,7 +395,7 @@ impl SantiStore {
         conn.execute(
             r#"
             UPDATE soul_sessions
-            SET last_seen_session_seq = ?2,
+            SET last_seen_session_seq = COALESCE(?2, last_seen_session_seq),
                 provider_state = ?3,
                 updated_at = ?4
             WHERE id = (SELECT soul_session_id FROM turns WHERE id = ?1)

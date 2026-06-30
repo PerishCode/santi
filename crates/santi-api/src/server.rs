@@ -71,6 +71,8 @@ pub async fn serve(config: config::ConfigService) -> Result<(), String> {
     if api_key.is_some() {
         println!("santi-api: bearer auth enabled");
     }
+    // Liveness: re-drive any requests stranded by a previous crash.
+    service.resume_pending();
     println!("santi-api listening on http://{address}");
     axum::serve(listener, router(service, api_key))
         .await

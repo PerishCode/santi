@@ -81,11 +81,29 @@ pub(crate) fn adaptor_for(adaptor: &str) -> Option<Box<dyn WebhookAdaptor>> {
 /// plus url), pushing no issue/comment content. Events whose sender matches the
 /// box vessel's configured GitHub login are dropped to break the act-then-observe
 /// loop; with no login configured the backstop is the soul reading the thread and
-/// choosing to do nothing.
+/// choosing to do nothing. An optional sender allowlist narrows who may wake the
+/// soul at all (a safety rail on a public repo, where any user can comment).
 struct GithubAdaptor;
 
 /// Env var naming the box vessel's GitHub login, for the self-echo loop guard.
 const GITHUB_SELF_LOGIN_ENV: &str = "SANTI_WEBHOOK_GITHUB_LOGIN";
+
+/// Env var holding a comma-separated allowlist of sender logins that may trigger a
+/// turn. Policy-in-config, like `GITHUB_SELF_LOGIN_ENV`. Unset/empty = no allowlist
+/// (any sender in scope); set = only listed senders wake the soul, the rest 200-noop.
+const GITHUB_ALLOW_ENV: &str = "SANTI_WEBHOOK_GITHUB_ALLOW";
+
+/// Whether `sender` may trigger a turn given the configured allowlist. A None or
+/// blank allowlist imposes no restriction; otherwise the sender must match one
+/// entry (case-insensitive, surrounding whitespace ignored).
+fn sender_allowed(sender: &str, allow: Option<&str>) -> bool {
+    match allow.map(str::trim) {
+        None | Some("") => true,
+        Some(list) => list
+            .split(',')
+            .any(|entry| entry.trim().eq_ignore_ascii_case(sender)),
+    }
+}
 
 impl WebhookAdaptor for GithubAdaptor {
     fn verify(
@@ -173,6 +191,10 @@ impl WebhookAdaptor for GithubAdaptor {
             .filter(|login| !login.is_empty())
             .is_some_and(|login| login.eq_ignore_ascii_case(&sender));
 
+        // Sender allowlist: an extra gate on who may wake the soul. With the
+        // allowlist set, an out-of-list sender is in_scope=false (200 noop).
+        let in_scope = sender_allowed(&sender, env::var(GITHUB_ALLOW_ENV).ok().as_deref());
+
         // The doorbell: occurrence kind + address. The soul goes and looks.
         let santi_system_text = format!(
             "[github] {event_type}.{action} on {repo}#{number}\nurl: {url}\ndelivery: {delivery}"
@@ -184,7 +206,7 @@ impl WebhookAdaptor for GithubAdaptor {
         Ok(NormalizedEvent {
             santi_system_text,
             label,
-            in_scope: true,
+            in_scope,
             self_authored,
         })
     }
@@ -288,6 +310,20 @@ mod tests {
                 .contains("hey santi, can you take a look?")
         );
         assert!(!event.santi_system_text.contains("Give santi senses"));
+    }
+
+    #[test]
+    fn sender_allowlist_gates_triggers() {
+        // No allowlist configured -> anyone is allowed.
+        assert!(sender_allowed("anyone", None));
+        assert!(sender_allowed("anyone", Some("")));
+        assert!(sender_allowed("anyone", Some("   ")));
+        // Allowlist set -> only listed senders, case-insensitive, whitespace-trimmed.
+        assert!(sender_allowed("PerishCode", Some("PerishCode")));
+        assert!(sender_allowed("perishcode", Some("PerishCode")));
+        assert!(sender_allowed("bob", Some(" alice , bob , PerishCode ")));
+        assert!(!sender_allowed("stranger", Some("PerishCode")));
+        assert!(!sender_allowed("LiberteCode", Some("PerishCode")));
     }
 
     #[test]

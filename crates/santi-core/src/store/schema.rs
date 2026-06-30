@@ -42,6 +42,16 @@ CREATE TABLE IF NOT EXISTS session_profiles (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS webhooks (
+    name TEXT PRIMARY KEY,
+    adaptor TEXT NOT NULL,
+    soul_id TEXT NOT NULL,
+    session_strategy TEXT NOT NULL,
+    secret_env TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS messages (
     id TEXT PRIMARY KEY,
     actor_type TEXT NOT NULL CHECK (actor_type IN ('account', 'soul', 'system')),

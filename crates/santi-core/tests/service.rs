@@ -269,6 +269,89 @@ async fn dispatches_tools() {
     );
 }
 
+#[tokio::test]
+async fn ingest_external_event_triggers_turn() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let provider = Arc::new(FakeProvider::default());
+    let service = SantiService::open(
+        SantiServiceConfig {
+            database_path: temp.path().join("santi.sqlite").display().to_string(),
+            runtime_root: temp.path().join("runtime").display().to_string(),
+            execution_root: temp.path().join("execution").display().to_string(),
+            bind_addr: Some("127.0.0.1:0".to_string()),
+        },
+        provider.clone(),
+    )
+    .expect("open service");
+
+    let soul_id = service.list_souls().expect("list souls")[0].soul_id.clone();
+    let label = "github:ops:issue:PerishCode/santi#42";
+    let session_id = service
+        .ingest_external_event(&soul_id, label, "an external request arrived".to_string())
+        .expect("ingest event");
+
+    // The webhook event is a REQUEST → it wakes the soul on a label-anchored
+    // session. Wait for the system-triggered turn to complete.
+    let runtime = wait_for_any_completed_turn(&service, &session_id).await;
+    assert!(
+        runtime
+            .turns
+            .iter()
+            .any(|turn| turn.trigger_type == santi_core::TurnTriggerType::System)
+    );
+    assert!(
+        runtime
+            .messages
+            .iter()
+            .any(|message| message.content_text == "an external request arrived")
+    );
+    assert!(
+        runtime
+            .messages
+            .iter()
+            .any(|message| message.content_text == "hi from runtime")
+    );
+
+    // A second event on the same label coalesces onto the same session, not a new one.
+    let session_id_again = service
+        .ingest_external_event(&soul_id, label, "a follow-up arrived".to_string())
+        .expect("ingest second event");
+    assert_eq!(session_id_again, session_id);
+
+    // The normalized text reached the provider as a user-role message.
+    let requests = provider.requests.lock().unwrap();
+    assert!(requests.iter().any(|request| {
+        request.input.iter().any(|item| {
+            matches!(
+                item,
+                ProviderItem::Message { role, content }
+                    if role == "user" && content == "an external request arrived"
+            )
+        })
+    }));
+}
+
+async fn wait_for_any_completed_turn(
+    service: &SantiService,
+    session_id: &str,
+) -> santi_core::SessionRuntimeSnapshot {
+    for _ in 0..50 {
+        let runtime = service
+            .runtime_snapshot(session_id)
+            .expect("runtime snapshot")
+            .expect("session runtime");
+        if runtime
+            .turns
+            .iter()
+            .any(|turn| turn.status == santi_core::TurnStatus::Completed)
+        {
+            return runtime;
+        }
+        sleep(Duration::from_millis(20)).await;
+    }
+    panic!("no turn completed");
+}
+
 async fn wait_for_completed_turn(
     service: &SantiService,
     session_id: &str,

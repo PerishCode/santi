@@ -5,7 +5,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::{
     ActorType, Compact, MessageKind, Session, SessionEffect, SessionMessage, SessionProfile,
     SessionSummary, SoulProfile, SoulSession, SoulSessionEntry, SoulSessionTargetType,
-    ThinkingSpan, ToolCall, ToolResult, Turn, timestamp_now,
+    ThinkingSpan, ToolCall, ToolResult, Turn, WebhookSubscription, timestamp_now,
 };
 
 use super::rows::*;
@@ -146,6 +146,24 @@ pub(super) fn soul_profile_by_id(
         "#,
         params![soul_id],
         map_soul_profile_row,
+    )
+    .optional()
+    .map_err(|error| error.to_string())
+}
+
+pub(super) fn webhook_by_name(
+    conn: &Connection,
+    name: &str,
+) -> Result<Option<WebhookSubscription>, String> {
+    conn.query_row(
+        r#"
+        SELECT name, adaptor, soul_id, session_strategy, secret_env, created_at, updated_at
+        FROM webhooks
+        WHERE name = ?1
+        LIMIT 1
+        "#,
+        params![name],
+        map_webhook_row,
     )
     .optional()
     .map_err(|error| error.to_string())

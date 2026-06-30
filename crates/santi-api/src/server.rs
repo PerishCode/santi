@@ -1,10 +1,14 @@
 use std::{convert::Infallible, env, fs, net::SocketAddr, path::PathBuf, sync::Arc};
 
-use crate::{config, provider};
+use crate::{
+    config, provider,
+    webhook::{WebhookError, adaptor_for},
+};
 use axum::{
     Json, Router,
+    body::Bytes,
     extract::{Path, Request, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{
         IntoResponse, Response, Sse,
@@ -14,11 +18,11 @@ use axum::{
 };
 use futures_core::Stream;
 use santi_core::{
-    CreateSessionResponse, CreateSoulRequest, ErrorResponse, HealthResponse, MaterialRequest,
-    SantiService, SantiServiceConfig, SantiStreamEvent, SantiStreamPayload,
+    CreateSessionResponse, CreateSoulRequest, CreateWebhookRequest, ErrorResponse, HealthResponse,
+    MaterialRequest, SantiService, SantiServiceConfig, SantiStreamEvent, SantiStreamPayload,
     SendSessionAcceptedResponse, SendSessionRequest, Session, SessionDetail, SessionMaterial,
     SessionProfile, SessionRuntimeSnapshot, SessionSummary, SoulProfile, UpdateSessionRequest,
-    prefixed_id, timestamp_now,
+    WebhookSubscription, prefixed_id, timestamp_now,
 };
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -95,6 +99,7 @@ fn router(service: SantiService, api_key: Option<Arc<str>>) -> Router {
         .route("/api/v1/sessions", post(create_session).get(list_sessions))
         .route("/api/v1/souls", post(create_soul).get(list_souls))
         .route("/api/v1/souls/{soul_id}", get(get_soul))
+        .route("/api/v1/webhooks", post(create_webhook).get(list_webhooks))
         .route(
             "/api/v1/sessions/{session_id}",
             get(get_session).patch(update_session),
@@ -118,6 +123,9 @@ fn router(service: SantiService, api_key: Option<Arc<str>>) -> Router {
 
     Router::new()
         .route("/api/v1/health", get(health))
+        // Webhook ingest is NOT bearer-gated — it is gated by the adaptor's
+        // signature verification against the subscription's shared secret.
+        .route("/api/v1/webhooks/{name}", post(ingest_webhook))
         .merge(protected)
         .layer(TraceLayer::new_for_http())
         .layer(
@@ -233,6 +241,98 @@ async fn get_soul(
         Some(soul) => Ok(Json(soul)),
         None => Err(ApiError::not_found("soul not found")),
     }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/webhooks",
+    request_body = CreateWebhookRequest,
+    responses((status = 200, body = WebhookSubscription), (status = 500, body = ErrorResponse))
+)]
+async fn create_webhook(
+    State(service): State<SantiService>,
+    Json(request): Json<CreateWebhookRequest>,
+) -> Result<Json<WebhookSubscription>, ApiError> {
+    service
+        .create_webhook(request)
+        .map(Json)
+        .map_err(ApiError::from_service)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/webhooks",
+    responses((status = 200, body = [WebhookSubscription]), (status = 500, body = ErrorResponse))
+)]
+async fn list_webhooks(
+    State(service): State<SantiService>,
+) -> Result<Json<Vec<WebhookSubscription>>, ApiError> {
+    service
+        .list_webhooks()
+        .map(Json)
+        .map_err(ApiError::internal)
+}
+
+/// Webhook ingest endpoint. Not bearer-gated — authenticity is established by the
+/// adaptor verifying the request signature against the subscription's secret. An
+/// out-of-scope or self-authored event returns 200 without waking the soul.
+#[utoipa::path(
+    post,
+    path = "/api/v1/webhooks/{name}",
+    params(("name" = String, Path)),
+    request_body(content_type = "application/json", description = "Raw provider event payload"),
+    responses(
+        (status = 200, description = "Event accepted (turn may or may not be triggered)"),
+        (status = 401, body = ErrorResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 500, body = ErrorResponse)
+    )
+)]
+async fn ingest_webhook(
+    State(service): State<SantiService>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<StatusCode, ApiError> {
+    let subscription = service
+        .webhook(&name)
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found("webhook not found"))?;
+    let adaptor = adaptor_for(&subscription.adaptor)
+        .ok_or_else(|| ApiError::internal(format!("unknown adaptor {}", subscription.adaptor)))?;
+    // Fail-closed: a missing or empty secret is never a pass.
+    let secret = env::var(&subscription.secret_env)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            ApiError::unauthorized(format!(
+                "webhook secret env {} is not set",
+                subscription.secret_env
+            ))
+        })?;
+    adaptor
+        .verify(&headers, &body, &secret)
+        .map_err(ApiError::from_webhook)?;
+    let event = adaptor
+        .normalize(&headers, &body, &name)
+        .map_err(ApiError::from_webhook)?;
+    // Out-of-scope events and the soul's own actions verify fine but produce no
+    // turn — the loop guard and the scope filter live in the adaptor.
+    if !event.in_scope || event.self_authored {
+        return Ok(StatusCode::OK);
+    }
+    // `per_thread` anchors on the adaptor's fine-grained label; `single` collapses
+    // every event for this subscription into one session.
+    let label = if subscription.session_strategy == "single" {
+        format!("{}:{}", subscription.adaptor, name)
+    } else {
+        event.label
+    };
+    service
+        .ingest_external_event(&subscription.soul_id, &label, event.santi_system_text)
+        .map_err(ApiError::from_service)?;
+    Ok(StatusCode::OK)
 }
 
 #[utoipa::path(
@@ -466,6 +566,13 @@ impl ApiError {
         }
     }
 
+    pub(crate) fn from_webhook(error: WebhookError) -> Self {
+        match error {
+            WebhookError::Unauthorized(message) => Self::unauthorized(message),
+            WebhookError::BadRequest(message) => Self::bad_request(message),
+        }
+    }
+
     pub(crate) fn from_service(message: String) -> Self {
         match message.as_str() {
             "session not found" | "soul not found" => Self::not_found(message),
@@ -503,6 +610,9 @@ impl IntoResponse for ApiError {
         create_soul,
         list_souls,
         get_soul,
+        create_webhook,
+        list_webhooks,
+        ingest_webhook,
         get_session,
         update_session,
         list_messages,
@@ -514,6 +624,8 @@ impl IntoResponse for ApiError {
     components(schemas(
         CreateSessionResponse,
         CreateSoulRequest,
+        CreateWebhookRequest,
+        WebhookSubscription,
         ErrorResponse,
         HealthResponse,
         MaterialRequest,

@@ -18,10 +18,12 @@ mod runtime;
 mod schema;
 
 use db::*;
-use rows::{actor_type_db, collect_rows, map_session_summary_row, message_state_db};
+use rows::{
+    actor_type_db, collect_rows, map_session_summary_row, map_webhook_row, message_state_db,
+};
 use schema::SCHEMA;
 
-const SANTI_SCHEMA_VERSION: u32 = 12;
+const SANTI_SCHEMA_VERSION: u32 = 13;
 const DEFAULT_ACCOUNT_ID: &str = "account_local";
 const DEFAULT_SOUL_ID: &str = "soul_default";
 const SANTI_SYSTEM_ACTOR_ID: &str = "santi";
@@ -83,6 +85,7 @@ impl SantiStore {
                 DROP TABLE IF EXISTS message_events;
                 DROP TABLE IF EXISTS r_session_messages;
                 DROP TABLE IF EXISTS messages;
+                DROP TABLE IF EXISTS webhooks;
                 DROP TABLE IF EXISTS session_profiles;
                 DROP TABLE IF EXISTS sessions;
                 DROP TABLE IF EXISTS soul_profiles;
@@ -450,6 +453,52 @@ impl SantiStore {
         tx.commit().map_err(|error| error.to_string())?;
         session_summary_by_id(&conn, &session_id)?
             .ok_or_else(|| "labeled session missing".to_string())
+    }
+
+    /// Register a webhook subscription (API-managed). The secret itself is never
+    /// stored — `secret_env` names the env var the adaptor reads at verify time.
+    pub fn create_webhook(
+        &self,
+        name: &str,
+        adaptor: &str,
+        soul_id: &str,
+        session_strategy: &str,
+        secret_env: &str,
+    ) -> Result<crate::WebhookSubscription, String> {
+        let conn = self.conn.lock().unwrap();
+        let now = timestamp_now();
+        conn.execute(
+            r#"
+            INSERT INTO webhooks (
+              name, adaptor, soul_id, session_strategy, secret_env, created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+            "#,
+            params![name, adaptor, soul_id, session_strategy, secret_env, now],
+        )
+        .map_err(|error| error.to_string())?;
+        webhook_by_name(&conn, name)?.ok_or_else(|| "created webhook missing".to_string())
+    }
+
+    pub fn list_webhooks(&self) -> Result<Vec<crate::WebhookSubscription>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                r#"
+                SELECT name, adaptor, soul_id, session_strategy, secret_env, created_at, updated_at
+                FROM webhooks ORDER BY created_at ASC, name ASC
+                "#,
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map([], map_webhook_row)
+            .map_err(|error| error.to_string())?;
+        collect_rows(rows)
+    }
+
+    pub fn webhook(&self, name: &str) -> Result<Option<crate::WebhookSubscription>, String> {
+        let conn = self.conn.lock().unwrap();
+        webhook_by_name(&conn, name)
     }
 
     /// Create a new soul (an individual). Souls are API-managed, never config.

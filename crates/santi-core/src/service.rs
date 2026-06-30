@@ -16,11 +16,11 @@ use tokio::sync::broadcast;
 use crate::assembly::input::provider_input;
 use crate::service_prompt::provider_tools;
 use crate::{
-    ActorType, CreateSessionResponse, CreateSoulRequest, MaterialKind, MessageContent,
-    MessageIntake, MessageState, SantiStore, SantiStreamEvent, SantiStreamPayload,
+    ActorType, CreateSessionResponse, CreateSoulRequest, CreateWebhookRequest, MaterialKind,
+    MessageContent, MessageIntake, MessageState, SantiStore, SantiStreamEvent, SantiStreamPayload,
     SendSessionAcceptedResponse, SendSessionRequest, SessionDetail, SessionMaterial,
     SessionRuntimeSnapshot, SessionSummary, SoulProfile, ThinkingCompletionReason, ThinkingSpan,
-    Turn, TurnActivityState, UpdateSessionRequest, prefixed_id, timestamp_now,
+    Turn, TurnActivityState, UpdateSessionRequest, WebhookSubscription, prefixed_id, timestamp_now,
 };
 use failure::ProviderTurnFailure;
 use text_delta::TextDeltaUpdate;
@@ -110,6 +110,88 @@ impl SantiService {
 
     pub fn soul(&self, soul_id: &str) -> Result<Option<SoulProfile>, String> {
         self.store.soul_profile(soul_id)
+    }
+
+    pub fn create_webhook(
+        &self,
+        request: CreateWebhookRequest,
+    ) -> Result<WebhookSubscription, String> {
+        let name = request.name.trim();
+        let adaptor = request.adaptor.trim();
+        let soul_id = request.soul_id.trim();
+        let secret_env = request.secret_env.trim();
+        if name.is_empty() {
+            return Err("webhook name must not be empty".to_string());
+        }
+        if adaptor.is_empty() {
+            return Err("webhook adaptor must not be empty".to_string());
+        }
+        if secret_env.is_empty() {
+            return Err("webhook secret_env must not be empty".to_string());
+        }
+        if self.store.soul_profile(soul_id)?.is_none() {
+            return Err("soul not found".to_string());
+        }
+        let session_strategy = request
+            .session_strategy
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("per_thread");
+        if !matches!(session_strategy, "per_thread" | "single") {
+            return Err("session_strategy must be 'per_thread' or 'single'".to_string());
+        }
+        self.store
+            .create_webhook(name, adaptor, soul_id, session_strategy, secret_env)
+    }
+
+    pub fn list_webhooks(&self) -> Result<Vec<WebhookSubscription>, String> {
+        self.store.list_webhooks()
+    }
+
+    pub fn webhook(&self, name: &str) -> Result<Option<WebhookSubscription>, String> {
+        self.store.webhook(name)
+    }
+
+    /// Ingest an external event already normalized by an adaptor: a `santi-system`
+    /// message addressed to `soul_id`, anchored to the session bound to `label`.
+    /// This is the webhook twin of `send_session` — append a REQUEST + poke the
+    /// driver — so it shares the same drive/coalesce semantics. Core stays generic:
+    /// the label and the message text are opaque (the adaptor owns their meaning).
+    /// Returns the anchored session id.
+    pub fn ingest_external_event(
+        &self,
+        soul_id: &str,
+        label: &str,
+        system_text: String,
+    ) -> Result<String, String> {
+        if self.store.soul_profile(soul_id)?.is_none() {
+            return Err("soul not found".to_string());
+        }
+        let session = self.store.find_or_create_session_by_label(label)?;
+        let session_id = session.session.id;
+        let system_message = self
+            .store
+            .append_santi_system_message(
+                &session_id,
+                MessageContent::text(system_text),
+                MessageIntake::Request,
+            )?
+            .session_message;
+        let soul_session = self
+            .store
+            .acquire_soul_session(soul_id, &session_id)?
+            .soul_session;
+        self.store
+            .append_message_ref(&soul_session.id, &system_message.message.id)?;
+        self.publish_stream(
+            &session_id,
+            SantiStreamPayload::MessageCreated {
+                message: system_message,
+            },
+        );
+        self.poke(&session_id, &soul_session.id, "system");
+        Ok(session_id)
     }
 
     pub fn list_sessions(&self) -> Result<Vec<SessionSummary>, String> {

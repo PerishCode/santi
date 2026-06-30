@@ -260,6 +260,34 @@ pub struct CreateSoulRequest {
     pub desc: Option<String>,
 }
 
+/// An API-managed webhook subscription: how an external source reaches a soul.
+/// `adaptor` selects the boundary normalizer (integration knowledge); `soul_id`
+/// is who receives the resulting turn; `session_strategy` picks where the thread
+/// lives (`per_thread` = one session per adaptor-derived label, `single` = one
+/// session per subscription); `secret_env` names the env var holding the signing
+/// secret (the secret itself is never stored). The `name` is the URL path segment.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct WebhookSubscription {
+    pub name: String,
+    pub adaptor: String,
+    pub soul_id: String,
+    pub session_strategy: String,
+    pub secret_env: String,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CreateWebhookRequest {
+    pub name: String,
+    pub adaptor: String,
+    pub soul_id: String,
+    /// `per_thread` (default) or `single`.
+    #[serde(default)]
+    pub session_strategy: Option<String>,
+    pub secret_env: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CreateSessionResponse {
     pub session: SessionSummary,

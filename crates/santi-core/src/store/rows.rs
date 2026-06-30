@@ -5,7 +5,7 @@ use crate::{
     ActorType, Compact, Message, MessageContent, MessageKind, MessageState, Session, SessionEffect,
     SessionMessage, SessionMessageRef, SessionProfile, SessionSummary, SoulProfile, SoulSession,
     SoulSessionTargetType, ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState, ToolCall,
-    ToolResult, Turn, TurnStatus, TurnTriggerType,
+    ToolResult, Turn, TurnStatus, TurnTriggerType, WebhookSubscription,
 };
 
 pub(super) fn map_session_row(row: &Row<'_>) -> rusqlite::Result<Session> {
@@ -57,6 +57,18 @@ pub(super) fn map_soul_profile_row(row: &Row<'_>) -> rusqlite::Result<SoulProfil
         desc: row.get(5)?,
         created_at: row.get(6)?,
         updated_at: row.get(7)?,
+    })
+}
+
+pub(super) fn map_webhook_row(row: &Row<'_>) -> rusqlite::Result<WebhookSubscription> {
+    Ok(WebhookSubscription {
+        name: row.get(0)?,
+        adaptor: row.get(1)?,
+        soul_id: row.get(2)?,
+        session_strategy: row.get(3)?,
+        secret_env: row.get(4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
     })
 }
 

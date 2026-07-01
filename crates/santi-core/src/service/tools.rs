@@ -83,6 +83,11 @@ impl SantiService {
                 "SANTI_SESSION_MEMORY_DIR",
                 self.session_memory_dir(session_id),
             )
+            // Self-involved: the soul inherits its own domain, so `santi …` from
+            // its shell auto-scopes to itself + this session (via the CLI's
+            // --soul/--session env defaults). Ambient capability, not authorization.
+            .env("SANTI_SOUL_ID", soul_id)
+            .env("SANTI_SESSION_ID", session_id)
             .output()
             .map_err(|error| format!("failed to run shell: {error}"))?;
         Ok(json!({

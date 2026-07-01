@@ -45,7 +45,7 @@ by default; drive one turn and stop when it lands:
 ```sh
 santi service serve &                                   # reads ./santi.toml
 SID=$(santi session create | jq -r .session.session.id)
-SANTI_SESSION=$SID santi session send 'Reply with exactly: OK' --watch
+SANTI_SESSION_ID=$SID santi session send 'Reply with exactly: OK' --watch
 ```
 
 `--watch` follows the SSE stream and exits when the soul_session goes idle
@@ -61,7 +61,7 @@ is still awaited to full idle.
                              | .payload.message.content_text'
 ```
 
-`--session`/`SANTI_SESSION` set a default session id; `--soul`/`SANTI_SOUL`
+`--session`/`SANTI_SESSION_ID` set a default session id; `--soul`/`SANTI_SOUL_ID`
 pick a non-default soul (empty → the runtime's default soul; an unknown soul
 is rejected, not silently created). To address a soul ad hoc without a
 default: `santi --soul <id> session send <sid> '…'`.

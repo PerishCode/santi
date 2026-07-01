@@ -42,13 +42,13 @@ struct Cli {
     api_key: Option<String>,
 
     /// Default session id used when a session subcommand omits an explicit id.
-    /// Falls back to SANTI_SESSION. Empty/absent → an id must be passed.
-    #[arg(long, global = true, env = "SANTI_SESSION")]
+    /// Falls back to SANTI_SESSION_ID. Empty/absent → an id must be passed.
+    #[arg(long, global = true, env = "SANTI_SESSION_ID")]
     session: Option<String>,
 
-    /// Default soul addressed by `session send`. Falls back to SANTI_SOUL.
+    /// Default soul addressed by `session send`. Falls back to SANTI_SOUL_ID.
     /// Empty/absent → the runtime's default soul (the pre-multi-soul path).
-    #[arg(long, global = true, env = "SANTI_SOUL")]
+    #[arg(long, global = true, env = "SANTI_SOUL_ID")]
     soul: Option<String>,
 
     #[command(subcommand)]
@@ -77,7 +77,7 @@ enum SessionCommand {
     Create,
     /// GET /api/v1/sessions
     List,
-    /// GET /api/v1/sessions/{id} (id falls back to --session/SANTI_SESSION)
+    /// GET /api/v1/sessions/{id} (id falls back to --session/SANTI_SESSION_ID)
     Get { id: Option<String> },
     /// GET /api/v1/sessions/{id}/messages (id falls back to --session)
     Messages { id: Option<String> },
@@ -86,7 +86,7 @@ enum SessionCommand {
     /// POST /api/v1/sessions/{id}/send.
     ///
     /// Positional forms: `send <id> <text>` or `send <text>` (id then falls
-    /// back to --session/SANTI_SESSION). The soul comes from --soul/SANTI_SOUL.
+    /// back to --session/SANTI_SESSION_ID). Soul comes from --soul/SANTI_SOUL_ID.
     Send {
         /// Either `<id> <text>` or just `<text>`.
         #[arg(num_args = 1..=2, required = true)]
@@ -134,7 +134,7 @@ impl ClientDefaults {
             .map(|id| id.trim().to_string())
             .filter(|id| !id.is_empty())
             .ok_or_else(|| {
-                anyhow::anyhow!("no session id: pass one or set --session / SANTI_SESSION")
+                anyhow::anyhow!("no session id: pass one or set --session / SANTI_SESSION_ID")
             })
     }
 
@@ -213,7 +213,7 @@ async fn run_client(
 }
 
 /// Split `send` positionals into `(session_id, text)`. Two args = explicit
-/// `<id> <text>`; one arg = `<text>` with the id from --session/SANTI_SESSION.
+/// `<id> <text>`; one arg = `<text>` with the id from --session/SANTI_SESSION_ID.
 fn split_send_args(mut args: Vec<String>, defaults: &ClientDefaults) -> Result<(String, String)> {
     match args.len() {
         2 => {

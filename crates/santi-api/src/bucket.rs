@@ -10,10 +10,10 @@ use crate::ApiError;
 
 #[utoipa::path(
     get,
-    path = "/api/v1/bucket/{soul_id}/{session_id}/{key}",
+    path = "/api/v1/bucket/{soul_id}/{strand_id}/{key}",
     params(
         ("soul_id" = String, Path),
-        ("session_id" = String, Path),
+        ("strand_id" = String, Path),
         ("key" = String, Path)
     ),
     responses(
@@ -25,10 +25,10 @@ use crate::ApiError;
 )]
 pub(crate) async fn get_bucket_object(
     State(service): State<SantiService>,
-    Path((soul_id, session_id, key)): Path<(String, String, String)>,
+    Path((soul_id, strand_id, key)): Path<(String, String, String)>,
 ) -> Result<Response, ApiError> {
     let payload = service
-        .get_bucket_object(&soul_id, &session_id, &key)
+        .get_bucket_object(&soul_id, &strand_id, &key)
         .map_err(ApiError::from_service)?
         .ok_or_else(|| ApiError::not_found("object not found"))?;
     Response::builder()

@@ -2,8 +2,8 @@ use rusqlite::Row;
 use serde_json::Value;
 
 use crate::{
-    ActorType, Compact, Message, MessageContent, MessageKind, MessageState, SessionEffect,
-    SessionMessage, SessionMessageRef, Soul, Strand, StrandTargetType, ThinkingCompletionReason,
+    ActorType, Compact, Message, MessageContent, MessageKind, MessageState, Soul, Strand,
+    StrandEffect, StrandMessage, StrandMessageRef, StrandTargetType, ThinkingCompletionReason,
     ThinkingSpan, ThinkingSpanState, ToolCall, ToolResult, Turn, TurnStatus, TurnTriggerType,
     WebhookSubscription,
 };
@@ -21,7 +21,7 @@ pub(super) fn map_webhook_row(row: &Row<'_>) -> rusqlite::Result<WebhookSubscrip
         name: row.get(0)?,
         adaptor: row.get(1)?,
         soul_id: row.get(2)?,
-        session_strategy: row.get(3)?,
+        strand_strategy: row.get(3)?,
         secret_env: row.get(4)?,
         created_at: row.get(5)?,
         updated_at: row.get(6)?,
@@ -34,10 +34,10 @@ pub(super) fn map_strand_row(row: &Row<'_>) -> rusqlite::Result<Strand> {
         id: row.get(0)?,
         soul_id: row.get(1)?,
         external_label: row.get(2)?,
-        session_memory: row.get(3)?,
+        strand_memory: row.get(3)?,
         provider_state: provider_state.and_then(|value| serde_json::from_str(&value).ok()),
         next_seq: row.get(5)?,
-        last_seen_session_seq: row.get(6)?,
+        last_seen_strand_seq: row.get(6)?,
         parent_strand_id: row.get(7)?,
         fork_point: row.get(8)?,
         created_at: row.get(9)?,
@@ -64,7 +64,7 @@ pub(super) fn map_message_row(row: &Row<'_>) -> rusqlite::Result<Message> {
     })
 }
 
-pub(super) fn map_session_message_row(row: &Row<'_>) -> rusqlite::Result<SessionMessage> {
+pub(super) fn map_strand_message_row(row: &Row<'_>) -> rusqlite::Result<StrandMessage> {
     let content_json: String = row.get(8)?;
     let content = serde_json::from_str::<MessageContent>(&content_json).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(8, rusqlite::types::Type::Text, Box::new(error))
@@ -85,8 +85,8 @@ pub(super) fn map_session_message_row(row: &Row<'_>) -> rusqlite::Result<Session
         updated_at: row.get(13)?,
     };
     let content_text = message.content.content_text();
-    Ok(SessionMessage {
-        relation: SessionMessageRef {
+    Ok(StrandMessage {
+        relation: StrandMessageRef {
             strand_id: row.get(0)?,
             message_id: row.get(1)?,
             strand_seq: row.get(2)?,
@@ -170,8 +170,8 @@ pub(super) fn map_compact_row(row: &Row<'_>) -> rusqlite::Result<Compact> {
     })
 }
 
-pub(super) fn map_session_effect_row(row: &Row<'_>) -> rusqlite::Result<SessionEffect> {
-    Ok(SessionEffect {
+pub(super) fn map_strand_effect_row(row: &Row<'_>) -> rusqlite::Result<StrandEffect> {
+    Ok(StrandEffect {
         id: row.get(0)?,
         strand_id: row.get(1)?,
         effect_type: row.get(2)?,
@@ -244,7 +244,7 @@ fn message_state_from_db(value: &str) -> MessageState {
 
 fn turn_trigger_from_db(value: &str) -> TurnTriggerType {
     match value {
-        "session_send" => TurnTriggerType::SessionSend,
+        "strand_send" => TurnTriggerType::StrandSend,
         "system" => TurnTriggerType::System,
         _ => TurnTriggerType::System,
     }

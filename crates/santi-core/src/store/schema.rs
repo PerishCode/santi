@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS webhooks (
     name TEXT PRIMARY KEY,
     adaptor TEXT NOT NULL,
     soul_id TEXT NOT NULL,
-    session_strategy TEXT NOT NULL,
+    strand_strategy TEXT NOT NULL,
     secret_env TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS message_events (
     created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS session_effects (
+CREATE TABLE IF NOT EXISTS strand_effects (
     id TEXT PRIMARY KEY,
     strand_id TEXT NOT NULL,
     effect_type TEXT NOT NULL,
@@ -61,10 +61,10 @@ CREATE TABLE IF NOT EXISTS strands (
     id TEXT PRIMARY KEY,
     soul_id TEXT NOT NULL,
     external_label TEXT,
-    session_memory TEXT NOT NULL DEFAULT '',
+    strand_memory TEXT NOT NULL DEFAULT '',
     provider_state TEXT,
     next_seq INTEGER NOT NULL DEFAULT 1 CHECK (next_seq > 0),
-    last_seen_session_seq INTEGER NOT NULL DEFAULT 0 CHECK (last_seen_session_seq >= 0),
+    last_seen_strand_seq INTEGER NOT NULL DEFAULT 0 CHECK (last_seen_strand_seq >= 0),
     parent_strand_id TEXT,
     fork_point INTEGER,
     created_at TEXT NOT NULL,
@@ -75,7 +75,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_strands_external_label ON strands (soul_id
 CREATE TABLE IF NOT EXISTS turns (
     id TEXT PRIMARY KEY,
     strand_id TEXT NOT NULL,
-    trigger_type TEXT NOT NULL CHECK (trigger_type IN ('session_send', 'system')),
+    trigger_type TEXT NOT NULL CHECK (trigger_type IN ('strand_send', 'system')),
     trigger_ref TEXT,
     base_strand_seq INTEGER NOT NULL CHECK (base_strand_seq >= 0),
     end_strand_seq INTEGER CHECK (end_strand_seq IS NULL OR end_strand_seq >= 0),
@@ -161,8 +161,8 @@ CREATE TABLE IF NOT EXISTS r_strand_entries (
 CREATE INDEX IF NOT EXISTS idx_messages_actor_created_at ON messages (actor_type, actor_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_state_created_at ON messages (state, created_at);
 CREATE INDEX IF NOT EXISTS idx_message_events_message_id_created_at ON message_events (message_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_session_effects_strand_created_at ON session_effects (strand_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_session_effects_lookup ON session_effects (strand_id, effect_type, idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_strand_effects_strand_created_at ON strand_effects (strand_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_strand_effects_lookup ON strand_effects (strand_id, effect_type, idempotency_key);
 CREATE INDEX IF NOT EXISTS idx_strands_soul_id ON strands (soul_id);
 CREATE INDEX IF NOT EXISTS idx_strands_lineage ON strands (parent_strand_id, fork_point);
 CREATE INDEX IF NOT EXISTS idx_turns_strand_created_at ON turns (strand_id, created_at);

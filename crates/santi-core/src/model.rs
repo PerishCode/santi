@@ -31,8 +31,8 @@ pub struct MaterialRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SessionMaterial {
-    pub session_id: String,
+pub struct StrandMaterial {
+    pub strand_id: String,
     pub kind: MaterialKind,
     pub content_type: String,
     pub text: String,
@@ -41,7 +41,7 @@ pub struct SessionMaterial {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct MaterialUpdated {
-    pub session_id: String,
+    pub strand_id: String,
     pub kind: MaterialKind,
     pub updated_at: Timestamp,
 }
@@ -64,10 +64,10 @@ pub struct Strand {
     /// Opaque external anchor (e.g. a webhook thread key). Unique per soul;
     /// absent for strands reached only by id (e.g. CLI-created ones).
     pub external_label: Option<String>,
-    pub session_memory: String,
+    pub strand_memory: String,
     pub provider_state: Option<Value>,
     pub next_seq: i64,
-    pub last_seen_session_seq: i64,
+    pub last_seen_strand_seq: i64,
     pub parent_strand_id: Option<String>,
     pub fork_point: Option<i64>,
     pub created_at: Timestamp,
@@ -77,7 +77,7 @@ pub struct Strand {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnTriggerType {
-    SessionSend,
+    StrandSend,
     System,
 }
 
@@ -220,7 +220,7 @@ pub struct CompactQueryResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SessionEffect {
+pub struct StrandEffect {
     pub id: String,
     pub strand_id: String,
     pub effect_type: String,
@@ -265,16 +265,16 @@ pub struct CreateSoulRequest {
 
 /// An API-managed webhook subscription: how an external source reaches a soul.
 /// `adaptor` selects the boundary normalizer (integration knowledge); `soul_id`
-/// is who receives the resulting turn; `session_strategy` picks where the thread
-/// lives (`per_thread` = one session per adaptor-derived label, `single` = one
-/// session per subscription); `secret_env` names the env var holding the signing
+/// is who receives the resulting turn; `strand_strategy` picks where the thread
+/// lives (`per_thread` = one strand per adaptor-derived label, `single` = one
+/// strand per subscription); `secret_env` names the env var holding the signing
 /// secret (the secret itself is never stored). The `name` is the URL path segment.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct WebhookSubscription {
     pub name: String,
     pub adaptor: String,
     pub soul_id: String,
-    pub session_strategy: String,
+    pub strand_strategy: String,
     pub secret_env: String,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
@@ -287,27 +287,27 @@ pub struct CreateWebhookRequest {
     pub soul_id: String,
     /// `per_thread` (default) or `single`.
     #[serde(default)]
-    pub session_strategy: Option<String>,
+    pub strand_strategy: Option<String>,
     pub secret_env: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct CreateSessionResponse {
-    pub session: Strand,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SessionDetail {
+pub struct CreateStrandResponse {
     pub strand: Strand,
-    pub messages: Vec<SessionMessage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SendSessionRequest {
+pub struct StrandDetail {
+    pub strand: Strand,
+    pub messages: Vec<StrandMessage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SendStrandRequest {
     pub content: Vec<MessagePart>,
 }
 
-impl SendSessionRequest {
+impl SendStrandRequest {
     pub fn text(&self) -> String {
         MessageContent {
             parts: self.content.clone(),
@@ -317,14 +317,14 @@ impl SendSessionRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SendSessionAcceptedResponse {
+pub struct SendStrandAcceptedResponse {
     pub strand: Strand,
     pub turn: Turn,
     /// The content this send just enqueued, once the driver has actually
     /// committed it to the timeline. Absent when this send coalesced into an
     /// already-running turn — durably enqueued, but the driver has not drained
     /// it yet (it will, when that turn completes and re-pokes).
-    pub user_message: Option<SessionMessage>,
+    pub user_message: Option<StrandMessage>,
 }
 
 /// How an ingest adaptor addresses a strand. Resolution is atomic (see
@@ -352,7 +352,7 @@ pub enum IngestOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SantiStreamEvent {
     pub event_id: String,
-    pub session_id: String,
+    pub strand_id: String,
     pub created_at: Timestamp,
     pub payload: SantiStreamPayload,
 }
@@ -379,7 +379,7 @@ pub struct TurnActivity {
 pub enum SantiStreamPayload {
     StreamOpen,
     MessageCreated {
-        message: SessionMessage,
+        message: StrandMessage,
     },
     MessageDelta {
         message_id: String,
@@ -389,7 +389,7 @@ pub enum SantiStreamPayload {
     },
     MessageCompleted {
         turn_id: String,
-        message: SessionMessage,
+        message: StrandMessage,
     },
     ToolCallCreated {
         tool_call: ToolCall,
@@ -425,15 +425,15 @@ pub enum SantiStreamPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SessionRuntimeSnapshot {
+pub struct StrandRuntimeSnapshot {
     pub strand: Strand,
-    pub messages: Vec<SessionMessage>,
+    pub messages: Vec<StrandMessage>,
     pub turns: Vec<Turn>,
     pub thinking_spans: Vec<ThinkingSpan>,
     pub tool_calls: Vec<ToolCall>,
     pub tool_results: Vec<ToolResult>,
     pub compacts: Vec<Compact>,
-    pub effects: Vec<SessionEffect>,
+    pub effects: Vec<StrandEffect>,
 }
 
 pub fn timestamp_now() -> Timestamp {

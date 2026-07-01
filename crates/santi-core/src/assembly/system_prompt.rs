@@ -4,8 +4,8 @@ use std::{
 };
 
 use crate::{
-    SESSION_WORKSPACE_URI, SOUL_WORKSPACE_URI, Strand, Timestamp, session_memory_uri,
-    soul_memory_uri, timestamp_from_system_time,
+    SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, Strand, Timestamp, soul_memory_uri,
+    strand_memory_uri, timestamp_from_system_time,
 };
 
 /// The `[santi]` constitution: santi's invariant physics, describing itself.
@@ -32,13 +32,13 @@ const SANTI_DEFAULT_SOUL_MEMORY: &str = "\
 Your memory is still empty. You are a soul — a cyber-individual — and this file is your self. Nothing here is fixed yet: write who you are as you come to act. Any role you are given is a seed to grow, not a cage.";
 
 pub(crate) struct SystemPromptRequest<'a> {
-    pub session_id: &'a str,
+    pub strand_id: &'a str,
     pub strand: &'a Strand,
     /// Path to the `[santi]` constitution config file. Absent/empty → the
     /// encoded default. Read per-turn (hot).
     pub constitution_path: PathBuf,
     pub soul_memory_path: PathBuf,
-    pub session_memory_path: PathBuf,
+    pub strand_memory_path: PathBuf,
     /// This strand's soul is the runtime's default soul, so an empty soul
     /// memory falls back to the encoded default (read-through, per turn).
     pub is_default_soul: bool,
@@ -47,16 +47,16 @@ pub(crate) struct SystemPromptRequest<'a> {
 pub(crate) fn render_system_prompt(request: SystemPromptRequest<'_>) -> Result<String, String> {
     let constitution = render_constitution(&request.constitution_path)?;
     let soul_memory = read_soul_memory(&request.soul_memory_path, request.is_default_soul)?;
-    let strand_memory = read_memory_material(&request.session_memory_path)?;
+    let strand_memory = read_memory_material(&request.strand_memory_path)?;
     let soul_source = soul_memory_uri();
-    let strand_source = session_memory_uri();
+    let strand_source = strand_memory_uri();
 
     Ok([
         constitution,
         format!("{soul_source} will always be displayed in [santi-soul]."),
         format!("{strand_source} will always be displayed in [santi-strand]."),
         format!(
-            "These files have no internal version history; save backups into {SOUL_WORKSPACE_URI} or {SESSION_WORKSPACE_URI} if needed."
+            "These files have no internal version history; save backups into {SOUL_WORKSPACE_URI} or {STRAND_WORKSPACE_URI} if needed."
         ),
         render_system_message_description(),
         render_meta(&request),
@@ -94,7 +94,7 @@ fn render_meta(request: &SystemPromptRequest<'_>) -> String {
     [
         "[santi-meta]".to_string(),
         format!("soul_id: {}", request.strand.soul_id),
-        format!("strand_id: {}", request.session_id),
+        format!("strand_id: {}", request.strand_id),
     ]
     .join("\n")
 }

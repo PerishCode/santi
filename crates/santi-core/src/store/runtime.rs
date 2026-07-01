@@ -191,7 +191,7 @@ impl SantiStore {
         &self,
         strand_id: &str,
         text: &str,
-    ) -> Result<crate::SessionMessage, String> {
+    ) -> Result<crate::StrandMessage, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let soul_id: String = tx
@@ -365,7 +365,7 @@ impl SantiStore {
         conn.execute(
             r#"
             UPDATE strands
-            SET last_seen_session_seq = COALESCE(?2, last_seen_session_seq),
+            SET last_seen_strand_seq = COALESCE(?2, last_seen_strand_seq),
                 provider_state = ?3,
                 updated_at = ?4
             WHERE id = (SELECT strand_id FROM turns WHERE id = ?1)
@@ -394,7 +394,7 @@ impl SantiStore {
     pub fn finish_failed_turn_context(
         &self,
         turn_id: &str,
-        last_seen_session_seq: i64,
+        last_seen_strand_seq: i64,
     ) -> Result<Turn, String> {
         let conn = self.conn.lock().unwrap();
         let now = timestamp_now();
@@ -413,14 +413,14 @@ impl SantiStore {
         conn.execute(
             r#"
             UPDATE strands
-            SET last_seen_session_seq = CASE
-                  WHEN last_seen_session_seq > ?2 THEN last_seen_session_seq
+            SET last_seen_strand_seq = CASE
+                  WHEN last_seen_strand_seq > ?2 THEN last_seen_strand_seq
                   ELSE ?2
                 END,
                 updated_at = ?3
             WHERE id = (SELECT strand_id FROM turns WHERE id = ?1)
             "#,
-            params![turn_id, last_seen_session_seq, now],
+            params![turn_id, last_seen_strand_seq, now],
         )
         .map_err(|error| error.to_string())?;
         turn_by_id(&conn, turn_id)?.ok_or_else(|| "failed turn missing".to_string())

@@ -41,12 +41,12 @@ struct Cli {
     #[arg(long, global = true, env = "SANTI_API_KEY")]
     api_key: Option<String>,
 
-    /// Default session id used when a session subcommand omits an explicit id.
-    /// Falls back to SANTI_SESSION_ID. Empty/absent → an id must be passed.
-    #[arg(long, global = true, env = "SANTI_SESSION_ID")]
-    session: Option<String>,
+    /// Default strand id used when a strand subcommand omits an explicit id.
+    /// Falls back to SANTI_STRAND_ID. Empty/absent → an id must be passed.
+    #[arg(long, global = true, env = "SANTI_STRAND_ID")]
+    strand: Option<String>,
 
-    /// Default soul addressed by `session send`. Falls back to SANTI_SOUL_ID.
+    /// Default soul addressed by `strand send`. Falls back to SANTI_SOUL_ID.
     /// Empty/absent → the runtime's default soul (the pre-multi-soul path).
     #[arg(long, global = true, env = "SANTI_SOUL_ID")]
     soul: Option<String>,
@@ -66,9 +66,9 @@ enum Command {
     },
     /// GET /api/v1/health
     Health,
-    /// Session resources under /api/v1/sessions
+    /// Strand resources under /api/v1/strands
     #[command(subcommand)]
-    Session(SessionCommand),
+    Strand(StrandCommand),
     /// Compact a strand's own timeline, or query a compact's detail.
     #[command(subcommand)]
     Compact(CompactCommand),
@@ -76,8 +76,8 @@ enum Command {
 
 #[derive(Subcommand)]
 enum CompactCommand {
-    /// POST /api/v1/sessions/{id}/compact — collapse [from,to] into a summary.
-    /// Session from --session/SANTI_SESSION_ID; soul from --soul/SANTI_SOUL_ID.
+    /// POST /api/v1/strands/{id}/compact — collapse [from,to] into a summary.
+    /// Strand from --strand/SANTI_STRAND_ID; soul from --soul/SANTI_SOUL_ID.
     Exec {
         /// First message of the range (a fixed user/assistant message id).
         #[arg(long)]
@@ -110,21 +110,21 @@ enum CompactCommand {
 }
 
 #[derive(Subcommand)]
-enum SessionCommand {
-    /// POST /api/v1/sessions
+enum StrandCommand {
+    /// POST /api/v1/strands
     Create,
-    /// GET /api/v1/sessions
+    /// GET /api/v1/strands
     List,
-    /// GET /api/v1/sessions/{id} (id falls back to --session/SANTI_SESSION_ID)
+    /// GET /api/v1/strands/{id} (id falls back to --strand/SANTI_STRAND_ID)
     Get { id: Option<String> },
-    /// GET /api/v1/sessions/{id}/messages (id falls back to --session)
+    /// GET /api/v1/strands/{id}/messages (id falls back to --strand)
     Messages { id: Option<String> },
-    /// GET /api/v1/sessions/{id}/runtime (id falls back to --session)
+    /// GET /api/v1/strands/{id}/runtime (id falls back to --strand)
     Runtime { id: Option<String> },
-    /// POST /api/v1/sessions/{id}/send.
+    /// POST /api/v1/strands/{id}/send.
     ///
     /// Positional forms: `send <id> <text>` or `send <text>` (id then falls
-    /// back to --session/SANTI_SESSION_ID). Soul comes from --soul/SANTI_SOUL_ID.
+    /// back to --strand/SANTI_STRAND_ID). Soul comes from --soul/SANTI_SOUL_ID.
     Send {
         /// Either `<id> <text>` or just `<text>`.
         #[arg(num_args = 1..=2, required = true)]
@@ -134,8 +134,8 @@ enum SessionCommand {
         #[arg(long)]
         watch: bool,
     },
-    /// GET /api/v1/sessions/{id}/events — follows the SSE stream (id falls back
-    /// to --session). Runs until interrupted; use `send --watch` to stop on idle.
+    /// GET /api/v1/strands/{id}/events — follows the SSE stream (id falls back
+    /// to --strand). Runs until interrupted; use `send --watch` to stop on idle.
     Events { id: Option<String> },
 }
 
@@ -147,7 +147,7 @@ async fn main() -> Result<()> {
         Command::Service { args } => run_service(args).await,
         other => {
             let defaults = ClientDefaults {
-                session: cli.session,
+                strand: cli.strand,
                 soul: cli.soul,
             };
             run_client(&cli.base_url, cli.api_key.as_deref(), &defaults, other).await
@@ -156,23 +156,23 @@ async fn main() -> Result<()> {
 }
 
 /// Client-side defaults resolved from global flags / env. They never reach the
-/// runtime as concepts: `session` only fills an omitted path id, and `soul` is
+/// runtime as concepts: `strand` only fills an omitted path id, and `soul` is
 /// forwarded on `send` (empty → the runtime keeps its default-soul path).
 struct ClientDefaults {
-    session: Option<String>,
+    strand: Option<String>,
     soul: Option<String>,
 }
 
 impl ClientDefaults {
-    /// Resolve a session id: an explicit positional wins, else the default.
-    /// Both empty is a usage error — same "you must name a session" path as before.
-    fn resolve_session(&self, explicit: Option<String>) -> Result<String> {
+    /// Resolve a strand id: an explicit positional wins, else the default.
+    /// Both empty is a usage error — same "you must name a strand" path as before.
+    fn resolve_strand(&self, explicit: Option<String>) -> Result<String> {
         explicit
-            .or_else(|| self.session.clone())
+            .or_else(|| self.strand.clone())
             .map(|id| id.trim().to_string())
             .filter(|id| !id.is_empty())
             .ok_or_else(|| {
-                anyhow::anyhow!("no session id: pass one or set --session / SANTI_SESSION_ID")
+                anyhow::anyhow!("no strand id: pass one or set --strand / SANTI_STRAND_ID")
             })
     }
 
@@ -215,25 +215,25 @@ async fn run_client(
     match command {
         Command::Service { .. } => unreachable!("service is handled before the client path"),
         Command::Health => get(&client, &format!("{base}/api/v1/health")).await,
-        Command::Session(SessionCommand::Create) => {
-            post(&client, &format!("{base}/api/v1/sessions"), None).await
+        Command::Strand(StrandCommand::Create) => {
+            post(&client, &format!("{base}/api/v1/strands"), None).await
         }
-        Command::Session(SessionCommand::List) => {
-            get(&client, &format!("{base}/api/v1/sessions")).await
+        Command::Strand(StrandCommand::List) => {
+            get(&client, &format!("{base}/api/v1/strands")).await
         }
-        Command::Session(SessionCommand::Get { id }) => {
-            let id = defaults.resolve_session(id)?;
-            get(&client, &format!("{base}/api/v1/sessions/{id}")).await
+        Command::Strand(StrandCommand::Get { id }) => {
+            let id = defaults.resolve_strand(id)?;
+            get(&client, &format!("{base}/api/v1/strands/{id}")).await
         }
-        Command::Session(SessionCommand::Messages { id }) => {
-            let id = defaults.resolve_session(id)?;
-            get(&client, &format!("{base}/api/v1/sessions/{id}/messages")).await
+        Command::Strand(StrandCommand::Messages { id }) => {
+            let id = defaults.resolve_strand(id)?;
+            get(&client, &format!("{base}/api/v1/strands/{id}/messages")).await
         }
-        Command::Session(SessionCommand::Runtime { id }) => {
-            let id = defaults.resolve_session(id)?;
-            get(&client, &format!("{base}/api/v1/sessions/{id}/runtime")).await
+        Command::Strand(StrandCommand::Runtime { id }) => {
+            let id = defaults.resolve_strand(id)?;
+            get(&client, &format!("{base}/api/v1/strands/{id}/runtime")).await
         }
-        Command::Session(SessionCommand::Send { args, watch }) => {
+        Command::Strand(StrandCommand::Send { args, watch }) => {
             let (id, text) = split_send_args(args, defaults)?;
             let mut content = serde_json::json!({
                 "content": [{ "type": "text", "text": text }]
@@ -243,9 +243,9 @@ async fn run_client(
             }
             send(&client, &base, &id, content, watch).await
         }
-        Command::Session(SessionCommand::Events { id }) => {
-            let id = defaults.resolve_session(id)?;
-            follow(&client, &format!("{base}/api/v1/sessions/{id}/events")).await
+        Command::Strand(StrandCommand::Events { id }) => {
+            let id = defaults.resolve_strand(id)?;
+            follow(&client, &format!("{base}/api/v1/strands/{id}/events")).await
         }
         Command::Compact(CompactCommand::Exec {
             from,
@@ -253,7 +253,7 @@ async fn run_client(
             summary,
             summary_file,
         }) => {
-            let session = defaults.resolve_session(None)?;
+            let strand = defaults.resolve_strand(None)?;
             let summary = match summary_file {
                 Some(path) => read_summary_file(&path)?,
                 None => summary.expect("clap requires summary or summary_file"),
@@ -268,7 +268,7 @@ async fn run_client(
             }
             post(
                 &client,
-                &format!("{base}/api/v1/sessions/{session}/compact"),
+                &format!("{base}/api/v1/strands/{strand}/compact"),
                 Some(body),
             )
             .await
@@ -316,18 +316,18 @@ fn urlencoding_encode(value: &str) -> String {
     out
 }
 
-/// Split `send` positionals into `(session_id, text)`. Two args = explicit
-/// `<id> <text>`; one arg = `<text>` with the id from --session/SANTI_SESSION_ID.
+/// Split `send` positionals into `(strand_id, text)`. Two args = explicit
+/// `<id> <text>`; one arg = `<text>` with the id from --strand/SANTI_STRAND_ID.
 fn split_send_args(mut args: Vec<String>, defaults: &ClientDefaults) -> Result<(String, String)> {
     match args.len() {
         2 => {
             let text = args.pop().expect("len == 2");
             let id = args.pop().expect("len == 2");
-            Ok((defaults.resolve_session(Some(id))?, text))
+            Ok((defaults.resolve_strand(Some(id))?, text))
         }
         1 => {
             let text = args.pop().expect("len == 1");
-            Ok((defaults.resolve_session(None)?, text))
+            Ok((defaults.resolve_strand(None)?, text))
         }
         _ => anyhow::bail!("send takes `<id> <text>` or `<text>`"),
     }
@@ -409,11 +409,11 @@ async fn follow(client: &reqwest::Client, url: &str) -> Result<()> {
 async fn send(
     client: &reqwest::Client,
     base: &str,
-    session_id: &str,
+    strand_id: &str,
     body: serde_json::Value,
     watch: bool,
 ) -> Result<()> {
-    let url = format!("{base}/api/v1/sessions/{session_id}/send");
+    let url = format!("{base}/api/v1/strands/{strand_id}/send");
     let response = client
         .post(&url)
         .json(&body)
@@ -447,20 +447,20 @@ async fn send(
         .and_then(|turn| turn.get("id"))
         .and_then(serde_json::Value::as_str)
         .map(str::to_string);
-    watch_until_idle(client, base, session_id, seed_turn).await
+    watch_until_idle(client, base, strand_id, seed_turn).await
 }
 
-/// Follow the session's SSE stream, tracking which turns are in flight, and
+/// Follow the strand's SSE stream, tracking which turns are in flight, and
 /// return once none remain (the strand has caught up). Each event is
 /// relayed to stdout as one compact JSON line; the client models only the
 /// turn-lifecycle events it needs to decide "idle", nothing more.
 async fn watch_until_idle(
     client: &reqwest::Client,
     base: &str,
-    session_id: &str,
+    strand_id: &str,
     seed_turn: Option<String>,
 ) -> Result<()> {
-    let url = format!("{base}/api/v1/sessions/{session_id}/events");
+    let url = format!("{base}/api/v1/strands/{strand_id}/events");
     let response = client
         .get(&url)
         .send()
@@ -573,25 +573,25 @@ fn json_field(data: &str, path: &[&str]) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn defaults(session: Option<&str>, soul: Option<&str>) -> ClientDefaults {
+    fn defaults(strand: Option<&str>, soul: Option<&str>) -> ClientDefaults {
         ClientDefaults {
-            session: session.map(str::to_string),
+            strand: strand.map(str::to_string),
             soul: soul.map(str::to_string),
         }
     }
 
     #[test]
-    fn resolve_session_prefers_explicit_then_default() {
+    fn resolve_strand_prefers_explicit_then_default() {
         let d = defaults(Some("sess_default"), None);
-        assert_eq!(d.resolve_session(Some("sess_x".into())).unwrap(), "sess_x");
-        assert_eq!(d.resolve_session(None).unwrap(), "sess_default");
+        assert_eq!(d.resolve_strand(Some("sess_x".into())).unwrap(), "sess_x");
+        assert_eq!(d.resolve_strand(None).unwrap(), "sess_default");
     }
 
     #[test]
-    fn resolve_session_errors_when_both_empty() {
-        assert!(defaults(None, None).resolve_session(None).is_err());
+    fn resolve_strand_errors_when_both_empty() {
+        assert!(defaults(None, None).resolve_strand(None).is_err());
         // A blank default is treated as absent, not a valid id.
-        assert!(defaults(Some("  "), None).resolve_session(None).is_err());
+        assert!(defaults(Some("  "), None).resolve_strand(None).is_err());
     }
 
     #[test]
@@ -610,7 +610,7 @@ mod tests {
         let (id, text) = split_send_args(vec!["hello".into()], &d).unwrap();
         assert_eq!((id.as_str(), text.as_str()), ("sess_default", "hello"));
 
-        // One arg with no default session is a usage error, not a silent send.
+        // One arg with no default strand is a usage error, not a silent send.
         assert!(split_send_args(vec!["hello".into()], &defaults(None, None)).is_err());
     }
 

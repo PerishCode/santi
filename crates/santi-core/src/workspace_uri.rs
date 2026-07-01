@@ -1,13 +1,13 @@
 use std::path::{Component, Path, PathBuf};
 
 pub const SOUL_WORKSPACE_URI: &str = "soul://";
-pub const SESSION_WORKSPACE_URI: &str = "session://";
+pub const STRAND_WORKSPACE_URI: &str = "strand://";
 pub const MEMORY_FILE: &str = "MEMORY.md";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkspaceRoot {
     Soul,
-    Session,
+    Strand,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,8 +20,8 @@ pub fn soul_memory_uri() -> String {
     workspace_uri(SOUL_WORKSPACE_URI, MEMORY_FILE)
 }
 
-pub fn session_memory_uri() -> String {
-    workspace_uri(SESSION_WORKSPACE_URI, MEMORY_FILE)
+pub fn strand_memory_uri() -> String {
+    workspace_uri(STRAND_WORKSPACE_URI, MEMORY_FILE)
 }
 
 pub fn workspace_uri(root: &str, path: &str) -> String {
@@ -38,22 +38,22 @@ pub fn parse_workspace_uri(value: &str) -> Result<WorkspaceUri, String> {
             path: safe_relative_path(path, SOUL_WORKSPACE_URI)?,
         });
     }
-    if let Some(path) = value.strip_prefix(SESSION_WORKSPACE_URI) {
+    if let Some(path) = value.strip_prefix(STRAND_WORKSPACE_URI) {
         return Ok(WorkspaceUri {
-            root: WorkspaceRoot::Session,
-            path: safe_relative_path(path, SESSION_WORKSPACE_URI)?,
+            root: WorkspaceRoot::Strand,
+            path: safe_relative_path(path, STRAND_WORKSPACE_URI)?,
         });
     }
     if value.starts_with('@') {
         return Err(format!(
-            "unsupported workspace alias: {value}; use {SOUL_WORKSPACE_URI} or {SESSION_WORKSPACE_URI}"
+            "unsupported workspace alias: {value}; use {SOUL_WORKSPACE_URI} or {STRAND_WORKSPACE_URI}"
         ));
     }
     if value.contains("://") {
         return Err(format!("unsupported workspace uri: {value}"));
     }
     Err(format!(
-        "cwd must use {SOUL_WORKSPACE_URI} or {SESSION_WORKSPACE_URI}"
+        "cwd must use {SOUL_WORKSPACE_URI} or {STRAND_WORKSPACE_URI}"
     ))
 }
 

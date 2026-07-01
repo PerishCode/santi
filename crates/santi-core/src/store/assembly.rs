@@ -11,7 +11,7 @@ use super::{
 };
 
 impl SantiStore {
-    /// Project the soul-session's assembled view into the provider's typed-item
+    /// Project the soul-strand's assembled view into the provider's typed-item
     /// input: the immutable spine (r_strand_entries) MERGED at read with
     /// this strand's compact overlay. Each compact collapses its covered
     /// `[start,end]` range into one summary item; the spine itself is never

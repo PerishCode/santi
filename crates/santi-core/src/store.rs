@@ -6,8 +6,8 @@ use std::{
 use rusqlite::{Connection, params};
 
 use crate::{
-    ActorType, IngestOutcome, MessageContent, MessageIntake, MessageKind, MessageState,
-    SessionMessage, Strand, StrandSelector, StrandTargetType, Turn, prefixed_id, timestamp_now,
+    ActorType, IngestOutcome, MessageContent, MessageIntake, MessageKind, MessageState, Strand,
+    StrandMessage, StrandSelector, StrandTargetType, Turn, prefixed_id, timestamp_now,
 };
 
 mod assembly;
@@ -21,7 +21,7 @@ use db::*;
 use rows::{actor_type_db, collect_rows, map_webhook_row, message_state_db};
 use schema::SCHEMA;
 
-const SANTI_SCHEMA_VERSION: u32 = 18;
+const SANTI_SCHEMA_VERSION: u32 = 19;
 const DEFAULT_SOUL_ID: &str = "soul_default";
 /// The runtime's one system actor identity. No account/user: every non-soul
 /// actor speaks as `system`, whether it's a runtime-authored notice (kind
@@ -41,7 +41,7 @@ pub struct SantiStore {
 
 #[derive(Debug, Clone)]
 pub struct AppendedMessage {
-    pub session_message: SessionMessage,
+    pub strand_message: StrandMessage,
 }
 
 #[derive(Debug, Clone)]
@@ -49,7 +49,7 @@ pub struct StartedTurn {
     pub turn: Turn,
     /// Inbox entries this call committed into the timeline to reach this turn
     /// (empty for the manual/test-only `start_turn`, which does not drain).
-    pub drained_messages: Vec<SessionMessage>,
+    pub drained_messages: Vec<StrandMessage>,
 }
 
 impl SantiStore {
@@ -86,12 +86,21 @@ impl SantiStore {
                 DROP TABLE IF EXISTS tool_calls;
                 DROP TABLE IF EXISTS turns;
                 DROP TABLE IF EXISTS strands;
-                DROP TABLE IF EXISTS session_effects;
+                DROP TABLE IF EXISTS strand_effects;
                 DROP TABLE IF EXISTS message_events;
                 DROP TABLE IF EXISTS messages;
                 DROP TABLE IF EXISTS webhooks;
                 DROP TABLE IF EXISTS soul_profiles;
                 DROP TABLE IF EXISTS souls;
+                -- Historical (pre-strand-rename) table names, so a clean wipe
+                -- reaches a `session`-era DB (e.g. the live box before this
+                -- migration). Harmless no-ops on a fresh DB.
+                DROP TABLE IF EXISTS soul_sessions;
+                DROP TABLE IF EXISTS sessions;
+                DROP TABLE IF EXISTS session_profiles;
+                DROP TABLE IF EXISTS r_session_messages;
+                DROP TABLE IF EXISTS session_effects;
+                DROP TABLE IF EXISTS accounts;
                 "#,
             )
             .map_err(|error| error.to_string())?;
@@ -130,13 +139,13 @@ impl SantiStore {
         SANTI_SYSTEM_ACTOR_ID
     }
 
-    pub fn list_sessions(&self) -> Result<Vec<Strand>, String> {
+    pub fn list_strands(&self) -> Result<Vec<Strand>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
                 r#"
-                SELECT id, soul_id, external_label, session_memory, provider_state, next_seq,
-                       last_seen_session_seq, parent_strand_id, fork_point, created_at, updated_at
+                SELECT id, soul_id, external_label, strand_memory, provider_state, next_seq,
+                       last_seen_strand_seq, parent_strand_id, fork_point, created_at, updated_at
                 FROM strands
                 ORDER BY updated_at DESC, id DESC
                 "#,
@@ -149,16 +158,16 @@ impl SantiStore {
     }
 
     /// Create a new strand owned by the runtime's default soul (the
-    /// pre-multi-soul-per-strand path CLI `session create` still uses).
-    pub fn create_session(&self) -> Result<Strand, String> {
+    /// pre-multi-soul-per-strand path CLI `strand create` still uses).
+    pub fn create_strand(&self) -> Result<Strand, String> {
         let conn = self.conn.lock().unwrap();
         let strand_id = prefixed_id("ss");
         let now = timestamp_now();
         conn.execute(
             r#"
             INSERT INTO strands (
-              id, soul_id, external_label, session_memory, provider_state, next_seq,
-              last_seen_session_seq, parent_strand_id, fork_point, created_at, updated_at
+              id, soul_id, external_label, strand_memory, provider_state, next_seq,
+              last_seen_strand_seq, parent_strand_id, fork_point, created_at, updated_at
             )
             VALUES (?1, ?2, NULL, '', NULL, 1, 0, NULL, NULL, ?3, ?3)
             "#,
@@ -168,27 +177,27 @@ impl SantiStore {
         strand_by_id(&conn, &strand_id)?.ok_or_else(|| "created strand missing".to_string())
     }
 
-    pub fn session_messages(&self, strand_id: &str) -> Result<Vec<SessionMessage>, String> {
+    pub fn strand_messages(&self, strand_id: &str) -> Result<Vec<StrandMessage>, String> {
         let conn = self.conn.lock().unwrap();
-        session_messages(&conn, strand_id)
+        strand_messages(&conn, strand_id)
     }
 
     pub fn runtime_snapshot(
         &self,
         strand_id: &str,
-    ) -> Result<Option<crate::SessionRuntimeSnapshot>, String> {
+    ) -> Result<Option<crate::StrandRuntimeSnapshot>, String> {
         let conn = self.conn.lock().unwrap();
         let Some(strand) = strand_by_id(&conn, strand_id)? else {
             return Ok(None);
         };
-        Ok(Some(crate::SessionRuntimeSnapshot {
-            messages: session_messages(&conn, strand_id)?,
+        Ok(Some(crate::StrandRuntimeSnapshot {
+            messages: strand_messages(&conn, strand_id)?,
             turns: turns_for_strand(&conn, &strand.id)?,
             thinking_spans: soul_thinking_spans(&conn, &strand.id)?,
             tool_calls: soul_tool_calls(&conn, &strand.id)?,
             tool_results: soul_tool_results(&conn, &strand.id)?,
             compacts: compacts_for_strand(&conn, &strand.id)?,
-            effects: session_effects(&conn, strand_id)?,
+            effects: strand_effects(&conn, strand_id)?,
             strand,
         }))
     }
@@ -269,7 +278,7 @@ impl SantiStore {
         append_entry_in_tx(&tx, strand_id, StrandTargetType::Message, &message_id)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(AppendedMessage {
-            session_message: message_by_id(&conn, &message_id)?
+            strand_message: message_by_id(&conn, &message_id)?
                 .ok_or_else(|| "created message missing".to_string())?,
         })
     }
@@ -295,8 +304,8 @@ impl SantiStore {
             tx.execute(
                 r#"
                 INSERT INTO strands (
-                  id, soul_id, external_label, session_memory, provider_state, next_seq,
-                  last_seen_session_seq, parent_strand_id, fork_point, created_at, updated_at
+                  id, soul_id, external_label, strand_memory, provider_state, next_seq,
+                  last_seen_strand_seq, parent_strand_id, fork_point, created_at, updated_at
                 )
                 VALUES (?1, ?2, ?3, '', NULL, 1, 0, NULL, NULL, ?4, ?4)
                 "#,
@@ -316,7 +325,7 @@ impl SantiStore {
         match selector {
             StrandSelector::ById(strand_id) => self
                 .strand(strand_id)?
-                .ok_or_else(|| "session not found".to_string()),
+                .ok_or_else(|| "strand not found".to_string()),
             StrandSelector::ByLabel { soul_id, label } => {
                 self.find_or_create_strand_by_label(soul_id, label)
             }
@@ -378,7 +387,7 @@ impl SantiStore {
         name: &str,
         adaptor: &str,
         soul_id: &str,
-        session_strategy: &str,
+        strand_strategy: &str,
         secret_env: &str,
     ) -> Result<crate::WebhookSubscription, String> {
         let conn = self.conn.lock().unwrap();
@@ -386,11 +395,11 @@ impl SantiStore {
         conn.execute(
             r#"
             INSERT INTO webhooks (
-              name, adaptor, soul_id, session_strategy, secret_env, created_at, updated_at
+              name, adaptor, soul_id, strand_strategy, secret_env, created_at, updated_at
             )
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
             "#,
-            params![name, adaptor, soul_id, session_strategy, secret_env, now],
+            params![name, adaptor, soul_id, strand_strategy, secret_env, now],
         )
         .map_err(|error| error.to_string())?;
         webhook_by_name(&conn, name)?.ok_or_else(|| "created webhook missing".to_string())
@@ -401,7 +410,7 @@ impl SantiStore {
         let mut stmt = conn
             .prepare(
                 r#"
-                SELECT name, adaptor, soul_id, session_strategy, secret_env, created_at, updated_at
+                SELECT name, adaptor, soul_id, strand_strategy, secret_env, created_at, updated_at
                 FROM webhooks ORDER BY created_at ASC, name ASC
                 "#,
             )
@@ -476,7 +485,7 @@ impl SantiStore {
               base_strand_seq, end_strand_seq, status, error_text,
               created_at, updated_at, finished_at
             )
-            SELECT ?1, id, 'session_send', ?3, next_seq - 1, NULL, 'running',
+            SELECT ?1, id, 'strand_send', ?3, next_seq - 1, NULL, 'running',
                    NULL, ?4, ?4, NULL
             FROM strands
             WHERE id = ?2

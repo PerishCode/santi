@@ -1,6 +1,6 @@
 use crate::assembly::system_prompt::{SystemPromptRequest, render_system_prompt};
 use crate::{
-    MaterialKind, MaterialRequest, MaterialUpdated, SantiStreamPayload, SessionMaterial, Strand,
+    MaterialKind, MaterialRequest, MaterialUpdated, SantiStreamPayload, Strand, StrandMaterial,
     timestamp_now,
 };
 
@@ -9,17 +9,17 @@ use super::{MaterialCacheKey, SantiService};
 const TEXT_PLAIN_UTF8: &str = "text/plain; charset=utf-8";
 
 impl SantiService {
-    pub fn session_material(
+    pub fn strand_material(
         &self,
-        session_id: &str,
+        strand_id: &str,
         request: MaterialRequest,
-    ) -> Result<SessionMaterial, String> {
+    ) -> Result<StrandMaterial, String> {
         match request.kind {
             MaterialKind::SystemPrompt => {
                 let strand = self
                     .store
-                    .strand(session_id)?
-                    .ok_or_else(|| "session not found".to_string())?;
+                    .strand(strand_id)?
+                    .ok_or_else(|| "strand not found".to_string())?;
                 self.system_prompt_material(&strand)
             }
         }
@@ -35,18 +35,18 @@ impl SantiService {
         Ok(self.system_prompt_material(&strand)?.text)
     }
 
-    fn system_prompt_material(&self, strand: &Strand) -> Result<SessionMaterial, String> {
-        let session_id = strand.id.as_str();
+    fn system_prompt_material(&self, strand: &Strand) -> Result<StrandMaterial, String> {
+        let strand_id = strand.id.as_str();
         let text = render_system_prompt(SystemPromptRequest {
-            session_id,
+            strand_id,
             strand,
             constitution_path: self.constitution_file(),
             soul_memory_path: self.soul_memory_file(&strand.soul_id),
-            session_memory_path: self.session_memory_file(session_id),
+            strand_memory_path: self.strand_memory_file(strand_id),
             is_default_soul: strand.soul_id == self.store.default_soul_id(),
         })?;
         // A strand has exactly one soul, so its id alone is a stable cache key.
-        let key: MaterialCacheKey = (session_id.to_string(), MaterialKind::SystemPrompt);
+        let key: MaterialCacheKey = (strand_id.to_string(), MaterialKind::SystemPrompt);
         let mut cache = self.material_cache.lock().unwrap();
         if let Some(existing) = cache.get(&key)
             && existing.text == text
@@ -55,8 +55,8 @@ impl SantiService {
         }
 
         let updated_at = timestamp_now();
-        let material = SessionMaterial {
-            session_id: session_id.to_string(),
+        let material = StrandMaterial {
+            strand_id: strand_id.to_string(),
             kind: MaterialKind::SystemPrompt,
             content_type: TEXT_PLAIN_UTF8.to_string(),
             text,
@@ -66,10 +66,10 @@ impl SantiService {
         drop(cache);
 
         self.publish_stream(
-            session_id,
+            strand_id,
             SantiStreamPayload::MaterialUpdated {
                 material: MaterialUpdated {
-                    session_id: session_id.to_string(),
+                    strand_id: strand_id.to_string(),
                     kind: MaterialKind::SystemPrompt,
                     updated_at,
                 },

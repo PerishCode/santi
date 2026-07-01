@@ -234,7 +234,7 @@ fn optional_profile_string(
 
 /// Resolve a config value that may be an `env://VAR` reference. A plain value is
 /// used literally; `env://VAR` reads VAR from the environment. This is the same
-/// `scheme://locator` vocabulary as the `session://` / `soul://` workspace URIs —
+/// `scheme://locator` vocabulary as the `strand://` / `soul://` workspace URIs —
 /// one indirection convention, so a toml can carry secrets as `env://` references
 /// while the real values live only in the process environment. Fail-closed: an
 /// `env://` reference to an unset/empty variable is an error, never silently empty.

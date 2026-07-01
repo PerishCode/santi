@@ -13,6 +13,6 @@ pub use santi_provider::ProviderItem;
 pub use service::{SantiService, SantiServiceConfig};
 pub use store::SantiStore;
 pub use workspace_uri::{
-    MEMORY_FILE, SESSION_WORKSPACE_URI, SOUL_WORKSPACE_URI, WorkspaceRoot, WorkspaceUri,
-    parse_workspace_uri, session_memory_uri, soul_memory_uri, workspace_uri,
+    MEMORY_FILE, SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, WorkspaceRoot, WorkspaceUri,
+    parse_workspace_uri, soul_memory_uri, strand_memory_uri, workspace_uri,
 };

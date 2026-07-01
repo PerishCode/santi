@@ -3,7 +3,7 @@ mod timeline;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{
-    ActorType, Compact, MessageKind, SessionEffect, SessionMessage, Soul, Strand, StrandEntry,
+    ActorType, Compact, MessageKind, Soul, Strand, StrandEffect, StrandEntry, StrandMessage,
     StrandTargetType, ThinkingSpan, ToolCall, ToolResult, Turn, WebhookSubscription, prefixed_id,
     timestamp_now,
 };
@@ -63,7 +63,7 @@ pub(super) fn append_entry_in_tx(
 pub(super) fn drain_inbox_in_tx(
     conn: &Connection,
     strand_id: &str,
-) -> Result<Vec<SessionMessage>, String> {
+) -> Result<Vec<StrandMessage>, String> {
     let mut stmt = conn
         .prepare(
             r#"
@@ -139,7 +139,7 @@ pub(super) fn webhook_by_name(
 ) -> Result<Option<WebhookSubscription>, String> {
     conn.query_row(
         r#"
-        SELECT name, adaptor, soul_id, session_strategy, secret_env, created_at, updated_at
+        SELECT name, adaptor, soul_id, strand_strategy, secret_env, created_at, updated_at
         FROM webhooks
         WHERE name = ?1
         LIMIT 1
@@ -154,8 +154,8 @@ pub(super) fn webhook_by_name(
 pub(super) fn strand_by_id(conn: &Connection, strand_id: &str) -> Result<Option<Strand>, String> {
     conn.query_row(
         r#"
-        SELECT id, soul_id, external_label, session_memory, provider_state, next_seq,
-               last_seen_session_seq, parent_strand_id, fork_point, created_at, updated_at
+        SELECT id, soul_id, external_label, strand_memory, provider_state, next_seq,
+               last_seen_strand_seq, parent_strand_id, fork_point, created_at, updated_at
         FROM strands
         WHERE id = ?1
         LIMIT 1
@@ -174,8 +174,8 @@ pub(super) fn strand_by_label(
 ) -> Result<Option<Strand>, String> {
     conn.query_row(
         r#"
-        SELECT id, soul_id, external_label, session_memory, provider_state, next_seq,
-               last_seen_session_seq, parent_strand_id, fork_point, created_at, updated_at
+        SELECT id, soul_id, external_label, strand_memory, provider_state, next_seq,
+               last_seen_strand_seq, parent_strand_id, fork_point, created_at, updated_at
         FROM strands
         WHERE soul_id = ?1 AND external_label = ?2
         LIMIT 1
@@ -190,7 +190,7 @@ pub(super) fn strand_by_label(
 pub(super) fn message_by_id(
     conn: &Connection,
     message_id: &str,
-) -> Result<Option<SessionMessage>, String> {
+) -> Result<Option<StrandMessage>, String> {
     conn.query_row(
         r#"
         SELECT r.strand_id, r.target_id, r.strand_seq, r.created_at,
@@ -202,7 +202,7 @@ pub(super) fn message_by_id(
         LIMIT 1
         "#,
         params![message_id],
-        map_session_message_row,
+        map_strand_message_row,
     )
     .optional()
     .map_err(|error| error.to_string())
@@ -230,10 +230,10 @@ pub(super) fn message_record_by_id(
     .map_err(|error| error.to_string())
 }
 
-pub(super) fn session_messages(
+pub(super) fn strand_messages(
     conn: &Connection,
     strand_id: &str,
-) -> Result<Vec<SessionMessage>, String> {
+) -> Result<Vec<StrandMessage>, String> {
     let mut stmt = conn
         .prepare(
             r#"
@@ -248,7 +248,7 @@ pub(super) fn session_messages(
         )
         .map_err(|error| error.to_string())?;
     let rows = stmt
-        .query_map(params![strand_id], map_session_message_row)
+        .query_map(params![strand_id], map_strand_message_row)
         .map_err(|error| error.to_string())?;
     collect_rows(rows)
 }
@@ -395,23 +395,23 @@ pub(super) fn compacts_for_strand(
     collect_rows(rows)
 }
 
-pub(super) fn session_effects(
+pub(super) fn strand_effects(
     conn: &Connection,
     strand_id: &str,
-) -> Result<Vec<SessionEffect>, String> {
+) -> Result<Vec<StrandEffect>, String> {
     let mut stmt = conn
         .prepare(
             r#"
             SELECT id, strand_id, effect_type, idempotency_key, status, source_hook_id,
                    source_turn_id, result_ref, error_text, created_at, updated_at
-            FROM session_effects
+            FROM strand_effects
             WHERE strand_id = ?1
             ORDER BY created_at ASC
             "#,
         )
         .map_err(|error| error.to_string())?;
     let rows = stmt
-        .query_map(params![strand_id], map_session_effect_row)
+        .query_map(params![strand_id], map_strand_effect_row)
         .map_err(|error| error.to_string())?;
     collect_rows(rows)
 }

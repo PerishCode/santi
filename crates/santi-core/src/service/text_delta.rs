@@ -5,7 +5,7 @@ use crate::{
 use super::{SantiService, timing::ProviderTurnTiming};
 
 pub(super) struct TextDeltaUpdate<'a, 'turn> {
-    pub(super) session_id: &'a str,
+    pub(super) strand_id: &'a str,
     pub(super) turn_id: &'a str,
     pub(super) assistant_text: &'a mut String,
     pub(super) round_assistant_text: &'a mut String,
@@ -24,12 +24,12 @@ impl SantiService {
         if update.assistant_text.is_empty() {
             update.timing.first_text_delta(update.round);
             self.complete_current_thinking_span(
-                update.session_id,
+                update.strand_id,
                 update.current_thinking_span,
                 ThinkingCompletionReason::FirstTextDelta,
             )?;
             self.publish_turn_activity(
-                update.session_id,
+                update.strand_id,
                 update.turn_id,
                 TurnActivityState::Generating,
                 update.active_provider_response_id.clone(),
@@ -38,7 +38,7 @@ impl SantiService {
         update.assistant_text.push_str(&delta);
         update.round_assistant_text.push_str(&delta);
         self.publish_stream(
-            update.session_id,
+            update.strand_id,
             SantiStreamPayload::MessageDelta {
                 message_id: format!("stream_{}", update.turn_id),
                 turn_id: update.turn_id.to_string(),

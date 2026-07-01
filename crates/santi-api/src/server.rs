@@ -18,11 +18,11 @@ use axum::{
 };
 use futures_core::Stream;
 use santi_core::{
-    CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSessionResponse,
-    CreateSoulRequest, CreateWebhookRequest, ErrorResponse, HealthResponse, IngestOutcome,
+    CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSoulRequest,
+    CreateStrandResponse, CreateWebhookRequest, ErrorResponse, HealthResponse, IngestOutcome,
     MaterialRequest, SantiService, SantiServiceConfig, SantiStreamEvent, SantiStreamPayload,
-    SendSessionAcceptedResponse, SendSessionRequest, SessionDetail, SessionMaterial,
-    SessionRuntimeSnapshot, Soul, Strand, WebhookSubscription, prefixed_id, timestamp_now,
+    SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand, StrandDetail, StrandMaterial,
+    StrandRuntimeSnapshot, WebhookSubscription, prefixed_id, timestamp_now,
 };
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -96,26 +96,23 @@ fn router(service: SantiService, api_key: Option<Arc<str>>) -> Router {
     // Everything except /health is bearer-gated when a key is configured.
     let protected = Router::new()
         .route("/api/v1/openapi.json", get(openapi))
-        .route("/api/v1/sessions", post(create_session).get(list_sessions))
+        .route("/api/v1/strands", post(create_strand).get(list_strands))
         .route("/api/v1/souls", post(create_soul).get(list_souls))
         .route("/api/v1/souls/{soul_id}", get(get_soul))
         .route("/api/v1/webhooks", post(create_webhook).get(list_webhooks))
-        .route("/api/v1/sessions/{session_id}", get(get_session))
-        .route("/api/v1/sessions/{session_id}/messages", get(list_messages))
+        .route("/api/v1/strands/{strand_id}", get(get_strand))
+        .route("/api/v1/strands/{strand_id}/messages", get(list_messages))
         .route(
-            "/api/v1/sessions/{session_id}/materials",
-            post(session_material),
+            "/api/v1/strands/{strand_id}/materials",
+            post(strand_material),
         )
-        .route("/api/v1/sessions/{session_id}/events", get(session_events))
-        .route("/api/v1/sessions/{session_id}/send", post(send_session))
-        .route("/api/v1/sessions/{session_id}/compact", post(compact_exec))
+        .route("/api/v1/strands/{strand_id}/events", get(strand_events))
+        .route("/api/v1/strands/{strand_id}/send", post(send_strand))
+        .route("/api/v1/strands/{strand_id}/compact", post(compact_exec))
         .route("/api/v1/compacts/{compact_id}", get(compact_query))
+        .route("/api/v1/strands/{strand_id}/runtime", get(runtime_snapshot))
         .route(
-            "/api/v1/sessions/{session_id}/runtime",
-            get(runtime_snapshot),
-        )
-        .route(
-            "/api/v1/bucket/{soul_id}/{session_id}/{*key}",
+            "/api/v1/bucket/{soul_id}/{strand_id}/{*key}",
             get(crate::bucket::get_bucket_object),
         )
         .route_layer(middleware::from_fn_with_state(api_key, require_bearer));
@@ -169,26 +166,26 @@ async fn health() -> Json<HealthResponse> {
 
 #[utoipa::path(
     post,
-    path = "/api/v1/sessions",
-    responses((status = 200, body = CreateSessionResponse), (status = 500, body = ErrorResponse))
+    path = "/api/v1/strands",
+    responses((status = 200, body = CreateStrandResponse), (status = 500, body = ErrorResponse))
 )]
-async fn create_session(
+async fn create_strand(
     State(service): State<SantiService>,
-) -> Result<Json<CreateSessionResponse>, ApiError> {
+) -> Result<Json<CreateStrandResponse>, ApiError> {
     service
-        .create_session()
+        .create_strand()
         .map(Json)
         .map_err(ApiError::from_service)
 }
 
 #[utoipa::path(
     get,
-    path = "/api/v1/sessions",
+    path = "/api/v1/strands",
     responses((status = 200, body = [Strand]), (status = 500, body = ErrorResponse))
 )]
-async fn list_sessions(State(service): State<SantiService>) -> Result<Json<Vec<Strand>>, ApiError> {
+async fn list_strands(State(service): State<SantiService>) -> Result<Json<Vec<Strand>>, ApiError> {
     service
-        .list_sessions()
+        .list_strands()
         .map(Json)
         .map_err(ApiError::from_service)
 }
@@ -321,8 +318,8 @@ async fn ingest_webhook(
         return Ok(StatusCode::OK);
     }
     // `per_thread` anchors on the adaptor's fine-grained label; `single` collapses
-    // every event for this subscription into one session.
-    let label = if subscription.session_strategy == "single" {
+    // every event for this subscription into one strand.
+    let label = if subscription.strand_strategy == "single" {
         format!("{}:{}", subscription.adaptor, name)
     } else {
         event.label
@@ -344,91 +341,91 @@ async fn ingest_webhook(
 
 #[utoipa::path(
     get,
-    path = "/api/v1/sessions/{session_id}",
-    params(("session_id" = String, Path)),
+    path = "/api/v1/strands/{strand_id}",
+    params(("strand_id" = String, Path)),
     responses(
-        (status = 200, body = SessionDetail),
+        (status = 200, body = StrandDetail),
         (status = 404, body = ErrorResponse),
         (status = 500, body = ErrorResponse)
     )
 )]
-async fn get_session(
+async fn get_strand(
     State(service): State<SantiService>,
-    Path(session_id): Path<String>,
-) -> Result<Json<SessionDetail>, ApiError> {
+    Path(strand_id): Path<String>,
+) -> Result<Json<StrandDetail>, ApiError> {
     service
-        .session(&session_id)
+        .strand(&strand_id)
         .map_err(ApiError::from_service)?
         .map(Json)
-        .ok_or_else(|| ApiError::not_found("session not found"))
+        .ok_or_else(|| ApiError::not_found("strand not found"))
 }
 
 #[utoipa::path(
     get,
-    path = "/api/v1/sessions/{session_id}/messages",
-    params(("session_id" = String, Path)),
+    path = "/api/v1/strands/{strand_id}/messages",
+    params(("strand_id" = String, Path)),
     responses(
-        (status = 200, body = [santi_core::SessionMessage]),
+        (status = 200, body = [santi_core::StrandMessage]),
         (status = 404, body = ErrorResponse),
         (status = 500, body = ErrorResponse)
     )
 )]
 async fn list_messages(
     State(service): State<SantiService>,
-    Path(session_id): Path<String>,
-) -> Result<Json<Vec<santi_core::SessionMessage>>, ApiError> {
+    Path(strand_id): Path<String>,
+) -> Result<Json<Vec<santi_core::StrandMessage>>, ApiError> {
     service
-        .session(&session_id)
+        .strand(&strand_id)
         .map_err(ApiError::from_service)?
         .map(|detail| Json(detail.messages))
-        .ok_or_else(|| ApiError::not_found("session not found"))
+        .ok_or_else(|| ApiError::not_found("strand not found"))
 }
 
 #[utoipa::path(
     post,
-    path = "/api/v1/sessions/{session_id}/materials",
-    params(("session_id" = String, Path)),
+    path = "/api/v1/strands/{strand_id}/materials",
+    params(("strand_id" = String, Path)),
     request_body = MaterialRequest,
     responses(
-        (status = 200, body = SessionMaterial),
+        (status = 200, body = StrandMaterial),
         (status = 404, body = ErrorResponse),
         (status = 500, body = ErrorResponse)
     )
 )]
-async fn session_material(
+async fn strand_material(
     State(service): State<SantiService>,
-    Path(session_id): Path<String>,
+    Path(strand_id): Path<String>,
     Json(request): Json<MaterialRequest>,
-) -> Result<Json<SessionMaterial>, ApiError> {
+) -> Result<Json<StrandMaterial>, ApiError> {
     service
-        .session_material(&session_id, request)
+        .strand_material(&strand_id, request)
         .map(Json)
         .map_err(ApiError::from_service)
 }
 
-async fn session_events(
+async fn strand_events(
     State(service): State<SantiService>,
-    Path(session_id): Path<String>,
+    Path(strand_id): Path<String>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
-    let session = service
-        .session(&session_id)
+    let strand = service
+        .strand(&strand_id)
         .map_err(ApiError::from_service)?
-        .ok_or_else(|| ApiError::not_found("session not found"))?;
-    drop(session);
+        .ok_or_else(|| ApiError::not_found("strand not found"))?;
+    drop(strand);
 
     let mut receiver = service.subscribe_stream();
-    let open_session_id = session_id.clone();
+    let open_strand_id = strand_id.clone();
     let stream = async_stream::stream! {
         yield Ok(sse_event(SantiStreamEvent {
             event_id: prefixed_id("stream"),
-            session_id: open_session_id,
+            strand_id: open_strand_id,
             created_at: timestamp_now(),
             payload: SantiStreamPayload::StreamOpen,
         }));
 
         loop {
             match receiver.recv().await {
-                Ok(event) if event.session_id == session_id => yield Ok(sse_event(event)),
+                Ok(event) if event.strand_id == strand_id => yield Ok(sse_event(event)),
                 Ok(_) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -440,22 +437,22 @@ async fn session_events(
 
 #[utoipa::path(
     post,
-    path = "/api/v1/sessions/{session_id}/send",
-    params(("session_id" = String, Path)),
-    request_body = SendSessionRequest,
+    path = "/api/v1/strands/{strand_id}/send",
+    params(("strand_id" = String, Path)),
+    request_body = SendStrandRequest,
     responses(
-        (status = 200, body = SendSessionAcceptedResponse),
+        (status = 200, body = SendStrandAcceptedResponse),
         (status = 404, body = ErrorResponse),
         (status = 500, body = ErrorResponse)
     )
 )]
-async fn send_session(
+async fn send_strand(
     State(service): State<SantiService>,
-    Path(session_id): Path<String>,
-    Json(request): Json<SendSessionRequest>,
-) -> Result<Json<SendSessionAcceptedResponse>, ApiError> {
+    Path(strand_id): Path<String>,
+    Json(request): Json<SendStrandRequest>,
+) -> Result<Json<SendStrandAcceptedResponse>, ApiError> {
     service
-        .send_session(&session_id, request)
+        .send_strand(&strand_id, request)
         .await
         .map(Json)
         .map_err(ApiError::from_service)
@@ -463,8 +460,8 @@ async fn send_session(
 
 #[utoipa::path(
     post,
-    path = "/api/v1/sessions/{session_id}/compact",
-    params(("session_id" = String, Path)),
+    path = "/api/v1/strands/{strand_id}/compact",
+    params(("strand_id" = String, Path)),
     request_body = CompactExecRequest,
     responses(
         (status = 200, body = CompactExecResponse),
@@ -475,11 +472,11 @@ async fn send_session(
 )]
 async fn compact_exec(
     State(service): State<SantiService>,
-    Path(session_id): Path<String>,
+    Path(strand_id): Path<String>,
     Json(request): Json<CompactExecRequest>,
 ) -> Result<Json<CompactExecResponse>, ApiError> {
     service
-        .compact_exec(&session_id, request)
+        .compact_exec(&strand_id, request)
         .map(Json)
         .map_err(ApiError::from_service)
 }
@@ -525,23 +522,23 @@ struct CompactQueryParams {
 
 #[utoipa::path(
     get,
-    path = "/api/v1/sessions/{session_id}/runtime",
-    params(("session_id" = String, Path)),
+    path = "/api/v1/strands/{strand_id}/runtime",
+    params(("strand_id" = String, Path)),
     responses(
-        (status = 200, body = SessionRuntimeSnapshot),
+        (status = 200, body = StrandRuntimeSnapshot),
         (status = 404, body = ErrorResponse),
         (status = 500, body = ErrorResponse)
     )
 )]
 async fn runtime_snapshot(
     State(service): State<SantiService>,
-    Path(session_id): Path<String>,
-) -> Result<Json<SessionRuntimeSnapshot>, ApiError> {
+    Path(strand_id): Path<String>,
+) -> Result<Json<StrandRuntimeSnapshot>, ApiError> {
     service
-        .runtime_snapshot(&session_id)
+        .runtime_snapshot(&strand_id)
         .map_err(ApiError::from_service)?
         .map(Json)
-        .ok_or_else(|| ApiError::not_found("session not found"))
+        .ok_or_else(|| ApiError::not_found("strand not found"))
 }
 
 async fn openapi() -> Json<utoipa::openapi::OpenApi> {
@@ -626,12 +623,12 @@ impl ApiError {
     /// degrade to 500, so routing any service error through here is safe.
     pub(crate) fn from_service(message: String) -> Self {
         let text = message.as_str();
-        if text == "session not found" || text == "soul not found" || text.ends_with("not found") {
+        if text == "strand not found" || text == "soul not found" || text.ends_with("not found") {
             Self::not_found(message)
         } else if text.starts_with("unknown soul")
             || text.contains("must not be empty")
             || text.contains("must contain text")
-            || text.starts_with("session_strategy must be")
+            || text.starts_with("strand_strategy must be")
             || text.contains("object key")
             || text.contains("object uri")
             || text.contains("path segment")
@@ -662,36 +659,36 @@ impl IntoResponse for ApiError {
 #[openapi(
     paths(
         health,
-        create_session,
-        list_sessions,
+        create_strand,
+        list_strands,
         create_soul,
         list_souls,
         get_soul,
         create_webhook,
         list_webhooks,
         ingest_webhook,
-        get_session,
+        get_strand,
         list_messages,
-        session_material,
-        send_session,
+        strand_material,
+        send_strand,
         compact_exec,
         compact_query,
         runtime_snapshot,
         crate::bucket::get_bucket_object
     ),
     components(schemas(
-        CreateSessionResponse,
+        CreateStrandResponse,
         CreateSoulRequest,
         CreateWebhookRequest,
         WebhookSubscription,
         ErrorResponse,
         HealthResponse,
         MaterialRequest,
-        SendSessionRequest,
-        SendSessionAcceptedResponse,
-        SessionDetail,
-        SessionMaterial,
-        SessionRuntimeSnapshot,
+        SendStrandRequest,
+        SendStrandAcceptedResponse,
+        StrandDetail,
+        StrandMaterial,
+        StrandRuntimeSnapshot,
         Soul,
         Strand,
         santi_core::ActorType,
@@ -707,9 +704,9 @@ impl IntoResponse for ApiError {
         santi_core::MessageState,
         santi_core::MaterialKind,
         santi_core::MaterialUpdated,
-        santi_core::SessionEffect,
-        santi_core::SessionMessage,
-        santi_core::SessionMessageRef,
+        santi_core::StrandEffect,
+        santi_core::StrandMessage,
+        santi_core::StrandMessageRef,
         santi_core::ThinkingSpan,
         santi_core::ThinkingSpanState,
         santi_core::ToolCall,
@@ -735,7 +732,7 @@ mod tests {
     #[test]
     fn classifies_service_errors_by_status() {
         // Absent referenced resources → 404.
-        assert_eq!(status("session not found"), StatusCode::NOT_FOUND);
+        assert_eq!(status("strand not found"), StatusCode::NOT_FOUND);
         assert_eq!(status("soul not found"), StatusCode::NOT_FOUND);
 
         // Rejected input → 400.
@@ -749,7 +746,7 @@ mod tests {
             StatusCode::BAD_REQUEST
         );
         assert_eq!(
-            status("session_strategy must be 'per_thread' or 'single'"),
+            status("strand_strategy must be 'per_thread' or 'single'"),
             StatusCode::BAD_REQUEST
         );
         assert_eq!(status("strand inbox is full (…)"), StatusCode::BAD_REQUEST);

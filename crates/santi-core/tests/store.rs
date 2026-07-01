@@ -29,7 +29,7 @@ fn schema_matches_runtime() {
         "souls",
         "messages",
         "message_events",
-        "session_effects",
+        "strand_effects",
         "strands",
         "strand_inbox",
         "turns",
@@ -48,12 +48,16 @@ fn schema_matches_runtime() {
             .expect("table lookup");
         assert_eq!(exists, 1, "missing table {table}");
     }
+    // The discarded tables keep their historical (pre-rename) names — these
+    // are the OLD session-era tables that must NOT exist in the clean schema.
     for table in [
         "accounts",
         "soul_profiles",
+        "soul_sessions",
         "sessions",
         "session_profiles",
         "r_session_messages",
+        "session_effects",
     ] {
         let exists: i64 = conn
             .query_row(
@@ -70,7 +74,7 @@ fn schema_matches_runtime() {
 fn appends_relations_in_order() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let strand = store.create_session().expect("create strand");
+    let strand = store.create_strand().expect("create strand");
     let user = store
         .append_message(
             &strand.id,
@@ -81,7 +85,7 @@ fn appends_relations_in_order() {
             MessageIntake::Request,
         )
         .expect("append user")
-        .session_message;
+        .strand_message;
 
     assert_eq!(user.relation.strand_seq, 1);
     let input = store.assembly_input(&strand.id).expect("assembly input");
@@ -93,7 +97,7 @@ fn appends_relations_in_order() {
 fn maps_santi_system_input() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let strand = store.create_session().expect("create strand");
+    let strand = store.create_strand().expect("create strand");
     let message = store
         .append_santi_system_message(
             &strand.id,
@@ -101,7 +105,7 @@ fn maps_santi_system_input() {
             MessageIntake::Request,
         )
         .expect("append santi system")
-        .session_message;
+        .strand_message;
 
     assert_eq!(message.message.actor_type, ActorType::System);
     assert_eq!(message.message.message_kind, MessageKind::SantiSystem);
@@ -118,7 +122,7 @@ fn maps_santi_system_input() {
 fn thinking_spans_become_reasoning_items() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let strand = store.create_session().expect("create strand");
+    let strand = store.create_strand().expect("create strand");
     let user = store
         .append_message(
             &strand.id,
@@ -129,7 +133,7 @@ fn thinking_spans_become_reasoning_items() {
             MessageIntake::Request,
         )
         .expect("append user")
-        .session_message;
+        .strand_message;
     let turn = store
         .start_turn(&strand.id, &user.message.id)
         .expect("start turn")
@@ -183,7 +187,7 @@ fn thinking_spans_become_reasoning_items() {
 fn projects_timeline_to_interleaved_items() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let strand = store.create_session().expect("create strand");
+    let strand = store.create_strand().expect("create strand");
 
     // A turn with a shell tool roundtrip and per-round assistant text: the
     // replay timeline interleaves user, function call, result, assistant text.
@@ -197,7 +201,7 @@ fn projects_timeline_to_interleaved_items() {
             MessageIntake::Request,
         )
         .expect("append user")
-        .session_message;
+        .strand_message;
     let turn = store
         .start_turn(&strand.id, &user.message.id)
         .expect("start turn")
@@ -223,7 +227,7 @@ fn projects_timeline_to_interleaved_items() {
         )
         .expect("append tool result");
     // The final assistant text is a soul-only timeline item (DC4b); the lumped
-    // session-visible reply is stored separately by the service.
+    // strand-visible reply is stored separately by the service.
     store
         .append_soul_assistant_text(&strand.id, "done")
         .expect("append soul assistant text");
@@ -299,12 +303,12 @@ fn append_timeline_message(
 fn drive_starts_coalesces_and_re_drives() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let strand = store.create_session().expect("create strand");
+    let strand = store.create_strand().expect("create strand");
 
     // No requests → not behind → no turn.
     assert!(
         store
-            .try_start_turn(&strand.id, "session_send", None)
+            .try_start_turn(&strand.id, "strand_send", None)
             .expect("try")
             .is_none()
     );
@@ -318,7 +322,7 @@ fn drive_starts_coalesces_and_re_drives() {
         MessageIntake::Request,
     );
     let started = store
-        .try_start_turn(&strand.id, "session_send", None)
+        .try_start_turn(&strand.id, "strand_send", None)
         .expect("try")
         .expect("turn started");
     assert_eq!(started.turn.status, santi_core::TurnStatus::Running);
@@ -335,7 +339,7 @@ fn drive_starts_coalesces_and_re_drives() {
     );
     assert!(
         store
-            .try_start_turn(&strand.id, "session_send", None)
+            .try_start_turn(&strand.id, "strand_send", None)
             .expect("try")
             .is_none(),
         "a running turn must block a second concurrent turn"
@@ -348,7 +352,7 @@ fn drive_starts_coalesces_and_re_drives() {
         .expect("complete");
     assert!(
         store
-            .try_start_turn(&strand.id, "session_send", None)
+            .try_start_turn(&strand.id, "strand_send", None)
             .expect("try")
             .is_some(),
         "accumulated request should drive the next turn at completion"
@@ -359,7 +363,7 @@ fn drive_starts_coalesces_and_re_drives() {
 fn drain_commits_all_pending_inbox_entries_to_one_turn() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let strand = store.create_session().expect("create strand");
+    let strand = store.create_strand().expect("create strand");
 
     // Multiple adaptors can enqueue concurrently before the driver ever runs;
     // the NEXT drive drains everything present into ONE turn, in arrival order.
@@ -369,7 +373,7 @@ fn drain_commits_all_pending_inbox_entries_to_one_turn() {
             .expect("enqueue");
     }
     let started = store
-        .try_start_turn(&strand.id, "session_send", None)
+        .try_start_turn(&strand.id, "strand_send", None)
         .expect("try")
         .expect("turn started");
     assert_eq!(started.drained_messages.len(), 3);
@@ -383,7 +387,7 @@ fn drain_commits_all_pending_inbox_entries_to_one_turn() {
     // The inbox is now empty — nothing left to drain, no new turn.
     assert!(
         store
-            .try_start_turn(&strand.id, "session_send", None)
+            .try_start_turn(&strand.id, "strand_send", None)
             .expect("try")
             .is_none()
     );
@@ -393,7 +397,7 @@ fn drain_commits_all_pending_inbox_entries_to_one_turn() {
 fn inbox_gate_rejects_past_threshold() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let strand = store.create_session().expect("create strand");
+    let strand = store.create_strand().expect("create strand");
 
     // Never drained (no try_start_turn call), so every enqueue adds to the
     // undrained count — eventually the gate must start rejecting rather than
@@ -419,7 +423,7 @@ fn inbox_gate_rejects_past_threshold() {
 fn record_messages_do_not_drive() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let strand = store.create_session().expect("create strand");
+    let strand = store.create_strand().expect("create strand");
 
     // A RECORD (the soul's own output / a failure notice) is not a request and
     // must not wake the soul.
@@ -432,7 +436,7 @@ fn record_messages_do_not_drive() {
     );
     assert!(
         store
-            .try_start_turn(&strand.id, "session_send", None)
+            .try_start_turn(&strand.id, "strand_send", None)
             .expect("try")
             .is_none(),
         "record messages must not drive a turn"
@@ -449,7 +453,7 @@ fn record_messages_do_not_drive() {
 fn boot_recovery_reconciles_and_does_not_retry() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let strand = store.create_session().expect("create strand");
+    let strand = store.create_strand().expect("create strand");
     append_timeline_message(
         &store,
         &strand.id,
@@ -459,7 +463,7 @@ fn boot_recovery_reconciles_and_does_not_retry() {
     );
     // A turn starts and then the process "crashes" (turn left running).
     store
-        .try_start_turn(&strand.id, "session_send", None)
+        .try_start_turn(&strand.id, "strand_send", None)
         .expect("try")
         .expect("turn started");
     // Before recovery it is the only pending-driver; reconcile interrupts it.
@@ -467,7 +471,7 @@ fn boot_recovery_reconciles_and_does_not_retry() {
     // The interrupted turn counts as "attempted" → the request is NOT retried.
     assert!(
         store
-            .try_start_turn(&strand.id, "session_send", None)
+            .try_start_turn(&strand.id, "strand_send", None)
             .expect("try")
             .is_none(),
         "an interrupted turn must not auto-retry its request"
@@ -489,7 +493,7 @@ fn boot_recovery_reconciles_and_does_not_retry() {
     );
     assert!(
         store
-            .try_start_turn(&strand.id, "session_send", None)
+            .try_start_turn(&strand.id, "strand_send", None)
             .expect("try")
             .is_some()
     );

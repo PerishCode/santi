@@ -37,11 +37,11 @@ impl SantiService {
                     MessageIntake::Record,
                 )
             {
-                last_seen_strand_seq = Some(message.session_message.relation.strand_seq);
+                last_seen_strand_seq = Some(message.strand_message.relation.strand_seq);
                 self.publish_stream(
                     strand_id,
                     SantiStreamPayload::MessageCreated {
-                        message: message.session_message,
+                        message: message.strand_message,
                     },
                 );
             }
@@ -50,11 +50,11 @@ impl SantiService {
                 failed_system_message(turn_id),
                 MessageIntake::Record,
             ) {
-                last_seen_strand_seq = Some(message.session_message.relation.strand_seq);
+                last_seen_strand_seq = Some(message.strand_message.relation.strand_seq);
                 self.publish_stream(
                     strand_id,
                     SantiStreamPayload::MessageCreated {
-                        message: message.session_message,
+                        message: message.strand_message,
                     },
                 );
             }

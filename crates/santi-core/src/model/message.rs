@@ -99,7 +99,7 @@ pub struct Message {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SessionMessageRef {
+pub struct StrandMessageRef {
     pub strand_id: String,
     pub message_id: String,
     pub strand_seq: i64,
@@ -107,8 +107,8 @@ pub struct SessionMessageRef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SessionMessage {
-    pub relation: SessionMessageRef,
+pub struct StrandMessage {
+    pub relation: StrandMessageRef,
     pub message: Message,
     pub content_text: String,
 }

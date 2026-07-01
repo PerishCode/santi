@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    SESSION_WORKSPACE_URI, SOUL_WORKSPACE_URI, SoulProfile, Strand, Timestamp, session_memory_uri,
+    SESSION_WORKSPACE_URI, SOUL_WORKSPACE_URI, Strand, Timestamp, session_memory_uri,
     soul_memory_uri, timestamp_from_system_time,
 };
 
@@ -13,7 +13,6 @@ const SANTI_CHANNEL: &str = "santi";
 pub(crate) struct SystemPromptRequest<'a> {
     pub session_id: &'a str,
     pub strand: &'a Strand,
-    pub soul_profile: &'a SoulProfile,
     pub soul_memory_path: PathBuf,
     pub session_memory_path: PathBuf,
 }
@@ -49,11 +48,14 @@ fn render_santi_system_description() -> String {
 }
 
 fn render_meta(request: SystemPromptRequest<'_>) -> String {
+    // No soul_name: a soul's name is not a runtime fact, it's part of the
+    // soul's own memory (rendered in [santi-soul]). Dissolving soul_profile
+    // dropped it here early; the fuller [santi-meta] slim (drop channel too) is
+    // STEP 6.
     [
         "[santi-meta]".to_string(),
         format!("channel: {SANTI_CHANNEL}"),
         format!("soul_id: {}", request.strand.soul_id),
-        format!("soul_name: {}", request.soul_profile.soul_name),
         format!("session_id: {}", request.session_id),
     ]
     .join("\n")

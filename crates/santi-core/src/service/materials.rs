@@ -1,7 +1,7 @@
 use crate::assembly::system_prompt::{SystemPromptRequest, render_system_prompt};
 use crate::{
-    MaterialKind, MaterialRequest, MaterialUpdated, SantiStreamPayload, SessionMaterial,
-    SoulProfile, Strand, timestamp_now,
+    MaterialKind, MaterialRequest, MaterialUpdated, SantiStreamPayload, SessionMaterial, Strand,
+    timestamp_now,
 };
 
 use super::{MaterialCacheKey, SantiService};
@@ -20,11 +20,7 @@ impl SantiService {
                     .store
                     .strand(session_id)?
                     .ok_or_else(|| "session not found".to_string())?;
-                let soul_profile = self
-                    .store
-                    .soul_profile(&strand.soul_id)?
-                    .ok_or_else(|| "soul_profile not found".to_string())?;
-                self.system_prompt_material(&strand, &soul_profile)
+                self.system_prompt_material(&strand)
             }
         }
     }
@@ -36,24 +32,15 @@ impl SantiService {
             .store
             .strand(strand_id)?
             .ok_or_else(|| "strand not found".to_string())?;
-        let soul_profile = self
-            .store
-            .soul_profile(&strand.soul_id)?
-            .ok_or_else(|| "soul_profile not found".to_string())?;
-        Ok(self.system_prompt_material(&strand, &soul_profile)?.text)
+        Ok(self.system_prompt_material(&strand)?.text)
     }
 
-    fn system_prompt_material(
-        &self,
-        strand: &Strand,
-        soul_profile: &SoulProfile,
-    ) -> Result<SessionMaterial, String> {
+    fn system_prompt_material(&self, strand: &Strand) -> Result<SessionMaterial, String> {
         let session_id = strand.id.as_str();
         let text = render_system_prompt(SystemPromptRequest {
             session_id,
             strand,
-            soul_profile,
-            soul_memory_path: self.soul_memory_file(&soul_profile.soul_id),
+            soul_memory_path: self.soul_memory_file(&strand.soul_id),
             session_memory_path: self.session_memory_file(session_id),
         })?;
         // A strand has exactly one soul, so its id alone is a stable cache key.

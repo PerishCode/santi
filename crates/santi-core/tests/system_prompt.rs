@@ -39,7 +39,9 @@ fn renders_material_shape() {
     assert!(text.contains("You are a distinct soul running inside this Santi instance."));
     assert!(text.contains("[santi-meta]"));
     assert!(text.contains("channel: santi"));
-    assert!(text.contains("soul_name: Liberte"));
+    assert!(text.contains("soul_id: soul_default"));
+    // soul_profile dissolved: no name in [santi-meta] (identity is in memory).
+    assert!(!text.contains("soul_name"));
     assert!(text.contains(&format!(
         "{} will always be displayed in [santi-soul].",
         soul_memory_uri()

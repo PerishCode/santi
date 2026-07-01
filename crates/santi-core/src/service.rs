@@ -20,8 +20,8 @@ use crate::{
     CreateSoulRequest, CreateWebhookRequest, IngestOutcome, MaterialKind, MessageContent,
     MessageKind, SantiStore, SantiStreamEvent, SantiStreamPayload, SendSessionAcceptedResponse,
     SendSessionRequest, SessionDetail, SessionMaterial, SessionMessage, SessionRuntimeSnapshot,
-    SoulProfile, Strand, StrandSelector, ThinkingCompletionReason, ThinkingSpan, Turn,
-    TurnActivityState, WebhookSubscription, prefixed_id, timestamp_now,
+    Soul, Strand, StrandSelector, ThinkingCompletionReason, ThinkingSpan, Turn, TurnActivityState,
+    WebhookSubscription, prefixed_id, timestamp_now,
 };
 use failure::ProviderTurnFailure;
 use text_delta::TextDeltaUpdate;
@@ -95,27 +95,33 @@ impl SantiService {
         })
     }
 
-    pub fn create_soul(&self, request: CreateSoulRequest) -> Result<SoulProfile, String> {
-        if request.soul_name.trim().is_empty() {
-            return Err("soul_name must not be empty".to_string());
+    /// Create a soul and seed its initial `[santi-soul]` memory. A soul is
+    /// id-only; its identity IS its memory, so creation optionally carries the
+    /// starting memory to write into the soul's memory file (absent → a blank
+    /// soul that will author its own).
+    pub fn create_soul(&self, request: CreateSoulRequest) -> Result<Soul, String> {
+        let soul = self.store.create_soul()?;
+        if let Some(memory) = request
+            .memory
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+        {
+            let path = self.soul_memory_file(&soul.id);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            std::fs::write(&path, memory).map_err(|error| error.to_string())?;
         }
-        self.store.create_soul(
-            request.soul_name.trim(),
-            request.nickname.trim(),
-            request
-                .desc
-                .as_deref()
-                .map(str::trim)
-                .filter(|d| !d.is_empty()),
-        )
+        Ok(soul)
     }
 
-    pub fn list_souls(&self) -> Result<Vec<SoulProfile>, String> {
+    pub fn list_souls(&self) -> Result<Vec<Soul>, String> {
         self.store.list_souls()
     }
 
-    pub fn soul(&self, soul_id: &str) -> Result<Option<SoulProfile>, String> {
-        self.store.soul_profile(soul_id)
+    pub fn soul(&self, soul_id: &str) -> Result<Option<Soul>, String> {
+        self.store.soul(soul_id)
     }
 
     pub fn create_webhook(
@@ -135,7 +141,7 @@ impl SantiService {
         if secret_env.is_empty() {
             return Err("webhook secret_env must not be empty".to_string());
         }
-        if self.store.soul_profile(soul_id)?.is_none() {
+        if self.store.soul(soul_id)?.is_none() {
             return Err("soul not found".to_string());
         }
         let session_strategy = request
@@ -321,14 +327,8 @@ impl SantiService {
             ),
         };
 
-        let soul_profile = self
-            .store
-            .soul_profile(&strand.soul_id)?
-            .ok_or_else(|| "soul_profile disappeared".to_string())?;
-
         Ok(SendSessionAcceptedResponse {
             strand,
-            soul_profile,
             turn,
             user_message,
         })

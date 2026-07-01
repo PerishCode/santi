@@ -3,9 +3,9 @@ mod timeline;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{
-    ActorType, Compact, MessageKind, SessionEffect, SessionMessage, SoulProfile, Strand,
-    StrandEntry, StrandTargetType, ThinkingSpan, ToolCall, ToolResult, Turn, WebhookSubscription,
-    prefixed_id, timestamp_now,
+    ActorType, Compact, MessageKind, SessionEffect, SessionMessage, Soul, Strand, StrandEntry,
+    StrandTargetType, ThinkingSpan, ToolCall, ToolResult, Turn, WebhookSubscription, prefixed_id,
+    timestamp_now,
 };
 
 use super::rows::*;
@@ -118,19 +118,16 @@ pub(super) fn drain_inbox_in_tx(
     Ok(drained)
 }
 
-pub(super) fn soul_profile_by_id(
-    conn: &Connection,
-    soul_id: &str,
-) -> Result<Option<SoulProfile>, String> {
+pub(super) fn soul_by_id(conn: &Connection, soul_id: &str) -> Result<Option<Soul>, String> {
     conn.query_row(
         r#"
-        SELECT soul_id, soul_name, nickname, avatar_ref, avatar_seed, desc, created_at, updated_at
-        FROM soul_profiles
-        WHERE soul_id = ?1
+        SELECT id, created_at, updated_at
+        FROM souls
+        WHERE id = ?1
         LIMIT 1
         "#,
         params![soul_id],
-        map_soul_profile_row,
+        map_soul_row,
     )
     .optional()
     .map_err(|error| error.to_string())

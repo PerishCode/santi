@@ -22,7 +22,7 @@ use santi_core::{
     CreateSoulRequest, CreateWebhookRequest, ErrorResponse, HealthResponse, IngestOutcome,
     MaterialRequest, SantiService, SantiServiceConfig, SantiStreamEvent, SantiStreamPayload,
     SendSessionAcceptedResponse, SendSessionRequest, SessionDetail, SessionMaterial,
-    SessionRuntimeSnapshot, SoulProfile, Strand, WebhookSubscription, prefixed_id, timestamp_now,
+    SessionRuntimeSnapshot, Soul, Strand, WebhookSubscription, prefixed_id, timestamp_now,
 };
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -197,12 +197,12 @@ async fn list_sessions(State(service): State<SantiService>) -> Result<Json<Vec<S
     post,
     path = "/api/v1/souls",
     request_body = CreateSoulRequest,
-    responses((status = 200, body = SoulProfile), (status = 500, body = ErrorResponse))
+    responses((status = 200, body = Soul), (status = 500, body = ErrorResponse))
 )]
 async fn create_soul(
     State(service): State<SantiService>,
     Json(request): Json<CreateSoulRequest>,
-) -> Result<Json<SoulProfile>, ApiError> {
+) -> Result<Json<Soul>, ApiError> {
     service
         .create_soul(request)
         .map(Json)
@@ -212,11 +212,9 @@ async fn create_soul(
 #[utoipa::path(
     get,
     path = "/api/v1/souls",
-    responses((status = 200, body = [SoulProfile]), (status = 500, body = ErrorResponse))
+    responses((status = 200, body = [Soul]), (status = 500, body = ErrorResponse))
 )]
-async fn list_souls(
-    State(service): State<SantiService>,
-) -> Result<Json<Vec<SoulProfile>>, ApiError> {
+async fn list_souls(State(service): State<SantiService>) -> Result<Json<Vec<Soul>>, ApiError> {
     service
         .list_souls()
         .map(Json)
@@ -228,7 +226,7 @@ async fn list_souls(
     path = "/api/v1/souls/{soul_id}",
     params(("soul_id" = String, Path)),
     responses(
-        (status = 200, body = SoulProfile),
+        (status = 200, body = Soul),
         (status = 404, body = ErrorResponse),
         (status = 500, body = ErrorResponse)
     )
@@ -236,7 +234,7 @@ async fn list_souls(
 async fn get_soul(
     State(service): State<SantiService>,
     Path(soul_id): Path<String>,
-) -> Result<Json<SoulProfile>, ApiError> {
+) -> Result<Json<Soul>, ApiError> {
     match service.soul(&soul_id).map_err(ApiError::from_service)? {
         Some(soul) => Ok(Json(soul)),
         None => Err(ApiError::not_found("soul not found")),
@@ -694,7 +692,7 @@ impl IntoResponse for ApiError {
         SessionDetail,
         SessionMaterial,
         SessionRuntimeSnapshot,
-        SoulProfile,
+        Soul,
         Strand,
         santi_core::ActorType,
         santi_core::Compact,
@@ -747,13 +745,14 @@ mod tests {
             StatusCode::BAD_REQUEST
         );
         assert_eq!(
-            status("soul_name must not be empty"),
+            status("webhook name must not be empty"),
             StatusCode::BAD_REQUEST
         );
         assert_eq!(
             status("session_strategy must be 'per_thread' or 'single'"),
             StatusCode::BAD_REQUEST
         );
+        assert_eq!(status("strand inbox is full (…)"), StatusCode::BAD_REQUEST);
 
         // Broken invariants and unrecognized messages → 500.
         assert_eq!(

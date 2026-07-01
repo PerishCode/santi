@@ -46,22 +46,13 @@ pub struct MaterialUpdated {
     pub updated_at: Timestamp,
 }
 
+/// A soul is a cyber-individual, keyed by id alone. It has no name/avatar/desc
+/// column: identity is the mutable self, and it lives entirely in the soul's
+/// memory (rendered live into `[santi-soul]`), not in a profile row. The
+/// timestamps are pure provenance.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Soul {
     pub id: String,
-    pub memory: String,
-    pub created_at: Timestamp,
-    pub updated_at: Timestamp,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SoulProfile {
-    pub soul_id: String,
-    pub soul_name: String,
-    pub nickname: String,
-    pub avatar_ref: Option<String>,
-    pub avatar_seed: String,
-    pub desc: Option<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -263,12 +254,13 @@ pub struct StrandEntry {
 }
 
 /// Create a new soul (an individual). Souls are API-managed, never config.
+/// A soul is id-only; its identity is its memory, so the only thing to supply
+/// at creation is the initial `[santi-soul]` memory to seed (empty/absent → a
+/// blank soul that will author its own).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CreateSoulRequest {
-    pub soul_name: String,
-    pub nickname: String,
     #[serde(default)]
-    pub desc: Option<String>,
+    pub memory: Option<String>,
 }
 
 /// An API-managed webhook subscription: how an external source reaches a soul.
@@ -327,7 +319,6 @@ impl SendSessionRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SendSessionAcceptedResponse {
     pub strand: Strand,
-    pub soul_profile: SoulProfile,
     pub turn: Turn,
     /// The content this send just enqueued, once the driver has actually
     /// committed it to the timeline. Absent when this send coalesced into an
@@ -436,7 +427,6 @@ pub enum SantiStreamPayload {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SessionRuntimeSnapshot {
     pub strand: Strand,
-    pub soul_profile: Option<SoulProfile>,
     pub messages: Vec<SessionMessage>,
     pub turns: Vec<Turn>,
     pub thinking_spans: Vec<ThinkingSpan>,

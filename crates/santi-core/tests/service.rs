@@ -133,7 +133,10 @@ async fn sends_with_runtime() {
     assert!(instructions.contains("You are a distinct soul running inside this Santi instance."));
     assert!(instructions.contains("[santi-meta]"));
     assert!(instructions.contains("channel: santi"));
-    assert!(instructions.contains("soul_name: Liberte"));
+    assert!(instructions.contains("soul_id: soul_default"));
+    // soul_profile is dissolved: a soul's name is not a runtime fact, it lives
+    // in the soul's own memory ([santi-soul]), so [santi-meta] no longer emits it.
+    assert!(!instructions.contains("soul_name"));
     assert!(instructions.contains("[santi-soul]"));
     assert!(instructions.contains("[santi-session]"));
     assert!(instructions.contains(&format!(
@@ -301,7 +304,7 @@ async fn ingest_external_event_triggers_turn() {
     )
     .expect("open service");
 
-    let soul_id = service.list_souls().expect("list souls")[0].soul_id.clone();
+    let soul_id = service.list_souls().expect("list souls")[0].id.clone();
     let label = "github:ops:issue:PerishCode/santi#42";
     let santi_core::IngestOutcome::Accepted {
         strand_id: session_id,
@@ -427,15 +430,13 @@ async fn send_session_targets_the_strands_own_soul() {
     )
     .expect("open service");
 
-    let default_soul = service.list_souls().expect("list souls")[0].soul_id.clone();
+    let default_soul = service.list_souls().expect("list souls")[0].id.clone();
     let secretary = service
         .create_soul(CreateSoulRequest {
-            soul_name: "Secretary".to_string(),
-            nickname: "sec".to_string(),
-            desc: None,
+            memory: Some("# I am the secretary".to_string()),
         })
         .expect("create soul");
-    assert_ne!(secretary.soul_id, default_soul);
+    assert_ne!(secretary.id, default_soul);
 
     // `create_session` (client-facing, no label) always binds the default soul —
     // multi-soul-per-strand is gone, so a non-default soul is reached only via a
@@ -454,7 +455,6 @@ async fn send_session_targets_the_strands_own_soul() {
         )
         .await
         .expect("send session");
-    assert_eq!(response.soul_profile.soul_id, default_soul);
     assert_eq!(response.strand.soul_id, default_soul);
 
     // A label-anchored strand can be owned by a non-default soul (via ingest).
@@ -462,7 +462,7 @@ async fn send_session_targets_the_strands_own_soul() {
         strand_id: secretary_strand_id,
     } = service
         .ingest_external_event(
-            &secretary.soul_id,
+            &secretary.id,
             "github:issue:1",
             "hello secretary".to_string(),
         )
@@ -481,8 +481,7 @@ async fn send_session_targets_the_strands_own_soul() {
         )
         .await
         .expect("send session");
-    assert_eq!(secretary_response.soul_profile.soul_id, secretary.soul_id);
-    assert_eq!(secretary_response.strand.soul_id, secretary.soul_id);
+    assert_eq!(secretary_response.strand.soul_id, secretary.id);
 
     // An unknown session id is rejected cleanly, not a 500.
     let error = service

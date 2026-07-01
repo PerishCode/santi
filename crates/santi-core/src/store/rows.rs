@@ -3,21 +3,16 @@ use serde_json::Value;
 
 use crate::{
     ActorType, Compact, Message, MessageContent, MessageKind, MessageState, SessionEffect,
-    SessionMessage, SessionMessageRef, SoulProfile, Strand, StrandTargetType,
-    ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState, ToolCall, ToolResult, Turn,
-    TurnStatus, TurnTriggerType, WebhookSubscription,
+    SessionMessage, SessionMessageRef, Soul, Strand, StrandTargetType, ThinkingCompletionReason,
+    ThinkingSpan, ThinkingSpanState, ToolCall, ToolResult, Turn, TurnStatus, TurnTriggerType,
+    WebhookSubscription,
 };
 
-pub(super) fn map_soul_profile_row(row: &Row<'_>) -> rusqlite::Result<SoulProfile> {
-    Ok(SoulProfile {
-        soul_id: row.get(0)?,
-        soul_name: row.get(1)?,
-        nickname: row.get(2)?,
-        avatar_ref: row.get(3)?,
-        avatar_seed: row.get(4)?,
-        desc: row.get(5)?,
-        created_at: row.get(6)?,
-        updated_at: row.get(7)?,
+pub(super) fn map_soul_row(row: &Row<'_>) -> rusqlite::Result<Soul> {
+    Ok(Soul {
+        id: row.get(0)?,
+        created_at: row.get(1)?,
+        updated_at: row.get(2)?,
     })
 }
 

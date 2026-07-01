@@ -27,11 +27,11 @@ fn schema_matches_runtime() {
     let conn = Connection::open(db).expect("open sqlite");
     for table in [
         "souls",
-        "soul_profiles",
         "messages",
         "message_events",
         "session_effects",
         "strands",
+        "strand_inbox",
         "turns",
         "tool_calls",
         "tool_results",
@@ -50,6 +50,7 @@ fn schema_matches_runtime() {
     }
     for table in [
         "accounts",
+        "soul_profiles",
         "sessions",
         "session_profiles",
         "r_session_messages",
@@ -499,40 +500,28 @@ fn create_soul_and_label_anchoring() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
 
-    // Souls are API-managed individuals; a created soul is distinct from default.
-    let soul = store
-        .create_soul("Echo", "echo", Some("a test soul"))
-        .expect("create soul");
-    assert_ne!(soul.soul_id, store.default_soul_id());
-    assert_eq!(soul.soul_name, "Echo");
+    // Souls are API-managed individuals, id-only; a created soul is distinct
+    // from default and shows up in the roster.
+    let soul = store.create_soul().expect("create soul");
+    assert_ne!(soul.id, store.default_soul_id());
     assert!(store.list_souls().expect("list").len() >= 2);
-    assert_eq!(
-        store
-            .soul_profile(&soul.soul_id)
-            .expect("soul")
-            .expect("exists")
-            .nickname,
-        "echo"
-    );
+    assert!(store.soul(&soul.id).expect("soul").is_some());
 
     // External label anchors a strand (scoped to its soul): same label → same
     // strand; new → new; a different soul on the same label gets its own strand.
     let s1 = store
-        .find_or_create_strand_by_label(&soul.soul_id, "github:issue:49")
+        .find_or_create_strand_by_label(&soul.id, "github:issue:49")
         .expect("label strand");
     let s1_again = store
-        .find_or_create_strand_by_label(&soul.soul_id, "github:issue:49")
+        .find_or_create_strand_by_label(&soul.id, "github:issue:49")
         .expect("label strand again");
     assert_eq!(s1.id, s1_again.id);
     let s2 = store
-        .find_or_create_strand_by_label(&soul.soul_id, "github:issue:50")
+        .find_or_create_strand_by_label(&soul.id, "github:issue:50")
         .expect("other label");
     assert_ne!(s1.id, s2.id);
-    assert_eq!(s1.soul_id, soul.soul_id);
-    assert_eq!(
-        store.soul_id_for_strand(&s1.id).expect("soul id"),
-        soul.soul_id
-    );
+    assert_eq!(s1.soul_id, soul.id);
+    assert_eq!(store.soul_id_for_strand(&s1.id).expect("soul id"), soul.id);
 
     let default_strand = store
         .find_or_create_strand_by_label(store.default_soul_id(), "github:issue:49")

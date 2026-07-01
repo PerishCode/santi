@@ -21,7 +21,7 @@ use db::*;
 use rows::{actor_type_db, collect_rows, map_webhook_row, message_state_db};
 use schema::SCHEMA;
 
-const SANTI_SCHEMA_VERSION: u32 = 17;
+const SANTI_SCHEMA_VERSION: u32 = 18;
 const DEFAULT_SOUL_ID: &str = "soul_default";
 /// The runtime's one system actor identity. No account/user: every non-soul
 /// actor speaks as `system`, whether it's a runtime-authored notice (kind
@@ -106,20 +106,14 @@ impl SantiStore {
     fn seed_defaults(&self) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         let now = timestamp_now();
+        // The default soul is id-only; its identity (the first soul = Liberte,
+        // the secretary) lives entirely in its memory FILE, which survives a DB
+        // wipe. Seeding the row is just "this soul exists". Seeding the initial
+        // memory of a fresh instance is config-exposed and lands in STEP 6.
         conn.execute(
             r#"
-            INSERT OR IGNORE INTO souls (id, memory, created_at, updated_at)
-            VALUES (?1, '', ?2, ?2)
-            "#,
-            params![DEFAULT_SOUL_ID, now],
-        )
-        .map_err(|error| error.to_string())?;
-        conn.execute(
-            r#"
-            INSERT OR IGNORE INTO soul_profiles (
-              soul_id, soul_name, nickname, avatar_ref, avatar_seed, desc, created_at, updated_at
-            )
-            VALUES (?1, 'Liberte', 'Santi', NULL, ?1, NULL, ?2, ?2)
+            INSERT OR IGNORE INTO souls (id, created_at, updated_at)
+            VALUES (?1, ?2, ?2)
             "#,
             params![DEFAULT_SOUL_ID, now],
         )
@@ -187,9 +181,7 @@ impl SantiStore {
         let Some(strand) = strand_by_id(&conn, strand_id)? else {
             return Ok(None);
         };
-        let soul_profile = soul_profile_by_id(&conn, &strand.soul_id)?;
         Ok(Some(crate::SessionRuntimeSnapshot {
-            soul_profile,
             messages: session_messages(&conn, strand_id)?,
             turns: turns_for_strand(&conn, &strand.id)?,
             thinking_spans: soul_thinking_spans(&conn, &strand.id)?,
@@ -292,7 +284,7 @@ impl SantiStore {
     ) -> Result<Strand, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        if soul_profile_by_id(&tx, soul_id)?.is_none() {
+        if soul_by_id(&tx, soul_id)?.is_none() {
             return Err("soul not found".to_string());
         }
         let strand_id = if let Some(existing) = strand_by_label(&tx, soul_id, label)? {
@@ -425,56 +417,41 @@ impl SantiStore {
         webhook_by_name(&conn, name)
     }
 
-    /// Create a new soul (an individual). Souls are API-managed, never config.
-    pub fn create_soul(
-        &self,
-        soul_name: &str,
-        nickname: &str,
-        desc: Option<&str>,
-    ) -> Result<crate::SoulProfile, String> {
-        let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction().map_err(|error| error.to_string())?;
+    /// Create a new soul (an individual), id-only. Souls are API-managed, never
+    /// config. Seeding the soul's initial `[santi-soul]` memory is the caller's
+    /// job (the service, which owns the memory FILE) — the store just mints the
+    /// identity row.
+    pub fn create_soul(&self) -> Result<crate::Soul, String> {
+        let conn = self.conn.lock().unwrap();
         let soul_id = prefixed_id("soul");
         let now = timestamp_now();
-        tx.execute(
-            "INSERT INTO souls (id, memory, created_at, updated_at) VALUES (?1, '', ?2, ?2)",
+        conn.execute(
+            "INSERT INTO souls (id, created_at, updated_at) VALUES (?1, ?2, ?2)",
             params![soul_id, now],
         )
         .map_err(|error| error.to_string())?;
-        tx.execute(
-            r#"
-            INSERT INTO soul_profiles (
-              soul_id, soul_name, nickname, avatar_ref, avatar_seed, desc, created_at, updated_at
-            )
-            VALUES (?1, ?2, ?3, NULL, ?1, ?4, ?5, ?5)
-            "#,
-            params![soul_id, soul_name, nickname, desc, now],
-        )
-        .map_err(|error| error.to_string())?;
-        tx.commit().map_err(|error| error.to_string())?;
-        soul_profile_by_id(&conn, &soul_id)?.ok_or_else(|| "created soul missing".to_string())
+        soul_by_id(&conn, &soul_id)?.ok_or_else(|| "created soul missing".to_string())
     }
 
-    pub fn list_souls(&self) -> Result<Vec<crate::SoulProfile>, String> {
+    pub fn list_souls(&self) -> Result<Vec<crate::Soul>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
                 r#"
-                SELECT soul_id, soul_name, nickname, avatar_ref, avatar_seed, desc,
-                       created_at, updated_at
-                FROM soul_profiles ORDER BY created_at ASC, soul_id ASC
+                SELECT id, created_at, updated_at
+                FROM souls ORDER BY created_at ASC, id ASC
                 "#,
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map([], rows::map_soul_profile_row)
+            .query_map([], rows::map_soul_row)
             .map_err(|error| error.to_string())?;
         collect_rows(rows)
     }
 
-    pub fn soul_profile(&self, soul_id: &str) -> Result<Option<crate::SoulProfile>, String> {
+    pub fn soul(&self, soul_id: &str) -> Result<Option<crate::Soul>, String> {
         let conn = self.conn.lock().unwrap();
-        soul_profile_by_id(&conn, soul_id)
+        soul_by_id(&conn, soul_id)
     }
 
     pub fn strand(&self, strand_id: &str) -> Result<Option<Strand>, String> {

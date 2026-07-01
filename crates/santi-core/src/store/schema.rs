@@ -1,18 +1,8 @@
 pub(super) const SCHEMA: &str = r#"
+-- A soul is id-only: its identity is its memory (a file, rendered live into
+-- [santi-soul]), never a profile row. Timestamps are pure provenance.
 CREATE TABLE IF NOT EXISTS souls (
     id TEXT PRIMARY KEY,
-    memory TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS soul_profiles (
-    soul_id TEXT PRIMARY KEY,
-    soul_name TEXT NOT NULL,
-    nickname TEXT NOT NULL,
-    avatar_ref TEXT,
-    avatar_seed TEXT NOT NULL,
-    desc TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );

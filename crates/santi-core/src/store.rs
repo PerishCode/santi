@@ -12,6 +12,7 @@ use crate::{
 };
 
 mod assembly;
+mod compact;
 mod db;
 mod rows;
 mod runtime;
@@ -23,7 +24,7 @@ use rows::{
 };
 use schema::SCHEMA;
 
-const SANTI_SCHEMA_VERSION: u32 = 13;
+const SANTI_SCHEMA_VERSION: u32 = 14;
 const DEFAULT_ACCOUNT_ID: &str = "account_local";
 const DEFAULT_SOUL_ID: &str = "soul_default";
 const SANTI_SYSTEM_ACTOR_ID: &str = "santi";
@@ -564,6 +565,17 @@ impl SantiStore {
     pub fn soul_session(&self, soul_session_id: &str) -> Result<Option<SoulSession>, String> {
         let conn = self.conn.lock().unwrap();
         soul_session_by_id(&conn, soul_session_id)
+    }
+
+    /// Existing soul_session for a (soul, session) pair, or None. Unlike
+    /// `acquire_soul_session`, this never creates one — a lookup, not a bind.
+    pub fn find_soul_session_by_pair(
+        &self,
+        soul_id: &str,
+        session_id: &str,
+    ) -> Result<Option<SoulSession>, String> {
+        let conn = self.conn.lock().unwrap();
+        soul_session_by_pair(&conn, soul_id, session_id)
     }
 
     pub fn soul_id_for_soul_session(&self, soul_session_id: &str) -> Result<String, String> {

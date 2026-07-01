@@ -16,8 +16,9 @@ use tokio::sync::broadcast;
 use crate::assembly::input::provider_input;
 use crate::service_prompt::provider_tools;
 use crate::{
-    ActorType, CreateSessionResponse, CreateSoulRequest, CreateWebhookRequest, MaterialKind,
-    MessageContent, MessageIntake, MessageState, SantiStore, SantiStreamEvent, SantiStreamPayload,
+    ActorType, CompactExecRequest, CompactExecResponse, CompactQueryResponse,
+    CreateSessionResponse, CreateSoulRequest, CreateWebhookRequest, MaterialKind, MessageContent,
+    MessageIntake, MessageState, SantiStore, SantiStreamEvent, SantiStreamPayload,
     SendSessionAcceptedResponse, SendSessionRequest, SessionDetail, SessionMaterial,
     SessionRuntimeSnapshot, SessionSummary, SoulProfile, ThinkingCompletionReason, ThinkingSpan,
     Turn, TurnActivityState, UpdateSessionRequest, WebhookSubscription, prefixed_id, timestamp_now,
@@ -192,6 +193,48 @@ impl SantiService {
         );
         self.poke(&session_id, &soul_session.id, "system");
         Ok(session_id)
+    }
+
+    /// Compact a range of a soul_session's own timeline (self-involved: the soul
+    /// runs this on itself). Resolves (soul, session) → soul_session, then creates
+    /// the projection overlay. The soul authors `summary`; the system only checks scale.
+    pub fn compact_exec(
+        &self,
+        session_id: &str,
+        request: CompactExecRequest,
+    ) -> Result<CompactExecResponse, String> {
+        let soul_id = request
+            .soul_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .unwrap_or_else(|| self.store.default_soul_id());
+        let from = request.from_message_id.trim();
+        let to = request.to_message_id.trim();
+        let summary = request.summary.trim();
+        if from.is_empty() || to.is_empty() {
+            return Err("compact requires from_message_id and to_message_id".to_string());
+        }
+        if summary.is_empty() {
+            return Err("compact summary must not be empty".to_string());
+        }
+        let soul_session = self
+            .store
+            .find_soul_session_by_pair(soul_id, session_id)?
+            .ok_or_else(|| "soul_session not found".to_string())?;
+        self.store
+            .create_compact(&soul_session.id, from, to, summary)
+    }
+
+    pub fn compact_query(
+        &self,
+        compact_id: &str,
+        keyword: Option<&str>,
+        page_index: i64,
+        page_size: i64,
+    ) -> Result<Option<CompactQueryResponse>, String> {
+        self.store
+            .compact_query(compact_id, keyword, page_index, page_size)
     }
 
     pub fn list_sessions(&self) -> Result<Vec<SessionSummary>, String> {

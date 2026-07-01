@@ -69,6 +69,44 @@ enum Command {
     /// Session resources under /api/v1/sessions
     #[command(subcommand)]
     Session(SessionCommand),
+    /// Compact a soul_session's own timeline, or query a compact's detail.
+    #[command(subcommand)]
+    Compact(CompactCommand),
+}
+
+#[derive(Subcommand)]
+enum CompactCommand {
+    /// POST /api/v1/sessions/{id}/compact — collapse [from,to] into a summary.
+    /// Session from --session/SANTI_SESSION_ID; soul from --soul/SANTI_SOUL_ID.
+    Exec {
+        /// First message of the range (a fixed user/assistant message id).
+        #[arg(long)]
+        from: String,
+        /// Last message of the range (a fixed user/assistant message id).
+        #[arg(long)]
+        to: String,
+        /// The summary text. Mutually exclusive with --summary-file.
+        #[arg(
+            long,
+            conflicts_with = "summary_file",
+            required_unless_present = "summary_file"
+        )]
+        summary: Option<String>,
+        /// Read the summary from a file (or `-` for stdin) instead of --summary.
+        #[arg(long)]
+        summary_file: Option<String>,
+    },
+    /// GET /api/v1/compacts/{id} — expand a compact's covered range (paginated).
+    Query {
+        #[arg(long)]
+        compact_id: String,
+        #[arg(long)]
+        keyword: Option<String>,
+        #[arg(long, default_value_t = 0)]
+        page_index: i64,
+        #[arg(long, default_value_t = 50)]
+        page_size: i64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -209,7 +247,73 @@ async fn run_client(
             let id = defaults.resolve_session(id)?;
             follow(&client, &format!("{base}/api/v1/sessions/{id}/events")).await
         }
+        Command::Compact(CompactCommand::Exec {
+            from,
+            to,
+            summary,
+            summary_file,
+        }) => {
+            let session = defaults.resolve_session(None)?;
+            let summary = match summary_file {
+                Some(path) => read_summary_file(&path)?,
+                None => summary.expect("clap requires summary or summary_file"),
+            };
+            let mut body = serde_json::json!({
+                "from_message_id": from,
+                "to_message_id": to,
+                "summary": summary,
+            });
+            if let Some(soul) = defaults.soul() {
+                body["soul_id"] = serde_json::Value::from(soul);
+            }
+            post(
+                &client,
+                &format!("{base}/api/v1/sessions/{session}/compact"),
+                Some(body),
+            )
+            .await
+        }
+        Command::Compact(CompactCommand::Query {
+            compact_id,
+            keyword,
+            page_index,
+            page_size,
+        }) => {
+            let mut url = format!(
+                "{base}/api/v1/compacts/{compact_id}?page_index={page_index}&page_size={page_size}"
+            );
+            if let Some(keyword) = keyword.filter(|k| !k.is_empty()) {
+                url.push_str(&format!("&keyword={}", urlencoding_encode(&keyword)));
+            }
+            get(&client, &url).await
+        }
     }
+}
+
+/// Read a compact summary from a file, or stdin when the path is `-`.
+fn read_summary_file(path: &str) -> Result<String> {
+    if path == "-" {
+        let mut buf = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
+            .context("read summary from stdin")?;
+        Ok(buf)
+    } else {
+        std::fs::read_to_string(path).with_context(|| format!("read summary file {path}"))
+    }
+}
+
+/// Minimal percent-encoding for a query-string value (the client has no URL dep).
+fn urlencoding_encode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            other => out.push_str(&format!("%{other:02X}")),
+        }
+    }
+    out
 }
 
 /// Split `send` positionals into `(session_id, text)`. Two args = explicit

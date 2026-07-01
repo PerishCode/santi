@@ -7,7 +7,7 @@ use crate::{
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{Path, Request, State},
+    extract::{Path, Query, Request, State},
     http::{HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{
@@ -18,8 +18,9 @@ use axum::{
 };
 use futures_core::Stream;
 use santi_core::{
-    CreateSessionResponse, CreateSoulRequest, CreateWebhookRequest, ErrorResponse, HealthResponse,
-    MaterialRequest, SantiService, SantiServiceConfig, SantiStreamEvent, SantiStreamPayload,
+    CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSessionResponse,
+    CreateSoulRequest, CreateWebhookRequest, ErrorResponse, HealthResponse, MaterialRequest,
+    SantiService, SantiServiceConfig, SantiStreamEvent, SantiStreamPayload,
     SendSessionAcceptedResponse, SendSessionRequest, Session, SessionDetail, SessionMaterial,
     SessionProfile, SessionRuntimeSnapshot, SessionSummary, SoulProfile, UpdateSessionRequest,
     WebhookSubscription, prefixed_id, timestamp_now,
@@ -111,6 +112,8 @@ fn router(service: SantiService, api_key: Option<Arc<str>>) -> Router {
         )
         .route("/api/v1/sessions/{session_id}/events", get(session_events))
         .route("/api/v1/sessions/{session_id}/send", post(send_session))
+        .route("/api/v1/sessions/{session_id}/compact", post(compact_exec))
+        .route("/api/v1/compacts/{compact_id}", get(compact_query))
         .route(
             "/api/v1/sessions/{session_id}/runtime",
             get(runtime_snapshot),
@@ -481,6 +484,68 @@ async fn send_session(
 }
 
 #[utoipa::path(
+    post,
+    path = "/api/v1/sessions/{session_id}/compact",
+    params(("session_id" = String, Path)),
+    request_body = CompactExecRequest,
+    responses(
+        (status = 200, body = CompactExecResponse),
+        (status = 400, body = ErrorResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 500, body = ErrorResponse)
+    )
+)]
+async fn compact_exec(
+    State(service): State<SantiService>,
+    Path(session_id): Path<String>,
+    Json(request): Json<CompactExecRequest>,
+) -> Result<Json<CompactExecResponse>, ApiError> {
+    service
+        .compact_exec(&session_id, request)
+        .map(Json)
+        .map_err(ApiError::from_service)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/compacts/{compact_id}",
+    params(
+        ("compact_id" = String, Path),
+        ("keyword" = Option<String>, Query),
+        ("page_index" = Option<i64>, Query),
+        ("page_size" = Option<i64>, Query)
+    ),
+    responses(
+        (status = 200, body = CompactQueryResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 500, body = ErrorResponse)
+    )
+)]
+async fn compact_query(
+    State(service): State<SantiService>,
+    Path(compact_id): Path<String>,
+    Query(params): Query<CompactQueryParams>,
+) -> Result<Json<CompactQueryResponse>, ApiError> {
+    service
+        .compact_query(
+            &compact_id,
+            params.keyword.as_deref(),
+            params.page_index.unwrap_or(0),
+            params.page_size.unwrap_or(50),
+        )
+        .map_err(ApiError::from_service)?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("compact not found"))
+}
+
+#[derive(serde::Deserialize)]
+struct CompactQueryParams {
+    keyword: Option<String>,
+    page_index: Option<i64>,
+    page_size: Option<i64>,
+}
+
+#[utoipa::path(
     get,
     path = "/api/v1/sessions/{session_id}/runtime",
     params(("session_id" = String, Path)),
@@ -631,6 +696,8 @@ impl IntoResponse for ApiError {
         list_messages,
         session_material,
         send_session,
+        compact_exec,
+        compact_query,
         runtime_snapshot,
         crate::bucket::get_bucket_object
     ),
@@ -654,6 +721,11 @@ impl IntoResponse for ApiError {
         UpdateSessionRequest,
         santi_core::ActorType,
         santi_core::Compact,
+        santi_core::CompactExecRequest,
+        santi_core::CompactExecResponse,
+        santi_core::CompactQueryEntry,
+        santi_core::CompactQueryResponse,
+        santi_core::SoulSessionTargetType,
         santi_core::Message,
         santi_core::MessageContent,
         santi_core::MessagePart,

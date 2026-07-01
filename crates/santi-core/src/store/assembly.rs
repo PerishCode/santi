@@ -5,23 +5,36 @@ use serde_json::json;
 use super::{
     SantiStore,
     db::{
-        compact_by_id, message_record_by_id, message_to_provider_item, thinking_span_by_id,
-        tool_call_by_id, tool_result_by_id,
+        compacts_for_soul_session, message_record_by_id, message_seq_in_soul_session,
+        message_to_provider_item, thinking_span_by_id, tool_call_by_id, tool_result_by_id,
     },
 };
 
 impl SantiStore {
-    /// Project the ordered soul-session timeline into the provider's typed-item
-    /// input. The timeline is the single source of truth; every item (messages,
-    /// reasoning, tool calls, tool results) is replayed in seq order. In-flight
-    /// calls are just the latest items — the turn loop re-derives input from here
-    /// each round, so there is no turn boundary to special-case.
+    /// Project the soul-session's assembled view into the provider's typed-item
+    /// input: the immutable spine (r_soul_session_messages) MERGED at read with
+    /// this soul_session's compact overlay. Each compact collapses its covered
+    /// `[start,end]` range into one summary item; the spine itself is never
+    /// touched (immutable, compact-unaware, fork-shareable). The turn loop
+    /// re-derives input from here each round.
     pub fn assembly_input(&self, soul_session_id: &str) -> Result<Vec<ProviderItem>, String> {
         let conn = self.conn.lock().unwrap();
+        // Resolve the compact overlay to seq ranges, sorted (disjoint by policy).
+        let mut overlay: Vec<(i64, i64, crate::Compact)> = Vec::new();
+        for compact in compacts_for_soul_session(&conn, soul_session_id)? {
+            if let (Some(from_seq), Some(to_seq)) = (
+                message_seq_in_soul_session(&conn, soul_session_id, &compact.start_message_id)?,
+                message_seq_in_soul_session(&conn, soul_session_id, &compact.end_message_id)?,
+            ) {
+                overlay.push((from_seq, to_seq, compact));
+            }
+        }
+        overlay.sort_by_key(|(start, _, _)| *start);
+
         let mut stmt = conn
             .prepare(
                 r#"
-                SELECT target_type, target_id
+                SELECT soul_session_seq, target_type, target_id
                 FROM r_soul_session_messages
                 WHERE soul_session_id = ?1
                 ORDER BY soul_session_seq ASC
@@ -30,29 +43,47 @@ impl SantiStore {
             .map_err(|error| error.to_string())?;
         let rows = stmt
             .query_map(params![soul_session_id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
             })
             .map_err(|error| error.to_string())?;
         let mut input = Vec::new();
+        let mut overlay_index = 0usize;
+        let mut overlay_emitted = false;
         for row in rows {
-            let (target_type, target_id) = row.map_err(|error| error.to_string())?;
+            let (seq, target_type, target_id) = row.map_err(|error| error.to_string())?;
+            // Advance past compacts whose range ends before this seq.
+            while overlay_index < overlay.len() && overlay[overlay_index].1 < seq {
+                overlay_index += 1;
+                overlay_emitted = false;
+            }
+            // Covered by a compact → emit its summary once, skip the underlying.
+            if overlay_index < overlay.len() && overlay[overlay_index].0 <= seq {
+                if !overlay_emitted {
+                    let compact = &overlay[overlay_index].2;
+                    input.push(ProviderItem::Message {
+                        role: "system".to_string(),
+                        content: format!(
+                            "[compact {} | {} | {}]\n{}",
+                            compact.id,
+                            compact.start_message_id,
+                            compact.end_message_id,
+                            compact.summary
+                        ),
+                    });
+                    overlay_emitted = true;
+                }
+                continue;
+            }
             match target_type.as_str() {
                 "message" => {
                     if let Some(message) = message_record_by_id(&conn, &target_id)?
                         && let Some(item) = message_to_provider_item(&message)
                     {
                         input.push(item);
-                    }
-                }
-                "compact" => {
-                    if let Some(compact) = compact_by_id(&conn, &target_id)? {
-                        input.push(ProviderItem::Message {
-                            role: "system".to_string(),
-                            content: format!(
-                                "[compact {}-{}]\n{}",
-                                compact.start_session_seq, compact.end_session_seq, compact.summary
-                            ),
-                        });
                     }
                 }
                 "thinking" => {

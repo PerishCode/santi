@@ -177,17 +177,16 @@ CREATE TABLE IF NOT EXISTS thinking_spans (
 
 CREATE TABLE IF NOT EXISTS compacts (
     id TEXT PRIMARY KEY,
-    turn_id TEXT NOT NULL,
+    soul_session_id TEXT NOT NULL,
     summary TEXT NOT NULL,
-    start_session_seq INTEGER NOT NULL CHECK (start_session_seq > 0),
-    end_session_seq INTEGER NOT NULL CHECK (end_session_seq > 0),
-    created_at TEXT NOT NULL,
-    CHECK (start_session_seq <= end_session_seq)
+    start_message_id TEXT NOT NULL,
+    end_message_id TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_compacts_soul_session ON compacts (soul_session_id);
 
 CREATE TABLE IF NOT EXISTS r_soul_session_messages (
     soul_session_id TEXT NOT NULL,
-    target_type TEXT NOT NULL CHECK (target_type IN ('message', 'compact', 'thinking', 'tool_call', 'tool_result')),
+    target_type TEXT NOT NULL CHECK (target_type IN ('message', 'thinking', 'tool_call', 'tool_result')),
     target_id TEXT NOT NULL,
     soul_session_seq INTEGER NOT NULL CHECK (soul_session_seq > 0),
     created_at TEXT NOT NULL,
@@ -212,7 +211,6 @@ CREATE INDEX IF NOT EXISTS idx_turns_soul_session_status_created_at ON turns (so
 CREATE INDEX IF NOT EXISTS idx_tool_calls_turn_id_created_at ON tool_calls (turn_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_tool_results_tool_call_id ON tool_results (tool_call_id);
 CREATE INDEX IF NOT EXISTS idx_thinking_spans_turn_id_created_at ON thinking_spans (turn_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_compacts_turn_id_created_at ON compacts (turn_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_r_soul_session_messages_target_lookup ON r_soul_session_messages (target_type, target_id);
 CREATE INDEX IF NOT EXISTS idx_r_soul_session_messages_seq ON r_soul_session_messages (soul_session_id, soul_session_seq);
 "#;

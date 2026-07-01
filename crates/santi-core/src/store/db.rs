@@ -297,7 +297,7 @@ pub(super) fn compact_by_id(
 ) -> Result<Option<Compact>, String> {
     conn.query_row(
         r#"
-        SELECT id, turn_id, summary, start_session_seq, end_session_seq, created_at
+        SELECT id, soul_session_id, summary, start_message_id, end_message_id
         FROM compacts WHERE id = ?1 LIMIT 1
         "#,
         params![compact_id],
@@ -376,6 +376,27 @@ pub(super) fn thinking_span_by_id(
     .map_err(|error| error.to_string())
 }
 
+/// Position of a message in a soul_session's spine (its ref's soul_session_seq),
+/// or None if the message is not part of that soul_session. This is the one
+/// axis compaction operates on — message_id in, soul_session_seq out.
+pub(super) fn message_seq_in_soul_session(
+    conn: &Connection,
+    soul_session_id: &str,
+    message_id: &str,
+) -> Result<Option<i64>, String> {
+    conn.query_row(
+        r#"
+        SELECT soul_session_seq FROM r_soul_session_messages
+        WHERE soul_session_id = ?1 AND target_type = 'message' AND target_id = ?2
+        LIMIT 1
+        "#,
+        params![soul_session_id, message_id],
+        |row| row.get::<_, i64>(0),
+    )
+    .optional()
+    .map_err(|error| error.to_string())
+}
+
 pub(super) fn compacts_for_soul_session(
     conn: &Connection,
     soul_session_id: &str,
@@ -383,11 +404,9 @@ pub(super) fn compacts_for_soul_session(
     let mut stmt = conn
         .prepare(
             r#"
-            SELECT c.id, c.turn_id, c.summary, c.start_session_seq, c.end_session_seq, c.created_at
-            FROM compacts c
-            JOIN turns t ON t.id = c.turn_id
-            WHERE t.soul_session_id = ?1
-            ORDER BY c.created_at ASC
+            SELECT id, soul_session_id, summary, start_message_id, end_message_id
+            FROM compacts
+            WHERE soul_session_id = ?1
             "#,
         )
         .map_err(|error| error.to_string())?;

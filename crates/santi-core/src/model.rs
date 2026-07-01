@@ -207,14 +207,59 @@ pub struct ThinkingSpan {
     pub finished_at: Option<Timestamp>,
 }
 
+/// A compact is a pure projection overlay over a soul_session's spine. It
+/// self-describes its coverage by message-id boundaries (fork-safe) and carries
+/// the soul-authored summary. The spine is never annotated. Provenance lives in
+/// the audit log (the compact-exec tool_call), not here.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Compact {
     pub id: String,
-    pub turn_id: String,
+    pub soul_session_id: String,
     pub summary: String,
-    pub start_session_seq: i64,
-    pub end_session_seq: i64,
-    pub created_at: Timestamp,
+    pub start_message_id: String,
+    pub end_message_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CompactExecRequest {
+    /// Soul whose view is compacted. Empty/absent → the runtime's default soul.
+    #[serde(default)]
+    pub soul_id: Option<String>,
+    /// Range boundaries — must be FIXED user/assistant messages in this
+    /// soul_session's spine. Everything between (messages/tools/reasoning) collapses.
+    pub from_message_id: String,
+    pub to_message_id: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CompactExecResponse {
+    pub compact_id: String,
+    pub start_message_id: String,
+    pub end_message_id: String,
+    /// Compacts fully covered by this range, dropped and replaced by the new one.
+    pub absorbed: Vec<String>,
+    /// Spine entries the new compact collapses out of the assembled view.
+    pub collapsed_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CompactQueryEntry {
+    pub soul_session_seq: i64,
+    pub target_type: SoulSessionTargetType,
+    pub target_id: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CompactQueryResponse {
+    pub compact_id: String,
+    pub start_message_id: String,
+    pub end_message_id: String,
+    pub total: i64,
+    pub page_index: i64,
+    pub page_size: i64,
+    pub entries: Vec<CompactQueryEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

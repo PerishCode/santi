@@ -208,11 +208,10 @@ pub(super) fn map_thinking_span_row(row: &Row<'_>) -> rusqlite::Result<ThinkingS
 pub(super) fn map_compact_row(row: &Row<'_>) -> rusqlite::Result<Compact> {
     Ok(Compact {
         id: row.get(0)?,
-        turn_id: row.get(1)?,
+        soul_session_id: row.get(1)?,
         summary: row.get(2)?,
-        start_session_seq: row.get(3)?,
-        end_session_seq: row.get(4)?,
-        created_at: row.get(5)?,
+        start_message_id: row.get(3)?,
+        end_message_id: row.get(4)?,
     })
 }
 

@@ -47,14 +47,6 @@ pub struct MaterialUpdated {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct Account {
-    pub id: String,
-    pub name: String,
-    pub created_at: Timestamp,
-    pub updated_at: Timestamp,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Soul {
     pub id: String,
     pub memory: String,

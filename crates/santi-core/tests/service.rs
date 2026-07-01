@@ -329,14 +329,15 @@ async fn ingest_external_event_triggers_turn() {
         .expect("ingest second event");
     assert_eq!(session_id_again, session_id);
 
-    // The normalized text reached the provider as a user-role message.
+    // A doorbell is a runtime-authored santi_system fact, not user speech — it
+    // reaches the provider as a system-role message (see message_to_provider_item).
     let requests = provider.requests.lock().unwrap();
     assert!(requests.iter().any(|request| {
         request.input.iter().any(|item| {
             matches!(
                 item,
                 ProviderItem::Message { role, content }
-                    if role == "user" && content == "an external request arrived"
+                    if role == "system" && content == "an external request arrived"
             )
         })
     }));

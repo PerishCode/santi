@@ -2,8 +2,8 @@ use rusqlite::{Connection, params};
 use serde_json::Value;
 
 use crate::{
-    ActorType, CompactExecResponse, CompactQueryEntry, CompactQueryResponse, MessageState,
-    StrandTargetType, prefixed_id,
+    ActorType, CompactExecResponse, CompactQueryEntry, CompactQueryResponse, MessageKind,
+    MessageState, StrandTargetType, prefixed_id,
 };
 
 use super::{
@@ -35,8 +35,13 @@ impl SantiStore {
         for (label, id) in [("from", from_message_id), ("to", to_message_id)] {
             let message = message_record_by_id(&tx, id)?
                 .ok_or_else(|| format!("compact {label} message not found"))?;
-            let is_conversational =
-                matches!(message.actor_type, ActorType::Account | ActorType::Soul);
+            // A boundary must be genuine conversational content: the soul's own
+            // speech, or world-inbound text. A runtime-authored santi_system
+            // notice (actor System, kind SantiSystem) is not user/assistant
+            // speech and can't anchor a compact range.
+            let is_conversational = message.actor_type == ActorType::Soul
+                || (message.actor_type == ActorType::System
+                    && message.message_kind == MessageKind::Text);
             if !is_conversational || message.state != MessageState::Fixed {
                 return Err(format!(
                     "compact {label} boundary must be a fixed user/assistant message"

@@ -4,10 +4,15 @@ use utoipa::ToSchema;
 
 use super::Timestamp;
 
+/// No user/account actor: santi is individual-first, not multi-tenant. All
+/// inbound (a CLI send, a webhook event) arrives as `System` — the sender's
+/// identity is metainfo carried in the content, opaque to core, not a distinct
+/// actor kind. `(actor, message_kind)` is the full marker at the provider
+/// boundary (see `message_to_provider_item`): Soul→assistant, System+Text→user
+/// (world-inbound), System+SantiSystem→system (runtime-meta, not user speech).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ActorType {
-    Account,
     Soul,
     System,
 }

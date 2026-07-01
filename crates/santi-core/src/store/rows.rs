@@ -203,7 +203,6 @@ pub(super) fn collect_rows<T>(
 
 pub(super) fn actor_type_db(value: &ActorType) -> &'static str {
     match value {
-        ActorType::Account => "account",
         ActorType::Soul => "soul",
         ActorType::System => "system",
     }
@@ -211,9 +210,7 @@ pub(super) fn actor_type_db(value: &ActorType) -> &'static str {
 
 fn actor_type_from_db(value: &str) -> ActorType {
     match value {
-        "account" => ActorType::Account,
         "soul" => ActorType::Soul,
-        "system" => ActorType::System,
         _ => ActorType::System,
     }
 }

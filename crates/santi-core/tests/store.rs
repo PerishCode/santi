@@ -26,7 +26,6 @@ fn schema_matches_runtime() {
 
     let conn = Connection::open(db).expect("open sqlite");
     for table in [
-        "accounts",
         "souls",
         "soul_profiles",
         "messages",
@@ -49,7 +48,12 @@ fn schema_matches_runtime() {
             .expect("table lookup");
         assert_eq!(exists, 1, "missing table {table}");
     }
-    for table in ["sessions", "session_profiles", "r_session_messages"] {
+    for table in [
+        "accounts",
+        "sessions",
+        "session_profiles",
+        "r_session_messages",
+    ] {
         let exists: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -69,8 +73,8 @@ fn appends_relations_in_order() {
     let user = store
         .append_message(
             &strand.id,
-            ActorType::Account,
-            store.default_account_id(),
+            ActorType::System,
+            store.system_actor_id(),
             MessageContent::text("hello ordering"),
             MessageState::Fixed,
             MessageIntake::Request,
@@ -104,7 +108,7 @@ fn maps_santi_system_input() {
     assert_eq!(input.len(), 1);
     assert_text(
         &input[0],
-        "user",
+        "system",
         "<santi-system>\nkind: note\n</santi-system>",
     );
 }
@@ -117,8 +121,8 @@ fn thinking_spans_become_reasoning_items() {
     let user = store
         .append_message(
             &strand.id,
-            ActorType::Account,
-            store.default_account_id(),
+            ActorType::System,
+            store.system_actor_id(),
             MessageContent::text("hello thinking"),
             MessageState::Fixed,
             MessageIntake::Request,
@@ -185,8 +189,8 @@ fn projects_timeline_to_interleaved_items() {
     let user = store
         .append_message(
             &strand.id,
-            ActorType::Account,
-            store.default_account_id(),
+            ActorType::System,
+            store.system_actor_id(),
             MessageContent::text("run a command"),
             MessageState::Fixed,
             MessageIntake::Request,
@@ -264,7 +268,7 @@ fn append_timeline_message(
 ) {
     let actor_id = match actor_type {
         ActorType::Soul => store.default_soul_id(),
-        _ => store.default_account_id(),
+        _ => store.system_actor_id(),
     };
     store
         .append_message(
@@ -296,7 +300,7 @@ fn drive_starts_coalesces_and_re_drives() {
     append_timeline_message(
         &store,
         &strand.id,
-        ActorType::Account,
+        ActorType::System,
         "hi",
         MessageIntake::Request,
     );
@@ -310,7 +314,7 @@ fn drive_starts_coalesces_and_re_drives() {
     append_timeline_message(
         &store,
         &strand.id,
-        ActorType::Account,
+        ActorType::System,
         "and again",
         MessageIntake::Request,
     );
@@ -374,7 +378,7 @@ fn boot_recovery_reconciles_and_does_not_retry() {
     append_timeline_message(
         &store,
         &strand.id,
-        ActorType::Account,
+        ActorType::System,
         "do a thing",
         MessageIntake::Request,
     );
@@ -397,7 +401,7 @@ fn boot_recovery_reconciles_and_does_not_retry() {
     append_timeline_message(
         &store,
         &strand.id,
-        ActorType::Account,
+        ActorType::System,
         "a new thing",
         MessageIntake::Request,
     );

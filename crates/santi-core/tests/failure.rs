@@ -102,12 +102,14 @@ async fn records_failed_system() {
 
     let requests = provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
+    // A santi_system notice is a runtime-authored fact, not user speech — the
+    // provider hears it as `system`, not `user` (see message_to_provider_item).
     assert!(
         requests[1]
             .input
             .iter()
             .any(
-                |message| as_text(message).is_some_and(|(role, content)| role == "user"
+                |message| as_text(message).is_some_and(|(role, content)| role == "system"
                     && content.contains("<santi-system>")
                     && content.contains("kind: turn_failed"))
             )
@@ -157,8 +159,9 @@ async fn preserves_aborted_output() {
         })
     }));
     assert!(requests[1].input.iter().any(|message| {
-        as_text(message)
-            .is_some_and(|(role, content)| role == "user" && content.contains("kind: turn_failed"))
+        as_text(message).is_some_and(|(role, content)| {
+            role == "system" && content.contains("kind: turn_failed")
+        })
     }));
 }
 

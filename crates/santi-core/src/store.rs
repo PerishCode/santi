@@ -21,9 +21,12 @@ use db::*;
 use rows::{actor_type_db, collect_rows, map_webhook_row, message_state_db};
 use schema::SCHEMA;
 
-const SANTI_SCHEMA_VERSION: u32 = 15;
-const DEFAULT_ACCOUNT_ID: &str = "account_local";
+const SANTI_SCHEMA_VERSION: u32 = 16;
 const DEFAULT_SOUL_ID: &str = "soul_default";
+/// The runtime's one system actor identity. No account/user: every non-soul
+/// actor speaks as `system`, whether it's a runtime-authored notice (kind
+/// santi_system) or opaque world-inbound content (kind text) — the sender's
+/// real identity, if any, lives in the content itself, not in this id.
 const SANTI_SYSTEM_ACTOR_ID: &str = "santi";
 
 #[derive(Clone)]
@@ -80,7 +83,6 @@ impl SantiStore {
                 DROP TABLE IF EXISTS webhooks;
                 DROP TABLE IF EXISTS soul_profiles;
                 DROP TABLE IF EXISTS souls;
-                DROP TABLE IF EXISTS accounts;
                 "#,
             )
             .map_err(|error| error.to_string())?;
@@ -95,14 +97,6 @@ impl SantiStore {
     fn seed_defaults(&self) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         let now = timestamp_now();
-        conn.execute(
-            r#"
-            INSERT OR IGNORE INTO accounts (id, name, created_at, updated_at)
-            VALUES (?1, 'Local Account', ?2, ?2)
-            "#,
-            params![DEFAULT_ACCOUNT_ID, now],
-        )
-        .map_err(|error| error.to_string())?;
         conn.execute(
             r#"
             INSERT OR IGNORE INTO souls (id, memory, created_at, updated_at)
@@ -124,12 +118,13 @@ impl SantiStore {
         Ok(())
     }
 
-    pub fn default_account_id(&self) -> &'static str {
-        DEFAULT_ACCOUNT_ID
-    }
-
     pub fn default_soul_id(&self) -> &'static str {
         DEFAULT_SOUL_ID
+    }
+
+    /// The one system actor identity (see `SANTI_SYSTEM_ACTOR_ID`).
+    pub fn system_actor_id(&self) -> &'static str {
+        SANTI_SYSTEM_ACTOR_ID
     }
 
     pub fn list_sessions(&self) -> Result<Vec<Strand>, String> {

@@ -263,8 +263,8 @@ impl SantiService {
             .store
             .append_message(
                 &strand.id,
-                ActorType::Account,
-                self.store.default_account_id(),
+                ActorType::System,
+                self.store.system_actor_id(),
                 MessageContent {
                     parts: request.content,
                 },

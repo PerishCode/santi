@@ -356,16 +356,18 @@ pub(super) fn session_effects(
     collect_rows(rows)
 }
 
+/// The provider boundary: `(actor, message_kind)` is the whole marker, no
+/// separate column. Soul always speaks as `assistant`. System splits by kind:
+/// `Text` is opaque world-inbound content (a CLI send, a webhook event) → the
+/// provider hears it as `user`; `SantiSystem` is a runtime-authored fact about
+/// this strand (not user speech, see the `<santi-system>` prompt copy) → `system`.
 pub(super) fn message_to_provider_item(
     message: &crate::Message,
 ) -> Option<santi_provider::ProviderItem> {
-    let role = match message.message_kind {
-        MessageKind::SantiSystem => "user",
-        MessageKind::Text => match message.actor_type {
-            ActorType::Account => "user",
-            ActorType::Soul => "assistant",
-            ActorType::System => "system",
-        },
+    let role = match (&message.actor_type, &message.message_kind) {
+        (ActorType::Soul, _) => "assistant",
+        (ActorType::System, MessageKind::Text) => "user",
+        (ActorType::System, MessageKind::SantiSystem) => "system",
     };
     let content = message.content.content_text();
     if content.trim().is_empty() {

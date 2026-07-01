@@ -1,11 +1,4 @@
 pub(super) const SCHEMA: &str = r#"
-CREATE TABLE IF NOT EXISTS accounts (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS souls (
     id TEXT PRIMARY KEY,
     memory TEXT NOT NULL DEFAULT '',
@@ -36,7 +29,7 @@ CREATE TABLE IF NOT EXISTS webhooks (
 
 CREATE TABLE IF NOT EXISTS messages (
     id TEXT PRIMARY KEY,
-    actor_type TEXT NOT NULL CHECK (actor_type IN ('account', 'soul', 'system')),
+    actor_type TEXT NOT NULL CHECK (actor_type IN ('soul', 'system')),
     actor_id TEXT NOT NULL,
     message_kind TEXT NOT NULL DEFAULT 'text' CHECK (message_kind IN ('text', 'santi_system')),
     content TEXT NOT NULL,
@@ -52,7 +45,7 @@ CREATE TABLE IF NOT EXISTS message_events (
     id TEXT PRIMARY KEY,
     message_id TEXT NOT NULL,
     action TEXT NOT NULL CHECK (action IN ('patch', 'insert', 'remove', 'fix', 'delete')),
-    actor_type TEXT NOT NULL CHECK (actor_type IN ('account', 'soul', 'system')),
+    actor_type TEXT NOT NULL CHECK (actor_type IN ('soul', 'system')),
     actor_id TEXT NOT NULL,
     base_version INTEGER NOT NULL CHECK (base_version > 0),
     payload TEXT NOT NULL,

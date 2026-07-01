@@ -97,7 +97,7 @@ fn maps_santi_system_input() {
     let message = store
         .append_santi_system_message(
             &strand.id,
-            MessageContent::text("<santi-system>\nkind: note\n</santi-system>"),
+            MessageContent::text("<system_message>\nkind: note\n</system_message>"),
             MessageIntake::Request,
         )
         .expect("append santi system")
@@ -110,7 +110,7 @@ fn maps_santi_system_input() {
     assert_text(
         &input[0],
         "system",
-        "<santi-system>\nkind: note\n</santi-system>",
+        "<system_message>\nkind: note\n</system_message>",
     );
 }
 

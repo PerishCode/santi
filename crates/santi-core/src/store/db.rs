@@ -420,7 +420,7 @@ pub(super) fn session_effects(
 /// separate column. Soul always speaks as `assistant`. System splits by kind:
 /// `Text` is opaque world-inbound content (a CLI send, a webhook event) → the
 /// provider hears it as `user`; `SantiSystem` is a runtime-authored fact about
-/// this strand (not user speech, see the `<santi-system>` prompt copy) → `system`.
+/// this strand (not user speech, see the `<system_message>` prompt copy) → `system`.
 pub(super) fn message_to_provider_item(
     message: &crate::Message,
 ) -> Option<santi_provider::ProviderItem> {

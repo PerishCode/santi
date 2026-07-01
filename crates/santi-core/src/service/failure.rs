@@ -75,12 +75,12 @@ impl SantiService {
 fn failed_system_message(turn_id: &str) -> MessageContent {
     MessageContent::text(
         [
-            "<santi-system>".to_string(),
+            "<system_message>".to_string(),
             "kind: turn_failed".to_string(),
             format!("turn_id: {turn_id}"),
             format!("trace: log://turn/{turn_id}"),
             "summary: Previous response attempt failed before completion.".to_string(),
-            "</santi-system>".to_string(),
+            "</system_message>".to_string(),
         ]
         .join("\n"),
     )

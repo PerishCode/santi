@@ -88,7 +88,7 @@ async fn records_failed_system() {
     assert_eq!(
         system_message.content_text,
         format!(
-            "<santi-system>\nkind: turn_failed\nturn_id: {}\ntrace: log://turn/{}\nsummary: Previous response attempt failed before completion.\n</santi-system>",
+            "<system_message>\nkind: turn_failed\nturn_id: {}\ntrace: log://turn/{}\nsummary: Previous response attempt failed before completion.\n</system_message>",
             response.turn.id, response.turn.id
         )
     );
@@ -110,7 +110,7 @@ async fn records_failed_system() {
             .iter()
             .any(
                 |message| as_text(message).is_some_and(|(role, content)| role == "system"
-                    && content.contains("<santi-system>")
+                    && content.contains("<system_message>")
                     && content.contains("kind: turn_failed"))
             )
     );

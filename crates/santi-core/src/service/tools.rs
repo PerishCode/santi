@@ -144,6 +144,16 @@ impl SantiService {
     pub(super) fn session_memory_file(&self, session_id: &str) -> PathBuf {
         self.session_memory_dir(session_id).join("MEMORY.md")
     }
+
+    /// The `[santi]` constitution config file: `SANTI_CONSTITUTION_FILE` if set,
+    /// else `<runtime_root>/constitution.md`. Absent → the encoded default. It
+    /// is read per-turn (hot), so editing it takes effect on the next turn with
+    /// no restart — the observe→refine loop.
+    pub(super) fn constitution_file(&self) -> PathBuf {
+        std::env::var("SANTI_CONSTITUTION_FILE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| self.runtime_root().join("constitution.md"))
+    }
 }
 
 #[derive(Debug, Deserialize)]

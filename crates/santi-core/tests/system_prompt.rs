@@ -36,10 +36,15 @@ fn renders_material_shape() {
 
     let text = harness.system_prompt().text;
 
-    assert!(text.contains("You are a distinct soul running inside this Santi instance."));
+    // [santi] constitution (encoded default — no constitution.md written here).
+    assert!(text.contains("[santi]"));
+    assert!(text.contains(
+        "santi is an agent runtime: a container that keeps souls and runs their strands."
+    ));
     assert!(text.contains("[santi-meta]"));
-    assert!(text.contains("channel: santi"));
+    assert!(!text.contains("channel: santi"));
     assert!(text.contains("soul_id: soul_default"));
+    assert!(text.contains("strand_id: "));
     // soul_profile dissolved: no name in [santi-meta] (identity is in memory).
     assert!(!text.contains("soul_name"));
     assert!(text.contains(&format!(
@@ -47,21 +52,22 @@ fn renders_material_shape() {
         soul_memory_uri()
     )));
     assert!(text.contains(&format!(
-        "{} will always be displayed in [santi-session].",
+        "{} will always be displayed in [santi-strand].",
         session_memory_uri()
     )));
     assert!(text.contains(&format!(
         "These files have no internal version history; save backups into {SOUL_WORKSPACE_URI} or {SESSION_WORKSPACE_URI} if needed."
     )));
-    assert!(text.contains("<santi-system> blocks describe Santi runtime facts in this session."));
+    assert!(text.contains("<system_message> blocks describe Santi runtime facts in this strand."));
     assert!(text.contains(
         "They are part of your context, not user speech or your natural-language reply."
     ));
     assert!(
-        text.contains("Read them as session facts about the workspace, runtime, or provider flow.")
+        text.contains("Read them as strand facts about the workspace, runtime, or provider flow.")
     );
     assert!(text.contains("[santi-soul]"));
-    assert!(text.contains("[santi-session]"));
+    assert!(text.contains("[santi-strand]"));
+    assert!(!text.contains("[santi-session]"));
     assert!(text.contains(&format!("source: {}", soul_memory_uri())));
     assert!(text.contains(&format!("source: {}", session_memory_uri())));
     assert!(text.contains("content:\n---\nplain: value\n---\n# Soul"));
@@ -80,6 +86,31 @@ fn leaves_frontmatter_plain() {
 
     assert!(text.contains("content:\n---\nplain: value\n---\n# Soul"));
     assert!(!text.contains("hint:"));
+}
+
+#[test]
+fn constitution_file_overrides_encoded_default() {
+    let harness = PromptHarness::open();
+    harness.write_constitution("my own physics, hot-edited");
+
+    let text = harness.system_prompt().text;
+
+    // The [santi] block renders the config file, not the encoded default.
+    assert!(text.contains("[santi]\nmy own physics, hot-edited"));
+    assert!(!text.contains("santi is an agent runtime: a container that keeps souls"));
+}
+
+#[test]
+fn default_soul_empty_memory_reads_through_to_encoded_default() {
+    // No soul memory written: the DEFAULT soul falls back (read-through, per
+    // turn — no write) to the encoded default soul memory in [santi-soul].
+    let harness = PromptHarness::open();
+
+    let text = harness.system_prompt().text;
+
+    assert!(text.contains("Your memory is still empty. You are a soul"));
+    // And it is role-NEUTRAL — no product/role vocabulary baked into core.
+    assert!(!text.to_lowercase().contains("secretary"));
 }
 
 struct PromptHarness {
@@ -131,6 +162,12 @@ impl PromptHarness {
             .join("memory");
         fs::create_dir_all(&path).expect("create session dir");
         fs::write(path.join("MEMORY.md"), text).expect("write session");
+    }
+
+    fn write_constitution(&self, text: &str) {
+        // The default constitution config path: <runtime_root>/constitution.md.
+        fs::create_dir_all(&self.runtime_root).expect("create runtime dir");
+        fs::write(self.runtime_root.join("constitution.md"), text).expect("write constitution");
     }
 
     fn system_prompt(&self) -> SessionMaterial {

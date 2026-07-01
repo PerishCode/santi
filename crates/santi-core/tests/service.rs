@@ -130,21 +130,27 @@ async fn sends_with_runtime() {
         .instructions
         .as_deref()
         .expect("runtime instructions");
-    assert!(instructions.contains("You are a distinct soul running inside this Santi instance."));
+    // The [santi] constitution replaces the old preamble prose (encoded default,
+    // since no constitution.md is written in this temp runtime).
+    assert!(instructions.contains("[santi]"));
+    assert!(instructions.contains(
+        "santi is an agent runtime: a container that keeps souls and runs their strands."
+    ));
     assert!(instructions.contains("[santi-meta]"));
-    assert!(instructions.contains("channel: santi"));
     assert!(instructions.contains("soul_id: soul_default"));
-    // soul_profile is dissolved: a soul's name is not a runtime fact, it lives
-    // in the soul's own memory ([santi-soul]), so [santi-meta] no longer emits it.
+    assert!(instructions.contains("strand_id: "));
+    // [santi-meta] is slim: no channel, no soul_name (identity is memory).
+    assert!(!instructions.contains("channel: santi"));
     assert!(!instructions.contains("soul_name"));
     assert!(instructions.contains("[santi-soul]"));
-    assert!(instructions.contains("[santi-session]"));
+    assert!(instructions.contains("[santi-strand]"));
+    assert!(!instructions.contains("[santi-session]"));
     assert!(instructions.contains(&format!(
         "{} will always be displayed in [santi-soul].",
         soul_memory_uri()
     )));
     assert!(instructions.contains(&format!(
-        "{} will always be displayed in [santi-session].",
+        "{} will always be displayed in [santi-strand].",
         session_memory_uri()
     )));
     assert!(instructions.contains(&format!(
@@ -152,14 +158,14 @@ async fn sends_with_runtime() {
     )));
     assert!(
         instructions
-            .contains("<santi-system> blocks describe Santi runtime facts in this session.")
+            .contains("<system_message> blocks describe Santi runtime facts in this strand.")
     );
     assert!(instructions.contains(
         "They are part of your context, not user speech or your natural-language reply."
     ));
     assert!(
         instructions
-            .contains("Read them as session facts about the workspace, runtime, or provider flow.")
+            .contains("Read them as strand facts about the workspace, runtime, or provider flow.")
     );
     assert!(instructions.contains(&format!("source: {}", soul_memory_uri())));
     assert!(instructions.contains(&format!("source: {}", session_memory_uri())));

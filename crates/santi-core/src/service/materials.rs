@@ -40,8 +40,10 @@ impl SantiService {
         let text = render_system_prompt(SystemPromptRequest {
             session_id,
             strand,
+            constitution_path: self.constitution_file(),
             soul_memory_path: self.soul_memory_file(&strand.soul_id),
             session_memory_path: self.session_memory_file(session_id),
+            is_default_soul: strand.soul_id == self.store.default_soul_id(),
         })?;
         // A strand has exactly one soul, so its id alone is a stable cache key.
         let key: MaterialCacheKey = (session_id.to_string(), MaterialKind::SystemPrompt);

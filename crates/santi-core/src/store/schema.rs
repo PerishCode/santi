@@ -149,6 +149,15 @@ CREATE TABLE IF NOT EXISTS compacts (
 );
 CREATE INDEX IF NOT EXISTS idx_compacts_strand ON compacts (strand_id);
 
+CREATE TABLE IF NOT EXISTS strand_inbox (
+    id TEXT PRIMARY KEY,
+    strand_id TEXT NOT NULL,
+    message_kind TEXT NOT NULL CHECK (message_kind IN ('text', 'santi_system')),
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_strand_inbox_strand_created_at ON strand_inbox (strand_id, created_at);
+
 CREATE TABLE IF NOT EXISTS r_strand_entries (
     strand_id TEXT NOT NULL,
     target_type TEXT NOT NULL CHECK (target_type IN ('message', 'thinking', 'tool_call', 'tool_result')),

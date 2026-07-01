@@ -329,7 +329,33 @@ pub struct SendSessionAcceptedResponse {
     pub strand: Strand,
     pub soul_profile: SoulProfile,
     pub turn: Turn,
-    pub user_message: SessionMessage,
+    /// The content this send just enqueued, once the driver has actually
+    /// committed it to the timeline. Absent when this send coalesced into an
+    /// already-running turn — durably enqueued, but the driver has not drained
+    /// it yet (it will, when that turn completes and re-pokes).
+    pub user_message: Option<SessionMessage>,
+}
+
+/// How an ingest adaptor addresses a strand. Resolution is atomic (see
+/// `SantiStore::resolve_strand_selector`) — the STRATEGY is the adaptor's: the
+/// operator addresses an already-existing strand by id; a webhook addresses
+/// one by an opaque label, scoped to its soul (find-or-create).
+#[derive(Debug, Clone)]
+pub enum StrandSelector {
+    ById(String),
+    ByLabel { soul_id: String, label: String },
+}
+
+/// The result of `ingest` — the one inbound path (a send, a webhook event).
+/// `Accepted` confirms durable enqueue only, not that a turn/message now
+/// exists (the driver may still be draining a running turn's inbox later).
+/// `Rejected` is a normal outcome (the inbox gate, a scale safety valve), not
+/// an error — handling it is the adaptor's own policy (surface it, or
+/// silently drop + log).
+#[derive(Debug, Clone)]
+pub enum IngestOutcome {
+    Accepted { strand_id: String },
+    Rejected { reason: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

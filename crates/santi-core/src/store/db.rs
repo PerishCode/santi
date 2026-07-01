@@ -5,7 +5,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::{
     ActorType, Compact, MessageKind, SessionEffect, SessionMessage, SoulProfile, Strand,
     StrandEntry, StrandTargetType, ThinkingSpan, ToolCall, ToolResult, Turn, WebhookSubscription,
-    timestamp_now,
+    prefixed_id, timestamp_now,
 };
 
 use super::rows::*;
@@ -53,6 +53,69 @@ pub(super) fn append_entry_in_tx(
         strand_seq: allocated_seq,
         created_at: now,
     })
+}
+
+/// Drain a strand's entire inbox into its timeline: each entry becomes a
+/// `messages` row (actor System, `is_request=1`, state fixed) referenced into
+/// `r_strand_entries` in arrival order, then the inbox row is removed. This is
+/// the ONE place inbound content is committed — ingest itself only durably
+/// enqueues. Returns the drained messages (empty ⟺ nothing was pending).
+pub(super) fn drain_inbox_in_tx(
+    conn: &Connection,
+    strand_id: &str,
+) -> Result<Vec<SessionMessage>, String> {
+    let mut stmt = conn
+        .prepare(
+            r#"
+            SELECT id, message_kind, content FROM strand_inbox
+            WHERE strand_id = ?1
+            ORDER BY created_at ASC, id ASC
+            "#,
+        )
+        .map_err(|error| error.to_string())?;
+    let pending = stmt
+        .query_map(params![strand_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    drop(stmt);
+
+    let now = timestamp_now();
+    let mut drained = Vec::with_capacity(pending.len());
+    for (inbox_id, message_kind_db, content_json) in pending {
+        let message_id = prefixed_id("msg");
+        conn.execute(
+            r#"
+            INSERT INTO messages (
+              id, actor_type, actor_id, message_kind, content, state, version, is_request,
+              deleted_at, created_at, updated_at
+            )
+            VALUES (?1, 'system', ?2, ?3, ?4, 'fixed', 1, 1, NULL, ?5, ?5)
+            "#,
+            params![
+                message_id,
+                super::SANTI_SYSTEM_ACTOR_ID,
+                message_kind_db,
+                content_json,
+                now
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        append_entry_in_tx(conn, strand_id, StrandTargetType::Message, &message_id)?;
+        conn.execute("DELETE FROM strand_inbox WHERE id = ?1", params![inbox_id])
+            .map_err(|error| error.to_string())?;
+        drained.push(
+            message_by_id(conn, &message_id)?
+                .ok_or_else(|| "drained message missing".to_string())?,
+        );
+    }
+    Ok(drained)
 }
 
 pub(super) fn soul_profile_by_id(

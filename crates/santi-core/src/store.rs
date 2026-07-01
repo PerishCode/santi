@@ -6,8 +6,8 @@ use std::{
 use rusqlite::{Connection, params};
 
 use crate::{
-    ActorType, MessageContent, MessageIntake, MessageKind, MessageState, SessionMessage, Strand,
-    StrandTargetType, Turn, prefixed_id, timestamp_now,
+    ActorType, IngestOutcome, MessageContent, MessageIntake, MessageKind, MessageState,
+    SessionMessage, Strand, StrandSelector, StrandTargetType, Turn, prefixed_id, timestamp_now,
 };
 
 mod assembly;
@@ -21,13 +21,18 @@ use db::*;
 use rows::{actor_type_db, collect_rows, map_webhook_row, message_state_db};
 use schema::SCHEMA;
 
-const SANTI_SCHEMA_VERSION: u32 = 16;
+const SANTI_SCHEMA_VERSION: u32 = 17;
 const DEFAULT_SOUL_ID: &str = "soul_default";
 /// The runtime's one system actor identity. No account/user: every non-soul
 /// actor speaks as `system`, whether it's a runtime-authored notice (kind
 /// santi_system) or opaque world-inbound content (kind text) — the sender's
 /// real identity, if any, lives in the content itself, not in this id.
 const SANTI_SYSTEM_ACTOR_ID: &str = "santi";
+/// Scale safety valve, not a business rule: past this many undrained entries
+/// for one strand, ingest starts rejecting instead of growing the queue
+/// without bound. The system enforces the gate; handling a rejection (surface
+/// it, or silently drop + log) is the adaptor's policy.
+const STRAND_INBOX_GATE: i64 = 500;
 
 #[derive(Clone)]
 pub struct SantiStore {
@@ -42,6 +47,9 @@ pub struct AppendedMessage {
 #[derive(Debug, Clone)]
 pub struct StartedTurn {
     pub turn: Turn,
+    /// Inbox entries this call committed into the timeline to reach this turn
+    /// (empty for the manual/test-only `start_turn`, which does not drain).
+    pub drained_messages: Vec<SessionMessage>,
 }
 
 impl SantiStore {
@@ -71,6 +79,7 @@ impl SantiStore {
                 DROP TABLE IF EXISTS message_text_contents;
                 DROP TABLE IF EXISTS conversations;
                 DROP TABLE IF EXISTS r_strand_entries;
+                DROP TABLE IF EXISTS strand_inbox;
                 DROP TABLE IF EXISTS compacts;
                 DROP TABLE IF EXISTS thinking_spans;
                 DROP TABLE IF EXISTS tool_results;
@@ -308,6 +317,68 @@ impl SantiStore {
         strand_by_id(&conn, &strand_id)?.ok_or_else(|| "labeled strand missing".to_string())
     }
 
+    /// Resolve an ingest adaptor's `StrandSelector` to a strand, atomically.
+    /// The selector IS the addressing strategy (by id — the operator's; by
+    /// label find-or-create scoped to a soul — a webhook's); core just runs it.
+    pub fn resolve_strand_selector(&self, selector: &StrandSelector) -> Result<Strand, String> {
+        match selector {
+            StrandSelector::ById(strand_id) => self
+                .strand(strand_id)?
+                .ok_or_else(|| "session not found".to_string()),
+            StrandSelector::ByLabel { soul_id, label } => {
+                self.find_or_create_strand_by_label(soul_id, label)
+            }
+        }
+    }
+
+    /// Enqueue inbound content into a strand's durable inbox — the ONE inbound
+    /// path (ingest). Does not touch the timeline; the driver drains the inbox
+    /// at the next turn boundary (see `try_start_turn`). `Accepted` confirms
+    /// durable enqueue only. Past `STRAND_INBOX_GATE` undrained entries, this
+    /// is a scale safety valve: reject rather than grow without bound.
+    pub fn enqueue_inbox(
+        &self,
+        strand_id: &str,
+        message_kind: MessageKind,
+        content: MessageContent,
+    ) -> Result<IngestOutcome, String> {
+        let conn = self.conn.lock().unwrap();
+        let pending: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM strand_inbox WHERE strand_id = ?1",
+                params![strand_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if pending >= STRAND_INBOX_GATE {
+            return Ok(IngestOutcome::Rejected {
+                reason: format!(
+                    "strand inbox is full ({pending} pending, gate {STRAND_INBOX_GATE})"
+                ),
+            });
+        }
+        let inbox_id = prefixed_id("inbox");
+        let now = timestamp_now();
+        let content_json = serde_json::to_string(&content).map_err(|error| error.to_string())?;
+        conn.execute(
+            r#"
+            INSERT INTO strand_inbox (id, strand_id, message_kind, content, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            "#,
+            params![
+                inbox_id,
+                strand_id,
+                rows::message_kind_db(&message_kind),
+                content_json,
+                now
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(IngestOutcome::Accepted {
+            strand_id: strand_id.to_string(),
+        })
+    }
+
     /// Register a webhook subscription (API-managed). The secret itself is never
     /// stored — `secret_env` names the env var the adaptor reads at verify time.
     pub fn create_webhook(
@@ -438,6 +509,7 @@ impl SantiStore {
         .map_err(|error| error.to_string())?;
         Ok(StartedTurn {
             turn: turn_by_id(&conn, &turn_id)?.ok_or_else(|| "created turn missing".to_string())?,
+            drained_messages: Vec::new(),
         })
     }
 }

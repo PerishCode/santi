@@ -2,9 +2,9 @@ use rusqlite::params;
 use serde_json::{Value, json};
 
 use super::{
-    SantiStore,
+    SantiStore, StartedTurn,
     db::{
-        append_entry_in_tx, call_soul_id, message_by_id, thinking_span_by_id,
+        append_entry_in_tx, call_soul_id, drain_inbox_in_tx, message_by_id, thinking_span_by_id,
         thinking_spans_for_turn, tool_call_by_id, tool_calls_for_turn, tool_result_by_id,
         tool_results_for_turn, turn_by_id, turn_strand_id,
     },
@@ -222,17 +222,19 @@ impl SantiStore {
     }
 
     /// Atomically start a turn for a strand IFF (a) no turn is currently
-    /// running for it and (b) it is "behind" — there is a REQUEST message whose
-    /// timeline seq is past the newest turn's start. This is the lynchpin of the
-    /// drive model: it makes "one present per thread of experience" an invariant
-    /// (the store mutex serializes the guard+insert), and lets ingest pokes and
-    /// completion re-checks race harmlessly. Returns the started turn, or None.
+    /// running for it and (b) it is "behind" — its inbox is non-empty. This is
+    /// the lynchpin of the drive model: it makes "one present per thread of
+    /// experience" an invariant (the store mutex serializes drain+guard+insert),
+    /// and lets ingest pokes and completion re-checks race harmlessly. Draining
+    /// the inbox INTO the timeline is part of this same atomic step — commit and
+    /// turn-start happen together, so a committed-but-uncovered REQUEST can
+    /// never exist. Returns the started turn (with what it drained), or None.
     pub fn try_start_turn(
         &self,
         strand_id: &str,
         trigger_type: &str,
         trigger_ref: Option<&str>,
-    ) -> Result<Option<Turn>, String> {
+    ) -> Result<Option<StartedTurn>, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let running: Option<i64> = tx
@@ -245,25 +247,8 @@ impl SantiStore {
         if running.is_some() {
             return Ok(None);
         }
-        let (request_frontier, turn_frontier): (i64, i64) = tx
-            .query_row(
-                r#"
-                SELECT
-                  (SELECT COALESCE(MAX(r.strand_seq), 0)
-                     FROM r_strand_entries r
-                     JOIN messages m ON m.id = r.target_id
-                    WHERE r.strand_id = ?1 AND r.target_type = 'message'
-                      AND m.is_request = 1),
-                  (SELECT COALESCE(MAX(base_strand_seq), 0)
-                     FROM turns WHERE strand_id = ?1)
-                "#,
-                params![strand_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .map_err(|error| error.to_string())?;
-        // Requests have seq >= 1; absent → 0. So 0 can never exceed the turn
-        // frontier (also >= 0) — no request, or one already covered → no drive.
-        if request_frontier <= turn_frontier {
+        let drained_messages = drain_inbox_in_tx(&tx, strand_id)?;
+        if drained_messages.is_empty() {
             return Ok(None);
         }
         let turn_id = prefixed_id("turn");
@@ -282,7 +267,10 @@ impl SantiStore {
         )
         .map_err(|error| error.to_string())?;
         tx.commit().map_err(|error| error.to_string())?;
-        turn_by_id(&conn, &turn_id)
+        Ok(Some(StartedTurn {
+            turn: turn_by_id(&conn, &turn_id)?.ok_or_else(|| "created turn missing".to_string())?,
+            drained_messages,
+        }))
     }
 
     /// The most recent turn for a strand (the active one under the drive
@@ -320,24 +308,14 @@ impl SantiStore {
         .map_err(|error| error.to_string())
     }
 
-    /// Strands that are "behind" (an unconsumed REQUEST exists). Used on
-    /// boot to re-drive durable requests stranded by a crash (liveness).
+    /// Strands that are "behind" (their inbox is non-empty). Used on boot to
+    /// re-drive durable requests stranded by a crash (liveness) — the inbox
+    /// itself is durable, so this is exactly "which strands still have
+    /// something an adaptor enqueued but the driver never drained".
     pub fn strands_with_pending_requests(&self) -> Result<Vec<String>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare(
-                r#"
-                SELECT ss.id
-                FROM strands ss
-                WHERE (SELECT COALESCE(MAX(r.strand_seq), 0)
-                         FROM r_strand_entries r
-                         JOIN messages m ON m.id = r.target_id
-                        WHERE r.strand_id = ss.id AND r.target_type = 'message'
-                          AND m.is_request = 1)
-                    > (SELECT COALESCE(MAX(base_strand_seq), 0)
-                         FROM turns WHERE strand_id = ss.id)
-                "#,
-            )
+            .prepare("SELECT DISTINCT strand_id FROM strand_inbox")
             .map_err(|error| error.to_string())?;
         let rows = stmt
             .query_map([], |row| row.get(0))

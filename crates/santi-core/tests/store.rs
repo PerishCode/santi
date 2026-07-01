@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use santi_core::{
-    ActorType, MessageContent, MessageIntake, MessageKind, MessageState, ProviderItem, SantiStore,
-    ThinkingCompletionReason, ToolCallProvenance,
+    ActorType, IngestOutcome, MessageContent, MessageIntake, MessageKind, MessageState,
+    ProviderItem, SantiStore, ThinkingCompletionReason, ToolCallProvenance,
 };
 
 fn assert_text(item: &ProviderItem, role: &str, content: &str) {
@@ -258,7 +258,10 @@ fn projects_timeline_to_interleaved_items() {
     assert_text(&input[3], "assistant", "done");
 }
 
-/// Append a REQUEST or RECORD message directly into a strand's timeline.
+/// A REQUEST enters through ingest (the inbox) — that's what makes a strand
+/// "behind" now. A RECORD (the soul's own output, a failure notice) bypasses
+/// the inbox entirely and is written straight to the timeline, same as
+/// `append_soul_assistant_text`/`fail_background_turn` do in the real service.
 fn append_timeline_message(
     store: &SantiStore,
     strand_id: &str,
@@ -266,20 +269,29 @@ fn append_timeline_message(
     text: &str,
     intake: MessageIntake,
 ) {
-    let actor_id = match actor_type {
-        ActorType::Soul => store.default_soul_id(),
-        _ => store.system_actor_id(),
-    };
-    store
-        .append_message(
-            strand_id,
-            actor_type,
-            actor_id,
-            MessageContent::text(text),
-            MessageState::Fixed,
-            intake,
-        )
-        .expect("append message");
+    match intake {
+        MessageIntake::Request => {
+            store
+                .enqueue_inbox(strand_id, MessageKind::Text, MessageContent::text(text))
+                .expect("enqueue inbox");
+        }
+        MessageIntake::Record => {
+            let actor_id = match actor_type {
+                ActorType::Soul => store.default_soul_id(),
+                ActorType::System => store.system_actor_id(),
+            };
+            store
+                .append_message(
+                    strand_id,
+                    actor_type,
+                    actor_id,
+                    MessageContent::text(text),
+                    MessageState::Fixed,
+                    intake,
+                )
+                .expect("append message");
+        }
+    }
 }
 
 #[test]
@@ -304,11 +316,13 @@ fn drive_starts_coalesces_and_re_drives() {
         "hi",
         MessageIntake::Request,
     );
-    let turn = store
+    let started = store
         .try_start_turn(&strand.id, "session_send", None)
         .expect("try")
         .expect("turn started");
-    assert_eq!(turn.status, santi_core::TurnStatus::Running);
+    assert_eq!(started.turn.status, santi_core::TurnStatus::Running);
+    assert_eq!(started.drained_messages.len(), 1);
+    let turn = started.turn;
 
     // A second request while the turn runs coalesces — no concurrent turn.
     append_timeline_message(
@@ -338,6 +352,66 @@ fn drive_starts_coalesces_and_re_drives() {
             .is_some(),
         "accumulated request should drive the next turn at completion"
     );
+}
+
+#[test]
+fn drain_commits_all_pending_inbox_entries_to_one_turn() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
+    let strand = store.create_session().expect("create strand");
+
+    // Multiple adaptors can enqueue concurrently before the driver ever runs;
+    // the NEXT drive drains everything present into ONE turn, in arrival order.
+    for text in ["first", "second", "third"] {
+        store
+            .enqueue_inbox(&strand.id, MessageKind::Text, MessageContent::text(text))
+            .expect("enqueue");
+    }
+    let started = store
+        .try_start_turn(&strand.id, "session_send", None)
+        .expect("try")
+        .expect("turn started");
+    assert_eq!(started.drained_messages.len(), 3);
+    assert_eq!(started.drained_messages[0].content_text, "first");
+    assert_eq!(started.drained_messages[1].content_text, "second");
+    assert_eq!(started.drained_messages[2].content_text, "third");
+    for (index, message) in started.drained_messages.iter().enumerate() {
+        assert_eq!(message.relation.strand_seq, (index + 1) as i64);
+    }
+
+    // The inbox is now empty — nothing left to drain, no new turn.
+    assert!(
+        store
+            .try_start_turn(&strand.id, "session_send", None)
+            .expect("try")
+            .is_none()
+    );
+}
+
+#[test]
+fn inbox_gate_rejects_past_threshold() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
+    let strand = store.create_session().expect("create strand");
+
+    // Never drained (no try_start_turn call), so every enqueue adds to the
+    // undrained count — eventually the gate must start rejecting rather than
+    // growing without bound.
+    let mut rejected = false;
+    for _ in 0..600 {
+        match store
+            .enqueue_inbox(&strand.id, MessageKind::Text, MessageContent::text("x"))
+            .expect("enqueue")
+        {
+            IngestOutcome::Accepted { .. } => {}
+            IngestOutcome::Rejected { reason } => {
+                assert!(reason.contains("inbox is full"), "got: {reason}");
+                rejected = true;
+                break;
+            }
+        }
+    }
+    assert!(rejected, "gate never rejected after 600 enqueues");
 }
 
 #[test]

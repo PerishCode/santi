@@ -16,12 +16,12 @@ use tokio::sync::broadcast;
 use crate::assembly::input::provider_input;
 use crate::service_prompt::provider_tools;
 use crate::{
-    ActorType, CompactExecRequest, CompactExecResponse, CompactQueryResponse,
-    CreateSessionResponse, CreateSoulRequest, CreateWebhookRequest, MaterialKind, MessageContent,
-    MessageIntake, MessageState, SantiStore, SantiStreamEvent, SantiStreamPayload,
-    SendSessionAcceptedResponse, SendSessionRequest, SessionDetail, SessionMaterial,
-    SessionMessage, SessionRuntimeSnapshot, SoulProfile, Strand, ThinkingCompletionReason,
-    ThinkingSpan, Turn, TurnActivityState, WebhookSubscription, prefixed_id, timestamp_now,
+    CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSessionResponse,
+    CreateSoulRequest, CreateWebhookRequest, IngestOutcome, MaterialKind, MessageContent,
+    MessageKind, SantiStore, SantiStreamEvent, SantiStreamPayload, SendSessionAcceptedResponse,
+    SendSessionRequest, SessionDetail, SessionMaterial, SessionMessage, SessionRuntimeSnapshot,
+    SoulProfile, Strand, StrandSelector, ThinkingCompletionReason, ThinkingSpan, Turn,
+    TurnActivityState, WebhookSubscription, prefixed_id, timestamp_now,
 };
 use failure::ProviderTurnFailure;
 use text_delta::TextDeltaUpdate;
@@ -37,6 +37,10 @@ pub struct SantiService {
 }
 
 type MaterialCacheKey = (String, MaterialKind);
+/// A turn `poke`/`ingest_into` actually just drove, with what it drained into
+/// the timeline to reach it — `None` when nothing was pending, or the drive
+/// coalesced into an already-running turn instead of starting a fresh one.
+type DrivenTurn = Option<(Turn, Vec<SessionMessage>)>;
 
 #[derive(Debug, Clone)]
 pub struct SantiServiceConfig {
@@ -66,9 +70,10 @@ impl SantiService {
         })
     }
 
-    /// Re-drive strands left "behind" by a crash (durable requests never
-    /// covered by a turn). Liveness only — no retry of attempted/failed turns.
-    /// Call once at server startup (inside the tokio runtime).
+    /// Re-drive strands left "behind" by a crash (their inbox durably holds
+    /// content nobody ever drained). Liveness only — no retry of
+    /// attempted/failed turns. Call once at server startup (inside the tokio
+    /// runtime).
     pub fn resume_pending(&self) {
         match self.store.strands_with_pending_requests() {
             Ok(pending) => {
@@ -154,35 +159,71 @@ impl SantiService {
         self.store.webhook(name)
     }
 
+    /// The one inbound path (see PHASE-06/STEP4): resolve `selector` to a
+    /// strand, enqueue `content` into its durable inbox, try to drive a turn.
+    /// `Accepted` only confirms durable enqueue, not that a message/turn now
+    /// exists yet — the driver may still be draining a running turn's inbox
+    /// later (see `ingest_into`). `Rejected` (the inbox gate — a scale safety
+    /// valve, not an error) is a normal outcome; handling it is the adaptor's
+    /// own policy (surface it, or silently drop + log).
+    pub fn ingest(
+        &self,
+        selector: StrandSelector,
+        content: MessageContent,
+        kind: MessageKind,
+        trigger_type: &str,
+    ) -> Result<IngestOutcome, String> {
+        let strand = self.store.resolve_strand_selector(&selector)?;
+        let (outcome, _driven) = self.ingest_into(&strand, content, kind, trigger_type)?;
+        Ok(outcome)
+    }
+
+    /// Shared ingest core (enqueue + drive) for both the generic `ingest` and
+    /// `send_session` (which additionally wants the turn/message it may have
+    /// just driven, to shape its richer response). Returns `driven = Some` only
+    /// when THIS call's poke actually drained the inbox (a fresh turn started,
+    /// possibly covering other adaptors' concurrently-enqueued entries too) —
+    /// `None` when it coalesced into an already-running turn, whose own
+    /// completion re-check will drain this content later.
+    fn ingest_into(
+        &self,
+        strand: &Strand,
+        content: MessageContent,
+        kind: MessageKind,
+        trigger_type: &str,
+    ) -> Result<(IngestOutcome, DrivenTurn), String> {
+        let outcome = self.store.enqueue_inbox(&strand.id, kind, content)?;
+        let driven = match outcome {
+            IngestOutcome::Accepted { .. } => self.poke(&strand.id, trigger_type),
+            IngestOutcome::Rejected { .. } => None,
+        };
+        Ok((outcome, driven))
+    }
+
     /// Ingest an external event already normalized by an adaptor: a `santi-system`
     /// message addressed to `soul_id`, anchored to the strand bound to `label`.
-    /// This is the webhook twin of `send_session` — append a REQUEST + poke the
-    /// driver — so it shares the same drive/coalesce semantics. Core stays generic:
-    /// the label and the message text are opaque (the adaptor owns their meaning).
-    /// Returns the anchored strand id.
+    /// This is the webhook twin of `send_session` — same `ingest_into` core, so
+    /// the same drive/coalesce/gate semantics. Core stays generic: the label and
+    /// the message text are opaque (the adaptor owns their meaning).
     pub fn ingest_external_event(
         &self,
         soul_id: &str,
         label: &str,
         system_text: String,
-    ) -> Result<String, String> {
-        let strand = self.store.find_or_create_strand_by_label(soul_id, label)?;
-        let system_message = self
+    ) -> Result<IngestOutcome, String> {
+        let strand = self
             .store
-            .append_santi_system_message(
-                &strand.id,
-                MessageContent::text(system_text),
-                MessageIntake::Request,
-            )?
-            .session_message;
-        self.publish_stream(
-            &strand.id,
-            SantiStreamPayload::MessageCreated {
-                message: system_message,
-            },
-        );
-        self.poke(&strand.id, "system");
-        Ok(strand.id)
+            .resolve_strand_selector(&StrandSelector::ByLabel {
+                soul_id: soul_id.to_string(),
+                label: label.to_string(),
+            })?;
+        let (outcome, _driven) = self.ingest_into(
+            &strand,
+            MessageContent::text(system_text),
+            MessageKind::SantiSystem,
+            "system",
+        )?;
+        Ok(outcome)
     }
 
     /// Compact a range of a strand's own timeline (self-involved: the soul
@@ -255,35 +296,29 @@ impl SantiService {
             .strand(session_id)?
             .ok_or_else(|| "session not found".to_string())?;
 
-        // Ingest is decoupled from drive: append the user message as a REQUEST,
-        // then poke the driver. If a turn is already running for this strand,
-        // this send simply joins the thread (coalesced) and the running turn (or
-        // its completion re-check) will see it — no second concurrent turn.
-        let user_message = self
-            .store
-            .append_message(
-                &strand.id,
-                ActorType::System,
-                self.store.system_actor_id(),
-                MessageContent {
-                    parts: request.content,
-                },
-                MessageState::Fixed,
-                MessageIntake::Request,
-            )?
-            .session_message;
-        self.publish_stream(
-            session_id,
-            SantiStreamPayload::MessageCreated {
-                message: user_message.clone(),
+        // ingest_into is decoupled from drive: enqueue into the inbox, then try
+        // to drive a turn. If one is already running for this strand, this send
+        // simply joins the thread (coalesced) and the running turn (or its
+        // completion re-check) will drain it later — no second concurrent turn.
+        let (outcome, driven) = self.ingest_into(
+            &strand,
+            MessageContent {
+                parts: request.content,
             },
-        );
-        let turn = match self.poke(&strand.id, "session_send") {
-            Some(turn) => turn,
-            None => self
-                .store
-                .latest_turn(&strand.id)?
-                .ok_or_else(|| "no active turn after send".to_string())?,
+            MessageKind::Text,
+            "session_send",
+        )?;
+        if let IngestOutcome::Rejected { reason } = outcome {
+            return Err(reason);
+        }
+        let (turn, user_message) = match driven {
+            Some((turn, mut drained)) => (turn, drained.pop()),
+            None => (
+                self.store
+                    .latest_turn(&strand.id)?
+                    .ok_or_else(|| "no active turn after send".to_string())?,
+                None,
+            ),
         };
 
         let soul_profile = self
@@ -299,26 +334,32 @@ impl SantiService {
         })
     }
 
-    /// Drive a turn if the strand is behind and idle, spawning the runner.
-    /// Returns the started turn, or None when a turn is already running (this
-    /// request coalesces) or there is nothing pending. The atomic guard in
+    /// Drive a turn if the strand is behind (its inbox is non-empty) and idle,
+    /// spawning the runner. Returns the started turn plus what it drained into
+    /// the timeline, or None when a turn is already running (this request
+    /// coalesces) or there is nothing pending. The atomic guard in
     /// `try_start_turn` keeps "one present per thread of experience".
-    fn poke(&self, strand_id: &str, trigger_type: &str) -> Option<Turn> {
+    fn poke(&self, strand_id: &str, trigger_type: &str) -> DrivenTurn {
         match self.store.try_start_turn(strand_id, trigger_type, None) {
-            Ok(Some(turn)) => {
+            Ok(Some(started)) => {
+                for message in started.drained_messages.iter().cloned() {
+                    self.publish_stream(strand_id, SantiStreamPayload::MessageCreated { message });
+                }
                 self.publish_stream(
                     strand_id,
-                    SantiStreamPayload::TurnStarted { turn: turn.clone() },
+                    SantiStreamPayload::TurnStarted {
+                        turn: started.turn.clone(),
+                    },
                 );
                 let background = self.clone();
                 let background_strand_id = strand_id.to_string();
-                let background_turn_id = turn.id.clone();
+                let background_turn_id = started.turn.id.clone();
                 tokio::spawn(async move {
                     background
                         .complete_provider_turn(background_strand_id, background_turn_id)
                         .await;
                 });
-                Some(turn)
+                Some((started.turn, started.drained_messages))
             }
             Ok(None) => None,
             Err(error) => {

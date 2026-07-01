@@ -19,8 +19,8 @@ use axum::{
 use futures_core::Stream;
 use santi_core::{
     CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSessionResponse,
-    CreateSoulRequest, CreateWebhookRequest, ErrorResponse, HealthResponse, MaterialRequest,
-    SantiService, SantiServiceConfig, SantiStreamEvent, SantiStreamPayload,
+    CreateSoulRequest, CreateWebhookRequest, ErrorResponse, HealthResponse, IngestOutcome,
+    MaterialRequest, SantiService, SantiServiceConfig, SantiStreamEvent, SantiStreamPayload,
     SendSessionAcceptedResponse, SendSessionRequest, SessionDetail, SessionMaterial,
     SessionRuntimeSnapshot, SoulProfile, Strand, WebhookSubscription, prefixed_id, timestamp_now,
 };
@@ -329,9 +329,18 @@ async fn ingest_webhook(
     } else {
         event.label
     };
-    service
+    // Rejection handling is the adaptor's own policy: a webhook silently drops
+    // + logs (the sender has no way to retry a specific event) rather than
+    // surfacing the inbox gate as an error.
+    match service
         .ingest_external_event(&subscription.soul_id, &label, event.santi_system_text)
-        .map_err(ApiError::from_service)?;
+        .map_err(ApiError::from_service)?
+    {
+        IngestOutcome::Accepted { .. } => {}
+        IngestOutcome::Rejected { reason } => {
+            eprintln!("santi: webhook ingest rejected for {name}: {reason}");
+        }
+    }
     Ok(StatusCode::OK)
 }
 
@@ -629,6 +638,7 @@ impl ApiError {
             || text.contains("object uri")
             || text.contains("path segment")
             || text.contains("path separators")
+            || text.starts_with("strand inbox is full")
         {
             Self::bad_request(message)
         } else {

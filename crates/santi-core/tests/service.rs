@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use futures_util::stream;
 use santi_core::{
-    CreateSoulRequest, MessagePart, ObjectBucket, ObjectUri, SESSION_WORKSPACE_URI,
-    SOUL_WORKSPACE_URI, SantiService, SantiServiceConfig, SendSessionRequest, session_memory_uri,
-    soul_memory_uri,
+    CreateSoulRequest, MessageContent, MessageKind, MessagePart, ObjectBucket, ObjectUri,
+    SESSION_WORKSPACE_URI, SOUL_WORKSPACE_URI, SantiService, SantiServiceConfig, SantiStore,
+    SendSessionRequest, session_memory_uri, soul_memory_uri,
 };
 use santi_provider::{
     ProviderClient, ProviderEvent, ProviderFunctionCall, ProviderItem, ProviderMetadata,
@@ -99,7 +99,13 @@ async fn sends_with_runtime() {
         .await
         .expect("send session");
 
-    assert_eq!(response.user_message.content_text, "hello provider");
+    assert_eq!(
+        response
+            .user_message
+            .expect("driven synchronously")
+            .content_text,
+        "hello provider"
+    );
     assert_eq!(response.turn.status, santi_core::TurnStatus::Running);
     let runtime = wait_for_completed_turn(&service, &session.id, &response.turn.id).await;
     assert!(
@@ -297,9 +303,14 @@ async fn ingest_external_event_triggers_turn() {
 
     let soul_id = service.list_souls().expect("list souls")[0].soul_id.clone();
     let label = "github:ops:issue:PerishCode/santi#42";
-    let session_id = service
+    let santi_core::IngestOutcome::Accepted {
+        strand_id: session_id,
+    } = service
         .ingest_external_event(&soul_id, label, "an external request arrived".to_string())
-        .expect("ingest event");
+        .expect("ingest event")
+    else {
+        panic!("expected accepted");
+    };
 
     // The webhook event is a REQUEST → it wakes the soul on a label-anchored
     // session. Wait for the system-triggered turn to complete.
@@ -324,9 +335,14 @@ async fn ingest_external_event_triggers_turn() {
     );
 
     // A second event on the same label coalesces onto the same session, not a new one.
-    let session_id_again = service
+    let santi_core::IngestOutcome::Accepted {
+        strand_id: session_id_again,
+    } = service
         .ingest_external_event(&soul_id, label, "a follow-up arrived".to_string())
-        .expect("ingest second event");
+        .expect("ingest second event")
+    else {
+        panic!("expected accepted");
+    };
     assert_eq!(session_id_again, session_id);
 
     // A doorbell is a runtime-authored santi_system fact, not user speech — it
@@ -341,6 +357,59 @@ async fn ingest_external_event_triggers_turn() {
             )
         })
     }));
+}
+
+/// Boot recovery drains the inbox: content that an adaptor durably enqueued
+/// but that never got drained before a crash (nobody called `ingest`'s poke —
+/// simulated here by writing straight to the store, bypassing the service)
+/// still drives a turn once a fresh service opens against the same db and
+/// calls `resume_pending`.
+#[tokio::test]
+async fn boot_recovery_drains_stranded_inbox_entries() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let config = SantiServiceConfig {
+        database_path: temp.path().join("santi.sqlite").display().to_string(),
+        runtime_root: temp.path().join("runtime").display().to_string(),
+        execution_root: temp.path().join("execution").display().to_string(),
+        bind_addr: Some("127.0.0.1:0".to_string()),
+    };
+    let provider = Arc::new(FakeProvider::default());
+
+    let strand_id = {
+        let service = SantiService::open(config.clone(), provider.clone()).expect("open service");
+        service.create_session().expect("create session").session.id
+    };
+
+    // Simulate an adaptor that enqueued content and then the process crashed
+    // before any poke ever drained it: write directly to the inbox, bypassing
+    // SantiService::ingest/send_session entirely.
+    let store = SantiStore::open(&config.database_path).expect("open store directly");
+    store
+        .enqueue_inbox(
+            &strand_id,
+            MessageKind::Text,
+            MessageContent::text("stranded before the crash"),
+        )
+        .expect("enqueue inbox");
+    drop(store);
+
+    // A fresh service against the SAME db, as after a restart.
+    let service = SantiService::open(config, provider.clone()).expect("reopen service");
+    service.resume_pending();
+
+    let runtime = wait_for_any_completed_turn(&service, &strand_id).await;
+    assert!(
+        runtime
+            .messages
+            .iter()
+            .any(|message| message.content_text == "stranded before the crash")
+    );
+    assert!(
+        runtime
+            .messages
+            .iter()
+            .any(|message| message.content_text == "hi from runtime")
+    );
 }
 
 #[tokio::test]
@@ -389,13 +458,18 @@ async fn send_session_targets_the_strands_own_soul() {
     assert_eq!(response.strand.soul_id, default_soul);
 
     // A label-anchored strand can be owned by a non-default soul (via ingest).
-    let secretary_strand_id = service
+    let santi_core::IngestOutcome::Accepted {
+        strand_id: secretary_strand_id,
+    } = service
         .ingest_external_event(
             &secretary.soul_id,
             "github:issue:1",
             "hello secretary".to_string(),
         )
-        .expect("ingest event");
+        .expect("ingest event")
+    else {
+        panic!("expected accepted");
+    };
     let secretary_response = service
         .send_session(
             &secretary_strand_id,

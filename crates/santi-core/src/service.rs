@@ -20,8 +20,8 @@ use crate::{
     CreateSessionResponse, CreateSoulRequest, CreateWebhookRequest, MaterialKind, MessageContent,
     MessageIntake, MessageState, SantiStore, SantiStreamEvent, SantiStreamPayload,
     SendSessionAcceptedResponse, SendSessionRequest, SessionDetail, SessionMaterial,
-    SessionRuntimeSnapshot, SessionSummary, SoulProfile, ThinkingCompletionReason, ThinkingSpan,
-    Turn, TurnActivityState, UpdateSessionRequest, WebhookSubscription, prefixed_id, timestamp_now,
+    SessionMessage, SessionRuntimeSnapshot, SoulProfile, Strand, ThinkingCompletionReason,
+    ThinkingSpan, Turn, TurnActivityState, WebhookSubscription, prefixed_id, timestamp_now,
 };
 use failure::ProviderTurnFailure;
 use text_delta::TextDeltaUpdate;
@@ -72,8 +72,8 @@ impl SantiService {
     pub fn resume_pending(&self) {
         match self.store.strands_with_pending_requests() {
             Ok(pending) => {
-                for (session_id, strand_id) in pending {
-                    self.poke(&session_id, &strand_id, "session_send");
+                for session_id in pending {
+                    self.poke(&session_id, "session_send");
                 }
             }
             Err(error) => eprintln!("santi: resume_pending scan failed: {error}"),
@@ -155,57 +155,44 @@ impl SantiService {
     }
 
     /// Ingest an external event already normalized by an adaptor: a `santi-system`
-    /// message addressed to `soul_id`, anchored to the session bound to `label`.
+    /// message addressed to `soul_id`, anchored to the strand bound to `label`.
     /// This is the webhook twin of `send_session` — append a REQUEST + poke the
     /// driver — so it shares the same drive/coalesce semantics. Core stays generic:
     /// the label and the message text are opaque (the adaptor owns their meaning).
-    /// Returns the anchored session id.
+    /// Returns the anchored strand id.
     pub fn ingest_external_event(
         &self,
         soul_id: &str,
         label: &str,
         system_text: String,
     ) -> Result<String, String> {
-        if self.store.soul_profile(soul_id)?.is_none() {
-            return Err("soul not found".to_string());
-        }
-        let session = self.store.find_or_create_session_by_label(label)?;
-        let session_id = session.session.id;
+        let strand = self.store.find_or_create_strand_by_label(soul_id, label)?;
         let system_message = self
             .store
             .append_santi_system_message(
-                &session_id,
+                &strand.id,
                 MessageContent::text(system_text),
                 MessageIntake::Request,
             )?
             .session_message;
-        let strand = self.store.acquire_strand(soul_id, &session_id)?.strand;
-        self.store
-            .append_message_ref(&strand.id, &system_message.message.id)?;
         self.publish_stream(
-            &session_id,
+            &strand.id,
             SantiStreamPayload::MessageCreated {
                 message: system_message,
             },
         );
-        self.poke(&session_id, &strand.id, "system");
-        Ok(session_id)
+        self.poke(&strand.id, "system");
+        Ok(strand.id)
     }
 
     /// Compact a range of a strand's own timeline (self-involved: the soul
-    /// runs this on itself). Resolves (soul, session) → strand, then creates
-    /// the projection overlay. The soul authors `summary`; the system only checks scale.
+    /// runs this on itself). Creates the projection overlay directly over the
+    /// addressed strand. The soul authors `summary`; the system only checks scale.
     pub fn compact_exec(
         &self,
         session_id: &str,
         request: CompactExecRequest,
     ) -> Result<CompactExecResponse, String> {
-        let soul_id = request
-            .soul_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|id| !id.is_empty())
-            .unwrap_or_else(|| self.store.default_soul_id());
         let from = request.from_message_id.trim();
         let to = request.to_message_id.trim();
         let summary = request.summary.trim();
@@ -217,7 +204,7 @@ impl SantiService {
         }
         let strand = self
             .store
-            .find_strand_by_pair(soul_id, session_id)?
+            .strand(session_id)?
             .ok_or_else(|| "strand not found".to_string())?;
         self.store.create_compact(&strand.id, from, to, summary)
     }
@@ -233,41 +220,25 @@ impl SantiService {
             .compact_query(compact_id, keyword, page_index, page_size)
     }
 
-    pub fn list_sessions(&self) -> Result<Vec<SessionSummary>, String> {
+    pub fn list_sessions(&self) -> Result<Vec<Strand>, String> {
         self.store.list_sessions()
     }
 
     pub fn session(&self, session_id: &str) -> Result<Option<SessionDetail>, String> {
-        let Some(session) = self.store.session(session_id)? else {
+        let Some(strand) = self.store.strand(session_id)? else {
             return Ok(None);
         };
         Ok(Some(SessionDetail {
-            profile: self
-                .store
-                .runtime_snapshot(self.store.default_soul_id(), session_id)?
-                .map(|snapshot| snapshot.profile)
-                .ok_or_else(|| "session disappeared".to_string())?,
-            session,
             messages: self.store.session_messages(session_id)?,
+            strand,
         }))
-    }
-
-    pub fn update_session(
-        &self,
-        session_id: &str,
-        request: UpdateSessionRequest,
-    ) -> Result<Option<SessionSummary>, String> {
-        self.store.update_session_title(session_id, request.title)
     }
 
     pub fn runtime_snapshot(
         &self,
         session_id: &str,
     ) -> Result<Option<SessionRuntimeSnapshot>, String> {
-        // Session-level view from the default soul's vantage (the pre-multi-soul
-        // shortcut the GET /runtime endpoint still uses).
-        self.store
-            .runtime_snapshot(self.store.default_soul_id(), session_id)
+        self.store.runtime_snapshot(session_id)
     }
 
     pub async fn send_session(
@@ -279,6 +250,10 @@ impl SantiService {
         if text.trim().is_empty() {
             return Err("send content must contain text".to_string());
         }
+        let strand = self
+            .store
+            .strand(session_id)?
+            .ok_or_else(|| "session not found".to_string())?;
 
         // Ingest is decoupled from drive: append the user message as a REQUEST,
         // then poke the driver. If a turn is already running for this strand,
@@ -287,7 +262,7 @@ impl SantiService {
         let user_message = self
             .store
             .append_message(
-                session_id,
+                &strand.id,
                 ActorType::Account,
                 self.store.default_account_id(),
                 MessageContent {
@@ -297,22 +272,13 @@ impl SantiService {
                 MessageIntake::Request,
             )?
             .session_message;
-        let soul_id = request
-            .soul_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|id| !id.is_empty())
-            .unwrap_or_else(|| self.store.default_soul_id());
-        let strand = self.store.acquire_strand(soul_id, session_id)?.strand;
-        self.store
-            .append_message_ref(&strand.id, &user_message.message.id)?;
         self.publish_stream(
             session_id,
             SantiStreamPayload::MessageCreated {
                 message: user_message.clone(),
             },
         );
-        let turn = match self.poke(session_id, &strand.id, "session_send") {
+        let turn = match self.poke(&strand.id, "session_send") {
             Some(turn) => turn,
             None => self
                 .store
@@ -320,23 +286,13 @@ impl SantiService {
                 .ok_or_else(|| "no active turn after send".to_string())?,
         };
 
-        let snapshot = self
+        let soul_profile = self
             .store
-            .runtime_snapshot(soul_id, session_id)?
-            .ok_or_else(|| "strand disappeared".to_string())?;
-        let accepted_strand = snapshot
-            .strand
-            .ok_or_else(|| "strand disappeared".to_string())?;
-        let soul_profile = snapshot
-            .soul_profile
+            .soul_profile(&strand.soul_id)?
             .ok_or_else(|| "soul_profile disappeared".to_string())?;
 
         Ok(SendSessionAcceptedResponse {
-            session: SessionSummary {
-                session: snapshot.session,
-                profile: snapshot.profile,
-            },
-            strand: accepted_strand,
+            strand,
             soul_profile,
             turn,
             user_message,
@@ -347,24 +303,19 @@ impl SantiService {
     /// Returns the started turn, or None when a turn is already running (this
     /// request coalesces) or there is nothing pending. The atomic guard in
     /// `try_start_turn` keeps "one present per thread of experience".
-    fn poke(&self, session_id: &str, strand_id: &str, trigger_type: &str) -> Option<Turn> {
+    fn poke(&self, strand_id: &str, trigger_type: &str) -> Option<Turn> {
         match self.store.try_start_turn(strand_id, trigger_type, None) {
             Ok(Some(turn)) => {
                 self.publish_stream(
-                    session_id,
+                    strand_id,
                     SantiStreamPayload::TurnStarted { turn: turn.clone() },
                 );
                 let background = self.clone();
-                let background_session_id = session_id.to_string();
                 let background_strand_id = strand_id.to_string();
                 let background_turn_id = turn.id.clone();
                 tokio::spawn(async move {
                     background
-                        .complete_provider_turn(
-                            background_session_id,
-                            background_strand_id,
-                            background_turn_id,
-                        )
+                        .complete_provider_turn(background_strand_id, background_turn_id)
                         .await;
                 });
                 Some(turn)
@@ -377,29 +328,21 @@ impl SantiService {
         }
     }
 
-    async fn complete_provider_turn(&self, session_id: String, strand_id: String, turn_id: String) {
-        match self
-            .run_provider_turn(&session_id, &strand_id, &turn_id)
-            .await
-        {
+    async fn complete_provider_turn(&self, strand_id: String, turn_id: String) {
+        match self.run_provider_turn(&strand_id, &turn_id).await {
             Err(failure) => {
                 self.fail_background_turn(
-                    &session_id,
+                    &strand_id,
                     &turn_id,
                     failure.error,
                     failure.partial_assistant_text,
                 );
             }
-            Ok((assistant_text, provider_response_id)) => {
-                let soul_id = self
-                    .store
-                    .soul_id_for_strand(&strand_id)
-                    .unwrap_or_else(|_| self.store.default_soul_id().to_string());
+            Ok((last_soul_message, provider_response_id)) => {
                 self.finalize_turn(
-                    &session_id,
+                    &strand_id,
                     &turn_id,
-                    &soul_id,
-                    assistant_text,
+                    last_soul_message,
                     provider_response_id,
                 );
             }
@@ -407,50 +350,32 @@ impl SantiService {
         // Re-check: a turn is one thread "catching up"; requests that arrived
         // during it (seq past this turn's start) make the strand behind
         // again → drive the next turn now.
-        self.poke(&session_id, &strand_id, "session_send");
+        self.poke(&strand_id, "session_send");
     }
 
     /// Finalize a completed provider turn. Speech is optional (N6): an empty
-    /// assistant_text is a valid silent completion, not a failure. The lumped,
-    /// user-visible reply is a RECORD (it does not wake the soul); the replay
-    /// timeline already holds this turn's per-round output.
+    /// turn (no per-round text ever appended) is a valid silent completion, not
+    /// a failure. `last_soul_message` is the final per-round entry `run_provider_turn`
+    /// appended (if any) — already the operator-visible truth, so completion just
+    /// marks the turn done, it does not write anything new.
     fn finalize_turn(
         &self,
-        session_id: &str,
+        strand_id: &str,
         turn_id: &str,
-        soul_id: &str,
-        assistant_text: String,
+        last_soul_message: Option<SessionMessage>,
         provider_response_id: Option<String>,
     ) {
-        let assistant_seq = if assistant_text.trim().is_empty() {
-            None
-        } else {
-            match self.store.append_message(
-                session_id,
-                ActorType::Soul,
-                soul_id,
-                MessageContent::text(assistant_text.clone()),
-                MessageState::Fixed,
-                MessageIntake::Record,
-            ) {
-                Ok(message) => {
-                    let assistant_message = message.session_message;
-                    let seq = assistant_message.relation.session_seq;
-                    self.publish_stream(
-                        session_id,
-                        SantiStreamPayload::MessageCompleted {
-                            turn_id: turn_id.to_string(),
-                            message: assistant_message,
-                        },
-                    );
-                    Some(seq)
-                }
-                Err(error) => {
-                    self.fail_background_turn(session_id, turn_id, error, assistant_text);
-                    return;
-                }
-            }
-        };
+        let assistant_seq = last_soul_message.map(|message| {
+            let seq = message.relation.strand_seq;
+            self.publish_stream(
+                strand_id,
+                SantiStreamPayload::MessageCompleted {
+                    turn_id: turn_id.to_string(),
+                    message,
+                },
+            );
+            seq
+        });
         match self.store.complete_turn(
             turn_id,
             assistant_seq,
@@ -458,22 +383,22 @@ impl SantiService {
             provider_response_id,
         ) {
             Ok(_) => self.publish_stream(
-                session_id,
+                strand_id,
                 SantiStreamPayload::TurnCompleted {
                     turn_id: turn_id.to_string(),
                 },
             ),
-            Err(error) => self.fail_background_turn(session_id, turn_id, error, String::new()),
+            Err(error) => self.fail_background_turn(strand_id, turn_id, error, String::new()),
         }
     }
 
     async fn run_provider_turn(
         &self,
-        session_id: &str,
         strand_id: &str,
         turn_id: &str,
-    ) -> Result<(String, Option<String>), ProviderTurnFailure> {
+    ) -> Result<(Option<SessionMessage>, Option<String>), ProviderTurnFailure> {
         let mut assistant_text = String::new();
+        let mut last_soul_message: Option<SessionMessage> = None;
         let mut timing = ProviderTurnTiming::new(turn_id);
         let mut round = 0;
         macro_rules! provider_try {
@@ -494,9 +419,7 @@ impl SantiService {
             let metadata = self.provider.metadata();
             let request = ProviderRequest {
                 model: metadata.model,
-                instructions: Some(provider_try!(
-                    self.system_prompt_text(session_id, strand_id)
-                )),
+                instructions: Some(provider_try!(self.system_prompt_text(strand_id))),
                 input,
                 tools: Some(provider_tools()),
                 previous_response_id: None,
@@ -506,7 +429,7 @@ impl SantiService {
                 request.input.len(),
                 request.instructions.as_ref().map_or(0, |text| text.len()),
             );
-            self.publish_turn_activity(session_id, turn_id, TurnActivityState::Requesting, None);
+            self.publish_turn_activity(strand_id, turn_id, TurnActivityState::Requesting, None);
             let mut stream = match self.provider.stream_response(request).await {
                 Ok(stream) => {
                     timing.http_response_started(round);
@@ -532,7 +455,7 @@ impl SantiService {
                     Err(error) => {
                         timing.failed(round, "sse_event", &error);
                         provider_try!(self.fail_current_thinking_span(
-                            session_id,
+                            strand_id,
                             &mut current_thinking_span,
                             error.clone(),
                         ));
@@ -557,14 +480,14 @@ impl SantiService {
                     } => {
                         active_provider_response_id = provider_response_id.clone();
                         provider_try!(self.ensure_thinking_span(
-                            session_id,
+                            strand_id,
                             turn_id,
                             &mut current_thinking_span,
                             &mut summary_thinking_span,
                             provider_response_id.clone(),
                         ));
                         self.publish_turn_activity(
-                            session_id,
+                            strand_id,
                             turn_id,
                             TurnActivityState::Thinking,
                             provider_response_id,
@@ -573,7 +496,7 @@ impl SantiService {
                     ProviderEvent::ReasoningSummaryDelta(delta) => {
                         reasoning_summary.push_str(&delta);
                         provider_try!(self.update_thinking_span_summary(
-                            session_id,
+                            strand_id,
                             &mut summary_thinking_span,
                             reasoning_summary.clone(),
                         ));
@@ -581,14 +504,14 @@ impl SantiService {
                     ProviderEvent::ReasoningSummaryDone(summary) => {
                         reasoning_summary = summary;
                         provider_try!(self.update_thinking_span_summary(
-                            session_id,
+                            strand_id,
                             &mut summary_thinking_span,
                             reasoning_summary.clone(),
                         ));
                     }
                     ProviderEvent::TextDelta(delta) => {
                         let update = TextDeltaUpdate {
-                            session_id,
+                            session_id: strand_id,
                             turn_id,
                             assistant_text: &mut assistant_text,
                             round_assistant_text: &mut round_assistant_text,
@@ -602,12 +525,12 @@ impl SantiService {
                     ProviderEvent::FunctionCallRequested(call) => {
                         timing.function_call_requested(round, &call.name);
                         provider_try!(self.complete_current_thinking_span(
-                            session_id,
+                            strand_id,
                             &mut current_thinking_span,
                             ThinkingCompletionReason::ToolCallRequested,
                         ));
                         self.publish_turn_activity(
-                            session_id,
+                            strand_id,
                             turn_id,
                             TurnActivityState::CallingTool,
                             active_provider_response_id.clone(),
@@ -620,7 +543,7 @@ impl SantiService {
                         timing.completed(round);
                         active_provider_response_id = provider_response_id.clone();
                         provider_try!(self.complete_current_thinking_span(
-                            session_id,
+                            strand_id,
                             &mut current_thinking_span,
                             ThinkingCompletionReason::ProviderCompleted,
                         ));
@@ -629,7 +552,7 @@ impl SantiService {
                     }
                     ProviderEvent::Failed(error) => {
                         provider_try!(self.fail_current_thinking_span(
-                            session_id,
+                            strand_id,
                             &mut current_thinking_span,
                             error.clone(),
                         ));
@@ -643,10 +566,10 @@ impl SantiService {
             // faithful interleaved log (DC4b). The lumped session-visible reply is
             // stored once at turn end.
             if !round_assistant_text.is_empty() {
-                provider_try!(
+                last_soul_message = Some(provider_try!(
                     self.store
                         .append_soul_assistant_text(strand_id, &round_assistant_text)
-                );
+                ));
             }
 
             if calls.is_empty() {
@@ -657,17 +580,17 @@ impl SantiService {
             let call_count = calls.len();
             for call in calls {
                 self.publish_turn_activity(
-                    session_id,
+                    strand_id,
                     turn_id,
                     TurnActivityState::RunningTool,
                     active_provider_response_id.clone(),
                 );
-                provider_try!(self.handle_tool_call(session_id, strand_id, turn_id, call));
+                provider_try!(self.handle_tool_call(strand_id, turn_id, call));
             }
             timing.tool_outputs_completed(round, call_count);
         };
 
-        Ok((assistant_text, final_response_id))
+        Ok((last_soul_message, final_response_id))
     }
 
     pub(crate) fn publish_stream(&self, session_id: &str, payload: SantiStreamPayload) {

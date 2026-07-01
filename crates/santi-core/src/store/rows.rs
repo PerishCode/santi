@@ -2,50 +2,11 @@ use rusqlite::Row;
 use serde_json::Value;
 
 use crate::{
-    ActorType, Compact, Message, MessageContent, MessageKind, MessageState, Session, SessionEffect,
-    SessionMessage, SessionMessageRef, SessionProfile, SessionSummary, SoulProfile, Strand,
-    StrandTargetType, ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState, ToolCall,
-    ToolResult, Turn, TurnStatus, TurnTriggerType, WebhookSubscription,
+    ActorType, Compact, Message, MessageContent, MessageKind, MessageState, SessionEffect,
+    SessionMessage, SessionMessageRef, SoulProfile, Strand, StrandTargetType,
+    ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState, ToolCall, ToolResult, Turn,
+    TurnStatus, TurnTriggerType, WebhookSubscription,
 };
-
-pub(super) fn map_session_row(row: &Row<'_>) -> rusqlite::Result<Session> {
-    Ok(Session {
-        id: row.get(0)?,
-        parent_session_id: row.get(1)?,
-        fork_point: row.get(2)?,
-        created_at: row.get(3)?,
-        updated_at: row.get(4)?,
-    })
-}
-
-pub(super) fn map_session_profile_row(row: &Row<'_>) -> rusqlite::Result<SessionProfile> {
-    Ok(SessionProfile {
-        session_id: row.get(0)?,
-        title: row.get(1)?,
-        desc: row.get(2)?,
-        created_at: row.get(3)?,
-        updated_at: row.get(4)?,
-    })
-}
-
-pub(super) fn map_session_summary_row(row: &Row<'_>) -> rusqlite::Result<SessionSummary> {
-    Ok(SessionSummary {
-        session: Session {
-            id: row.get(0)?,
-            parent_session_id: row.get(1)?,
-            fork_point: row.get(2)?,
-            created_at: row.get(3)?,
-            updated_at: row.get(4)?,
-        },
-        profile: SessionProfile {
-            session_id: row.get(5)?,
-            title: row.get(6)?,
-            desc: row.get(7)?,
-            created_at: row.get(8)?,
-            updated_at: row.get(9)?,
-        },
-    })
-}
 
 pub(super) fn map_soul_profile_row(row: &Row<'_>) -> rusqlite::Result<SoulProfile> {
     Ok(SoulProfile {
@@ -77,7 +38,7 @@ pub(super) fn map_strand_row(row: &Row<'_>) -> rusqlite::Result<Strand> {
     Ok(Strand {
         id: row.get(0)?,
         soul_id: row.get(1)?,
-        session_id: row.get(2)?,
+        external_label: row.get(2)?,
         session_memory: row.get(3)?,
         provider_state: provider_state.and_then(|value| serde_json::from_str(&value).ok()),
         next_seq: row.get(5)?,
@@ -131,9 +92,9 @@ pub(super) fn map_session_message_row(row: &Row<'_>) -> rusqlite::Result<Session
     let content_text = message.content.content_text();
     Ok(SessionMessage {
         relation: SessionMessageRef {
-            session_id: row.get(0)?,
+            strand_id: row.get(0)?,
             message_id: row.get(1)?,
-            session_seq: row.get(2)?,
+            strand_seq: row.get(2)?,
             created_at: row.get(3)?,
         },
         message,
@@ -147,14 +108,13 @@ pub(super) fn map_turn_row(row: &Row<'_>) -> rusqlite::Result<Turn> {
         strand_id: row.get(1)?,
         trigger_type: turn_trigger_from_db(row.get::<_, String>(2)?.as_str()),
         trigger_ref: row.get(3)?,
-        input_through_session_seq: row.get(4)?,
-        base_strand_seq: row.get(5)?,
-        end_strand_seq: row.get(6)?,
-        status: turn_status_from_db(row.get::<_, String>(7)?.as_str()),
-        error_text: row.get(8)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
-        finished_at: row.get(11)?,
+        base_strand_seq: row.get(4)?,
+        end_strand_seq: row.get(5)?,
+        status: turn_status_from_db(row.get::<_, String>(6)?.as_str()),
+        error_text: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
+        finished_at: row.get(10)?,
     })
 }
 
@@ -218,7 +178,7 @@ pub(super) fn map_compact_row(row: &Row<'_>) -> rusqlite::Result<Compact> {
 pub(super) fn map_session_effect_row(row: &Row<'_>) -> rusqlite::Result<SessionEffect> {
     Ok(SessionEffect {
         id: row.get(0)?,
-        session_id: row.get(1)?,
+        strand_id: row.get(1)?,
         effect_type: row.get(2)?,
         idempotency_key: row.get(3)?,
         status: row.get(4)?,

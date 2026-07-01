@@ -16,25 +16,20 @@ impl SantiService {
     ) -> Result<SessionMaterial, String> {
         match request.kind {
             MaterialKind::SystemPrompt => {
-                // Operator-facing material view: the default soul's prompt.
                 let strand = self
                     .store
-                    .acquire_strand(self.store.default_soul_id(), session_id)?
-                    .strand;
+                    .strand(session_id)?
+                    .ok_or_else(|| "session not found".to_string())?;
                 let soul_profile = self
                     .store
                     .soul_profile(&strand.soul_id)?
                     .ok_or_else(|| "soul_profile not found".to_string())?;
-                self.system_prompt_material(session_id, &strand, &soul_profile)
+                self.system_prompt_material(&strand, &soul_profile)
             }
         }
     }
 
-    pub(super) fn system_prompt_text(
-        &self,
-        session_id: &str,
-        strand_id: &str,
-    ) -> Result<String, String> {
+    pub(super) fn system_prompt_text(&self, strand_id: &str) -> Result<String, String> {
         // Load identity + memory from THIS strand's soul (not a hardcoded
         // default) so every soul speaks as itself.
         let strand = self
@@ -45,17 +40,15 @@ impl SantiService {
             .store
             .soul_profile(&strand.soul_id)?
             .ok_or_else(|| "soul_profile not found".to_string())?;
-        Ok(self
-            .system_prompt_material(session_id, &strand, &soul_profile)?
-            .text)
+        Ok(self.system_prompt_material(&strand, &soul_profile)?.text)
     }
 
     fn system_prompt_material(
         &self,
-        session_id: &str,
         strand: &Strand,
         soul_profile: &SoulProfile,
     ) -> Result<SessionMaterial, String> {
+        let session_id = strand.id.as_str();
         let text = render_system_prompt(SystemPromptRequest {
             session_id,
             strand,
@@ -63,11 +56,8 @@ impl SantiService {
             soul_memory_path: self.soul_memory_file(&soul_profile.soul_id),
             session_memory_path: self.session_memory_file(session_id),
         })?;
-        // Cache per (session, soul): two souls on one session must not collide.
-        let key: MaterialCacheKey = (
-            format!("{session_id}:{}", soul_profile.soul_id),
-            MaterialKind::SystemPrompt,
-        );
+        // A strand has exactly one soul, so its id alone is a stable cache key.
+        let key: MaterialCacheKey = (session_id.to_string(), MaterialKind::SystemPrompt);
         let mut cache = self.material_cache.lock().unwrap();
         if let Some(existing) = cache.get(&key)
             && existing.text == text

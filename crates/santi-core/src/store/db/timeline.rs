@@ -13,7 +13,7 @@ pub(in crate::store) fn turns_for_strand(
     let mut stmt = conn
         .prepare(
             r#"
-            SELECT id, strand_id, trigger_type, trigger_ref, input_through_session_seq,
+            SELECT id, strand_id, trigger_type, trigger_ref,
                    base_strand_seq, end_strand_seq, status, error_text,
                    created_at, updated_at, finished_at
             FROM turns

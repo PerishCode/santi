@@ -24,24 +24,6 @@ CREATE TABLE IF NOT EXISTS soul_profiles (
     updated_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS sessions (
-    id TEXT PRIMARY KEY,
-    parent_session_id TEXT,
-    fork_point INTEGER,
-    external_label TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_external_label ON sessions (external_label) WHERE external_label IS NOT NULL;
-
-CREATE TABLE IF NOT EXISTS session_profiles (
-    session_id TEXT PRIMARY KEY,
-    title TEXT,
-    desc TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS webhooks (
     name TEXT PRIMARY KEY,
     adaptor TEXT NOT NULL,
@@ -66,15 +48,6 @@ CREATE TABLE IF NOT EXISTS messages (
     updated_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS r_session_messages (
-    session_id TEXT NOT NULL,
-    message_id TEXT NOT NULL,
-    session_seq INTEGER NOT NULL CHECK (session_seq > 0),
-    created_at TEXT NOT NULL,
-    PRIMARY KEY (session_id, message_id),
-    UNIQUE (session_id, session_seq)
-);
-
 CREATE TABLE IF NOT EXISTS message_events (
     id TEXT PRIMARY KEY,
     message_id TEXT NOT NULL,
@@ -88,7 +61,7 @@ CREATE TABLE IF NOT EXISTS message_events (
 
 CREATE TABLE IF NOT EXISTS session_effects (
     id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
+    strand_id TEXT NOT NULL,
     effect_type TEXT NOT NULL,
     idempotency_key TEXT NOT NULL,
     status TEXT NOT NULL,
@@ -98,13 +71,13 @@ CREATE TABLE IF NOT EXISTS session_effects (
     error_text TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    UNIQUE (session_id, effect_type, idempotency_key)
+    UNIQUE (strand_id, effect_type, idempotency_key)
 );
 
 CREATE TABLE IF NOT EXISTS strands (
     id TEXT PRIMARY KEY,
     soul_id TEXT NOT NULL,
-    session_id TEXT NOT NULL,
+    external_label TEXT,
     session_memory TEXT NOT NULL DEFAULT '',
     provider_state TEXT,
     next_seq INTEGER NOT NULL DEFAULT 1 CHECK (next_seq > 0),
@@ -112,16 +85,15 @@ CREATE TABLE IF NOT EXISTS strands (
     parent_strand_id TEXT,
     fork_point INTEGER,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE (soul_id, session_id)
+    updated_at TEXT NOT NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_strands_external_label ON strands (soul_id, external_label) WHERE external_label IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS turns (
     id TEXT PRIMARY KEY,
     strand_id TEXT NOT NULL,
     trigger_type TEXT NOT NULL CHECK (trigger_type IN ('session_send', 'system')),
     trigger_ref TEXT,
-    input_through_session_seq INTEGER NOT NULL CHECK (input_through_session_seq >= 0),
     base_strand_seq INTEGER NOT NULL CHECK (base_strand_seq >= 0),
     end_strand_seq INTEGER CHECK (end_strand_seq IS NULL OR end_strand_seq >= 0),
     status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed')),
@@ -196,14 +168,9 @@ CREATE TABLE IF NOT EXISTS r_strand_entries (
 
 CREATE INDEX IF NOT EXISTS idx_messages_actor_created_at ON messages (actor_type, actor_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_state_created_at ON messages (state, created_at);
-CREATE INDEX IF NOT EXISTS idx_session_profiles_title ON session_profiles (title);
-CREATE INDEX IF NOT EXISTS idx_r_session_messages_message_id ON r_session_messages (message_id);
-CREATE INDEX IF NOT EXISTS idx_r_session_messages_session_seq ON r_session_messages (session_id, session_seq);
 CREATE INDEX IF NOT EXISTS idx_message_events_message_id_created_at ON message_events (message_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_session_effects_session_created_at ON session_effects (session_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_session_effects_lookup ON session_effects (session_id, effect_type, idempotency_key);
-CREATE INDEX IF NOT EXISTS idx_sessions_lineage ON sessions (parent_session_id, fork_point);
-CREATE INDEX IF NOT EXISTS idx_strands_session_id ON strands (session_id);
+CREATE INDEX IF NOT EXISTS idx_session_effects_strand_created_at ON session_effects (strand_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_session_effects_lookup ON session_effects (strand_id, effect_type, idempotency_key);
 CREATE INDEX IF NOT EXISTS idx_strands_soul_id ON strands (soul_id);
 CREATE INDEX IF NOT EXISTS idx_strands_lineage ON strands (parent_strand_id, fork_point);
 CREATE INDEX IF NOT EXISTS idx_turns_strand_created_at ON turns (strand_id, created_at);

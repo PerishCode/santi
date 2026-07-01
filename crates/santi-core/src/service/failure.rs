@@ -20,58 +20,50 @@ impl ProviderTurnFailure {
 impl SantiService {
     pub(super) fn fail_background_turn(
         &self,
-        session_id: &str,
+        strand_id: &str,
         turn_id: &str,
         error: String,
         partial_assistant_text: String,
     ) {
-        let mut last_seen_session_seq = None;
+        let mut last_seen_strand_seq = None;
         if let Ok(turn) = self.store.fail_turn(turn_id, &error) {
             if !partial_assistant_text.trim().is_empty()
                 && let Ok(message) = self.store.append_message(
-                    session_id,
+                    &turn.strand_id,
                     ActorType::Soul,
                     self.store.default_soul_id(),
                     MessageContent::text(partial_assistant_text),
                     MessageState::Aborted,
                     MessageIntake::Record,
                 )
-                && self
-                    .store
-                    .append_message_ref(&turn.strand_id, &message.session_message.message.id)
-                    .is_ok()
             {
-                last_seen_session_seq = Some(message.session_message.relation.session_seq);
+                last_seen_strand_seq = Some(message.session_message.relation.strand_seq);
                 self.publish_stream(
-                    session_id,
+                    strand_id,
                     SantiStreamPayload::MessageCreated {
                         message: message.session_message,
                     },
                 );
             }
             if let Ok(message) = self.store.append_santi_system_message(
-                session_id,
+                &turn.strand_id,
                 failed_system_message(turn_id),
                 MessageIntake::Record,
-            ) && self
-                .store
-                .append_message_ref(&turn.strand_id, &message.session_message.message.id)
-                .is_ok()
-            {
-                last_seen_session_seq = Some(message.session_message.relation.session_seq);
+            ) {
+                last_seen_strand_seq = Some(message.session_message.relation.strand_seq);
                 self.publish_stream(
-                    session_id,
+                    strand_id,
                     SantiStreamPayload::MessageCreated {
                         message: message.session_message,
                     },
                 );
             }
-            if let Some(seq) = last_seen_session_seq {
+            if let Some(seq) = last_seen_strand_seq {
                 let _ = self.store.finish_failed_turn_context(turn_id, seq);
             }
         }
         self.publish_stream(
-            session_id,
+            strand_id,
             SantiStreamPayload::TurnFailed {
                 turn_id: turn_id.to_string(),
                 error,

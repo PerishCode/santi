@@ -101,12 +101,7 @@ impl PromptHarness {
             Arc::new(FakeProvider),
         )
         .expect("open service");
-        let session_id = service
-            .create_session()
-            .expect("create session")
-            .session
-            .session
-            .id;
+        let session_id = service.create_session().expect("create session").session.id;
         Self {
             _temp: temp,
             service,

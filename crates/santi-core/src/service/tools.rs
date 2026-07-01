@@ -11,7 +11,6 @@ use super::SantiService;
 impl SantiService {
     pub(super) fn handle_tool_call(
         &self,
-        session_id: &str,
         strand_id: &str,
         turn_id: &str,
         call: ProviderFunctionCall,
@@ -30,13 +29,13 @@ impl SantiService {
             },
         )?;
         self.publish_stream(
-            session_id,
+            strand_id,
             SantiStreamPayload::ToolCallCreated {
                 tool_call: tool_call.clone(),
             },
         );
         let soul_id = self.store.soul_id_for_strand(strand_id)?;
-        let dispatch = self.dispatch_tool(session_id, &soul_id, &call);
+        let dispatch = self.dispatch_tool(strand_id, &soul_id, &call);
         let (output, error_text) = match dispatch {
             Ok(output) => (Some(output), None),
             Err(error) => (None, Some(error)),
@@ -45,7 +44,7 @@ impl SantiService {
             .store
             .append_tool_result(&call.call_id, output, error_text)?;
         self.publish_stream(
-            session_id,
+            strand_id,
             SantiStreamPayload::ToolResultCreated {
                 tool_result: result,
             },

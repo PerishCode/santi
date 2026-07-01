@@ -68,9 +68,9 @@ async fn records_failed_system() {
     });
     let service = open_service(&temp, provider.clone());
     let session = service.create_session().expect("create session").session;
-    let response = send_text(&service, &session.session.id, "trigger failure").await;
+    let response = send_text(&service, &session.id, "trigger failure").await;
 
-    let runtime = wait_for_failed_turn(&service, &session.session.id, &response.turn.id).await;
+    let runtime = wait_for_failed_turn(&service, &session.id, &response.turn.id).await;
     let failed_turn = runtime
         .turns
         .iter()
@@ -97,8 +97,8 @@ async fn records_failed_system() {
     assert!(!system_message.content_text.contains("Unauthorized"));
     assert!(!system_message.content_text.contains("secret detail"));
 
-    let retry = send_text(&service, &session.session.id, "continue after failure").await;
-    wait_for_failed_turn(&service, &session.session.id, &retry.turn.id).await;
+    let retry = send_text(&service, &session.id, "continue after failure").await;
+    wait_for_failed_turn(&service, &session.id, &retry.turn.id).await;
 
     let requests = provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
@@ -123,9 +123,9 @@ async fn preserves_aborted_output() {
     });
     let service = open_service(&temp, provider.clone());
     let session = service.create_session().expect("create session").session;
-    let response = send_text(&service, &session.session.id, "trigger stream failure").await;
+    let response = send_text(&service, &session.id, "trigger stream failure").await;
 
-    let runtime = wait_for_failed_turn(&service, &session.session.id, &response.turn.id).await;
+    let runtime = wait_for_failed_turn(&service, &session.id, &response.turn.id).await;
     let partial_message = runtime
         .messages
         .iter()
@@ -142,17 +142,12 @@ async fn preserves_aborted_output() {
         .find(|message| message.message.message_kind == MessageKind::SantiSystem)
         .expect("santi system failure message");
     assert!(
-        partial_message.relation.session_seq < system_message.relation.session_seq,
+        partial_message.relation.strand_seq < system_message.relation.strand_seq,
         "partial output should precede failure fact"
     );
 
-    let retry = send_text(
-        &service,
-        &session.session.id,
-        "continue with preserved partial",
-    )
-    .await;
-    wait_for_failed_turn(&service, &session.session.id, &retry.turn.id).await;
+    let retry = send_text(&service, &session.id, "continue with preserved partial").await;
+    wait_for_failed_turn(&service, &session.id, &retry.turn.id).await;
 
     let requests = provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
@@ -192,7 +187,6 @@ async fn send_text(
                 content: vec![MessagePart::Text {
                     text: text.to_string(),
                 }],
-                soul_id: None,
             },
         )
         .await

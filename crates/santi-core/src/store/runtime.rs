@@ -4,14 +4,14 @@ use serde_json::{Value, json};
 use super::{
     SantiStore,
     db::{
-        append_entry_in_tx, call_soul_id, thinking_span_by_id, thinking_spans_for_turn,
-        tool_call_by_id, tool_calls_for_turn, tool_result_by_id, tool_results_for_turn, turn_by_id,
-        turn_strand_id,
+        append_entry_in_tx, call_soul_id, message_by_id, thinking_span_by_id,
+        thinking_spans_for_turn, tool_call_by_id, tool_calls_for_turn, tool_result_by_id,
+        tool_results_for_turn, turn_by_id, turn_strand_id,
     },
 };
 use crate::{
-    StrandEntry, StrandTargetType, ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState,
-    ToolCall, ToolResult, Turn, prefixed_id, timestamp_now,
+    StrandTargetType, ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState, ToolCall,
+    ToolResult, Turn, prefixed_id, timestamp_now,
 };
 
 impl SantiStore {
@@ -183,11 +183,15 @@ impl SantiStore {
             .ok_or_else(|| "created tool_result missing".to_string())
     }
 
-    /// Append a per-round assistant text segment to the strand replay
-    /// timeline ONLY (no `r_session_messages` row). The session-visible reply is
-    /// the lumped message stored separately at turn end; this keeps the replay
-    /// timeline a faithful, interleaved item log (DC4b / DC6).
-    pub fn append_soul_assistant_text(&self, strand_id: &str, text: &str) -> Result<(), String> {
+    /// Append a per-round assistant text segment to the strand's timeline. This
+    /// is the soul's speech in this round — the interleaved replay log (DC4b/DC6)
+    /// AND the operator-visible conversational projection are the SAME entry now
+    /// that both read `r_strand_entries` (no separate lumped end-of-turn record).
+    pub fn append_soul_assistant_text(
+        &self,
+        strand_id: &str,
+        text: &str,
+    ) -> Result<crate::SessionMessage, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let soul_id: String = tx
@@ -214,7 +218,7 @@ impl SantiStore {
         .map_err(|error| error.to_string())?;
         append_entry_in_tx(&tx, strand_id, StrandTargetType::Message, &message_id)?;
         tx.commit().map_err(|error| error.to_string())?;
-        Ok(())
+        message_by_id(&conn, &message_id)?.ok_or_else(|| "created message missing".to_string())
     }
 
     /// Atomically start a turn for a strand IFF (a) no turn is currently
@@ -267,11 +271,11 @@ impl SantiStore {
         tx.execute(
             r#"
             INSERT INTO turns (
-              id, strand_id, trigger_type, trigger_ref, input_through_session_seq,
+              id, strand_id, trigger_type, trigger_ref,
               base_strand_seq, end_strand_seq, status, error_text,
               created_at, updated_at, finished_at
             )
-            SELECT ?1, id, ?3, ?4, 0, next_seq - 1, NULL, 'running', NULL, ?5, ?5, NULL
+            SELECT ?1, id, ?3, ?4, next_seq - 1, NULL, 'running', NULL, ?5, ?5, NULL
             FROM strands WHERE id = ?2
             "#,
             params![turn_id, strand_id, trigger_type, trigger_ref, now],
@@ -316,14 +320,14 @@ impl SantiStore {
         .map_err(|error| error.to_string())
     }
 
-    /// Soul_sessions that are "behind" (an unconsumed REQUEST exists). Used on
+    /// Strands that are "behind" (an unconsumed REQUEST exists). Used on
     /// boot to re-drive durable requests stranded by a crash (liveness).
-    pub fn strands_with_pending_requests(&self) -> Result<Vec<(String, String)>, String> {
+    pub fn strands_with_pending_requests(&self) -> Result<Vec<String>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
                 r#"
-                SELECT ss.session_id, ss.id
+                SELECT ss.id
                 FROM strands ss
                 WHERE (SELECT COALESCE(MAX(r.strand_seq), 0)
                          FROM r_strand_entries r
@@ -336,7 +340,7 @@ impl SantiStore {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .query_map([], |row| row.get(0))
             .map_err(|error| error.to_string())?;
         let mut out = Vec::new();
         for row in rows {
@@ -457,19 +461,6 @@ impl SantiStore {
     pub fn tool_results_for_turn(&self, turn_id: &str) -> Result<Vec<ToolResult>, String> {
         let conn = self.conn.lock().unwrap();
         tool_results_for_turn(&conn, turn_id)
-    }
-
-    pub(super) fn append_strand_entry(
-        &self,
-        strand_id: &str,
-        target_type: StrandTargetType,
-        target_id: &str,
-    ) -> Result<StrandEntry, String> {
-        let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let entry = append_entry_in_tx(&tx, strand_id, target_type, target_id)?;
-        tx.commit().map_err(|error| error.to_string())?;
-        Ok(entry)
     }
 
     fn finish_thinking_span(

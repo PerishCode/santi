@@ -3,34 +3,13 @@ mod timeline;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{
-    ActorType, Compact, MessageKind, Session, SessionEffect, SessionMessage, SessionProfile,
-    SessionSummary, SoulProfile, Strand, StrandEntry, StrandTargetType, ThinkingSpan, ToolCall,
-    ToolResult, Turn, WebhookSubscription, timestamp_now,
+    ActorType, Compact, MessageKind, SessionEffect, SessionMessage, SoulProfile, Strand,
+    StrandEntry, StrandTargetType, ThinkingSpan, ToolCall, ToolResult, Turn, WebhookSubscription,
+    timestamp_now,
 };
 
 use super::rows::*;
 pub(super) use timeline::*;
-
-pub(super) fn ensure_session(conn: &Connection, session_id: &str) -> Result<(), String> {
-    let exists = conn
-        .query_row(
-            "SELECT 1 FROM sessions WHERE id = ?1 LIMIT 1",
-            params![session_id],
-            |_| Ok(()),
-        )
-        .optional()
-        .map_err(|error| error.to_string())?;
-    exists.ok_or_else(|| "session not found".to_string())
-}
-
-pub(super) fn next_session_seq(conn: &Connection, session_id: &str) -> Result<i64, String> {
-    conn.query_row(
-        "SELECT COALESCE(MAX(session_seq), 0) + 1 FROM r_session_messages WHERE session_id = ?1",
-        params![session_id],
-        |row| row.get(0),
-    )
-    .map_err(|error| error.to_string())
-}
 
 pub(super) fn append_entry_in_tx(
     conn: &Connection,
@@ -76,63 +55,6 @@ pub(super) fn append_entry_in_tx(
     })
 }
 
-pub(super) fn session_by_id(
-    conn: &Connection,
-    session_id: &str,
-) -> Result<Option<Session>, String> {
-    conn.query_row(
-        r#"
-        SELECT id, parent_session_id, fork_point, created_at, updated_at
-        FROM sessions
-        WHERE id = ?1
-        LIMIT 1
-        "#,
-        params![session_id],
-        map_session_row,
-    )
-    .optional()
-    .map_err(|error| error.to_string())
-}
-
-pub(super) fn session_profile_by_id(
-    conn: &Connection,
-    session_id: &str,
-) -> Result<Option<SessionProfile>, String> {
-    conn.query_row(
-        r#"
-        SELECT session_id, title, desc, created_at, updated_at
-        FROM session_profiles
-        WHERE session_id = ?1
-        LIMIT 1
-        "#,
-        params![session_id],
-        map_session_profile_row,
-    )
-    .optional()
-    .map_err(|error| error.to_string())
-}
-
-pub(super) fn session_summary_by_id(
-    conn: &Connection,
-    session_id: &str,
-) -> Result<Option<SessionSummary>, String> {
-    conn.query_row(
-        r#"
-        SELECT
-          s.id, s.parent_session_id, s.fork_point, s.created_at, s.updated_at,
-          p.session_id, p.title, p.desc, p.created_at, p.updated_at
-        FROM sessions s
-        JOIN session_profiles p ON p.session_id = s.id
-        WHERE s.id = ?1
-        LIMIT 1
-        "#,
-        params![session_id],
-        map_session_summary_row,
-    )
-    .optional()
-    .map_err(|error| error.to_string())
-}
-
 pub(super) fn soul_profile_by_id(
     conn: &Connection,
     soul_id: &str,
@@ -169,30 +91,10 @@ pub(super) fn webhook_by_name(
     .map_err(|error| error.to_string())
 }
 
-pub(super) fn strand_by_pair(
-    conn: &Connection,
-    soul_id: &str,
-    session_id: &str,
-) -> Result<Option<Strand>, String> {
-    conn.query_row(
-        r#"
-        SELECT id, soul_id, session_id, session_memory, provider_state, next_seq,
-               last_seen_session_seq, parent_strand_id, fork_point, created_at, updated_at
-        FROM strands
-        WHERE soul_id = ?1 AND session_id = ?2
-        LIMIT 1
-        "#,
-        params![soul_id, session_id],
-        map_strand_row,
-    )
-    .optional()
-    .map_err(|error| error.to_string())
-}
-
 pub(super) fn strand_by_id(conn: &Connection, strand_id: &str) -> Result<Option<Strand>, String> {
     conn.query_row(
         r#"
-        SELECT id, soul_id, session_id, session_memory, provider_state, next_seq,
+        SELECT id, soul_id, external_label, session_memory, provider_state, next_seq,
                last_seen_session_seq, parent_strand_id, fork_point, created_at, updated_at
         FROM strands
         WHERE id = ?1
@@ -205,18 +107,38 @@ pub(super) fn strand_by_id(conn: &Connection, strand_id: &str) -> Result<Option<
     .map_err(|error| error.to_string())
 }
 
+pub(super) fn strand_by_label(
+    conn: &Connection,
+    soul_id: &str,
+    label: &str,
+) -> Result<Option<Strand>, String> {
+    conn.query_row(
+        r#"
+        SELECT id, soul_id, external_label, session_memory, provider_state, next_seq,
+               last_seen_session_seq, parent_strand_id, fork_point, created_at, updated_at
+        FROM strands
+        WHERE soul_id = ?1 AND external_label = ?2
+        LIMIT 1
+        "#,
+        params![soul_id, label],
+        map_strand_row,
+    )
+    .optional()
+    .map_err(|error| error.to_string())
+}
+
 pub(super) fn message_by_id(
     conn: &Connection,
     message_id: &str,
 ) -> Result<Option<SessionMessage>, String> {
     conn.query_row(
         r#"
-        SELECT r.session_id, r.message_id, r.session_seq, r.created_at,
+        SELECT r.strand_id, r.target_id, r.strand_seq, r.created_at,
                m.id, m.actor_type, m.actor_id, m.message_kind, m.content, m.state, m.version,
                m.deleted_at, m.created_at, m.updated_at
-        FROM r_session_messages r
-        JOIN messages m ON m.id = r.message_id
-        WHERE r.message_id = ?1
+        FROM r_strand_entries r
+        JOIN messages m ON m.id = r.target_id
+        WHERE r.target_type = 'message' AND r.target_id = ?1
         LIMIT 1
         "#,
         params![message_id],
@@ -227,7 +149,7 @@ pub(super) fn message_by_id(
 }
 
 /// Fetch a message's content by id directly from `messages`, independent of any
-/// session relation — so the assembly projection can render both session-visible
+/// strand relation — so the assembly projection can render both timeline-visible
 /// messages and strand-only assistant text items uniformly.
 pub(super) fn message_record_by_id(
     conn: &Connection,
@@ -250,23 +172,23 @@ pub(super) fn message_record_by_id(
 
 pub(super) fn session_messages(
     conn: &Connection,
-    session_id: &str,
+    strand_id: &str,
 ) -> Result<Vec<SessionMessage>, String> {
     let mut stmt = conn
         .prepare(
             r#"
-            SELECT r.session_id, r.message_id, r.session_seq, r.created_at,
+            SELECT r.strand_id, r.target_id, r.strand_seq, r.created_at,
                    m.id, m.actor_type, m.actor_id, m.message_kind, m.content, m.state, m.version,
                    m.deleted_at, m.created_at, m.updated_at
-            FROM r_session_messages r
-            JOIN messages m ON m.id = r.message_id
-            WHERE r.session_id = ?1 AND m.deleted_at IS NULL
-            ORDER BY r.session_seq ASC
+            FROM r_strand_entries r
+            JOIN messages m ON m.id = r.target_id
+            WHERE r.strand_id = ?1 AND r.target_type = 'message' AND m.deleted_at IS NULL
+            ORDER BY r.strand_seq ASC
             "#,
         )
         .map_err(|error| error.to_string())?;
     let rows = stmt
-        .query_map(params![session_id], map_session_message_row)
+        .query_map(params![strand_id], map_session_message_row)
         .map_err(|error| error.to_string())?;
     collect_rows(rows)
 }
@@ -274,7 +196,7 @@ pub(super) fn session_messages(
 pub(super) fn turn_by_id(conn: &Connection, turn_id: &str) -> Result<Option<Turn>, String> {
     conn.query_row(
         r#"
-        SELECT id, strand_id, trigger_type, trigger_ref, input_through_session_seq,
+        SELECT id, strand_id, trigger_type, trigger_ref,
                base_strand_seq, end_strand_seq, status, error_text,
                created_at, updated_at, finished_at
         FROM turns
@@ -415,21 +337,21 @@ pub(super) fn compacts_for_strand(
 
 pub(super) fn session_effects(
     conn: &Connection,
-    session_id: &str,
+    strand_id: &str,
 ) -> Result<Vec<SessionEffect>, String> {
     let mut stmt = conn
         .prepare(
             r#"
-            SELECT id, session_id, effect_type, idempotency_key, status, source_hook_id,
+            SELECT id, strand_id, effect_type, idempotency_key, status, source_hook_id,
                    source_turn_id, result_ref, error_text, created_at, updated_at
             FROM session_effects
-            WHERE session_id = ?1
+            WHERE strand_id = ?1
             ORDER BY created_at ASC
             "#,
         )
         .map_err(|error| error.to_string())?;
     let rows = stmt
-        .query_map(params![session_id], map_session_effect_row)
+        .query_map(params![strand_id], map_session_effect_row)
         .map_err(|error| error.to_string())?;
     collect_rows(rows)
 }

@@ -89,12 +89,11 @@ async fn sends_with_runtime() {
     let session = service.create_session().expect("create session").session;
     let response = service
         .send_session(
-            &session.session.id,
+            &session.id,
             SendSessionRequest {
                 content: vec![MessagePart::Text {
                     text: "hello provider".to_string(),
                 }],
-                soul_id: None,
             },
         )
         .await
@@ -102,7 +101,7 @@ async fn sends_with_runtime() {
 
     assert_eq!(response.user_message.content_text, "hello provider");
     assert_eq!(response.turn.status, santi_core::TurnStatus::Running);
-    let runtime = wait_for_completed_turn(&service, &session.session.id, &response.turn.id).await;
+    let runtime = wait_for_completed_turn(&service, &session.id, &response.turn.id).await;
     assert!(
         runtime
             .messages
@@ -183,7 +182,7 @@ async fn sends_with_runtime() {
     assert!(!tool_descriptions.contains("@session"));
 
     let detail = service
-        .session(&session.session.id)
+        .session(&session.id)
         .expect("load detail")
         .expect("session");
     assert_eq!(detail.messages.len(), 2);
@@ -211,19 +210,18 @@ async fn dispatches_tools() {
     let session = service.create_session().expect("create session").session;
     let response = service
         .send_session(
-            &session.session.id,
+            &session.id,
             SendSessionRequest {
                 content: vec![MessagePart::Text {
                     text: "run tool".to_string(),
                 }],
-                soul_id: None,
             },
         )
         .await
         .expect("send session");
 
     assert_eq!(response.turn.status, santi_core::TurnStatus::Running);
-    let runtime = wait_for_completed_turn(&service, &session.session.id, &response.turn.id).await;
+    let runtime = wait_for_completed_turn(&service, &session.id, &response.turn.id).await;
     assert!(
         runtime
             .messages
@@ -244,7 +242,7 @@ async fn dispatches_tools() {
         .expect("shell stdout");
     let session_memory_dir = Path::new("runtime")
         .join("sessions")
-        .join(&session.session.id)
+        .join(&session.id)
         .join("memory");
     assert!(stdout.contains(&session_memory_dir.display().to_string()));
     // Self-involved env: the soul's shell inherits its own soul_id + session_id,
@@ -254,7 +252,7 @@ async fn dispatches_tools() {
         "SANTI_SOUL_ID in shell env: {stdout}"
     );
     assert!(
-        stdout.contains(&session.session.id),
+        stdout.contains(&session.id),
         "SANTI_SESSION_ID in shell env: {stdout}"
     );
     let cwd = output
@@ -345,7 +343,7 @@ async fn ingest_external_event_triggers_turn() {
 }
 
 #[tokio::test]
-async fn send_session_addresses_explicit_soul() {
+async fn send_session_targets_the_strands_own_soul() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FakeProvider::default());
     let service = SantiService::open(
@@ -369,54 +367,61 @@ async fn send_session_addresses_explicit_soul() {
         .expect("create soul");
     assert_ne!(secretary.soul_id, default_soul);
 
-    // An explicit soul_id binds this (soul, session) pair to that soul.
+    // `create_session` (client-facing, no label) always binds the default soul —
+    // multi-soul-per-strand is gone, so a non-default soul is reached only via a
+    // label-anchored strand (e.g. ingest_external_event), not by picking a soul
+    // at send time.
     let session = service.create_session().expect("create session").session;
+    assert_eq!(session.soul_id, default_soul);
     let response = service
         .send_session(
-            &session.session.id,
-            SendSessionRequest {
-                content: vec![MessagePart::Text {
-                    text: "for the secretary".to_string(),
-                }],
-                soul_id: Some(secretary.soul_id.clone()),
-            },
-        )
-        .await
-        .expect("send session");
-    assert_eq!(response.soul_profile.soul_id, secretary.soul_id);
-    assert_eq!(response.strand.soul_id, secretary.soul_id);
-
-    // Absent soul_id keeps the pre-multi-soul path: the runtime's default soul.
-    let other = service.create_session().expect("create session").session;
-    let default_response = service
-        .send_session(
-            &other.session.id,
+            &session.id,
             SendSessionRequest {
                 content: vec![MessagePart::Text {
                     text: "for whoever".to_string(),
                 }],
-                soul_id: None,
             },
         )
         .await
         .expect("send session");
-    assert_eq!(default_response.soul_profile.soul_id, default_soul);
+    assert_eq!(response.soul_profile.soul_id, default_soul);
+    assert_eq!(response.strand.soul_id, default_soul);
 
-    // An unknown soul is rejected cleanly (no orphan strand), not a 500.
-    let stray = service.create_session().expect("create session").session;
+    // A label-anchored strand can be owned by a non-default soul (via ingest).
+    let secretary_strand_id = service
+        .ingest_external_event(
+            &secretary.soul_id,
+            "github:issue:1",
+            "hello secretary".to_string(),
+        )
+        .expect("ingest event");
+    let secretary_response = service
+        .send_session(
+            &secretary_strand_id,
+            SendSessionRequest {
+                content: vec![MessagePart::Text {
+                    text: "for the secretary".to_string(),
+                }],
+            },
+        )
+        .await
+        .expect("send session");
+    assert_eq!(secretary_response.soul_profile.soul_id, secretary.soul_id);
+    assert_eq!(secretary_response.strand.soul_id, secretary.soul_id);
+
+    // An unknown session id is rejected cleanly, not a 500.
     let error = service
         .send_session(
-            &stray.session.id,
+            "ss_does_not_exist",
             SendSessionRequest {
                 content: vec![MessagePart::Text {
                     text: "nobody home".to_string(),
                 }],
-                soul_id: Some("soul_does_not_exist".to_string()),
             },
         )
         .await
-        .expect_err("unknown soul should error");
-    assert!(error.contains("unknown soul"), "got: {error}");
+        .expect_err("unknown session should error");
+    assert!(error.contains("session not found"), "got: {error}");
 }
 
 #[tokio::test]
@@ -439,12 +444,11 @@ async fn completed_turn_emits_turn_completed_event() {
     let session = service.create_session().expect("create session").session;
     let response = service
         .send_session(
-            &session.session.id,
+            &session.id,
             SendSessionRequest {
                 content: vec![MessagePart::Text {
                     text: "say hi".to_string(),
                 }],
-                soul_id: None,
             },
         )
         .await
@@ -523,7 +527,7 @@ async fn bucket_objects_are_scoped() {
     )
     .expect("open service");
     let session = service.create_session().expect("create session").session;
-    let bucket = ObjectBucket::new("soul_default", session.session.id.as_str()).expect("bucket");
+    let bucket = ObjectBucket::new("soul_default", session.id.as_str()).expect("bucket");
     let uri = ObjectUri::new(bucket.clone(), "avatars/santi.svg").expect("uri");
 
     let meta = service
@@ -537,12 +541,12 @@ async fn bucket_objects_are_scoped() {
             .expect("renderable ref"),
         format!(
             "/api/v1/bucket/soul_default/{}/avatars/santi.svg",
-            session.session.id
+            session.id
         )
     );
 
     let object = service
-        .get_bucket_object("soul_default", &session.session.id, "avatars/santi.svg")
+        .get_bucket_object("soul_default", &session.id, "avatars/santi.svg")
         .expect("get object")
         .expect("object exists");
     assert_eq!(object.bytes, b"<svg>avatar</svg>");
@@ -558,7 +562,7 @@ async fn bucket_objects_are_scoped() {
     assert!(service.delete_bucket_object(&uri).expect("delete object"));
     assert!(
         service
-            .get_bucket_object("soul_default", &session.session.id, "avatars/santi.svg")
+            .get_bucket_object("soul_default", &session.id, "avatars/santi.svg")
             .expect("get deleted object")
             .is_none()
     );
@@ -581,19 +585,19 @@ async fn bucket_rejects_unsafe_keys() {
 
     assert!(
         service
-            .get_bucket_object("soul_default", &session.session.id, "../escape.txt")
+            .get_bucket_object("soul_default", &session.id, "../escape.txt")
             .expect_err("unsafe key")
             .contains("object key")
     );
     assert!(
         service
-            .get_bucket_object("soul_default", &session.session.id, "bad//key.txt")
+            .get_bucket_object("soul_default", &session.id, "bad//key.txt")
             .expect_err("empty segment")
             .contains("object key")
     );
     assert!(
         service
-            .get_bucket_object("unknown_soul", &session.session.id, "safe.txt")
+            .get_bucket_object("unknown_soul", &session.id, "safe.txt")
             .expect_err("unknown soul")
             .contains("soul not found")
     );

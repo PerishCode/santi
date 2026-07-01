@@ -29,10 +29,7 @@ fn schema_matches_runtime() {
         "accounts",
         "souls",
         "soul_profiles",
-        "sessions",
-        "session_profiles",
         "messages",
-        "r_session_messages",
         "message_events",
         "session_effects",
         "strands",
@@ -52,16 +49,26 @@ fn schema_matches_runtime() {
             .expect("table lookup");
         assert_eq!(exists, 1, "missing table {table}");
     }
+    for table in ["sessions", "session_profiles", "r_session_messages"] {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .expect("table lookup");
+        assert_eq!(exists, 0, "discarded table {table} still present");
+    }
 }
 
 #[test]
 fn appends_relations_in_order() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let session = store.create_session().expect("create session");
+    let strand = store.create_session().expect("create strand");
     let user = store
         .append_message(
-            &session.session.id,
+            &strand.id,
             ActorType::Account,
             store.default_account_id(),
             MessageContent::text("hello ordering"),
@@ -70,16 +77,8 @@ fn appends_relations_in_order() {
         )
         .expect("append user")
         .session_message;
-    let strand = store
-        .acquire_strand(store.default_soul_id(), &session.session.id)
-        .expect("acquire soul session")
-        .strand;
-    let entry = store
-        .append_message_ref(&strand.id, &user.message.id)
-        .expect("append message ref");
 
-    assert_eq!(user.relation.session_seq, 1);
-    assert_eq!(entry.strand_seq, 1);
+    assert_eq!(user.relation.strand_seq, 1);
     let input = store.assembly_input(&strand.id).expect("assembly input");
     assert_eq!(input.len(), 1);
     assert_text(&input[0], "user", "hello ordering");
@@ -89,22 +88,15 @@ fn appends_relations_in_order() {
 fn maps_santi_system_input() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let session = store.create_session().expect("create session");
-    let strand = store
-        .acquire_strand(store.default_soul_id(), &session.session.id)
-        .expect("acquire soul session")
-        .strand;
+    let strand = store.create_session().expect("create strand");
     let message = store
         .append_santi_system_message(
-            &session.session.id,
+            &strand.id,
             MessageContent::text("<santi-system>\nkind: note\n</santi-system>"),
             MessageIntake::Request,
         )
         .expect("append santi system")
         .session_message;
-    store
-        .append_message_ref(&strand.id, &message.message.id)
-        .expect("append message ref");
 
     assert_eq!(message.message.actor_type, ActorType::System);
     assert_eq!(message.message.message_kind, MessageKind::SantiSystem);
@@ -121,10 +113,10 @@ fn maps_santi_system_input() {
 fn thinking_spans_become_reasoning_items() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let session = store.create_session().expect("create session");
+    let strand = store.create_session().expect("create strand");
     let user = store
         .append_message(
-            &session.session.id,
+            &strand.id,
             ActorType::Account,
             store.default_account_id(),
             MessageContent::text("hello thinking"),
@@ -133,15 +125,8 @@ fn thinking_spans_become_reasoning_items() {
         )
         .expect("append user")
         .session_message;
-    let strand = store
-        .acquire_strand(store.default_soul_id(), &session.session.id)
-        .expect("acquire soul session")
-        .strand;
-    store
-        .append_message_ref(&strand.id, &user.message.id)
-        .expect("append message ref");
     let turn = store
-        .start_turn(&strand.id, &user.message.id, user.relation.session_seq)
+        .start_turn(&strand.id, &user.message.id)
         .expect("start turn")
         .turn;
     let thinking = store
@@ -157,9 +142,9 @@ fn thinking_spans_become_reasoning_items() {
         .expect("thinking exists");
 
     let snapshot = store
-        .runtime_snapshot(store.default_soul_id(), &session.session.id)
+        .runtime_snapshot(&strand.id)
         .expect("runtime snapshot")
-        .expect("session exists");
+        .expect("strand exists");
     assert_eq!(snapshot.thinking_spans.len(), 1);
     assert_eq!(snapshot.thinking_spans[0].id, thinking.id);
     assert_eq!(
@@ -190,76 +175,16 @@ fn thinking_spans_become_reasoning_items() {
 }
 
 #[test]
-fn titles_from_first_message() {
-    let temp = tempfile::tempdir().expect("temp dir");
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let session = store.create_session().expect("create session");
-    assert_eq!(session.profile.title, None);
-    let title = "first visible session title with enough detail to remain durable";
-
-    store
-        .append_message(
-            &session.session.id,
-            ActorType::Account,
-            store.default_account_id(),
-            MessageContent::text(format!("  {title}  ")),
-            MessageState::Fixed,
-            MessageIntake::Request,
-        )
-        .expect("append first message");
-    store
-        .append_message(
-            &session.session.id,
-            ActorType::Account,
-            store.default_account_id(),
-            MessageContent::text("should not replace title"),
-            MessageState::Fixed,
-            MessageIntake::Request,
-        )
-        .expect("append second message");
-
-    let session = store
-        .session(&session.session.id)
-        .expect("load session")
-        .expect("session exists");
-    let profile = store
-        .runtime_snapshot(store.default_soul_id(), &session.id)
-        .expect("runtime snapshot")
-        .expect("session exists")
-        .profile;
-    assert_eq!(profile.title.as_deref(), Some(title));
-}
-
-#[test]
-fn trims_session_title() {
-    let temp = tempfile::tempdir().expect("temp dir");
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let session = store.create_session().expect("create session");
-
-    let session = store
-        .update_session_title(&session.session.id, Some("  renamed title  ".to_string()))
-        .expect("update title")
-        .expect("session exists");
-    assert_eq!(session.profile.title.as_deref(), Some("renamed title"));
-
-    let session = store
-        .update_session_title(&session.session.id, Some("   ".to_string()))
-        .expect("clear title")
-        .expect("session exists");
-    assert_eq!(session.profile.title, None);
-}
-
-#[test]
 fn projects_timeline_to_interleaved_items() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let session = store.create_session().expect("create session");
+    let strand = store.create_session().expect("create strand");
 
     // A turn with a shell tool roundtrip and per-round assistant text: the
     // replay timeline interleaves user, function call, result, assistant text.
     let user = store
         .append_message(
-            &session.session.id,
+            &strand.id,
             ActorType::Account,
             store.default_account_id(),
             MessageContent::text("run a command"),
@@ -268,15 +193,8 @@ fn projects_timeline_to_interleaved_items() {
         )
         .expect("append user")
         .session_message;
-    let strand = store
-        .acquire_strand(store.default_soul_id(), &session.session.id)
-        .expect("acquire soul session")
-        .strand;
-    store
-        .append_message_ref(&strand.id, &user.message.id)
-        .expect("append user ref");
     let turn = store
-        .start_turn(&strand.id, &user.message.id, user.relation.session_seq)
+        .start_turn(&strand.id, &user.message.id)
         .expect("start turn")
         .turn;
     store
@@ -336,10 +254,9 @@ fn projects_timeline_to_interleaved_items() {
     assert_text(&input[3], "assistant", "done");
 }
 
-/// Append a REQUEST or RECORD message and reference it into the soul timeline.
+/// Append a REQUEST or RECORD message directly into a strand's timeline.
 fn append_timeline_message(
     store: &SantiStore,
-    session_id: &str,
     strand_id: &str,
     actor_type: ActorType,
     text: &str,
@@ -349,36 +266,28 @@ fn append_timeline_message(
         ActorType::Soul => store.default_soul_id(),
         _ => store.default_account_id(),
     };
-    let message = store
+    store
         .append_message(
-            session_id,
+            strand_id,
             actor_type,
             actor_id,
             MessageContent::text(text),
             MessageState::Fixed,
             intake,
         )
-        .expect("append message")
-        .session_message;
-    store
-        .append_message_ref(strand_id, &message.message.id)
-        .expect("append ref");
+        .expect("append message");
 }
 
 #[test]
 fn drive_starts_coalesces_and_re_drives() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let session = store.create_session().expect("create session");
-    let ss = store
-        .acquire_strand(store.default_soul_id(), &session.session.id)
-        .expect("acquire")
-        .strand;
+    let strand = store.create_session().expect("create strand");
 
     // No requests → not behind → no turn.
     assert!(
         store
-            .try_start_turn(&ss.id, "session_send", None)
+            .try_start_turn(&strand.id, "session_send", None)
             .expect("try")
             .is_none()
     );
@@ -386,14 +295,13 @@ fn drive_starts_coalesces_and_re_drives() {
     // A REQUEST makes the thread behind → starts a turn.
     append_timeline_message(
         &store,
-        &session.session.id,
-        &ss.id,
+        &strand.id,
         ActorType::Account,
         "hi",
         MessageIntake::Request,
     );
     let turn = store
-        .try_start_turn(&ss.id, "session_send", None)
+        .try_start_turn(&strand.id, "session_send", None)
         .expect("try")
         .expect("turn started");
     assert_eq!(turn.status, santi_core::TurnStatus::Running);
@@ -401,15 +309,14 @@ fn drive_starts_coalesces_and_re_drives() {
     // A second request while the turn runs coalesces — no concurrent turn.
     append_timeline_message(
         &store,
-        &session.session.id,
-        &ss.id,
+        &strand.id,
         ActorType::Account,
         "and again",
         MessageIntake::Request,
     );
     assert!(
         store
-            .try_start_turn(&ss.id, "session_send", None)
+            .try_start_turn(&strand.id, "session_send", None)
             .expect("try")
             .is_none(),
         "a running turn must block a second concurrent turn"
@@ -422,7 +329,7 @@ fn drive_starts_coalesces_and_re_drives() {
         .expect("complete");
     assert!(
         store
-            .try_start_turn(&ss.id, "session_send", None)
+            .try_start_turn(&strand.id, "session_send", None)
             .expect("try")
             .is_some(),
         "accumulated request should drive the next turn at completion"
@@ -433,25 +340,20 @@ fn drive_starts_coalesces_and_re_drives() {
 fn record_messages_do_not_drive() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let session = store.create_session().expect("create session");
-    let ss = store
-        .acquire_strand(store.default_soul_id(), &session.session.id)
-        .expect("acquire")
-        .strand;
+    let strand = store.create_session().expect("create strand");
 
     // A RECORD (the soul's own output / a failure notice) is not a request and
     // must not wake the soul.
     append_timeline_message(
         &store,
-        &session.session.id,
-        &ss.id,
+        &strand.id,
         ActorType::Soul,
         "a note to self",
         MessageIntake::Record,
     );
     assert!(
         store
-            .try_start_turn(&ss.id, "session_send", None)
+            .try_start_turn(&strand.id, "session_send", None)
             .expect("try")
             .is_none(),
         "record messages must not drive a turn"
@@ -468,22 +370,17 @@ fn record_messages_do_not_drive() {
 fn boot_recovery_reconciles_and_does_not_retry() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let session = store.create_session().expect("create session");
-    let ss = store
-        .acquire_strand(store.default_soul_id(), &session.session.id)
-        .expect("acquire")
-        .strand;
+    let strand = store.create_session().expect("create strand");
     append_timeline_message(
         &store,
-        &session.session.id,
-        &ss.id,
+        &strand.id,
         ActorType::Account,
         "do a thing",
         MessageIntake::Request,
     );
     // A turn starts and then the process "crashes" (turn left running).
     store
-        .try_start_turn(&ss.id, "session_send", None)
+        .try_start_turn(&strand.id, "session_send", None)
         .expect("try")
         .expect("turn started");
     // Before recovery it is the only pending-driver; reconcile interrupts it.
@@ -491,7 +388,7 @@ fn boot_recovery_reconciles_and_does_not_retry() {
     // The interrupted turn counts as "attempted" → the request is NOT retried.
     assert!(
         store
-            .try_start_turn(&ss.id, "session_send", None)
+            .try_start_turn(&strand.id, "session_send", None)
             .expect("try")
             .is_none(),
         "an interrupted turn must not auto-retry its request"
@@ -499,8 +396,7 @@ fn boot_recovery_reconciles_and_does_not_retry() {
     // But a genuinely new request drives a fresh turn (liveness).
     append_timeline_message(
         &store,
-        &session.session.id,
-        &ss.id,
+        &strand.id,
         ActorType::Account,
         "a new thing",
         MessageIntake::Request,
@@ -510,11 +406,11 @@ fn boot_recovery_reconciles_and_does_not_retry() {
             .strands_with_pending_requests()
             .expect("scan")
             .iter()
-            .any(|(_, ssid)| ssid == &ss.id)
+            .any(|id| id == &strand.id)
     );
     assert!(
         store
-            .try_start_turn(&ss.id, "session_send", None)
+            .try_start_turn(&strand.id, "session_send", None)
             .expect("try")
             .is_some()
     );
@@ -541,27 +437,34 @@ fn create_soul_and_label_anchoring() {
         "echo"
     );
 
-    // External label anchors a session: same label → same session; new → new.
+    // External label anchors a strand (scoped to its soul): same label → same
+    // strand; new → new; a different soul on the same label gets its own strand.
     let s1 = store
-        .find_or_create_session_by_label("github:issue:49")
-        .expect("label session");
+        .find_or_create_strand_by_label(&soul.soul_id, "github:issue:49")
+        .expect("label strand");
     let s1_again = store
-        .find_or_create_session_by_label("github:issue:49")
-        .expect("label session again");
-    assert_eq!(s1.session.id, s1_again.session.id);
+        .find_or_create_strand_by_label(&soul.soul_id, "github:issue:49")
+        .expect("label strand again");
+    assert_eq!(s1.id, s1_again.id);
     let s2 = store
-        .find_or_create_session_by_label("github:issue:50")
+        .find_or_create_strand_by_label(&soul.soul_id, "github:issue:50")
         .expect("other label");
-    assert_ne!(s1.session.id, s2.session.id);
-
-    // A non-default soul acquires its own strand on the labeled session.
-    let ss = store
-        .acquire_strand(&soul.soul_id, &s1.session.id)
-        .expect("acquire")
-        .strand;
-    assert_eq!(ss.soul_id, soul.soul_id);
+    assert_ne!(s1.id, s2.id);
+    assert_eq!(s1.soul_id, soul.soul_id);
     assert_eq!(
-        store.soul_id_for_strand(&ss.id).expect("soul id"),
+        store.soul_id_for_strand(&s1.id).expect("soul id"),
         soul.soul_id
+    );
+
+    let default_strand = store
+        .find_or_create_strand_by_label(store.default_soul_id(), "github:issue:49")
+        .expect("same label, default soul");
+    assert_ne!(default_strand.id, s1.id);
+
+    // An unknown soul cannot anchor a new label.
+    assert!(
+        store
+            .find_or_create_strand_by_label("soul_does_not_exist", "github:issue:99")
+            .is_err()
     );
 }

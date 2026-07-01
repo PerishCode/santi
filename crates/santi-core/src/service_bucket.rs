@@ -55,11 +55,12 @@ impl SantiService {
     }
 
     fn ensure_object_bucket(&self, bucket: &ObjectBucket) -> Result<(), String> {
-        if bucket.soul_id != self.store.default_soul_id() {
+        let strand = self
+            .store
+            .strand(&bucket.session_id)?
+            .ok_or_else(|| "session not found".to_string())?;
+        if strand.soul_id != bucket.soul_id {
             return Err("soul not found".to_string());
-        }
-        if self.store.session(&bucket.session_id)?.is_none() {
-            return Err("session not found".to_string());
         }
         Ok(())
     }

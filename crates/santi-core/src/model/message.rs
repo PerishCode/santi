@@ -95,9 +95,9 @@ pub struct Message {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SessionMessageRef {
-    pub session_id: String,
+    pub strand_id: String,
     pub message_id: String,
-    pub session_seq: i64,
+    pub strand_seq: i64,
     pub created_at: Timestamp,
 }
 

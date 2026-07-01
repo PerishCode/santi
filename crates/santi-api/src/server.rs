@@ -21,9 +21,8 @@ use santi_core::{
     CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSessionResponse,
     CreateSoulRequest, CreateWebhookRequest, ErrorResponse, HealthResponse, MaterialRequest,
     SantiService, SantiServiceConfig, SantiStreamEvent, SantiStreamPayload,
-    SendSessionAcceptedResponse, SendSessionRequest, Session, SessionDetail, SessionMaterial,
-    SessionProfile, SessionRuntimeSnapshot, SessionSummary, SoulProfile, UpdateSessionRequest,
-    WebhookSubscription, prefixed_id, timestamp_now,
+    SendSessionAcceptedResponse, SendSessionRequest, SessionDetail, SessionMaterial,
+    SessionRuntimeSnapshot, SoulProfile, Strand, WebhookSubscription, prefixed_id, timestamp_now,
 };
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -101,10 +100,7 @@ fn router(service: SantiService, api_key: Option<Arc<str>>) -> Router {
         .route("/api/v1/souls", post(create_soul).get(list_souls))
         .route("/api/v1/souls/{soul_id}", get(get_soul))
         .route("/api/v1/webhooks", post(create_webhook).get(list_webhooks))
-        .route(
-            "/api/v1/sessions/{session_id}",
-            get(get_session).patch(update_session),
-        )
+        .route("/api/v1/sessions/{session_id}", get(get_session))
         .route("/api/v1/sessions/{session_id}/messages", get(list_messages))
         .route(
             "/api/v1/sessions/{session_id}/materials",
@@ -188,11 +184,9 @@ async fn create_session(
 #[utoipa::path(
     get,
     path = "/api/v1/sessions",
-    responses((status = 200, body = [SessionSummary]), (status = 500, body = ErrorResponse))
+    responses((status = 200, body = [Strand]), (status = 500, body = ErrorResponse))
 )]
-async fn list_sessions(
-    State(service): State<SantiService>,
-) -> Result<Json<Vec<SessionSummary>>, ApiError> {
+async fn list_sessions(State(service): State<SantiService>) -> Result<Json<Vec<Strand>>, ApiError> {
     service
         .list_sessions()
         .map(Json)
@@ -357,29 +351,6 @@ async fn get_session(
 ) -> Result<Json<SessionDetail>, ApiError> {
     service
         .session(&session_id)
-        .map_err(ApiError::from_service)?
-        .map(Json)
-        .ok_or_else(|| ApiError::not_found("session not found"))
-}
-
-#[utoipa::path(
-    patch,
-    path = "/api/v1/sessions/{session_id}",
-    params(("session_id" = String, Path)),
-    request_body = UpdateSessionRequest,
-    responses(
-        (status = 200, body = SessionSummary),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse)
-    )
-)]
-async fn update_session(
-    State(service): State<SantiService>,
-    Path(session_id): Path<String>,
-    Json(request): Json<UpdateSessionRequest>,
-) -> Result<Json<SessionSummary>, ApiError> {
-    service
-        .update_session(&session_id, request)
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("session not found"))
@@ -692,7 +663,6 @@ impl IntoResponse for ApiError {
         list_webhooks,
         ingest_webhook,
         get_session,
-        update_session,
         list_messages,
         session_material,
         send_session,
@@ -711,14 +681,11 @@ impl IntoResponse for ApiError {
         MaterialRequest,
         SendSessionRequest,
         SendSessionAcceptedResponse,
-        Session,
         SessionDetail,
         SessionMaterial,
-        SessionProfile,
         SessionRuntimeSnapshot,
-        SessionSummary,
         SoulProfile,
-        UpdateSessionRequest,
+        Strand,
         santi_core::ActorType,
         santi_core::Compact,
         santi_core::CompactExecRequest,
@@ -735,7 +702,6 @@ impl IntoResponse for ApiError {
         santi_core::SessionEffect,
         santi_core::SessionMessage,
         santi_core::SessionMessageRef,
-        santi_core::Strand,
         santi_core::ThinkingSpan,
         santi_core::ThinkingSpanState,
         santi_core::ToolCall,

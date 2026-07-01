@@ -47,30 +47,6 @@ pub struct MaterialUpdated {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct Session {
-    pub id: String,
-    pub parent_session_id: Option<String>,
-    pub fork_point: Option<i64>,
-    pub created_at: Timestamp,
-    pub updated_at: Timestamp,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SessionProfile {
-    pub session_id: String,
-    pub title: Option<String>,
-    pub desc: Option<String>,
-    pub created_at: Timestamp,
-    pub updated_at: Timestamp,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SessionSummary {
-    pub session: Session,
-    pub profile: SessionProfile,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Account {
     pub id: String,
     pub name: String,
@@ -102,7 +78,9 @@ pub struct SoulProfile {
 pub struct Strand {
     pub id: String,
     pub soul_id: String,
-    pub session_id: String,
+    /// Opaque external anchor (e.g. a webhook thread key). Unique per soul;
+    /// absent for strands reached only by id (e.g. CLI-created ones).
+    pub external_label: Option<String>,
     pub session_memory: String,
     pub provider_state: Option<Value>,
     pub next_seq: i64,
@@ -134,7 +112,6 @@ pub struct Turn {
     pub strand_id: String,
     pub trigger_type: TurnTriggerType,
     pub trigger_ref: Option<String>,
-    pub input_through_session_seq: i64,
     pub base_strand_seq: i64,
     pub end_strand_seq: Option<i64>,
     pub status: TurnStatus,
@@ -222,9 +199,6 @@ pub struct Compact {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CompactExecRequest {
-    /// Soul whose view is compacted. Empty/absent → the runtime's default soul.
-    #[serde(default)]
-    pub soul_id: Option<String>,
     /// Range boundaries — must be FIXED user/assistant messages in this
     /// strand's spine. Everything between (messages/tools/reasoning) collapses.
     pub from_message_id: String,
@@ -265,7 +239,7 @@ pub struct CompactQueryResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SessionEffect {
     pub id: String,
-    pub session_id: String,
+    pub strand_id: String,
     pub effect_type: String,
     pub idempotency_key: String,
     pub status: String,
@@ -335,29 +309,18 @@ pub struct CreateWebhookRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CreateSessionResponse {
-    pub session: SessionSummary,
+    pub session: Strand,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SessionDetail {
-    pub session: Session,
-    pub profile: SessionProfile,
+    pub strand: Strand,
     pub messages: Vec<SessionMessage>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct UpdateSessionRequest {
-    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SendSessionRequest {
     pub content: Vec<MessagePart>,
-    /// Soul to address this send to. Empty/absent → the runtime's default soul,
-    /// preserving the pre-multi-soul path. The (soul, session) pair is acquired
-    /// at send time, so this is the only place a non-default soul is selected.
-    #[serde(default)]
-    pub soul_id: Option<String>,
 }
 
 impl SendSessionRequest {
@@ -371,7 +334,6 @@ impl SendSessionRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SendSessionAcceptedResponse {
-    pub session: SessionSummary,
     pub strand: Strand,
     pub soul_profile: SoulProfile,
     pub turn: Turn,
@@ -455,9 +417,7 @@ pub enum SantiStreamPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SessionRuntimeSnapshot {
-    pub session: Session,
-    pub profile: SessionProfile,
-    pub strand: Option<Strand>,
+    pub strand: Strand,
     pub soul_profile: Option<SoulProfile>,
     pub messages: Vec<SessionMessage>,
     pub turns: Vec<Turn>,

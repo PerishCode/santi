@@ -99,7 +99,7 @@ pub struct SoulProfile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SoulSession {
+pub struct Strand {
     pub id: String,
     pub soul_id: String,
     pub session_id: String,
@@ -107,7 +107,7 @@ pub struct SoulSession {
     pub provider_state: Option<Value>,
     pub next_seq: i64,
     pub last_seen_session_seq: i64,
-    pub parent_soul_session_id: Option<String>,
+    pub parent_strand_id: Option<String>,
     pub fork_point: Option<i64>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
@@ -131,12 +131,12 @@ pub enum TurnStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Turn {
     pub id: String,
-    pub soul_session_id: String,
+    pub strand_id: String,
     pub trigger_type: TurnTriggerType,
     pub trigger_ref: Option<String>,
     pub input_through_session_seq: i64,
-    pub base_soul_session_seq: i64,
-    pub end_soul_session_seq: Option<i64>,
+    pub base_strand_seq: i64,
+    pub end_strand_seq: Option<i64>,
     pub status: TurnStatus,
     pub error_text: Option<String>,
     pub created_at: Timestamp,
@@ -207,14 +207,14 @@ pub struct ThinkingSpan {
     pub finished_at: Option<Timestamp>,
 }
 
-/// A compact is a pure projection overlay over a soul_session's spine. It
+/// A compact is a pure projection overlay over a strand's spine. It
 /// self-describes its coverage by message-id boundaries (fork-safe) and carries
 /// the soul-authored summary. The spine is never annotated. Provenance lives in
 /// the audit log (the compact-exec tool_call), not here.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Compact {
     pub id: String,
-    pub soul_session_id: String,
+    pub strand_id: String,
     pub summary: String,
     pub start_message_id: String,
     pub end_message_id: String,
@@ -226,7 +226,7 @@ pub struct CompactExecRequest {
     #[serde(default)]
     pub soul_id: Option<String>,
     /// Range boundaries — must be FIXED user/assistant messages in this
-    /// soul_session's spine. Everything between (messages/tools/reasoning) collapses.
+    /// strand's spine. Everything between (messages/tools/reasoning) collapses.
     pub from_message_id: String,
     pub to_message_id: String,
     pub summary: String,
@@ -245,8 +245,8 @@ pub struct CompactExecResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CompactQueryEntry {
-    pub soul_session_seq: i64,
-    pub target_type: SoulSessionTargetType,
+    pub strand_seq: i64,
+    pub target_type: StrandTargetType,
     pub target_id: String,
     pub text: String,
 }
@@ -279,7 +279,7 @@ pub struct SessionEffect {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum SoulSessionTargetType {
+pub enum StrandTargetType {
     Message,
     Compact,
     Thinking,
@@ -288,11 +288,11 @@ pub enum SoulSessionTargetType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SoulSessionEntry {
-    pub soul_session_id: String,
-    pub target_type: SoulSessionTargetType,
+pub struct StrandEntry {
+    pub strand_id: String,
+    pub target_type: StrandTargetType,
     pub target_id: String,
-    pub soul_session_seq: i64,
+    pub strand_seq: i64,
     pub created_at: Timestamp,
 }
 
@@ -372,7 +372,7 @@ impl SendSessionRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SendSessionAcceptedResponse {
     pub session: SessionSummary,
-    pub soul_session: SoulSession,
+    pub strand: Strand,
     pub soul_profile: SoulProfile,
     pub turn: Turn,
     pub user_message: SessionMessage,
@@ -457,7 +457,7 @@ pub enum SantiStreamPayload {
 pub struct SessionRuntimeSnapshot {
     pub session: Session,
     pub profile: SessionProfile,
-    pub soul_session: Option<SoulSession>,
+    pub strand: Option<Strand>,
     pub soul_profile: Option<SoulProfile>,
     pub messages: Vec<SessionMessage>,
     pub turns: Vec<Turn>,

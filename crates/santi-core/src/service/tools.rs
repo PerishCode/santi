@@ -12,7 +12,7 @@ impl SantiService {
     pub(super) fn handle_tool_call(
         &self,
         session_id: &str,
-        soul_session_id: &str,
+        strand_id: &str,
         turn_id: &str,
         call: ProviderFunctionCall,
     ) -> Result<(), String> {
@@ -35,7 +35,7 @@ impl SantiService {
                 tool_call: tool_call.clone(),
             },
         );
-        let soul_id = self.store.soul_id_for_soul_session(soul_session_id)?;
+        let soul_id = self.store.soul_id_for_strand(strand_id)?;
         let dispatch = self.dispatch_tool(session_id, &soul_id, &call);
         let (output, error_text) = match dispatch {
             Ok(output) => (Some(output), None),

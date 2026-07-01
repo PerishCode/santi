@@ -725,7 +725,7 @@ impl IntoResponse for ApiError {
         santi_core::CompactExecResponse,
         santi_core::CompactQueryEntry,
         santi_core::CompactQueryResponse,
-        santi_core::SoulSessionTargetType,
+        santi_core::StrandTargetType,
         santi_core::Message,
         santi_core::MessageContent,
         santi_core::MessagePart,
@@ -735,7 +735,7 @@ impl IntoResponse for ApiError {
         santi_core::SessionEffect,
         santi_core::SessionMessage,
         santi_core::SessionMessageRef,
-        santi_core::SoulSession,
+        santi_core::Strand,
         santi_core::ThinkingSpan,
         santi_core::ThinkingSpanState,
         santi_core::ToolCall,
@@ -781,7 +781,7 @@ mod tests {
 
         // Broken invariants and unrecognized messages → 500.
         assert_eq!(
-            status("soul_session disappeared"),
+            status("strand disappeared"),
             StatusCode::INTERNAL_SERVER_ERROR
         );
         assert_eq!(

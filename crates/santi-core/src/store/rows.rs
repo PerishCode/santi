@@ -3,8 +3,8 @@ use serde_json::Value;
 
 use crate::{
     ActorType, Compact, Message, MessageContent, MessageKind, MessageState, Session, SessionEffect,
-    SessionMessage, SessionMessageRef, SessionProfile, SessionSummary, SoulProfile, SoulSession,
-    SoulSessionTargetType, ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState, ToolCall,
+    SessionMessage, SessionMessageRef, SessionProfile, SessionSummary, SoulProfile, Strand,
+    StrandTargetType, ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState, ToolCall,
     ToolResult, Turn, TurnStatus, TurnTriggerType, WebhookSubscription,
 };
 
@@ -72,9 +72,9 @@ pub(super) fn map_webhook_row(row: &Row<'_>) -> rusqlite::Result<WebhookSubscrip
     })
 }
 
-pub(super) fn map_soul_session_row(row: &Row<'_>) -> rusqlite::Result<SoulSession> {
+pub(super) fn map_strand_row(row: &Row<'_>) -> rusqlite::Result<Strand> {
     let provider_state: Option<String> = row.get(4)?;
-    Ok(SoulSession {
+    Ok(Strand {
         id: row.get(0)?,
         soul_id: row.get(1)?,
         session_id: row.get(2)?,
@@ -82,7 +82,7 @@ pub(super) fn map_soul_session_row(row: &Row<'_>) -> rusqlite::Result<SoulSessio
         provider_state: provider_state.and_then(|value| serde_json::from_str(&value).ok()),
         next_seq: row.get(5)?,
         last_seen_session_seq: row.get(6)?,
-        parent_soul_session_id: row.get(7)?,
+        parent_strand_id: row.get(7)?,
         fork_point: row.get(8)?,
         created_at: row.get(9)?,
         updated_at: row.get(10)?,
@@ -144,12 +144,12 @@ pub(super) fn map_session_message_row(row: &Row<'_>) -> rusqlite::Result<Session
 pub(super) fn map_turn_row(row: &Row<'_>) -> rusqlite::Result<Turn> {
     Ok(Turn {
         id: row.get(0)?,
-        soul_session_id: row.get(1)?,
+        strand_id: row.get(1)?,
         trigger_type: turn_trigger_from_db(row.get::<_, String>(2)?.as_str()),
         trigger_ref: row.get(3)?,
         input_through_session_seq: row.get(4)?,
-        base_soul_session_seq: row.get(5)?,
-        end_soul_session_seq: row.get(6)?,
+        base_strand_seq: row.get(5)?,
+        end_strand_seq: row.get(6)?,
         status: turn_status_from_db(row.get::<_, String>(7)?.as_str()),
         error_text: row.get(8)?,
         created_at: row.get(9)?,
@@ -208,7 +208,7 @@ pub(super) fn map_thinking_span_row(row: &Row<'_>) -> rusqlite::Result<ThinkingS
 pub(super) fn map_compact_row(row: &Row<'_>) -> rusqlite::Result<Compact> {
     Ok(Compact {
         id: row.get(0)?,
-        soul_session_id: row.get(1)?,
+        strand_id: row.get(1)?,
         summary: row.get(2)?,
         start_message_id: row.get(3)?,
         end_message_id: row.get(4)?,
@@ -341,12 +341,12 @@ fn thinking_state_from_db(value: &str) -> ThinkingSpanState {
     }
 }
 
-pub(super) fn entry_type_db(value: &SoulSessionTargetType) -> &'static str {
+pub(super) fn entry_type_db(value: &StrandTargetType) -> &'static str {
     match value {
-        SoulSessionTargetType::Message => "message",
-        SoulSessionTargetType::Compact => "compact",
-        SoulSessionTargetType::Thinking => "thinking",
-        SoulSessionTargetType::ToolCall => "tool_call",
-        SoulSessionTargetType::ToolResult => "tool_result",
+        StrandTargetType::Message => "message",
+        StrandTargetType::Compact => "compact",
+        StrandTargetType::Thinking => "thinking",
+        StrandTargetType::ToolCall => "tool_call",
+        StrandTargetType::ToolResult => "tool_result",
     }
 }

@@ -384,7 +384,7 @@ async fn send_session_addresses_explicit_soul() {
         .await
         .expect("send session");
     assert_eq!(response.soul_profile.soul_id, secretary.soul_id);
-    assert_eq!(response.soul_session.soul_id, secretary.soul_id);
+    assert_eq!(response.strand.soul_id, secretary.soul_id);
 
     // Absent soul_id keeps the pre-multi-soul path: the runtime's default soul.
     let other = service.create_session().expect("create session").session;
@@ -402,7 +402,7 @@ async fn send_session_addresses_explicit_soul() {
         .expect("send session");
     assert_eq!(default_response.soul_profile.soul_id, default_soul);
 
-    // An unknown soul is rejected cleanly (no orphan soul_session), not a 500.
+    // An unknown soul is rejected cleanly (no orphan strand), not a 500.
     let stray = service.create_session().expect("create session").session;
     let error = service
         .send_session(

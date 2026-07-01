@@ -4,7 +4,7 @@ use crate::SantiStore;
 
 pub(crate) fn provider_input(
     store: &SantiStore,
-    soul_session_id: &str,
+    strand_id: &str,
 ) -> Result<Vec<ProviderItem>, String> {
-    store.assembly_input(soul_session_id)
+    store.assembly_input(strand_id)
 }

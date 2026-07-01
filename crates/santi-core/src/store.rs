@@ -7,8 +7,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{
     ActorType, MessageContent, MessageIntake, MessageKind, MessageState, Session, SessionMessage,
-    SessionSummary, SoulSession, SoulSessionEntry, SoulSessionTargetType, Turn, prefixed_id,
-    timestamp_now,
+    SessionSummary, Strand, StrandEntry, StrandTargetType, Turn, prefixed_id, timestamp_now,
 };
 
 mod assembly;
@@ -40,8 +39,8 @@ pub struct AppendedMessage {
 }
 
 #[derive(Debug, Clone)]
-pub struct AcquiredSoulSession {
-    pub soul_session: SoulSession,
+pub struct AcquiredStrand {
+    pub strand: Strand,
 }
 
 #[derive(Debug, Clone)]
@@ -75,13 +74,13 @@ impl SantiStore {
                 DROP TABLE IF EXISTS response_runs;
                 DROP TABLE IF EXISTS message_text_contents;
                 DROP TABLE IF EXISTS conversations;
-                DROP TABLE IF EXISTS r_soul_session_messages;
+                DROP TABLE IF EXISTS r_strand_entries;
                 DROP TABLE IF EXISTS compacts;
                 DROP TABLE IF EXISTS thinking_spans;
                 DROP TABLE IF EXISTS tool_results;
                 DROP TABLE IF EXISTS tool_calls;
                 DROP TABLE IF EXISTS turns;
-                DROP TABLE IF EXISTS soul_sessions;
+                DROP TABLE IF EXISTS strands;
                 DROP TABLE IF EXISTS session_effects;
                 DROP TABLE IF EXISTS message_events;
                 DROP TABLE IF EXISTS r_session_messages;
@@ -233,36 +232,36 @@ impl SantiStore {
         };
         let profile = session_profile_by_id(&conn, session_id)?
             .ok_or_else(|| "session profile missing".to_string())?;
-        let soul_session = soul_session_by_pair(&conn, soul_id, session_id)?;
+        let strand = strand_by_pair(&conn, soul_id, session_id)?;
         let soul_profile = soul_profile_by_id(&conn, soul_id)?;
         Ok(Some(crate::SessionRuntimeSnapshot {
             session,
             profile,
-            soul_session: soul_session.clone(),
+            strand: strand.clone(),
             soul_profile,
             messages: session_messages(&conn, session_id)?,
-            turns: if let Some(soul_session) = &soul_session {
-                turns_for_soul_session(&conn, &soul_session.id)?
+            turns: if let Some(strand) = &strand {
+                turns_for_strand(&conn, &strand.id)?
             } else {
                 Vec::new()
             },
-            thinking_spans: if let Some(soul_session) = &soul_session {
-                soul_thinking_spans(&conn, &soul_session.id)?
+            thinking_spans: if let Some(strand) = &strand {
+                soul_thinking_spans(&conn, &strand.id)?
             } else {
                 Vec::new()
             },
-            tool_calls: if let Some(soul_session) = &soul_session {
-                soul_tool_calls(&conn, &soul_session.id)?
+            tool_calls: if let Some(strand) = &strand {
+                soul_tool_calls(&conn, &strand.id)?
             } else {
                 Vec::new()
             },
-            tool_results: if let Some(soul_session) = &soul_session {
-                soul_tool_results(&conn, &soul_session.id)?
+            tool_results: if let Some(strand) = &strand {
+                soul_tool_results(&conn, &strand.id)?
             } else {
                 Vec::new()
             },
-            compacts: if let Some(soul_session) = &soul_session {
-                compacts_for_soul_session(&conn, &soul_session.id)?
+            compacts: if let Some(strand) = &strand {
+                compacts_for_strand(&conn, &strand.id)?
             } else {
                 Vec::new()
             },
@@ -383,43 +382,42 @@ impl SantiStore {
         })
     }
 
-    pub fn acquire_soul_session(
+    pub fn acquire_strand(
         &self,
         soul_id: &str,
         session_id: &str,
-    ) -> Result<AcquiredSoulSession, String> {
+    ) -> Result<AcquiredStrand, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         ensure_session(&tx, session_id)?;
         // Reject an unknown soul before inserting a pair: otherwise a bad
         // soul_id (now user-suppliable via `send`) would create an orphan
-        // soul_session pointing at no soul, surfacing later as a cryptic
+        // strand pointing at no soul, surfacing later as a cryptic
         // "soul_profile disappeared".
         if soul_profile_by_id(&tx, soul_id)?.is_none() {
             return Err(format!("unknown soul: {soul_id}"));
         }
         let now = timestamp_now();
-        let existing = soul_session_by_pair(&tx, soul_id, session_id)?;
-        let soul_session = if let Some(existing) = existing {
+        let existing = strand_by_pair(&tx, soul_id, session_id)?;
+        let strand = if let Some(existing) = existing {
             existing
         } else {
-            let soul_session_id = prefixed_id("ss");
+            let strand_id = prefixed_id("ss");
             tx.execute(
                 r#"
-                INSERT INTO soul_sessions (
+                INSERT INTO strands (
                   id, soul_id, session_id, session_memory, provider_state, next_seq,
-                  last_seen_session_seq, parent_soul_session_id, fork_point, created_at, updated_at
+                  last_seen_session_seq, parent_strand_id, fork_point, created_at, updated_at
                 )
                 VALUES (?1, ?2, ?3, '', NULL, 1, 0, NULL, NULL, ?4, ?4)
                 "#,
-                params![soul_session_id, soul_id, session_id, now],
+                params![strand_id, soul_id, session_id, now],
             )
             .map_err(|error| error.to_string())?;
-            soul_session_by_id(&tx, &soul_session_id)?
-                .ok_or_else(|| "created soul_session missing".to_string())?
+            strand_by_id(&tx, &strand_id)?.ok_or_else(|| "created strand missing".to_string())?
         };
         tx.commit().map_err(|error| error.to_string())?;
-        Ok(AcquiredSoulSession { soul_session })
+        Ok(AcquiredStrand { strand })
     }
 
     /// Find the session anchored to an opaque external label, or create one and
@@ -562,39 +560,39 @@ impl SantiStore {
         soul_profile_by_id(&conn, soul_id)
     }
 
-    pub fn soul_session(&self, soul_session_id: &str) -> Result<Option<SoulSession>, String> {
+    pub fn strand(&self, strand_id: &str) -> Result<Option<Strand>, String> {
         let conn = self.conn.lock().unwrap();
-        soul_session_by_id(&conn, soul_session_id)
+        strand_by_id(&conn, strand_id)
     }
 
-    /// Existing soul_session for a (soul, session) pair, or None. Unlike
-    /// `acquire_soul_session`, this never creates one — a lookup, not a bind.
-    pub fn find_soul_session_by_pair(
+    /// Existing strand for a (soul, session) pair, or None. Unlike
+    /// `acquire_strand`, this never creates one — a lookup, not a bind.
+    pub fn find_strand_by_pair(
         &self,
         soul_id: &str,
         session_id: &str,
-    ) -> Result<Option<SoulSession>, String> {
+    ) -> Result<Option<Strand>, String> {
         let conn = self.conn.lock().unwrap();
-        soul_session_by_pair(&conn, soul_id, session_id)
+        strand_by_pair(&conn, soul_id, session_id)
     }
 
-    pub fn soul_id_for_soul_session(&self, soul_session_id: &str) -> Result<String, String> {
-        self.soul_session(soul_session_id)?
-            .map(|soul_session| soul_session.soul_id)
-            .ok_or_else(|| "soul_session not found".to_string())
+    pub fn soul_id_for_strand(&self, strand_id: &str) -> Result<String, String> {
+        self.strand(strand_id)?
+            .map(|strand| strand.soul_id)
+            .ok_or_else(|| "strand not found".to_string())
     }
 
     pub fn append_message_ref(
         &self,
-        soul_session_id: &str,
+        strand_id: &str,
         message_id: &str,
-    ) -> Result<SoulSessionEntry, String> {
-        self.append_soul_session_entry(soul_session_id, SoulSessionTargetType::Message, message_id)
+    ) -> Result<StrandEntry, String> {
+        self.append_strand_entry(strand_id, StrandTargetType::Message, message_id)
     }
 
     pub fn start_turn(
         &self,
-        soul_session_id: &str,
+        strand_id: &str,
         trigger_ref: &str,
         input_through_session_seq: i64,
     ) -> Result<StartedTurn, String> {
@@ -604,18 +602,18 @@ impl SantiStore {
         conn.execute(
             r#"
             INSERT INTO turns (
-              id, soul_session_id, trigger_type, trigger_ref, input_through_session_seq,
-              base_soul_session_seq, end_soul_session_seq, status, error_text,
+              id, strand_id, trigger_type, trigger_ref, input_through_session_seq,
+              base_strand_seq, end_strand_seq, status, error_text,
               created_at, updated_at, finished_at
             )
             SELECT ?1, id, 'session_send', ?3, ?4, next_seq - 1, NULL, 'running',
                    NULL, ?5, ?5, NULL
-            FROM soul_sessions
+            FROM strands
             WHERE id = ?2
             "#,
             params![
                 turn_id,
-                soul_session_id,
+                strand_id,
                 trigger_ref,
                 input_through_session_seq,
                 now

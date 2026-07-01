@@ -3,26 +3,26 @@ use serde_json::Value;
 
 use crate::{
     ActorType, CompactExecResponse, CompactQueryEntry, CompactQueryResponse, MessageState,
-    SoulSessionTargetType, prefixed_id,
+    StrandTargetType, prefixed_id,
 };
 
 use super::{
     SantiStore,
     db::{
-        compact_by_id, compacts_for_soul_session, message_record_by_id,
-        message_seq_in_soul_session, thinking_span_by_id, tool_call_by_id, tool_result_by_id,
+        compact_by_id, compacts_for_strand, message_record_by_id, message_seq_in_strand,
+        thinking_span_by_id, tool_call_by_id, tool_result_by_id,
     },
 };
 
 impl SantiStore {
-    /// Create a compact over `[from_message_id, to_message_id]` in a soul_session's
+    /// Create a compact over `[from_message_id, to_message_id]` in a strand's
     /// spine. Pure projection: the spine is never touched; only the compacts
     /// overlay changes (new row + any fully-covered compacts absorbed). Endpoints
     /// must be FIXED user/assistant messages; the range is disjoint-or-full-cover
     /// against existing compacts (partial overlap is a quick fail).
     pub fn create_compact(
         &self,
-        soul_session_id: &str,
+        strand_id: &str,
         from_message_id: &str,
         to_message_id: &str,
         summary: &str,
@@ -44,11 +44,11 @@ impl SantiStore {
             }
         }
 
-        // Resolve to the one axis compaction lives on: soul_session_seq.
-        let from_seq = message_seq_in_soul_session(&tx, soul_session_id, from_message_id)?
-            .ok_or_else(|| "compact from message not in this soul_session".to_string())?;
-        let to_seq = message_seq_in_soul_session(&tx, soul_session_id, to_message_id)?
-            .ok_or_else(|| "compact to message not in this soul_session".to_string())?;
+        // Resolve to the one axis compaction lives on: strand_seq.
+        let from_seq = message_seq_in_strand(&tx, strand_id, from_message_id)?
+            .ok_or_else(|| "compact from message not in this strand".to_string())?;
+        let to_seq = message_seq_in_strand(&tx, strand_id, to_message_id)?
+            .ok_or_else(|| "compact to message not in this strand".to_string())?;
         if from_seq > to_seq {
             return Err("compact from must not be after to".to_string());
         }
@@ -56,10 +56,10 @@ impl SantiStore {
         // Overlap policy: disjoint OR full-cover only. Fully-covered compacts are
         // absorbed (dropped, replaced by the new one). Partial overlap → quick fail.
         let mut absorbed = Vec::new();
-        for existing in compacts_for_soul_session(&tx, soul_session_id)? {
+        for existing in compacts_for_strand(&tx, strand_id)? {
             let (Some(es), Some(ee)) = (
-                message_seq_in_soul_session(&tx, soul_session_id, &existing.start_message_id)?,
-                message_seq_in_soul_session(&tx, soul_session_id, &existing.end_message_id)?,
+                message_seq_in_strand(&tx, strand_id, &existing.start_message_id)?,
+                message_seq_in_strand(&tx, strand_id, &existing.end_message_id)?,
             ) else {
                 continue;
             };
@@ -76,10 +76,10 @@ impl SantiStore {
         let collapsed_count: i64 = tx
             .query_row(
                 r#"
-                SELECT COUNT(*) FROM r_soul_session_messages
-                WHERE soul_session_id = ?1 AND soul_session_seq BETWEEN ?2 AND ?3
+                SELECT COUNT(*) FROM r_strand_entries
+                WHERE strand_id = ?1 AND strand_seq BETWEEN ?2 AND ?3
                 "#,
-                params![soul_session_id, from_seq, to_seq],
+                params![strand_id, from_seq, to_seq],
                 |row| row.get(0),
             )
             .map_err(|error| error.to_string())?;
@@ -91,12 +91,12 @@ impl SantiStore {
         let compact_id = prefixed_id("cmp");
         tx.execute(
             r#"
-            INSERT INTO compacts (id, soul_session_id, summary, start_message_id, end_message_id)
+            INSERT INTO compacts (id, strand_id, summary, start_message_id, end_message_id)
             VALUES (?1, ?2, ?3, ?4, ?5)
             "#,
             params![
                 compact_id,
-                soul_session_id,
+                strand_id,
                 summary,
                 from_message_id,
                 to_message_id
@@ -130,12 +130,8 @@ impl SantiStore {
         };
         let mut entries = Vec::new();
         if let (Some(from_seq), Some(to_seq)) = (
-            message_seq_in_soul_session(
-                &conn,
-                &compact.soul_session_id,
-                &compact.start_message_id,
-            )?,
-            message_seq_in_soul_session(&conn, &compact.soul_session_id, &compact.end_message_id)?,
+            message_seq_in_strand(&conn, &compact.strand_id, &compact.start_message_id)?,
+            message_seq_in_strand(&conn, &compact.strand_id, &compact.end_message_id)?,
         ) {
             let needle = keyword
                 .map(str::trim)
@@ -144,15 +140,15 @@ impl SantiStore {
             let mut stmt = conn
                 .prepare(
                     r#"
-                    SELECT soul_session_seq, target_type, target_id
-                    FROM r_soul_session_messages
-                    WHERE soul_session_id = ?1 AND soul_session_seq BETWEEN ?2 AND ?3
-                    ORDER BY soul_session_seq ASC
+                    SELECT strand_seq, target_type, target_id
+                    FROM r_strand_entries
+                    WHERE strand_id = ?1 AND strand_seq BETWEEN ?2 AND ?3
+                    ORDER BY strand_seq ASC
                     "#,
                 )
                 .map_err(|error| error.to_string())?;
             let rows = stmt
-                .query_map(params![compact.soul_session_id, from_seq, to_seq], |row| {
+                .query_map(params![compact.strand_id, from_seq, to_seq], |row| {
                     Ok((
                         row.get::<_, i64>(0)?,
                         row.get::<_, String>(1)?,
@@ -169,7 +165,7 @@ impl SantiStore {
                     continue;
                 }
                 entries.push(CompactQueryEntry {
-                    soul_session_seq: seq,
+                    strand_seq: seq,
                     target_type: parse_target_type(&target_type),
                     target_id,
                     text,
@@ -230,12 +226,12 @@ fn value_text(value: &Value) -> String {
     }
 }
 
-fn parse_target_type(value: &str) -> SoulSessionTargetType {
+fn parse_target_type(value: &str) -> StrandTargetType {
     match value {
-        "compact" => SoulSessionTargetType::Compact,
-        "thinking" => SoulSessionTargetType::Thinking,
-        "tool_call" => SoulSessionTargetType::ToolCall,
-        "tool_result" => SoulSessionTargetType::ToolResult,
-        _ => SoulSessionTargetType::Message,
+        "compact" => StrandTargetType::Compact,
+        "thinking" => StrandTargetType::Thinking,
+        "tool_call" => StrandTargetType::ToolCall,
+        "tool_result" => StrandTargetType::ToolResult,
+        _ => StrandTargetType::Message,
     }
 }

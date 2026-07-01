@@ -17,7 +17,7 @@ use clap::{Parser, Subcommand};
 use futures_util::{Stream, StreamExt};
 
 /// Grace window after the in-flight turn set empties, before declaring the
-/// soul_session idle. A completed turn re-checks for newer requests and may
+/// strand idle. A completed turn re-checks for newer requests and may
 /// start a follow-on turn (coalescing); its `turn_started` lands just after the
 /// `turn_completed`, so we wait briefly to catch it rather than exit early.
 const WATCH_IDLE_GRACE: Duration = Duration::from_millis(1500);
@@ -69,7 +69,7 @@ enum Command {
     /// Session resources under /api/v1/sessions
     #[command(subcommand)]
     Session(SessionCommand),
-    /// Compact a soul_session's own timeline, or query a compact's detail.
+    /// Compact a strand's own timeline, or query a compact's detail.
     #[command(subcommand)]
     Compact(CompactCommand),
 }
@@ -129,7 +129,7 @@ enum SessionCommand {
         /// Either `<id> <text>` or just `<text>`.
         #[arg(num_args = 1..=2, required = true)]
         args: Vec<String>,
-        /// After sending, follow the stream until the soul_session goes idle,
+        /// After sending, follow the stream until the strand goes idle,
         /// then exit. Robust to coalescing and silent (speechless) completions.
         #[arg(long)]
         watch: bool,
@@ -404,7 +404,7 @@ async fn follow(client: &reqwest::Client, url: &str) -> Result<()> {
     Ok(())
 }
 
-/// POST a send, then optionally `--watch` the stream until the soul_session is
+/// POST a send, then optionally `--watch` the stream until the strand is
 /// idle again. Without `--watch` this is the prior fire-and-return behavior.
 async fn send(
     client: &reqwest::Client,
@@ -451,7 +451,7 @@ async fn send(
 }
 
 /// Follow the session's SSE stream, tracking which turns are in flight, and
-/// return once none remain (the soul_session has caught up). Each event is
+/// return once none remain (the strand has caught up). Each event is
 /// relayed to stdout as one compact JSON line; the client models only the
 /// turn-lifecycle events it needs to decide "idle", nothing more.
 async fn watch_until_idle(

@@ -38,7 +38,7 @@ impl SantiService {
                 )
                 && self
                     .store
-                    .append_message_ref(&turn.soul_session_id, &message.session_message.message.id)
+                    .append_message_ref(&turn.strand_id, &message.session_message.message.id)
                     .is_ok()
             {
                 last_seen_session_seq = Some(message.session_message.relation.session_seq);
@@ -55,7 +55,7 @@ impl SantiService {
                 MessageIntake::Record,
             ) && self
                 .store
-                .append_message_ref(&turn.soul_session_id, &message.session_message.message.id)
+                .append_message_ref(&turn.strand_id, &message.session_message.message.id)
                 .is_ok()
             {
                 last_seen_session_seq = Some(message.session_message.relation.session_seq);

@@ -6,12 +6,12 @@ use super::{
     db::{
         append_entry_in_tx, call_soul_id, thinking_span_by_id, thinking_spans_for_turn,
         tool_call_by_id, tool_calls_for_turn, tool_result_by_id, tool_results_for_turn, turn_by_id,
-        turn_soul_session_id,
+        turn_strand_id,
     },
 };
 use crate::{
-    SoulSessionEntry, SoulSessionTargetType, ThinkingCompletionReason, ThinkingSpan,
-    ThinkingSpanState, ToolCall, ToolResult, Turn, prefixed_id, timestamp_now,
+    StrandEntry, StrandTargetType, ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState,
+    ToolCall, ToolResult, Turn, prefixed_id, timestamp_now,
 };
 
 impl SantiStore {
@@ -24,7 +24,7 @@ impl SantiStore {
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let thinking_id = prefixed_id("thinking");
         let now = timestamp_now();
-        let soul_session_id = turn_soul_session_id(&tx, turn_id)?;
+        let strand_id = turn_strand_id(&tx, turn_id)?;
         tx.execute(
             r#"
             INSERT INTO thinking_spans (
@@ -36,12 +36,7 @@ impl SantiStore {
             params![thinking_id, turn_id, provider_response_id, now],
         )
         .map_err(|error| error.to_string())?;
-        append_entry_in_tx(
-            &tx,
-            &soul_session_id,
-            SoulSessionTargetType::Thinking,
-            &thinking_id,
-        )?;
+        append_entry_in_tx(&tx, &strand_id, StrandTargetType::Thinking, &thinking_id)?;
         tx.commit().map_err(|error| error.to_string())?;
         thinking_span_by_id(&conn, &thinking_id)?
             .ok_or_else(|| "created thinking_span missing".to_string())
@@ -124,7 +119,7 @@ impl SantiStore {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let now = timestamp_now();
-        let soul_session_id = turn_soul_session_id(&tx, turn_id)?;
+        let strand_id = turn_strand_id(&tx, turn_id)?;
         let provider_item_text = provenance
             .item
             .as_ref()
@@ -148,12 +143,7 @@ impl SantiStore {
             ],
         )
         .map_err(|error| error.to_string())?;
-        append_entry_in_tx(
-            &tx,
-            &soul_session_id,
-            SoulSessionTargetType::ToolCall,
-            tool_call_id,
-        )?;
+        append_entry_in_tx(&tx, &strand_id, StrandTargetType::ToolCall, tool_call_id)?;
         tx.commit().map_err(|error| error.to_string())?;
         tool_call_by_id(&conn, tool_call_id)?.ok_or_else(|| "created tool_call missing".to_string())
     }
@@ -168,7 +158,7 @@ impl SantiStore {
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let tool_result_id = prefixed_id("tool_result");
         let now = timestamp_now();
-        let soul_session_id = call_soul_id(&tx, tool_call_id)?;
+        let strand_id = call_soul_id(&tx, tool_call_id)?;
         let output_text = output
             .as_ref()
             .map(serde_json::to_string)
@@ -184,8 +174,8 @@ impl SantiStore {
         .map_err(|error| error.to_string())?;
         append_entry_in_tx(
             &tx,
-            &soul_session_id,
-            SoulSessionTargetType::ToolResult,
+            &strand_id,
+            StrandTargetType::ToolResult,
             &tool_result_id,
         )?;
         tx.commit().map_err(|error| error.to_string())?;
@@ -193,21 +183,17 @@ impl SantiStore {
             .ok_or_else(|| "created tool_result missing".to_string())
     }
 
-    /// Append a per-round assistant text segment to the soul_session replay
+    /// Append a per-round assistant text segment to the strand replay
     /// timeline ONLY (no `r_session_messages` row). The session-visible reply is
     /// the lumped message stored separately at turn end; this keeps the replay
     /// timeline a faithful, interleaved item log (DC4b / DC6).
-    pub fn append_soul_assistant_text(
-        &self,
-        soul_session_id: &str,
-        text: &str,
-    ) -> Result<(), String> {
+    pub fn append_soul_assistant_text(&self, strand_id: &str, text: &str) -> Result<(), String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let soul_id: String = tx
             .query_row(
-                "SELECT soul_id FROM soul_sessions WHERE id = ?1 LIMIT 1",
-                params![soul_session_id],
+                "SELECT soul_id FROM strands WHERE id = ?1 LIMIT 1",
+                params![strand_id],
                 |row| row.get(0),
             )
             .map_err(|error| error.to_string())?;
@@ -226,17 +212,12 @@ impl SantiStore {
             params![message_id, soul_id, content_json, now],
         )
         .map_err(|error| error.to_string())?;
-        append_entry_in_tx(
-            &tx,
-            soul_session_id,
-            SoulSessionTargetType::Message,
-            &message_id,
-        )?;
+        append_entry_in_tx(&tx, strand_id, StrandTargetType::Message, &message_id)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(())
     }
 
-    /// Atomically start a turn for a soul_session IFF (a) no turn is currently
+    /// Atomically start a turn for a strand IFF (a) no turn is currently
     /// running for it and (b) it is "behind" — there is a REQUEST message whose
     /// timeline seq is past the newest turn's start. This is the lynchpin of the
     /// drive model: it makes "one present per thread of experience" an invariant
@@ -244,7 +225,7 @@ impl SantiStore {
     /// completion re-checks race harmlessly. Returns the started turn, or None.
     pub fn try_start_turn(
         &self,
-        soul_session_id: &str,
+        strand_id: &str,
         trigger_type: &str,
         trigger_ref: Option<&str>,
     ) -> Result<Option<Turn>, String> {
@@ -252,8 +233,8 @@ impl SantiStore {
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let running: Option<i64> = tx
             .query_row(
-                "SELECT 1 FROM turns WHERE soul_session_id = ?1 AND status = 'running' LIMIT 1",
-                params![soul_session_id],
+                "SELECT 1 FROM turns WHERE strand_id = ?1 AND status = 'running' LIMIT 1",
+                params![strand_id],
                 |row| row.get(0),
             )
             .ok();
@@ -264,15 +245,15 @@ impl SantiStore {
             .query_row(
                 r#"
                 SELECT
-                  (SELECT COALESCE(MAX(r.soul_session_seq), 0)
-                     FROM r_soul_session_messages r
+                  (SELECT COALESCE(MAX(r.strand_seq), 0)
+                     FROM r_strand_entries r
                      JOIN messages m ON m.id = r.target_id
-                    WHERE r.soul_session_id = ?1 AND r.target_type = 'message'
+                    WHERE r.strand_id = ?1 AND r.target_type = 'message'
                       AND m.is_request = 1),
-                  (SELECT COALESCE(MAX(base_soul_session_seq), 0)
-                     FROM turns WHERE soul_session_id = ?1)
+                  (SELECT COALESCE(MAX(base_strand_seq), 0)
+                     FROM turns WHERE strand_id = ?1)
                 "#,
-                params![soul_session_id],
+                params![strand_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .map_err(|error| error.to_string())?;
@@ -286,28 +267,28 @@ impl SantiStore {
         tx.execute(
             r#"
             INSERT INTO turns (
-              id, soul_session_id, trigger_type, trigger_ref, input_through_session_seq,
-              base_soul_session_seq, end_soul_session_seq, status, error_text,
+              id, strand_id, trigger_type, trigger_ref, input_through_session_seq,
+              base_strand_seq, end_strand_seq, status, error_text,
               created_at, updated_at, finished_at
             )
             SELECT ?1, id, ?3, ?4, 0, next_seq - 1, NULL, 'running', NULL, ?5, ?5, NULL
-            FROM soul_sessions WHERE id = ?2
+            FROM strands WHERE id = ?2
             "#,
-            params![turn_id, soul_session_id, trigger_type, trigger_ref, now],
+            params![turn_id, strand_id, trigger_type, trigger_ref, now],
         )
         .map_err(|error| error.to_string())?;
         tx.commit().map_err(|error| error.to_string())?;
         turn_by_id(&conn, &turn_id)
     }
 
-    /// The most recent turn for a soul_session (the active one under the drive
+    /// The most recent turn for a strand (the active one under the drive
     /// model — running if busy, else the latest completed). For response shaping.
-    pub fn latest_turn(&self, soul_session_id: &str) -> Result<Option<Turn>, String> {
+    pub fn latest_turn(&self, strand_id: &str) -> Result<Option<Turn>, String> {
         let conn = self.conn.lock().unwrap();
         let id: Option<String> = conn
             .query_row(
-                "SELECT id FROM turns WHERE soul_session_id = ?1 ORDER BY created_at DESC, id DESC LIMIT 1",
-                params![soul_session_id],
+                "SELECT id FROM turns WHERE strand_id = ?1 ORDER BY created_at DESC, id DESC LIMIT 1",
+                params![strand_id],
                 |row| row.get(0),
             )
             .ok();
@@ -319,7 +300,7 @@ impl SantiStore {
 
     /// On startup, every `running` turn is orphaned (its process is gone).
     /// Reconcile them to an honest "interrupted" terminal — never fabricate a
-    /// result — so the soul_session is idle again and the soul sees the truth.
+    /// result — so the strand is idle again and the soul sees the truth.
     pub fn reconcile_orphaned_turns(&self) -> Result<usize, String> {
         let conn = self.conn.lock().unwrap();
         let now = timestamp_now();
@@ -337,20 +318,20 @@ impl SantiStore {
 
     /// Soul_sessions that are "behind" (an unconsumed REQUEST exists). Used on
     /// boot to re-drive durable requests stranded by a crash (liveness).
-    pub fn soul_sessions_with_pending_requests(&self) -> Result<Vec<(String, String)>, String> {
+    pub fn strands_with_pending_requests(&self) -> Result<Vec<(String, String)>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
                 r#"
                 SELECT ss.session_id, ss.id
-                FROM soul_sessions ss
-                WHERE (SELECT COALESCE(MAX(r.soul_session_seq), 0)
-                         FROM r_soul_session_messages r
+                FROM strands ss
+                WHERE (SELECT COALESCE(MAX(r.strand_seq), 0)
+                         FROM r_strand_entries r
                          JOIN messages m ON m.id = r.target_id
-                        WHERE r.soul_session_id = ss.id AND r.target_type = 'message'
+                        WHERE r.strand_id = ss.id AND r.target_type = 'message'
                           AND m.is_request = 1)
-                    > (SELECT COALESCE(MAX(base_soul_session_seq), 0)
-                         FROM turns WHERE soul_session_id = ss.id)
+                    > (SELECT COALESCE(MAX(base_strand_seq), 0)
+                         FROM turns WHERE strand_id = ss.id)
                 "#,
             )
             .map_err(|error| error.to_string())?;
@@ -389,8 +370,8 @@ impl SantiStore {
             r#"
             UPDATE turns
             SET status = 'completed',
-                end_soul_session_seq = (
-                  SELECT next_seq - 1 FROM soul_sessions WHERE id = turns.soul_session_id
+                end_strand_seq = (
+                  SELECT next_seq - 1 FROM strands WHERE id = turns.strand_id
                 ),
                 updated_at = ?2,
                 finished_at = ?2
@@ -401,11 +382,11 @@ impl SantiStore {
         .map_err(|error| error.to_string())?;
         conn.execute(
             r#"
-            UPDATE soul_sessions
+            UPDATE strands
             SET last_seen_session_seq = COALESCE(?2, last_seen_session_seq),
                 provider_state = ?3,
                 updated_at = ?4
-            WHERE id = (SELECT soul_session_id FROM turns WHERE id = ?1)
+            WHERE id = (SELECT strand_id FROM turns WHERE id = ?1)
             "#,
             params![turn_id, assistant_message_seq, provider_state, now],
         )
@@ -438,8 +419,8 @@ impl SantiStore {
         conn.execute(
             r#"
             UPDATE turns
-            SET end_soul_session_seq = (
-                  SELECT next_seq - 1 FROM soul_sessions WHERE id = turns.soul_session_id
+            SET end_strand_seq = (
+                  SELECT next_seq - 1 FROM strands WHERE id = turns.strand_id
                 ),
                 updated_at = ?2
             WHERE id = ?1 AND status = 'failed'
@@ -449,13 +430,13 @@ impl SantiStore {
         .map_err(|error| error.to_string())?;
         conn.execute(
             r#"
-            UPDATE soul_sessions
+            UPDATE strands
             SET last_seen_session_seq = CASE
                   WHEN last_seen_session_seq > ?2 THEN last_seen_session_seq
                   ELSE ?2
                 END,
                 updated_at = ?3
-            WHERE id = (SELECT soul_session_id FROM turns WHERE id = ?1)
+            WHERE id = (SELECT strand_id FROM turns WHERE id = ?1)
             "#,
             params![turn_id, last_seen_session_seq, now],
         )
@@ -478,15 +459,15 @@ impl SantiStore {
         tool_results_for_turn(&conn, turn_id)
     }
 
-    pub(super) fn append_soul_session_entry(
+    pub(super) fn append_strand_entry(
         &self,
-        soul_session_id: &str,
-        target_type: SoulSessionTargetType,
+        strand_id: &str,
+        target_type: StrandTargetType,
         target_id: &str,
-    ) -> Result<SoulSessionEntry, String> {
+    ) -> Result<StrandEntry, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let entry = append_entry_in_tx(&tx, soul_session_id, target_type, target_id)?;
+        let entry = append_entry_in_tx(&tx, strand_id, target_type, target_id)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(entry)
     }

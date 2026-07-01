@@ -4,8 +4,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{
     ActorType, Compact, MessageKind, Session, SessionEffect, SessionMessage, SessionProfile,
-    SessionSummary, SoulProfile, SoulSession, SoulSessionEntry, SoulSessionTargetType,
-    ThinkingSpan, ToolCall, ToolResult, Turn, WebhookSubscription, timestamp_now,
+    SessionSummary, SoulProfile, Strand, StrandEntry, StrandTargetType, ThinkingSpan, ToolCall,
+    ToolResult, Turn, WebhookSubscription, timestamp_now,
 };
 
 use super::rows::*;
@@ -34,32 +34,32 @@ pub(super) fn next_session_seq(conn: &Connection, session_id: &str) -> Result<i6
 
 pub(super) fn append_entry_in_tx(
     conn: &Connection,
-    soul_session_id: &str,
-    target_type: SoulSessionTargetType,
+    strand_id: &str,
+    target_type: StrandTargetType,
     target_id: &str,
-) -> Result<SoulSessionEntry, String> {
+) -> Result<StrandEntry, String> {
     let now = timestamp_now();
     let allocated_seq = conn
         .query_row(
             r#"
-            UPDATE soul_sessions
+            UPDATE strands
             SET next_seq = next_seq + 1, updated_at = ?2
             WHERE id = ?1
             RETURNING next_seq - 1
             "#,
-            params![soul_session_id, now],
+            params![strand_id, now],
             |row| row.get::<_, i64>(0),
         )
         .map_err(|error| error.to_string())?;
     conn.execute(
         r#"
-        INSERT INTO r_soul_session_messages (
-          soul_session_id, target_type, target_id, soul_session_seq, created_at
+        INSERT INTO r_strand_entries (
+          strand_id, target_type, target_id, strand_seq, created_at
         )
         VALUES (?1, ?2, ?3, ?4, ?5)
         "#,
         params![
-            soul_session_id,
+            strand_id,
             entry_type_db(&target_type),
             target_id,
             allocated_seq,
@@ -67,11 +67,11 @@ pub(super) fn append_entry_in_tx(
         ],
     )
     .map_err(|error| error.to_string())?;
-    Ok(SoulSessionEntry {
-        soul_session_id: soul_session_id.to_string(),
+    Ok(StrandEntry {
+        strand_id: strand_id.to_string(),
         target_type,
         target_id: target_id.to_string(),
-        soul_session_seq: allocated_seq,
+        strand_seq: allocated_seq,
         created_at: now,
     })
 }
@@ -169,40 +169,37 @@ pub(super) fn webhook_by_name(
     .map_err(|error| error.to_string())
 }
 
-pub(super) fn soul_session_by_pair(
+pub(super) fn strand_by_pair(
     conn: &Connection,
     soul_id: &str,
     session_id: &str,
-) -> Result<Option<SoulSession>, String> {
+) -> Result<Option<Strand>, String> {
     conn.query_row(
         r#"
         SELECT id, soul_id, session_id, session_memory, provider_state, next_seq,
-               last_seen_session_seq, parent_soul_session_id, fork_point, created_at, updated_at
-        FROM soul_sessions
+               last_seen_session_seq, parent_strand_id, fork_point, created_at, updated_at
+        FROM strands
         WHERE soul_id = ?1 AND session_id = ?2
         LIMIT 1
         "#,
         params![soul_id, session_id],
-        map_soul_session_row,
+        map_strand_row,
     )
     .optional()
     .map_err(|error| error.to_string())
 }
 
-pub(super) fn soul_session_by_id(
-    conn: &Connection,
-    soul_session_id: &str,
-) -> Result<Option<SoulSession>, String> {
+pub(super) fn strand_by_id(conn: &Connection, strand_id: &str) -> Result<Option<Strand>, String> {
     conn.query_row(
         r#"
         SELECT id, soul_id, session_id, session_memory, provider_state, next_seq,
-               last_seen_session_seq, parent_soul_session_id, fork_point, created_at, updated_at
-        FROM soul_sessions
+               last_seen_session_seq, parent_strand_id, fork_point, created_at, updated_at
+        FROM strands
         WHERE id = ?1
         LIMIT 1
         "#,
-        params![soul_session_id],
-        map_soul_session_row,
+        params![strand_id],
+        map_strand_row,
     )
     .optional()
     .map_err(|error| error.to_string())
@@ -231,7 +228,7 @@ pub(super) fn message_by_id(
 
 /// Fetch a message's content by id directly from `messages`, independent of any
 /// session relation — so the assembly projection can render both session-visible
-/// messages and soul_session-only assistant text items uniformly.
+/// messages and strand-only assistant text items uniformly.
 pub(super) fn message_record_by_id(
     conn: &Connection,
     message_id: &str,
@@ -277,8 +274,8 @@ pub(super) fn session_messages(
 pub(super) fn turn_by_id(conn: &Connection, turn_id: &str) -> Result<Option<Turn>, String> {
     conn.query_row(
         r#"
-        SELECT id, soul_session_id, trigger_type, trigger_ref, input_through_session_seq,
-               base_soul_session_seq, end_soul_session_seq, status, error_text,
+        SELECT id, strand_id, trigger_type, trigger_ref, input_through_session_seq,
+               base_strand_seq, end_strand_seq, status, error_text,
                created_at, updated_at, finished_at
         FROM turns
         WHERE id = ?1
@@ -297,7 +294,7 @@ pub(super) fn compact_by_id(
 ) -> Result<Option<Compact>, String> {
     conn.query_row(
         r#"
-        SELECT id, soul_session_id, summary, start_message_id, end_message_id
+        SELECT id, strand_id, summary, start_message_id, end_message_id
         FROM compacts WHERE id = ?1 LIMIT 1
         "#,
         params![compact_id],
@@ -307,9 +304,9 @@ pub(super) fn compact_by_id(
     .map_err(|error| error.to_string())
 }
 
-pub(super) fn turn_soul_session_id(conn: &Connection, turn_id: &str) -> Result<String, String> {
+pub(super) fn turn_strand_id(conn: &Connection, turn_id: &str) -> Result<String, String> {
     conn.query_row(
-        "SELECT soul_session_id FROM turns WHERE id = ?1 LIMIT 1",
+        "SELECT strand_id FROM turns WHERE id = ?1 LIMIT 1",
         params![turn_id],
         |row| row.get(0),
     )
@@ -319,7 +316,7 @@ pub(super) fn turn_soul_session_id(conn: &Connection, turn_id: &str) -> Result<S
 pub(super) fn call_soul_id(conn: &Connection, tool_call_id: &str) -> Result<String, String> {
     conn.query_row(
         r#"
-        SELECT t.soul_session_id
+        SELECT t.strand_id
         FROM tool_calls c
         JOIN turns t ON t.id = c.turn_id
         WHERE c.id = ?1
@@ -376,42 +373,42 @@ pub(super) fn thinking_span_by_id(
     .map_err(|error| error.to_string())
 }
 
-/// Position of a message in a soul_session's spine (its ref's soul_session_seq),
-/// or None if the message is not part of that soul_session. This is the one
-/// axis compaction operates on — message_id in, soul_session_seq out.
-pub(super) fn message_seq_in_soul_session(
+/// Position of a message in a strand's spine (its ref's strand_seq),
+/// or None if the message is not part of that strand. This is the one
+/// axis compaction operates on — message_id in, strand_seq out.
+pub(super) fn message_seq_in_strand(
     conn: &Connection,
-    soul_session_id: &str,
+    strand_id: &str,
     message_id: &str,
 ) -> Result<Option<i64>, String> {
     conn.query_row(
         r#"
-        SELECT soul_session_seq FROM r_soul_session_messages
-        WHERE soul_session_id = ?1 AND target_type = 'message' AND target_id = ?2
+        SELECT strand_seq FROM r_strand_entries
+        WHERE strand_id = ?1 AND target_type = 'message' AND target_id = ?2
         LIMIT 1
         "#,
-        params![soul_session_id, message_id],
+        params![strand_id, message_id],
         |row| row.get::<_, i64>(0),
     )
     .optional()
     .map_err(|error| error.to_string())
 }
 
-pub(super) fn compacts_for_soul_session(
+pub(super) fn compacts_for_strand(
     conn: &Connection,
-    soul_session_id: &str,
+    strand_id: &str,
 ) -> Result<Vec<Compact>, String> {
     let mut stmt = conn
         .prepare(
             r#"
-            SELECT id, soul_session_id, summary, start_message_id, end_message_id
+            SELECT id, strand_id, summary, start_message_id, end_message_id
             FROM compacts
-            WHERE soul_session_id = ?1
+            WHERE strand_id = ?1
             "#,
         )
         .map_err(|error| error.to_string())?;
     let rows = stmt
-        .query_map(params![soul_session_id], map_compact_row)
+        .query_map(params![strand_id], map_compact_row)
         .map_err(|error| error.to_string())?;
     collect_rows(rows)
 }

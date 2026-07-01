@@ -5,26 +5,26 @@ use serde_json::json;
 use super::{
     SantiStore,
     db::{
-        compacts_for_soul_session, message_record_by_id, message_seq_in_soul_session,
-        message_to_provider_item, thinking_span_by_id, tool_call_by_id, tool_result_by_id,
+        compacts_for_strand, message_record_by_id, message_seq_in_strand, message_to_provider_item,
+        thinking_span_by_id, tool_call_by_id, tool_result_by_id,
     },
 };
 
 impl SantiStore {
     /// Project the soul-session's assembled view into the provider's typed-item
-    /// input: the immutable spine (r_soul_session_messages) MERGED at read with
-    /// this soul_session's compact overlay. Each compact collapses its covered
+    /// input: the immutable spine (r_strand_entries) MERGED at read with
+    /// this strand's compact overlay. Each compact collapses its covered
     /// `[start,end]` range into one summary item; the spine itself is never
     /// touched (immutable, compact-unaware, fork-shareable). The turn loop
     /// re-derives input from here each round.
-    pub fn assembly_input(&self, soul_session_id: &str) -> Result<Vec<ProviderItem>, String> {
+    pub fn assembly_input(&self, strand_id: &str) -> Result<Vec<ProviderItem>, String> {
         let conn = self.conn.lock().unwrap();
         // Resolve the compact overlay to seq ranges, sorted (disjoint by policy).
         let mut overlay: Vec<(i64, i64, crate::Compact)> = Vec::new();
-        for compact in compacts_for_soul_session(&conn, soul_session_id)? {
+        for compact in compacts_for_strand(&conn, strand_id)? {
             if let (Some(from_seq), Some(to_seq)) = (
-                message_seq_in_soul_session(&conn, soul_session_id, &compact.start_message_id)?,
-                message_seq_in_soul_session(&conn, soul_session_id, &compact.end_message_id)?,
+                message_seq_in_strand(&conn, strand_id, &compact.start_message_id)?,
+                message_seq_in_strand(&conn, strand_id, &compact.end_message_id)?,
             ) {
                 overlay.push((from_seq, to_seq, compact));
             }
@@ -34,15 +34,15 @@ impl SantiStore {
         let mut stmt = conn
             .prepare(
                 r#"
-                SELECT soul_session_seq, target_type, target_id
-                FROM r_soul_session_messages
-                WHERE soul_session_id = ?1
-                ORDER BY soul_session_seq ASC
+                SELECT strand_seq, target_type, target_id
+                FROM r_strand_entries
+                WHERE strand_id = ?1
+                ORDER BY strand_seq ASC
                 "#,
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map(params![soul_session_id], |row| {
+            .query_map(params![strand_id], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,

@@ -35,13 +35,13 @@ fn schema_matches_runtime() {
         "r_session_messages",
         "message_events",
         "session_effects",
-        "soul_sessions",
+        "strands",
         "turns",
         "tool_calls",
         "tool_results",
         "thinking_spans",
         "compacts",
-        "r_soul_session_messages",
+        "r_strand_entries",
     ] {
         let exists: i64 = conn
             .query_row(
@@ -70,19 +70,17 @@ fn appends_relations_in_order() {
         )
         .expect("append user")
         .session_message;
-    let soul_session = store
-        .acquire_soul_session(store.default_soul_id(), &session.session.id)
+    let strand = store
+        .acquire_strand(store.default_soul_id(), &session.session.id)
         .expect("acquire soul session")
-        .soul_session;
+        .strand;
     let entry = store
-        .append_message_ref(&soul_session.id, &user.message.id)
+        .append_message_ref(&strand.id, &user.message.id)
         .expect("append message ref");
 
     assert_eq!(user.relation.session_seq, 1);
-    assert_eq!(entry.soul_session_seq, 1);
-    let input = store
-        .assembly_input(&soul_session.id)
-        .expect("assembly input");
+    assert_eq!(entry.strand_seq, 1);
+    let input = store.assembly_input(&strand.id).expect("assembly input");
     assert_eq!(input.len(), 1);
     assert_text(&input[0], "user", "hello ordering");
 }
@@ -92,10 +90,10 @@ fn maps_santi_system_input() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let session = store.create_session().expect("create session");
-    let soul_session = store
-        .acquire_soul_session(store.default_soul_id(), &session.session.id)
+    let strand = store
+        .acquire_strand(store.default_soul_id(), &session.session.id)
         .expect("acquire soul session")
-        .soul_session;
+        .strand;
     let message = store
         .append_santi_system_message(
             &session.session.id,
@@ -105,14 +103,12 @@ fn maps_santi_system_input() {
         .expect("append santi system")
         .session_message;
     store
-        .append_message_ref(&soul_session.id, &message.message.id)
+        .append_message_ref(&strand.id, &message.message.id)
         .expect("append message ref");
 
     assert_eq!(message.message.actor_type, ActorType::System);
     assert_eq!(message.message.message_kind, MessageKind::SantiSystem);
-    let input = store
-        .assembly_input(&soul_session.id)
-        .expect("assembly input");
+    let input = store.assembly_input(&strand.id).expect("assembly input");
     assert_eq!(input.len(), 1);
     assert_text(
         &input[0],
@@ -137,19 +133,15 @@ fn thinking_spans_become_reasoning_items() {
         )
         .expect("append user")
         .session_message;
-    let soul_session = store
-        .acquire_soul_session(store.default_soul_id(), &session.session.id)
+    let strand = store
+        .acquire_strand(store.default_soul_id(), &session.session.id)
         .expect("acquire soul session")
-        .soul_session;
+        .strand;
     store
-        .append_message_ref(&soul_session.id, &user.message.id)
+        .append_message_ref(&strand.id, &user.message.id)
         .expect("append message ref");
     let turn = store
-        .start_turn(
-            &soul_session.id,
-            &user.message.id,
-            user.relation.session_seq,
-        )
+        .start_turn(&strand.id, &user.message.id, user.relation.session_seq)
         .expect("start turn")
         .turn;
     let thinking = store
@@ -185,9 +177,7 @@ fn thinking_spans_become_reasoning_items() {
 
     // Reasoning is now a first-class timeline item (adapters drop it per DC5,
     // but the projection includes it when there is real summary text).
-    let input = store
-        .assembly_input(&soul_session.id)
-        .expect("assembly input");
+    let input = store.assembly_input(&strand.id).expect("assembly input");
     assert_eq!(input.len(), 2);
     assert_text(&input[0], "user", "hello thinking");
     match &input[1] {
@@ -278,19 +268,15 @@ fn projects_timeline_to_interleaved_items() {
         )
         .expect("append user")
         .session_message;
-    let soul_session = store
-        .acquire_soul_session(store.default_soul_id(), &session.session.id)
+    let strand = store
+        .acquire_strand(store.default_soul_id(), &session.session.id)
         .expect("acquire soul session")
-        .soul_session;
+        .strand;
     store
-        .append_message_ref(&soul_session.id, &user.message.id)
+        .append_message_ref(&strand.id, &user.message.id)
         .expect("append user ref");
     let turn = store
-        .start_turn(
-            &soul_session.id,
-            &user.message.id,
-            user.relation.session_seq,
-        )
+        .start_turn(&strand.id, &user.message.id, user.relation.session_seq)
         .expect("start turn")
         .turn;
     store
@@ -316,12 +302,10 @@ fn projects_timeline_to_interleaved_items() {
     // The final assistant text is a soul-only timeline item (DC4b); the lumped
     // session-visible reply is stored separately by the service.
     store
-        .append_soul_assistant_text(&soul_session.id, "done")
+        .append_soul_assistant_text(&strand.id, "done")
         .expect("append soul assistant text");
 
-    let input = store
-        .assembly_input(&soul_session.id)
-        .expect("assembly input");
+    let input = store.assembly_input(&strand.id).expect("assembly input");
     assert_eq!(input.len(), 4);
     assert_text(&input[0], "user", "run a command");
     match &input[1] {
@@ -356,7 +340,7 @@ fn projects_timeline_to_interleaved_items() {
 fn append_timeline_message(
     store: &SantiStore,
     session_id: &str,
-    soul_session_id: &str,
+    strand_id: &str,
     actor_type: ActorType,
     text: &str,
     intake: MessageIntake,
@@ -377,7 +361,7 @@ fn append_timeline_message(
         .expect("append message")
         .session_message;
     store
-        .append_message_ref(soul_session_id, &message.message.id)
+        .append_message_ref(strand_id, &message.message.id)
         .expect("append ref");
 }
 
@@ -387,9 +371,9 @@ fn drive_starts_coalesces_and_re_drives() {
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let session = store.create_session().expect("create session");
     let ss = store
-        .acquire_soul_session(store.default_soul_id(), &session.session.id)
+        .acquire_strand(store.default_soul_id(), &session.session.id)
         .expect("acquire")
-        .soul_session;
+        .strand;
 
     // No requests → not behind → no turn.
     assert!(
@@ -451,9 +435,9 @@ fn record_messages_do_not_drive() {
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let session = store.create_session().expect("create session");
     let ss = store
-        .acquire_soul_session(store.default_soul_id(), &session.session.id)
+        .acquire_strand(store.default_soul_id(), &session.session.id)
         .expect("acquire")
-        .soul_session;
+        .strand;
 
     // A RECORD (the soul's own output / a failure notice) is not a request and
     // must not wake the soul.
@@ -474,7 +458,7 @@ fn record_messages_do_not_drive() {
     );
     assert!(
         store
-            .soul_sessions_with_pending_requests()
+            .strands_with_pending_requests()
             .expect("scan")
             .is_empty()
     );
@@ -486,9 +470,9 @@ fn boot_recovery_reconciles_and_does_not_retry() {
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let session = store.create_session().expect("create session");
     let ss = store
-        .acquire_soul_session(store.default_soul_id(), &session.session.id)
+        .acquire_strand(store.default_soul_id(), &session.session.id)
         .expect("acquire")
-        .soul_session;
+        .strand;
     append_timeline_message(
         &store,
         &session.session.id,
@@ -523,7 +507,7 @@ fn boot_recovery_reconciles_and_does_not_retry() {
     );
     assert!(
         store
-            .soul_sessions_with_pending_requests()
+            .strands_with_pending_requests()
             .expect("scan")
             .iter()
             .any(|(_, ssid)| ssid == &ss.id)
@@ -570,14 +554,14 @@ fn create_soul_and_label_anchoring() {
         .expect("other label");
     assert_ne!(s1.session.id, s2.session.id);
 
-    // A non-default soul acquires its own soul_session on the labeled session.
+    // A non-default soul acquires its own strand on the labeled session.
     let ss = store
-        .acquire_soul_session(&soul.soul_id, &s1.session.id)
+        .acquire_strand(&soul.soul_id, &s1.session.id)
         .expect("acquire")
-        .soul_session;
+        .strand;
     assert_eq!(ss.soul_id, soul.soul_id);
     assert_eq!(
-        store.soul_id_for_soul_session(&ss.id).expect("soul id"),
+        store.soul_id_for_strand(&ss.id).expect("soul id"),
         soul.soul_id
     );
 }

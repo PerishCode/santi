@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use futures_util::stream;
 use santi_core::{
-    CreateSoulRequest, MessagePart, ObjectBucket, ObjectUri, SESSION_WORKSPACE_URI,
-    SOUL_WORKSPACE_URI, SantiService, SantiServiceConfig, SendSessionRequest, session_memory_uri,
-    soul_memory_uri,
+    CreateSoulRequest, MessageContent, MessageKind, MessagePart, ObjectBucket, ObjectUri,
+    SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, SantiService, SantiServiceConfig, SantiStore,
+    SendStrandRequest, soul_memory_uri, strand_memory_uri,
 };
 use santi_provider::{
     ProviderClient, ProviderEvent, ProviderFunctionCall, ProviderItem, ProviderMetadata,
@@ -47,14 +47,14 @@ impl ProviderClient for FakeProvider {
                         "id": "item_tool",
                         "call_id": "call_shell",
                         "name": "shell",
-                        "arguments": r#"{"command":"pwd && printf \"\\n$SANTI_SESSION_MEMORY_DIR\\n$SANTI_SOUL_ID\\n$SANTI_SESSION_ID\"","cwd":"session://"}"#,
+                        "arguments": r#"{"command":"pwd && printf \"\\n$SANTI_STRAND_MEMORY_DIR\\n$SANTI_SOUL_ID\\n$SANTI_STRAND_ID\"","cwd":"strand://"}"#,
                     }),
                     call_id: "call_shell".to_string(),
                     name: "shell".to_string(),
-                    arguments_raw: r#"{"command":"pwd && printf \"\\n$SANTI_SESSION_MEMORY_DIR\\n$SANTI_SOUL_ID\\n$SANTI_SESSION_ID\"","cwd":"session://"}"#.to_string(),
+                    arguments_raw: r#"{"command":"pwd && printf \"\\n$SANTI_STRAND_MEMORY_DIR\\n$SANTI_SOUL_ID\\n$SANTI_STRAND_ID\"","cwd":"strand://"}"#.to_string(),
                     arguments: json!({
-                        "command": "pwd && printf \"\\n$SANTI_SESSION_MEMORY_DIR\\n$SANTI_SOUL_ID\\n$SANTI_SESSION_ID\"",
-                        "cwd": SESSION_WORKSPACE_URI
+                        "command": "pwd && printf \"\\n$SANTI_STRAND_MEMORY_DIR\\n$SANTI_SOUL_ID\\n$SANTI_STRAND_ID\"",
+                        "cwd": STRAND_WORKSPACE_URI
                     }),
                 })),
                 Ok(ProviderEvent::Completed {
@@ -86,23 +86,28 @@ async fn sends_with_runtime() {
     )
     .expect("open service");
 
-    let session = service.create_session().expect("create session").session;
+    let strand = service.create_strand().expect("create strand").strand;
     let response = service
-        .send_session(
-            &session.session.id,
-            SendSessionRequest {
+        .send_strand(
+            &strand.id,
+            SendStrandRequest {
                 content: vec![MessagePart::Text {
                     text: "hello provider".to_string(),
                 }],
-                soul_id: None,
             },
         )
         .await
-        .expect("send session");
+        .expect("send strand");
 
-    assert_eq!(response.user_message.content_text, "hello provider");
+    assert_eq!(
+        response
+            .user_message
+            .expect("driven synchronously")
+            .content_text,
+        "hello provider"
+    );
     assert_eq!(response.turn.status, santi_core::TurnStatus::Running);
-    let runtime = wait_for_completed_turn(&service, &session.session.id, &response.turn.id).await;
+    let runtime = wait_for_completed_turn(&service, &strand.id, &response.turn.id).await;
     assert!(
         runtime
             .messages
@@ -125,39 +130,47 @@ async fn sends_with_runtime() {
         .instructions
         .as_deref()
         .expect("runtime instructions");
-    assert!(instructions.contains("You are a distinct soul running inside this Santi instance."));
+    // The [santi] constitution replaces the old preamble prose (encoded default,
+    // since no constitution.md is written in this temp runtime).
+    assert!(instructions.contains("[santi]"));
+    assert!(instructions.contains(
+        "santi is an agent runtime: a container that keeps souls and runs their strands."
+    ));
     assert!(instructions.contains("[santi-meta]"));
-    assert!(instructions.contains("channel: santi"));
-    assert!(instructions.contains("soul_name: Liberte"));
+    assert!(instructions.contains("soul_id: soul_default"));
+    assert!(instructions.contains("strand_id: "));
+    // [santi-meta] is slim: no channel, no soul_name (identity is memory).
+    assert!(!instructions.contains("channel: santi"));
+    assert!(!instructions.contains("soul_name"));
     assert!(instructions.contains("[santi-soul]"));
-    assert!(instructions.contains("[santi-session]"));
+    assert!(instructions.contains("[santi-strand]"));
     assert!(instructions.contains(&format!(
         "{} will always be displayed in [santi-soul].",
         soul_memory_uri()
     )));
     assert!(instructions.contains(&format!(
-        "{} will always be displayed in [santi-session].",
-        session_memory_uri()
+        "{} will always be displayed in [santi-strand].",
+        strand_memory_uri()
     )));
     assert!(instructions.contains(&format!(
-        "These files have no internal version history; save backups into {SOUL_WORKSPACE_URI} or {SESSION_WORKSPACE_URI} if needed."
+        "These files have no internal version history; save backups into {SOUL_WORKSPACE_URI} or {STRAND_WORKSPACE_URI} if needed."
     )));
     assert!(
         instructions
-            .contains("<santi-system> blocks describe Santi runtime facts in this session.")
+            .contains("<system_message> blocks describe Santi runtime facts in this strand.")
     );
     assert!(instructions.contains(
         "They are part of your context, not user speech or your natural-language reply."
     ));
     assert!(
         instructions
-            .contains("Read them as session facts about the workspace, runtime, or provider flow.")
+            .contains("Read them as strand facts about the workspace, runtime, or provider flow.")
     );
     assert!(instructions.contains(&format!("source: {}", soul_memory_uri())));
-    assert!(instructions.contains(&format!("source: {}", session_memory_uri())));
+    assert!(instructions.contains(&format!("source: {}", strand_memory_uri())));
     assert!(!instructions.contains("hint:"));
     assert!(!instructions.contains("@soul"));
-    assert!(!instructions.contains("@session"));
+    assert!(!instructions.contains("@strand"));
     assert!(!instructions.contains("<santi-runtime>"));
     assert!(!instructions.contains("<santi-tools>"));
     let tools = requests[0].tools.as_ref().expect("tools");
@@ -178,14 +191,14 @@ async fn sends_with_runtime() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(tool_descriptions.contains(&soul_memory_uri()));
-    assert!(tool_descriptions.contains(&session_memory_uri()));
+    assert!(tool_descriptions.contains(&strand_memory_uri()));
     assert!(!tool_descriptions.contains("@soul"));
-    assert!(!tool_descriptions.contains("@session"));
+    assert!(!tool_descriptions.contains("@strand"));
 
     let detail = service
-        .session(&session.session.id)
+        .strand(&strand.id)
         .expect("load detail")
-        .expect("session");
+        .expect("strand");
     assert_eq!(detail.messages.len(), 2);
     assert_eq!(runtime.turns.len(), 1);
 }
@@ -208,22 +221,21 @@ async fn dispatches_tools() {
     )
     .expect("open service");
 
-    let session = service.create_session().expect("create session").session;
+    let strand = service.create_strand().expect("create strand").strand;
     let response = service
-        .send_session(
-            &session.session.id,
-            SendSessionRequest {
+        .send_strand(
+            &strand.id,
+            SendStrandRequest {
                 content: vec![MessagePart::Text {
                     text: "run tool".to_string(),
                 }],
-                soul_id: None,
             },
         )
         .await
-        .expect("send session");
+        .expect("send strand");
 
     assert_eq!(response.turn.status, santi_core::TurnStatus::Running);
-    let runtime = wait_for_completed_turn(&service, &session.session.id, &response.turn.id).await;
+    let runtime = wait_for_completed_turn(&service, &strand.id, &response.turn.id).await;
     assert!(
         runtime
             .messages
@@ -242,26 +254,26 @@ async fn dispatches_tools() {
         .get("stdout")
         .and_then(|value| value.as_str())
         .expect("shell stdout");
-    let session_memory_dir = Path::new("runtime")
-        .join("sessions")
-        .join(&session.session.id)
+    let strand_memory_dir = Path::new("runtime")
+        .join("strands")
+        .join(&strand.id)
         .join("memory");
-    assert!(stdout.contains(&session_memory_dir.display().to_string()));
-    // Self-involved env: the soul's shell inherits its own soul_id + session_id,
+    assert!(stdout.contains(&strand_memory_dir.display().to_string()));
+    // Self-involved env: the soul's shell inherits its own soul_id + strand_id,
     // so `santi …` from the shell auto-scopes to itself.
     assert!(
         stdout.contains("soul_default"),
         "SANTI_SOUL_ID in shell env: {stdout}"
     );
     assert!(
-        stdout.contains(&session.session.id),
-        "SANTI_SESSION_ID in shell env: {stdout}"
+        stdout.contains(&strand.id),
+        "SANTI_STRAND_ID in shell env: {stdout}"
     );
     let cwd = output
         .get("cwd")
         .and_then(|value| value.as_str())
         .expect("shell cwd");
-    assert!(Path::new(cwd).ends_with(&session_memory_dir));
+    assert!(Path::new(cwd).ends_with(&strand_memory_dir));
 
     let requests = provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
@@ -297,15 +309,18 @@ async fn ingest_external_event_triggers_turn() {
     )
     .expect("open service");
 
-    let soul_id = service.list_souls().expect("list souls")[0].soul_id.clone();
+    let soul_id = service.list_souls().expect("list souls")[0].id.clone();
     let label = "github:ops:issue:PerishCode/santi#42";
-    let session_id = service
+    let santi_core::IngestOutcome::Accepted { strand_id } = service
         .ingest_external_event(&soul_id, label, "an external request arrived".to_string())
-        .expect("ingest event");
+        .expect("ingest event")
+    else {
+        panic!("expected accepted");
+    };
 
     // The webhook event is a REQUEST → it wakes the soul on a label-anchored
-    // session. Wait for the system-triggered turn to complete.
-    let runtime = wait_for_any_completed_turn(&service, &session_id).await;
+    // strand. Wait for the system-triggered turn to complete.
+    let runtime = wait_for_any_completed_turn(&service, &strand_id).await;
     assert!(
         runtime
             .turns
@@ -325,27 +340,86 @@ async fn ingest_external_event_triggers_turn() {
             .any(|message| message.content_text == "hi from runtime")
     );
 
-    // A second event on the same label coalesces onto the same session, not a new one.
-    let session_id_again = service
+    // A second event on the same label coalesces onto the same strand, not a new one.
+    let santi_core::IngestOutcome::Accepted {
+        strand_id: strand_id_again,
+    } = service
         .ingest_external_event(&soul_id, label, "a follow-up arrived".to_string())
-        .expect("ingest second event");
-    assert_eq!(session_id_again, session_id);
+        .expect("ingest second event")
+    else {
+        panic!("expected accepted");
+    };
+    assert_eq!(strand_id_again, strand_id);
 
-    // The normalized text reached the provider as a user-role message.
+    // A doorbell is a runtime-authored santi_system fact, not user speech — it
+    // reaches the provider as a system-role message (see message_to_provider_item).
     let requests = provider.requests.lock().unwrap();
     assert!(requests.iter().any(|request| {
         request.input.iter().any(|item| {
             matches!(
                 item,
                 ProviderItem::Message { role, content }
-                    if role == "user" && content == "an external request arrived"
+                    if role == "system" && content == "an external request arrived"
             )
         })
     }));
 }
 
+/// Boot recovery drains the inbox: content that an adaptor durably enqueued
+/// but that never got drained before a crash (nobody called `ingest`'s poke —
+/// simulated here by writing straight to the store, bypassing the service)
+/// still drives a turn once a fresh service opens against the same db and
+/// calls `resume_pending`.
 #[tokio::test]
-async fn send_session_addresses_explicit_soul() {
+async fn boot_recovery_drains_stranded_inbox_entries() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let config = SantiServiceConfig {
+        database_path: temp.path().join("santi.sqlite").display().to_string(),
+        runtime_root: temp.path().join("runtime").display().to_string(),
+        execution_root: temp.path().join("execution").display().to_string(),
+        bind_addr: Some("127.0.0.1:0".to_string()),
+    };
+    let provider = Arc::new(FakeProvider::default());
+
+    let strand_id = {
+        let service = SantiService::open(config.clone(), provider.clone()).expect("open service");
+        service.create_strand().expect("create strand").strand.id
+    };
+
+    // Simulate an adaptor that enqueued content and then the process crashed
+    // before any poke ever drained it: write directly to the inbox, bypassing
+    // SantiService::ingest/send_strand entirely.
+    let store = SantiStore::open(&config.database_path).expect("open store directly");
+    store
+        .enqueue_inbox(
+            &strand_id,
+            MessageKind::Text,
+            MessageContent::text("stranded before the crash"),
+        )
+        .expect("enqueue inbox");
+    drop(store);
+
+    // A fresh service against the SAME db, as after a restart.
+    let service = SantiService::open(config, provider.clone()).expect("reopen service");
+    service.resume_pending();
+
+    let runtime = wait_for_any_completed_turn(&service, &strand_id).await;
+    assert!(
+        runtime
+            .messages
+            .iter()
+            .any(|message| message.content_text == "stranded before the crash")
+    );
+    assert!(
+        runtime
+            .messages
+            .iter()
+            .any(|message| message.content_text == "hi from runtime")
+    );
+}
+
+#[tokio::test]
+async fn send_strand_targets_the_strands_own_soul() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FakeProvider::default());
     let service = SantiService::open(
@@ -359,64 +433,72 @@ async fn send_session_addresses_explicit_soul() {
     )
     .expect("open service");
 
-    let default_soul = service.list_souls().expect("list souls")[0].soul_id.clone();
+    let default_soul = service.list_souls().expect("list souls")[0].id.clone();
     let secretary = service
         .create_soul(CreateSoulRequest {
-            soul_name: "Secretary".to_string(),
-            nickname: "sec".to_string(),
-            desc: None,
+            memory: Some("# I am the secretary".to_string()),
         })
         .expect("create soul");
-    assert_ne!(secretary.soul_id, default_soul);
+    assert_ne!(secretary.id, default_soul);
 
-    // An explicit soul_id binds this (soul, session) pair to that soul.
-    let session = service.create_session().expect("create session").session;
+    // `create_strand` (client-facing, no label) always binds the default soul —
+    // multi-soul-per-strand is gone, so a non-default soul is reached only via a
+    // label-anchored strand (e.g. ingest_external_event), not by picking a soul
+    // at send time.
+    let strand = service.create_strand().expect("create strand").strand;
+    assert_eq!(strand.soul_id, default_soul);
     let response = service
-        .send_session(
-            &session.session.id,
-            SendSessionRequest {
-                content: vec![MessagePart::Text {
-                    text: "for the secretary".to_string(),
-                }],
-                soul_id: Some(secretary.soul_id.clone()),
-            },
-        )
-        .await
-        .expect("send session");
-    assert_eq!(response.soul_profile.soul_id, secretary.soul_id);
-    assert_eq!(response.soul_session.soul_id, secretary.soul_id);
-
-    // Absent soul_id keeps the pre-multi-soul path: the runtime's default soul.
-    let other = service.create_session().expect("create session").session;
-    let default_response = service
-        .send_session(
-            &other.session.id,
-            SendSessionRequest {
+        .send_strand(
+            &strand.id,
+            SendStrandRequest {
                 content: vec![MessagePart::Text {
                     text: "for whoever".to_string(),
                 }],
-                soul_id: None,
             },
         )
         .await
-        .expect("send session");
-    assert_eq!(default_response.soul_profile.soul_id, default_soul);
+        .expect("send strand");
+    assert_eq!(response.strand.soul_id, default_soul);
 
-    // An unknown soul is rejected cleanly (no orphan soul_session), not a 500.
-    let stray = service.create_session().expect("create session").session;
+    // A label-anchored strand can be owned by a non-default soul (via ingest).
+    let santi_core::IngestOutcome::Accepted {
+        strand_id: secretary_strand_id,
+    } = service
+        .ingest_external_event(
+            &secretary.id,
+            "github:issue:1",
+            "hello secretary".to_string(),
+        )
+        .expect("ingest event")
+    else {
+        panic!("expected accepted");
+    };
+    let secretary_response = service
+        .send_strand(
+            &secretary_strand_id,
+            SendStrandRequest {
+                content: vec![MessagePart::Text {
+                    text: "for the secretary".to_string(),
+                }],
+            },
+        )
+        .await
+        .expect("send strand");
+    assert_eq!(secretary_response.strand.soul_id, secretary.id);
+
+    // An unknown strand id is rejected cleanly, not a 500.
     let error = service
-        .send_session(
-            &stray.session.id,
-            SendSessionRequest {
+        .send_strand(
+            "ss_does_not_exist",
+            SendStrandRequest {
                 content: vec![MessagePart::Text {
                     text: "nobody home".to_string(),
                 }],
-                soul_id: Some("soul_does_not_exist".to_string()),
             },
         )
         .await
-        .expect_err("unknown soul should error");
-    assert!(error.contains("unknown soul"), "got: {error}");
+        .expect_err("unknown strand should error");
+    assert!(error.contains("strand not found"), "got: {error}");
 }
 
 #[tokio::test]
@@ -436,19 +518,18 @@ async fn completed_turn_emits_turn_completed_event() {
 
     // Subscribe before sending so no lifecycle event is missed.
     let mut events = service.subscribe_stream();
-    let session = service.create_session().expect("create session").session;
+    let strand = service.create_strand().expect("create strand").strand;
     let response = service
-        .send_session(
-            &session.session.id,
-            SendSessionRequest {
+        .send_strand(
+            &strand.id,
+            SendStrandRequest {
                 content: vec![MessagePart::Text {
                     text: "say hi".to_string(),
                 }],
-                soul_id: None,
             },
         )
         .await
-        .expect("send session");
+        .expect("send strand");
 
     // The CLI `--watch` idle check relies on a terminal turn event carrying the
     // same turn_id the send landed on. Drain the stream until it arrives.
@@ -468,13 +549,13 @@ async fn completed_turn_emits_turn_completed_event() {
 
 async fn wait_for_any_completed_turn(
     service: &SantiService,
-    session_id: &str,
-) -> santi_core::SessionRuntimeSnapshot {
+    strand_id: &str,
+) -> santi_core::StrandRuntimeSnapshot {
     for _ in 0..50 {
         let runtime = service
-            .runtime_snapshot(session_id)
+            .runtime_snapshot(strand_id)
             .expect("runtime snapshot")
-            .expect("session runtime");
+            .expect("strand runtime");
         if runtime
             .turns
             .iter()
@@ -489,14 +570,14 @@ async fn wait_for_any_completed_turn(
 
 async fn wait_for_completed_turn(
     service: &SantiService,
-    session_id: &str,
+    strand_id: &str,
     turn_id: &str,
-) -> santi_core::SessionRuntimeSnapshot {
+) -> santi_core::StrandRuntimeSnapshot {
     for _ in 0..50 {
         let runtime = service
-            .runtime_snapshot(session_id)
+            .runtime_snapshot(strand_id)
             .expect("runtime snapshot")
-            .expect("session runtime");
+            .expect("strand runtime");
         if runtime
             .turns
             .iter()
@@ -522,8 +603,8 @@ async fn bucket_objects_are_scoped() {
         Arc::new(FakeProvider::default()),
     )
     .expect("open service");
-    let session = service.create_session().expect("create session").session;
-    let bucket = ObjectBucket::new("soul_default", session.session.id.as_str()).expect("bucket");
+    let strand = service.create_strand().expect("create strand").strand;
+    let bucket = ObjectBucket::new("soul_default", strand.id.as_str()).expect("bucket");
     let uri = ObjectUri::new(bucket.clone(), "avatars/santi.svg").expect("uri");
 
     let meta = service
@@ -537,12 +618,12 @@ async fn bucket_objects_are_scoped() {
             .expect("renderable ref"),
         format!(
             "/api/v1/bucket/soul_default/{}/avatars/santi.svg",
-            session.session.id
+            strand.id
         )
     );
 
     let object = service
-        .get_bucket_object("soul_default", &session.session.id, "avatars/santi.svg")
+        .get_bucket_object("soul_default", &strand.id, "avatars/santi.svg")
         .expect("get object")
         .expect("object exists");
     assert_eq!(object.bytes, b"<svg>avatar</svg>");
@@ -558,7 +639,7 @@ async fn bucket_objects_are_scoped() {
     assert!(service.delete_bucket_object(&uri).expect("delete object"));
     assert!(
         service
-            .get_bucket_object("soul_default", &session.session.id, "avatars/santi.svg")
+            .get_bucket_object("soul_default", &strand.id, "avatars/santi.svg")
             .expect("get deleted object")
             .is_none()
     );
@@ -577,23 +658,23 @@ async fn bucket_rejects_unsafe_keys() {
         Arc::new(FakeProvider::default()),
     )
     .expect("open service");
-    let session = service.create_session().expect("create session").session;
+    let strand = service.create_strand().expect("create strand").strand;
 
     assert!(
         service
-            .get_bucket_object("soul_default", &session.session.id, "../escape.txt")
+            .get_bucket_object("soul_default", &strand.id, "../escape.txt")
             .expect_err("unsafe key")
             .contains("object key")
     );
     assert!(
         service
-            .get_bucket_object("soul_default", &session.session.id, "bad//key.txt")
+            .get_bucket_object("soul_default", &strand.id, "bad//key.txt")
             .expect_err("empty segment")
             .contains("object key")
     );
     assert!(
         service
-            .get_bucket_object("unknown_soul", &session.session.id, "safe.txt")
+            .get_bucket_object("unknown_soul", &strand.id, "safe.txt")
             .expect_err("unknown soul")
             .contains("soul not found")
     );

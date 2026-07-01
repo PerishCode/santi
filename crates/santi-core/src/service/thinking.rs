@@ -7,7 +7,7 @@ use super::SantiService;
 impl SantiService {
     pub(super) fn ensure_thinking_span(
         &self,
-        session_id: &str,
+        strand_id: &str,
         turn_id: &str,
         current: &mut Option<ThinkingSpan>,
         summary_target: &mut Option<ThinkingSpan>,
@@ -23,7 +23,7 @@ impl SantiService {
                 *thinking = updated.clone();
                 *summary_target = Some(updated.clone());
                 self.publish_stream(
-                    session_id,
+                    strand_id,
                     SantiStreamPayload::ThinkingUpdated { thinking: updated },
                 );
             }
@@ -34,7 +34,7 @@ impl SantiService {
             .store
             .append_thinking_span(turn_id, provider_response_id)?;
         self.publish_stream(
-            session_id,
+            strand_id,
             SantiStreamPayload::ThinkingCreated {
                 thinking: thinking.clone(),
             },
@@ -46,7 +46,7 @@ impl SantiService {
 
     pub(super) fn update_thinking_span_summary(
         &self,
-        session_id: &str,
+        strand_id: &str,
         summary_target: &mut Option<ThinkingSpan>,
         summary: String,
     ) -> Result<(), String> {
@@ -62,7 +62,7 @@ impl SantiService {
         {
             *thinking = updated.clone();
             self.publish_stream(
-                session_id,
+                strand_id,
                 SantiStreamPayload::ThinkingUpdated { thinking: updated },
             );
         }
@@ -71,7 +71,7 @@ impl SantiService {
 
     pub(super) fn complete_current_thinking_span(
         &self,
-        session_id: &str,
+        strand_id: &str,
         current: &mut Option<ThinkingSpan>,
         completion_reason: ThinkingCompletionReason,
     ) -> Result<(), String> {
@@ -83,7 +83,7 @@ impl SantiService {
             .complete_thinking_span(&thinking.id, completion_reason)?
         {
             self.publish_stream(
-                session_id,
+                strand_id,
                 SantiStreamPayload::ThinkingCompleted {
                     thinking: completed,
                 },
@@ -94,7 +94,7 @@ impl SantiService {
 
     pub(super) fn fail_current_thinking_span(
         &self,
-        session_id: &str,
+        strand_id: &str,
         current: &mut Option<ThinkingSpan>,
         error_text: String,
     ) -> Result<(), String> {
@@ -103,7 +103,7 @@ impl SantiService {
         };
         if let Some(failed) = self.store.fail_thinking_span(&thinking.id, error_text)? {
             self.publish_stream(
-                session_id,
+                strand_id,
                 SantiStreamPayload::ThinkingCompleted { thinking: failed },
             );
         }
@@ -112,13 +112,13 @@ impl SantiService {
 
     pub(super) fn publish_turn_activity(
         &self,
-        session_id: &str,
+        strand_id: &str,
         turn_id: &str,
         state: TurnActivityState,
         provider_response_id: Option<String>,
     ) {
         self.publish_stream(
-            session_id,
+            strand_id,
             SantiStreamPayload::TurnActivity {
                 activity: TurnActivity {
                     turn_id: turn_id.to_string(),

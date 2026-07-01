@@ -1,43 +1,8 @@
 pub(super) const SCHEMA: &str = r#"
-CREATE TABLE IF NOT EXISTS accounts (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
+-- A soul is id-only: its identity is its memory (a file, rendered live into
+-- [santi-soul]), never a profile row. Timestamps are pure provenance.
 CREATE TABLE IF NOT EXISTS souls (
     id TEXT PRIMARY KEY,
-    memory TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS soul_profiles (
-    soul_id TEXT PRIMARY KEY,
-    soul_name TEXT NOT NULL,
-    nickname TEXT NOT NULL,
-    avatar_ref TEXT,
-    avatar_seed TEXT NOT NULL,
-    desc TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS sessions (
-    id TEXT PRIMARY KEY,
-    parent_session_id TEXT,
-    fork_point INTEGER,
-    external_label TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_external_label ON sessions (external_label) WHERE external_label IS NOT NULL;
-
-CREATE TABLE IF NOT EXISTS session_profiles (
-    session_id TEXT PRIMARY KEY,
-    title TEXT,
-    desc TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -46,7 +11,7 @@ CREATE TABLE IF NOT EXISTS webhooks (
     name TEXT PRIMARY KEY,
     adaptor TEXT NOT NULL,
     soul_id TEXT NOT NULL,
-    session_strategy TEXT NOT NULL,
+    strand_strategy TEXT NOT NULL,
     secret_env TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -54,7 +19,7 @@ CREATE TABLE IF NOT EXISTS webhooks (
 
 CREATE TABLE IF NOT EXISTS messages (
     id TEXT PRIMARY KEY,
-    actor_type TEXT NOT NULL CHECK (actor_type IN ('account', 'soul', 'system')),
+    actor_type TEXT NOT NULL CHECK (actor_type IN ('soul', 'system')),
     actor_id TEXT NOT NULL,
     message_kind TEXT NOT NULL DEFAULT 'text' CHECK (message_kind IN ('text', 'santi_system')),
     content TEXT NOT NULL,
@@ -66,29 +31,20 @@ CREATE TABLE IF NOT EXISTS messages (
     updated_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS r_session_messages (
-    session_id TEXT NOT NULL,
-    message_id TEXT NOT NULL,
-    session_seq INTEGER NOT NULL CHECK (session_seq > 0),
-    created_at TEXT NOT NULL,
-    PRIMARY KEY (session_id, message_id),
-    UNIQUE (session_id, session_seq)
-);
-
 CREATE TABLE IF NOT EXISTS message_events (
     id TEXT PRIMARY KEY,
     message_id TEXT NOT NULL,
     action TEXT NOT NULL CHECK (action IN ('patch', 'insert', 'remove', 'fix', 'delete')),
-    actor_type TEXT NOT NULL CHECK (actor_type IN ('account', 'soul', 'system')),
+    actor_type TEXT NOT NULL CHECK (actor_type IN ('soul', 'system')),
     actor_id TEXT NOT NULL,
     base_version INTEGER NOT NULL CHECK (base_version > 0),
     payload TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS session_effects (
+CREATE TABLE IF NOT EXISTS strand_effects (
     id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
+    strand_id TEXT NOT NULL,
     effect_type TEXT NOT NULL,
     idempotency_key TEXT NOT NULL,
     status TEXT NOT NULL,
@@ -98,32 +54,31 @@ CREATE TABLE IF NOT EXISTS session_effects (
     error_text TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    UNIQUE (session_id, effect_type, idempotency_key)
+    UNIQUE (strand_id, effect_type, idempotency_key)
 );
 
-CREATE TABLE IF NOT EXISTS soul_sessions (
+CREATE TABLE IF NOT EXISTS strands (
     id TEXT PRIMARY KEY,
     soul_id TEXT NOT NULL,
-    session_id TEXT NOT NULL,
-    session_memory TEXT NOT NULL DEFAULT '',
+    external_label TEXT,
+    strand_memory TEXT NOT NULL DEFAULT '',
     provider_state TEXT,
     next_seq INTEGER NOT NULL DEFAULT 1 CHECK (next_seq > 0),
-    last_seen_session_seq INTEGER NOT NULL DEFAULT 0 CHECK (last_seen_session_seq >= 0),
-    parent_soul_session_id TEXT,
+    last_seen_strand_seq INTEGER NOT NULL DEFAULT 0 CHECK (last_seen_strand_seq >= 0),
+    parent_strand_id TEXT,
     fork_point INTEGER,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE (soul_id, session_id)
+    updated_at TEXT NOT NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_strands_external_label ON strands (soul_id, external_label) WHERE external_label IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS turns (
     id TEXT PRIMARY KEY,
-    soul_session_id TEXT NOT NULL,
-    trigger_type TEXT NOT NULL CHECK (trigger_type IN ('session_send', 'system')),
+    strand_id TEXT NOT NULL,
+    trigger_type TEXT NOT NULL CHECK (trigger_type IN ('strand_send', 'system')),
     trigger_ref TEXT,
-    input_through_session_seq INTEGER NOT NULL CHECK (input_through_session_seq >= 0),
-    base_soul_session_seq INTEGER NOT NULL CHECK (base_soul_session_seq >= 0),
-    end_soul_session_seq INTEGER CHECK (end_soul_session_seq IS NULL OR end_soul_session_seq >= 0),
+    base_strand_seq INTEGER NOT NULL CHECK (base_strand_seq >= 0),
+    end_strand_seq INTEGER CHECK (end_strand_seq IS NULL OR end_strand_seq >= 0),
     status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed')),
     error_text TEXT,
     created_at TEXT NOT NULL,
@@ -177,42 +132,44 @@ CREATE TABLE IF NOT EXISTS thinking_spans (
 
 CREATE TABLE IF NOT EXISTS compacts (
     id TEXT PRIMARY KEY,
-    turn_id TEXT NOT NULL,
+    strand_id TEXT NOT NULL,
     summary TEXT NOT NULL,
-    start_session_seq INTEGER NOT NULL CHECK (start_session_seq > 0),
-    end_session_seq INTEGER NOT NULL CHECK (end_session_seq > 0),
-    created_at TEXT NOT NULL,
-    CHECK (start_session_seq <= end_session_seq)
+    start_message_id TEXT NOT NULL,
+    end_message_id TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_compacts_strand ON compacts (strand_id);
 
-CREATE TABLE IF NOT EXISTS r_soul_session_messages (
-    soul_session_id TEXT NOT NULL,
-    target_type TEXT NOT NULL CHECK (target_type IN ('message', 'compact', 'thinking', 'tool_call', 'tool_result')),
+CREATE TABLE IF NOT EXISTS strand_inbox (
+    id TEXT PRIMARY KEY,
+    strand_id TEXT NOT NULL,
+    message_kind TEXT NOT NULL CHECK (message_kind IN ('text', 'santi_system')),
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_strand_inbox_strand_created_at ON strand_inbox (strand_id, created_at);
+
+CREATE TABLE IF NOT EXISTS r_strand_entries (
+    strand_id TEXT NOT NULL,
+    target_type TEXT NOT NULL CHECK (target_type IN ('message', 'thinking', 'tool_call', 'tool_result')),
     target_id TEXT NOT NULL,
-    soul_session_seq INTEGER NOT NULL CHECK (soul_session_seq > 0),
+    strand_seq INTEGER NOT NULL CHECK (strand_seq > 0),
     created_at TEXT NOT NULL,
-    PRIMARY KEY (soul_session_id, target_type, target_id),
-    UNIQUE (soul_session_id, soul_session_seq)
+    PRIMARY KEY (strand_id, target_type, target_id),
+    UNIQUE (strand_id, strand_seq)
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_actor_created_at ON messages (actor_type, actor_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_state_created_at ON messages (state, created_at);
-CREATE INDEX IF NOT EXISTS idx_session_profiles_title ON session_profiles (title);
-CREATE INDEX IF NOT EXISTS idx_r_session_messages_message_id ON r_session_messages (message_id);
-CREATE INDEX IF NOT EXISTS idx_r_session_messages_session_seq ON r_session_messages (session_id, session_seq);
 CREATE INDEX IF NOT EXISTS idx_message_events_message_id_created_at ON message_events (message_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_session_effects_session_created_at ON session_effects (session_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_session_effects_lookup ON session_effects (session_id, effect_type, idempotency_key);
-CREATE INDEX IF NOT EXISTS idx_sessions_lineage ON sessions (parent_session_id, fork_point);
-CREATE INDEX IF NOT EXISTS idx_soul_sessions_session_id ON soul_sessions (session_id);
-CREATE INDEX IF NOT EXISTS idx_soul_sessions_soul_id ON soul_sessions (soul_id);
-CREATE INDEX IF NOT EXISTS idx_soul_sessions_lineage ON soul_sessions (parent_soul_session_id, fork_point);
-CREATE INDEX IF NOT EXISTS idx_turns_soul_session_created_at ON turns (soul_session_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_turns_soul_session_status_created_at ON turns (soul_session_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_strand_effects_strand_created_at ON strand_effects (strand_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_strand_effects_lookup ON strand_effects (strand_id, effect_type, idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_strands_soul_id ON strands (soul_id);
+CREATE INDEX IF NOT EXISTS idx_strands_lineage ON strands (parent_strand_id, fork_point);
+CREATE INDEX IF NOT EXISTS idx_turns_strand_created_at ON turns (strand_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_turns_strand_status_created_at ON turns (strand_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_turn_id_created_at ON tool_calls (turn_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_tool_results_tool_call_id ON tool_results (tool_call_id);
 CREATE INDEX IF NOT EXISTS idx_thinking_spans_turn_id_created_at ON thinking_spans (turn_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_compacts_turn_id_created_at ON compacts (turn_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_r_soul_session_messages_target_lookup ON r_soul_session_messages (target_type, target_id);
-CREATE INDEX IF NOT EXISTS idx_r_soul_session_messages_seq ON r_soul_session_messages (soul_session_id, soul_session_seq);
+CREATE INDEX IF NOT EXISTS idx_r_strand_entries_target_lookup ON r_strand_entries (target_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_r_strand_entries_seq ON r_strand_entries (strand_id, strand_seq);
 "#;

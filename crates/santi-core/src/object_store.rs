@@ -9,7 +9,7 @@ const SANTI_SCHEME: &str = "santi://";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObjectBucket {
     pub soul_id: String,
-    pub session_id: String,
+    pub strand_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,13 +37,13 @@ pub struct LocalObjectStore {
 }
 
 impl ObjectBucket {
-    pub fn new(soul_id: impl Into<String>, session_id: impl Into<String>) -> Result<Self, String> {
+    pub fn new(soul_id: impl Into<String>, strand_id: impl Into<String>) -> Result<Self, String> {
         let bucket = Self {
             soul_id: soul_id.into(),
-            session_id: session_id.into(),
+            strand_id: strand_id.into(),
         };
         validate_segment("soul_id", &bucket.soul_id)?;
-        validate_segment("session_id", &bucket.session_id)?;
+        validate_segment("strand_id", &bucket.strand_id)?;
         Ok(bucket)
     }
 }
@@ -66,19 +66,19 @@ impl ObjectUri {
         let soul_id = parts
             .next()
             .ok_or_else(|| "object uri missing soul id".to_string())?;
-        let session_id = parts
+        let strand_id = parts
             .next()
-            .ok_or_else(|| "object uri missing session id".to_string())?;
+            .ok_or_else(|| "object uri missing strand id".to_string())?;
         let key = parts
             .next()
             .ok_or_else(|| "object uri missing key".to_string())?;
-        Self::new(ObjectBucket::new(soul_id, session_id)?, key)
+        Self::new(ObjectBucket::new(soul_id, strand_id)?, key)
     }
 
     pub fn as_santi_uri(&self) -> String {
         format!(
             "{SANTI_SCHEME}{}/{}/{}",
-            self.bucket.soul_id, self.bucket.session_id, self.key
+            self.bucket.soul_id, self.bucket.strand_id, self.key
         )
     }
 
@@ -86,7 +86,7 @@ impl ObjectUri {
         format!(
             "/api/v1/bucket/{}/{}/{}",
             percent_encode_path_component(&self.bucket.soul_id),
-            percent_encode_path_component(&self.bucket.session_id),
+            percent_encode_path_component(&self.bucket.strand_id),
             percent_encode_key(&self.key)
         )
     }
@@ -198,8 +198,8 @@ impl LocalObjectStore {
 
     fn bucket_path(&self, bucket: &ObjectBucket) -> Result<PathBuf, String> {
         validate_segment("soul_id", &bucket.soul_id)?;
-        validate_segment("session_id", &bucket.session_id)?;
-        Ok(self.root.join(&bucket.soul_id).join(&bucket.session_id))
+        validate_segment("strand_id", &bucket.strand_id)?;
+        Ok(self.root.join(&bucket.soul_id).join(&bucket.strand_id))
     }
 
     fn object_path(&self, uri: &ObjectUri) -> Result<PathBuf, String> {

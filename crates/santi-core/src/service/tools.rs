@@ -11,8 +11,7 @@ use super::SantiService;
 impl SantiService {
     pub(super) fn handle_tool_call(
         &self,
-        session_id: &str,
-        soul_session_id: &str,
+        strand_id: &str,
         turn_id: &str,
         call: ProviderFunctionCall,
     ) -> Result<(), String> {
@@ -30,13 +29,13 @@ impl SantiService {
             },
         )?;
         self.publish_stream(
-            session_id,
+            strand_id,
             SantiStreamPayload::ToolCallCreated {
                 tool_call: tool_call.clone(),
             },
         );
-        let soul_id = self.store.soul_id_for_soul_session(soul_session_id)?;
-        let dispatch = self.dispatch_tool(session_id, &soul_id, &call);
+        let soul_id = self.store.soul_id_for_strand(strand_id)?;
+        let dispatch = self.dispatch_tool(strand_id, &soul_id, &call);
         let (output, error_text) = match dispatch {
             Ok(output) => (Some(output), None),
             Err(error) => (None, Some(error)),
@@ -45,7 +44,7 @@ impl SantiService {
             .store
             .append_tool_result(&call.call_id, output, error_text)?;
         self.publish_stream(
-            session_id,
+            strand_id,
             SantiStreamPayload::ToolResultCreated {
                 tool_result: result,
             },
@@ -55,39 +54,36 @@ impl SantiService {
 
     fn dispatch_tool(
         &self,
-        session_id: &str,
+        strand_id: &str,
         soul_id: &str,
         call: &ProviderFunctionCall,
     ) -> Result<Value, String> {
         match call.name.as_str() {
             "shell" => {
                 let args = parse_tool_args::<ShellArgs>(&call.arguments)?;
-                self.run_shell(session_id, soul_id, args)
+                self.run_shell(strand_id, soul_id, args)
             }
             name => Err(format!("unsupported tool: {name}")),
         }
     }
 
-    fn run_shell(&self, session_id: &str, soul_id: &str, args: ShellArgs) -> Result<Value, String> {
+    fn run_shell(&self, strand_id: &str, soul_id: &str, args: ShellArgs) -> Result<Value, String> {
         std::fs::create_dir_all(self.soul_memory_dir(soul_id))
             .map_err(|error| error.to_string())?;
-        std::fs::create_dir_all(self.session_memory_dir(session_id))
+        std::fs::create_dir_all(self.strand_memory_dir(strand_id))
             .map_err(|error| error.to_string())?;
-        let cwd = self.resolve_shell_cwd(session_id, soul_id, args.cwd.as_deref())?;
+        let cwd = self.resolve_shell_cwd(strand_id, soul_id, args.cwd.as_deref())?;
         std::fs::create_dir_all(&cwd).map_err(|error| error.to_string())?;
         let mut command = shell_command(&args.command);
         let output = command
             .current_dir(&cwd)
             .env("SANTI_SOUL_MEMORY_DIR", self.soul_memory_dir(soul_id))
-            .env(
-                "SANTI_SESSION_MEMORY_DIR",
-                self.session_memory_dir(session_id),
-            )
+            .env("SANTI_STRAND_MEMORY_DIR", self.strand_memory_dir(strand_id))
             // Self-involved: the soul inherits its own domain, so `santi …` from
-            // its shell auto-scopes to itself + this session (via the CLI's
-            // --soul/--session env defaults). Ambient capability, not authorization.
+            // its shell auto-scopes to itself + this strand (via the CLI's
+            // --soul/--strand env defaults). Ambient capability, not authorization.
             .env("SANTI_SOUL_ID", soul_id)
-            .env("SANTI_SESSION_ID", session_id)
+            .env("SANTI_STRAND_ID", strand_id)
             .output()
             .map_err(|error| format!("failed to run shell: {error}"))?;
         Ok(json!({
@@ -101,7 +97,7 @@ impl SantiService {
 
     fn resolve_shell_cwd(
         &self,
-        session_id: &str,
+        strand_id: &str,
         soul_id: &str,
         cwd: Option<&str>,
     ) -> Result<PathBuf, String> {
@@ -111,7 +107,7 @@ impl SantiService {
         let uri = parse_workspace_uri(cwd)?;
         let root = match uri.root {
             WorkspaceRoot::Soul => self.soul_memory_dir(soul_id),
-            WorkspaceRoot::Session => self.session_memory_dir(session_id),
+            WorkspaceRoot::Strand => self.strand_memory_dir(strand_id),
         };
         Ok(root.join(uri.path))
     }
@@ -135,15 +131,25 @@ impl SantiService {
         self.soul_memory_dir(soul_id).join("MEMORY.md")
     }
 
-    pub(super) fn session_memory_dir(&self, session_id: &str) -> PathBuf {
+    pub(super) fn strand_memory_dir(&self, strand_id: &str) -> PathBuf {
         self.runtime_root()
-            .join("sessions")
-            .join(session_id)
+            .join("strands")
+            .join(strand_id)
             .join("memory")
     }
 
-    pub(super) fn session_memory_file(&self, session_id: &str) -> PathBuf {
-        self.session_memory_dir(session_id).join("MEMORY.md")
+    pub(super) fn strand_memory_file(&self, strand_id: &str) -> PathBuf {
+        self.strand_memory_dir(strand_id).join("MEMORY.md")
+    }
+
+    /// The `[santi]` constitution config file: `SANTI_CONSTITUTION_FILE` if set,
+    /// else `<runtime_root>/constitution.md`. Absent → the encoded default. It
+    /// is read per-turn (hot), so editing it takes effect on the next turn with
+    /// no restart — the observe→refine loop.
+    pub(super) fn constitution_file(&self) -> PathBuf {
+        std::env::var("SANTI_CONSTITUTION_FILE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| self.runtime_root().join("constitution.md"))
     }
 }
 

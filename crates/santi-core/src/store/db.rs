@@ -3,63 +3,42 @@ mod timeline;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{
-    ActorType, Compact, MessageKind, Session, SessionEffect, SessionMessage, SessionProfile,
-    SessionSummary, SoulProfile, SoulSession, SoulSessionEntry, SoulSessionTargetType,
-    ThinkingSpan, ToolCall, ToolResult, Turn, WebhookSubscription, timestamp_now,
+    ActorType, Compact, MessageKind, Soul, Strand, StrandEffect, StrandEntry, StrandMessage,
+    StrandTargetType, ThinkingSpan, ToolCall, ToolResult, Turn, WebhookSubscription, prefixed_id,
+    timestamp_now,
 };
 
 use super::rows::*;
 pub(super) use timeline::*;
 
-pub(super) fn ensure_session(conn: &Connection, session_id: &str) -> Result<(), String> {
-    let exists = conn
-        .query_row(
-            "SELECT 1 FROM sessions WHERE id = ?1 LIMIT 1",
-            params![session_id],
-            |_| Ok(()),
-        )
-        .optional()
-        .map_err(|error| error.to_string())?;
-    exists.ok_or_else(|| "session not found".to_string())
-}
-
-pub(super) fn next_session_seq(conn: &Connection, session_id: &str) -> Result<i64, String> {
-    conn.query_row(
-        "SELECT COALESCE(MAX(session_seq), 0) + 1 FROM r_session_messages WHERE session_id = ?1",
-        params![session_id],
-        |row| row.get(0),
-    )
-    .map_err(|error| error.to_string())
-}
-
 pub(super) fn append_entry_in_tx(
     conn: &Connection,
-    soul_session_id: &str,
-    target_type: SoulSessionTargetType,
+    strand_id: &str,
+    target_type: StrandTargetType,
     target_id: &str,
-) -> Result<SoulSessionEntry, String> {
+) -> Result<StrandEntry, String> {
     let now = timestamp_now();
     let allocated_seq = conn
         .query_row(
             r#"
-            UPDATE soul_sessions
+            UPDATE strands
             SET next_seq = next_seq + 1, updated_at = ?2
             WHERE id = ?1
             RETURNING next_seq - 1
             "#,
-            params![soul_session_id, now],
+            params![strand_id, now],
             |row| row.get::<_, i64>(0),
         )
         .map_err(|error| error.to_string())?;
     conn.execute(
         r#"
-        INSERT INTO r_soul_session_messages (
-          soul_session_id, target_type, target_id, soul_session_seq, created_at
+        INSERT INTO r_strand_entries (
+          strand_id, target_type, target_id, strand_seq, created_at
         )
         VALUES (?1, ?2, ?3, ?4, ?5)
         "#,
         params![
-            soul_session_id,
+            strand_id,
             entry_type_db(&target_type),
             target_id,
             allocated_seq,
@@ -67,85 +46,88 @@ pub(super) fn append_entry_in_tx(
         ],
     )
     .map_err(|error| error.to_string())?;
-    Ok(SoulSessionEntry {
-        soul_session_id: soul_session_id.to_string(),
+    Ok(StrandEntry {
+        strand_id: strand_id.to_string(),
         target_type,
         target_id: target_id.to_string(),
-        soul_session_seq: allocated_seq,
+        strand_seq: allocated_seq,
         created_at: now,
     })
 }
 
-pub(super) fn session_by_id(
+/// Drain a strand's entire inbox into its timeline: each entry becomes a
+/// `messages` row (actor System, `is_request=1`, state fixed) referenced into
+/// `r_strand_entries` in arrival order, then the inbox row is removed. This is
+/// the ONE place inbound content is committed — ingest itself only durably
+/// enqueues. Returns the drained messages (empty ⟺ nothing was pending).
+pub(super) fn drain_inbox_in_tx(
     conn: &Connection,
-    session_id: &str,
-) -> Result<Option<Session>, String> {
+    strand_id: &str,
+) -> Result<Vec<StrandMessage>, String> {
+    let mut stmt = conn
+        .prepare(
+            r#"
+            SELECT id, message_kind, content FROM strand_inbox
+            WHERE strand_id = ?1
+            ORDER BY created_at ASC, id ASC
+            "#,
+        )
+        .map_err(|error| error.to_string())?;
+    let pending = stmt
+        .query_map(params![strand_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    drop(stmt);
+
+    let now = timestamp_now();
+    let mut drained = Vec::with_capacity(pending.len());
+    for (inbox_id, message_kind_db, content_json) in pending {
+        let message_id = prefixed_id("msg");
+        conn.execute(
+            r#"
+            INSERT INTO messages (
+              id, actor_type, actor_id, message_kind, content, state, version, is_request,
+              deleted_at, created_at, updated_at
+            )
+            VALUES (?1, 'system', ?2, ?3, ?4, 'fixed', 1, 1, NULL, ?5, ?5)
+            "#,
+            params![
+                message_id,
+                super::SANTI_SYSTEM_ACTOR_ID,
+                message_kind_db,
+                content_json,
+                now
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        append_entry_in_tx(conn, strand_id, StrandTargetType::Message, &message_id)?;
+        conn.execute("DELETE FROM strand_inbox WHERE id = ?1", params![inbox_id])
+            .map_err(|error| error.to_string())?;
+        drained.push(
+            message_by_id(conn, &message_id)?
+                .ok_or_else(|| "drained message missing".to_string())?,
+        );
+    }
+    Ok(drained)
+}
+
+pub(super) fn soul_by_id(conn: &Connection, soul_id: &str) -> Result<Option<Soul>, String> {
     conn.query_row(
         r#"
-        SELECT id, parent_session_id, fork_point, created_at, updated_at
-        FROM sessions
+        SELECT id, created_at, updated_at
+        FROM souls
         WHERE id = ?1
         LIMIT 1
         "#,
-        params![session_id],
-        map_session_row,
-    )
-    .optional()
-    .map_err(|error| error.to_string())
-}
-
-pub(super) fn session_profile_by_id(
-    conn: &Connection,
-    session_id: &str,
-) -> Result<Option<SessionProfile>, String> {
-    conn.query_row(
-        r#"
-        SELECT session_id, title, desc, created_at, updated_at
-        FROM session_profiles
-        WHERE session_id = ?1
-        LIMIT 1
-        "#,
-        params![session_id],
-        map_session_profile_row,
-    )
-    .optional()
-    .map_err(|error| error.to_string())
-}
-
-pub(super) fn session_summary_by_id(
-    conn: &Connection,
-    session_id: &str,
-) -> Result<Option<SessionSummary>, String> {
-    conn.query_row(
-        r#"
-        SELECT
-          s.id, s.parent_session_id, s.fork_point, s.created_at, s.updated_at,
-          p.session_id, p.title, p.desc, p.created_at, p.updated_at
-        FROM sessions s
-        JOIN session_profiles p ON p.session_id = s.id
-        WHERE s.id = ?1
-        LIMIT 1
-        "#,
-        params![session_id],
-        map_session_summary_row,
-    )
-    .optional()
-    .map_err(|error| error.to_string())
-}
-
-pub(super) fn soul_profile_by_id(
-    conn: &Connection,
-    soul_id: &str,
-) -> Result<Option<SoulProfile>, String> {
-    conn.query_row(
-        r#"
-        SELECT soul_id, soul_name, nickname, avatar_ref, avatar_seed, desc, created_at, updated_at
-        FROM soul_profiles
-        WHERE soul_id = ?1
-        LIMIT 1
-        "#,
         params![soul_id],
-        map_soul_profile_row,
+        map_soul_row,
     )
     .optional()
     .map_err(|error| error.to_string())
@@ -157,7 +139,7 @@ pub(super) fn webhook_by_name(
 ) -> Result<Option<WebhookSubscription>, String> {
     conn.query_row(
         r#"
-        SELECT name, adaptor, soul_id, session_strategy, secret_env, created_at, updated_at
+        SELECT name, adaptor, soul_id, strand_strategy, secret_env, created_at, updated_at
         FROM webhooks
         WHERE name = ?1
         LIMIT 1
@@ -169,40 +151,37 @@ pub(super) fn webhook_by_name(
     .map_err(|error| error.to_string())
 }
 
-pub(super) fn soul_session_by_pair(
-    conn: &Connection,
-    soul_id: &str,
-    session_id: &str,
-) -> Result<Option<SoulSession>, String> {
+pub(super) fn strand_by_id(conn: &Connection, strand_id: &str) -> Result<Option<Strand>, String> {
     conn.query_row(
         r#"
-        SELECT id, soul_id, session_id, session_memory, provider_state, next_seq,
-               last_seen_session_seq, parent_soul_session_id, fork_point, created_at, updated_at
-        FROM soul_sessions
-        WHERE soul_id = ?1 AND session_id = ?2
+        SELECT id, soul_id, external_label, strand_memory, provider_state, next_seq,
+               last_seen_strand_seq, parent_strand_id, fork_point, created_at, updated_at
+        FROM strands
+        WHERE id = ?1
         LIMIT 1
         "#,
-        params![soul_id, session_id],
-        map_soul_session_row,
+        params![strand_id],
+        map_strand_row,
     )
     .optional()
     .map_err(|error| error.to_string())
 }
 
-pub(super) fn soul_session_by_id(
+pub(super) fn strand_by_label(
     conn: &Connection,
-    soul_session_id: &str,
-) -> Result<Option<SoulSession>, String> {
+    soul_id: &str,
+    label: &str,
+) -> Result<Option<Strand>, String> {
     conn.query_row(
         r#"
-        SELECT id, soul_id, session_id, session_memory, provider_state, next_seq,
-               last_seen_session_seq, parent_soul_session_id, fork_point, created_at, updated_at
-        FROM soul_sessions
-        WHERE id = ?1
+        SELECT id, soul_id, external_label, strand_memory, provider_state, next_seq,
+               last_seen_strand_seq, parent_strand_id, fork_point, created_at, updated_at
+        FROM strands
+        WHERE soul_id = ?1 AND external_label = ?2
         LIMIT 1
         "#,
-        params![soul_session_id],
-        map_soul_session_row,
+        params![soul_id, label],
+        map_strand_row,
     )
     .optional()
     .map_err(|error| error.to_string())
@@ -211,27 +190,27 @@ pub(super) fn soul_session_by_id(
 pub(super) fn message_by_id(
     conn: &Connection,
     message_id: &str,
-) -> Result<Option<SessionMessage>, String> {
+) -> Result<Option<StrandMessage>, String> {
     conn.query_row(
         r#"
-        SELECT r.session_id, r.message_id, r.session_seq, r.created_at,
+        SELECT r.strand_id, r.target_id, r.strand_seq, r.created_at,
                m.id, m.actor_type, m.actor_id, m.message_kind, m.content, m.state, m.version,
                m.deleted_at, m.created_at, m.updated_at
-        FROM r_session_messages r
-        JOIN messages m ON m.id = r.message_id
-        WHERE r.message_id = ?1
+        FROM r_strand_entries r
+        JOIN messages m ON m.id = r.target_id
+        WHERE r.target_type = 'message' AND r.target_id = ?1
         LIMIT 1
         "#,
         params![message_id],
-        map_session_message_row,
+        map_strand_message_row,
     )
     .optional()
     .map_err(|error| error.to_string())
 }
 
 /// Fetch a message's content by id directly from `messages`, independent of any
-/// session relation — so the assembly projection can render both session-visible
-/// messages and soul_session-only assistant text items uniformly.
+/// strand relation — so the assembly projection can render both timeline-visible
+/// messages and strand-only assistant text items uniformly.
 pub(super) fn message_record_by_id(
     conn: &Connection,
     message_id: &str,
@@ -251,25 +230,25 @@ pub(super) fn message_record_by_id(
     .map_err(|error| error.to_string())
 }
 
-pub(super) fn session_messages(
+pub(super) fn strand_messages(
     conn: &Connection,
-    session_id: &str,
-) -> Result<Vec<SessionMessage>, String> {
+    strand_id: &str,
+) -> Result<Vec<StrandMessage>, String> {
     let mut stmt = conn
         .prepare(
             r#"
-            SELECT r.session_id, r.message_id, r.session_seq, r.created_at,
+            SELECT r.strand_id, r.target_id, r.strand_seq, r.created_at,
                    m.id, m.actor_type, m.actor_id, m.message_kind, m.content, m.state, m.version,
                    m.deleted_at, m.created_at, m.updated_at
-            FROM r_session_messages r
-            JOIN messages m ON m.id = r.message_id
-            WHERE r.session_id = ?1 AND m.deleted_at IS NULL
-            ORDER BY r.session_seq ASC
+            FROM r_strand_entries r
+            JOIN messages m ON m.id = r.target_id
+            WHERE r.strand_id = ?1 AND r.target_type = 'message' AND m.deleted_at IS NULL
+            ORDER BY r.strand_seq ASC
             "#,
         )
         .map_err(|error| error.to_string())?;
     let rows = stmt
-        .query_map(params![session_id], map_session_message_row)
+        .query_map(params![strand_id], map_strand_message_row)
         .map_err(|error| error.to_string())?;
     collect_rows(rows)
 }
@@ -277,8 +256,8 @@ pub(super) fn session_messages(
 pub(super) fn turn_by_id(conn: &Connection, turn_id: &str) -> Result<Option<Turn>, String> {
     conn.query_row(
         r#"
-        SELECT id, soul_session_id, trigger_type, trigger_ref, input_through_session_seq,
-               base_soul_session_seq, end_soul_session_seq, status, error_text,
+        SELECT id, strand_id, trigger_type, trigger_ref,
+               base_strand_seq, end_strand_seq, status, error_text,
                created_at, updated_at, finished_at
         FROM turns
         WHERE id = ?1
@@ -297,7 +276,7 @@ pub(super) fn compact_by_id(
 ) -> Result<Option<Compact>, String> {
     conn.query_row(
         r#"
-        SELECT id, turn_id, summary, start_session_seq, end_session_seq, created_at
+        SELECT id, strand_id, summary, start_message_id, end_message_id
         FROM compacts WHERE id = ?1 LIMIT 1
         "#,
         params![compact_id],
@@ -307,9 +286,9 @@ pub(super) fn compact_by_id(
     .map_err(|error| error.to_string())
 }
 
-pub(super) fn turn_soul_session_id(conn: &Connection, turn_id: &str) -> Result<String, String> {
+pub(super) fn turn_strand_id(conn: &Connection, turn_id: &str) -> Result<String, String> {
     conn.query_row(
-        "SELECT soul_session_id FROM turns WHERE id = ?1 LIMIT 1",
+        "SELECT strand_id FROM turns WHERE id = ?1 LIMIT 1",
         params![turn_id],
         |row| row.get(0),
     )
@@ -319,7 +298,7 @@ pub(super) fn turn_soul_session_id(conn: &Connection, turn_id: &str) -> Result<S
 pub(super) fn call_soul_id(conn: &Connection, tool_call_id: &str) -> Result<String, String> {
     conn.query_row(
         r#"
-        SELECT t.soul_session_id
+        SELECT t.strand_id
         FROM tool_calls c
         JOIN turns t ON t.id = c.turn_id
         WHERE c.id = ?1
@@ -376,58 +355,79 @@ pub(super) fn thinking_span_by_id(
     .map_err(|error| error.to_string())
 }
 
-pub(super) fn compacts_for_soul_session(
+/// Position of a message in a strand's spine (its ref's strand_seq),
+/// or None if the message is not part of that strand. This is the one
+/// axis compaction operates on — message_id in, strand_seq out.
+pub(super) fn message_seq_in_strand(
     conn: &Connection,
-    soul_session_id: &str,
+    strand_id: &str,
+    message_id: &str,
+) -> Result<Option<i64>, String> {
+    conn.query_row(
+        r#"
+        SELECT strand_seq FROM r_strand_entries
+        WHERE strand_id = ?1 AND target_type = 'message' AND target_id = ?2
+        LIMIT 1
+        "#,
+        params![strand_id, message_id],
+        |row| row.get::<_, i64>(0),
+    )
+    .optional()
+    .map_err(|error| error.to_string())
+}
+
+pub(super) fn compacts_for_strand(
+    conn: &Connection,
+    strand_id: &str,
 ) -> Result<Vec<Compact>, String> {
     let mut stmt = conn
         .prepare(
             r#"
-            SELECT c.id, c.turn_id, c.summary, c.start_session_seq, c.end_session_seq, c.created_at
-            FROM compacts c
-            JOIN turns t ON t.id = c.turn_id
-            WHERE t.soul_session_id = ?1
-            ORDER BY c.created_at ASC
+            SELECT id, strand_id, summary, start_message_id, end_message_id
+            FROM compacts
+            WHERE strand_id = ?1
             "#,
         )
         .map_err(|error| error.to_string())?;
     let rows = stmt
-        .query_map(params![soul_session_id], map_compact_row)
+        .query_map(params![strand_id], map_compact_row)
         .map_err(|error| error.to_string())?;
     collect_rows(rows)
 }
 
-pub(super) fn session_effects(
+pub(super) fn strand_effects(
     conn: &Connection,
-    session_id: &str,
-) -> Result<Vec<SessionEffect>, String> {
+    strand_id: &str,
+) -> Result<Vec<StrandEffect>, String> {
     let mut stmt = conn
         .prepare(
             r#"
-            SELECT id, session_id, effect_type, idempotency_key, status, source_hook_id,
+            SELECT id, strand_id, effect_type, idempotency_key, status, source_hook_id,
                    source_turn_id, result_ref, error_text, created_at, updated_at
-            FROM session_effects
-            WHERE session_id = ?1
+            FROM strand_effects
+            WHERE strand_id = ?1
             ORDER BY created_at ASC
             "#,
         )
         .map_err(|error| error.to_string())?;
     let rows = stmt
-        .query_map(params![session_id], map_session_effect_row)
+        .query_map(params![strand_id], map_strand_effect_row)
         .map_err(|error| error.to_string())?;
     collect_rows(rows)
 }
 
+/// The provider boundary: `(actor, message_kind)` is the whole marker, no
+/// separate column. Soul always speaks as `assistant`. System splits by kind:
+/// `Text` is opaque world-inbound content (a CLI send, a webhook event) → the
+/// provider hears it as `user`; `SantiSystem` is a runtime-authored fact about
+/// this strand (not user speech, see the `<system_message>` prompt copy) → `system`.
 pub(super) fn message_to_provider_item(
     message: &crate::Message,
 ) -> Option<santi_provider::ProviderItem> {
-    let role = match message.message_kind {
-        MessageKind::SantiSystem => "user",
-        MessageKind::Text => match message.actor_type {
-            ActorType::Account => "user",
-            ActorType::Soul => "assistant",
-            ActorType::System => "system",
-        },
+    let role = match (&message.actor_type, &message.message_kind) {
+        (ActorType::Soul, _) => "assistant",
+        (ActorType::System, MessageKind::Text) => "user",
+        (ActorType::System, MessageKind::SantiSystem) => "system",
     };
     let content = message.content.content_text();
     if content.trim().is_empty() {

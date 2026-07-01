@@ -18,10 +18,10 @@ impl SantiService {
     pub fn get_bucket_object(
         &self,
         soul_id: &str,
-        session_id: &str,
+        strand_id: &str,
         key: &str,
     ) -> Result<Option<ObjectPayload>, String> {
-        let uri = self.object_uri(soul_id, session_id, key)?;
+        let uri = self.object_uri(soul_id, strand_id, key)?;
         self.object_store().get_object(&uri)
     }
 
@@ -48,18 +48,19 @@ impl SantiService {
         LocalObjectStore::new(PathBuf::from(&self.config.runtime_root))
     }
 
-    fn object_uri(&self, soul_id: &str, session_id: &str, key: &str) -> Result<ObjectUri, String> {
-        let bucket = ObjectBucket::new(soul_id, session_id)?;
+    fn object_uri(&self, soul_id: &str, strand_id: &str, key: &str) -> Result<ObjectUri, String> {
+        let bucket = ObjectBucket::new(soul_id, strand_id)?;
         self.ensure_object_bucket(&bucket)?;
         ObjectUri::new(bucket, key)
     }
 
     fn ensure_object_bucket(&self, bucket: &ObjectBucket) -> Result<(), String> {
-        if bucket.soul_id != self.store.default_soul_id() {
+        let strand = self
+            .store
+            .strand(&bucket.strand_id)?
+            .ok_or_else(|| "strand not found".to_string())?;
+        if strand.soul_id != bucket.soul_id {
             return Err("soul not found".to_string());
-        }
-        if self.store.session(&bucket.session_id)?.is_none() {
-            return Err("session not found".to_string());
         }
         Ok(())
     }

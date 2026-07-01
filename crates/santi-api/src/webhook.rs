@@ -2,7 +2,7 @@
 //!
 //! An adaptor is a DOORBELL, not a delivery: it verifies an external request's
 //! authenticity against a shared secret, then normalizes it into the minimum
-//! needed to (a) map it to a session and (b) tell the soul an occurrence happened
+//! needed to (a) map it to a strand and (b) tell the soul an occurrence happened
 //! at an address. It does NOT push world-content (issue body, comment list, state,
 //! history) — the soul perceives that itself by looking through its carrier and
 //! remembers it in its own memory, like a natural person who hears a knock and
@@ -25,7 +25,7 @@ pub(crate) struct NormalizedEvent {
     /// The doorbell text: occurrence kind + address (e.g. repo#N + url), NOT
     /// world-content. Enough for the soul to know what happened and where to look.
     pub santi_system_text: String,
-    /// The opaque external label that anchors the session (per-thread identity).
+    /// The opaque external label that anchors the strand (per-thread identity).
     pub label: String,
     /// Whether this event type is in scope for santi. Out-of-scope events (a
     /// GitHub `ping`, an unhandled action) verify fine but produce no turn.
@@ -199,7 +199,7 @@ impl WebhookAdaptor for GithubAdaptor {
         let santi_system_text = format!(
             "[github] {event_type}.{action} on {repo}#{number}\nurl: {url}\ndelivery: {delivery}"
         );
-        // One session per issue thread, scoped by subscription name so two
+        // One strand per issue thread, scoped by subscription name so two
         // subscriptions never share a thread.
         let label = format!("github:{webhook_name}:issue:{repo}#{number}");
 

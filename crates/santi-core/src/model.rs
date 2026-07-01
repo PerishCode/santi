@@ -31,8 +31,8 @@ pub struct MaterialRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SessionMaterial {
-    pub session_id: String,
+pub struct StrandMaterial {
+    pub strand_id: String,
     pub kind: MaterialKind,
     pub content_type: String,
     pub text: String,
@@ -41,73 +41,34 @@ pub struct SessionMaterial {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct MaterialUpdated {
-    pub session_id: String,
+    pub strand_id: String,
     pub kind: MaterialKind,
     pub updated_at: Timestamp,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct Session {
-    pub id: String,
-    pub parent_session_id: Option<String>,
-    pub fork_point: Option<i64>,
-    pub created_at: Timestamp,
-    pub updated_at: Timestamp,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SessionProfile {
-    pub session_id: String,
-    pub title: Option<String>,
-    pub desc: Option<String>,
-    pub created_at: Timestamp,
-    pub updated_at: Timestamp,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SessionSummary {
-    pub session: Session,
-    pub profile: SessionProfile,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct Account {
-    pub id: String,
-    pub name: String,
-    pub created_at: Timestamp,
-    pub updated_at: Timestamp,
-}
-
+/// A soul is a cyber-individual, keyed by id alone. It has no name/avatar/desc
+/// column: identity is the mutable self, and it lives entirely in the soul's
+/// memory (rendered live into `[santi-soul]`), not in a profile row. The
+/// timestamps are pure provenance.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Soul {
     pub id: String,
-    pub memory: String,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SoulProfile {
-    pub soul_id: String,
-    pub soul_name: String,
-    pub nickname: String,
-    pub avatar_ref: Option<String>,
-    pub avatar_seed: String,
-    pub desc: Option<String>,
-    pub created_at: Timestamp,
-    pub updated_at: Timestamp,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SoulSession {
+pub struct Strand {
     pub id: String,
     pub soul_id: String,
-    pub session_id: String,
-    pub session_memory: String,
+    /// Opaque external anchor (e.g. a webhook thread key). Unique per soul;
+    /// absent for strands reached only by id (e.g. CLI-created ones).
+    pub external_label: Option<String>,
+    pub strand_memory: String,
     pub provider_state: Option<Value>,
     pub next_seq: i64,
-    pub last_seen_session_seq: i64,
-    pub parent_soul_session_id: Option<String>,
+    pub last_seen_strand_seq: i64,
+    pub parent_strand_id: Option<String>,
     pub fork_point: Option<i64>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
@@ -116,7 +77,7 @@ pub struct SoulSession {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnTriggerType {
-    SessionSend,
+    StrandSend,
     System,
 }
 
@@ -131,12 +92,11 @@ pub enum TurnStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Turn {
     pub id: String,
-    pub soul_session_id: String,
+    pub strand_id: String,
     pub trigger_type: TurnTriggerType,
     pub trigger_ref: Option<String>,
-    pub input_through_session_seq: i64,
-    pub base_soul_session_seq: i64,
-    pub end_soul_session_seq: Option<i64>,
+    pub base_strand_seq: i64,
+    pub end_strand_seq: Option<i64>,
     pub status: TurnStatus,
     pub error_text: Option<String>,
     pub created_at: Timestamp,
@@ -207,20 +167,62 @@ pub struct ThinkingSpan {
     pub finished_at: Option<Timestamp>,
 }
 
+/// A compact is a pure projection overlay over a strand's spine. It
+/// self-describes its coverage by message-id boundaries (fork-safe) and carries
+/// the soul-authored summary. The spine is never annotated. Provenance lives in
+/// the audit log (the compact-exec tool_call), not here.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Compact {
     pub id: String,
-    pub turn_id: String,
+    pub strand_id: String,
     pub summary: String,
-    pub start_session_seq: i64,
-    pub end_session_seq: i64,
-    pub created_at: Timestamp,
+    pub start_message_id: String,
+    pub end_message_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SessionEffect {
+pub struct CompactExecRequest {
+    /// Range boundaries — must be FIXED user/assistant messages in this
+    /// strand's spine. Everything between (messages/tools/reasoning) collapses.
+    pub from_message_id: String,
+    pub to_message_id: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CompactExecResponse {
+    pub compact_id: String,
+    pub start_message_id: String,
+    pub end_message_id: String,
+    /// Compacts fully covered by this range, dropped and replaced by the new one.
+    pub absorbed: Vec<String>,
+    /// Spine entries the new compact collapses out of the assembled view.
+    pub collapsed_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CompactQueryEntry {
+    pub strand_seq: i64,
+    pub target_type: StrandTargetType,
+    pub target_id: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CompactQueryResponse {
+    pub compact_id: String,
+    pub start_message_id: String,
+    pub end_message_id: String,
+    pub total: i64,
+    pub page_index: i64,
+    pub page_size: i64,
+    pub entries: Vec<CompactQueryEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct StrandEffect {
     pub id: String,
-    pub session_id: String,
+    pub strand_id: String,
     pub effect_type: String,
     pub idempotency_key: String,
     pub status: String,
@@ -234,7 +236,7 @@ pub struct SessionEffect {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum SoulSessionTargetType {
+pub enum StrandTargetType {
     Message,
     Compact,
     Thinking,
@@ -243,35 +245,36 @@ pub enum SoulSessionTargetType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SoulSessionEntry {
-    pub soul_session_id: String,
-    pub target_type: SoulSessionTargetType,
+pub struct StrandEntry {
+    pub strand_id: String,
+    pub target_type: StrandTargetType,
     pub target_id: String,
-    pub soul_session_seq: i64,
+    pub strand_seq: i64,
     pub created_at: Timestamp,
 }
 
 /// Create a new soul (an individual). Souls are API-managed, never config.
+/// A soul is id-only; its identity is its memory, so the only thing to supply
+/// at creation is the initial `[santi-soul]` memory to seed (empty/absent → a
+/// blank soul that will author its own).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CreateSoulRequest {
-    pub soul_name: String,
-    pub nickname: String,
     #[serde(default)]
-    pub desc: Option<String>,
+    pub memory: Option<String>,
 }
 
 /// An API-managed webhook subscription: how an external source reaches a soul.
 /// `adaptor` selects the boundary normalizer (integration knowledge); `soul_id`
-/// is who receives the resulting turn; `session_strategy` picks where the thread
-/// lives (`per_thread` = one session per adaptor-derived label, `single` = one
-/// session per subscription); `secret_env` names the env var holding the signing
+/// is who receives the resulting turn; `strand_strategy` picks where the thread
+/// lives (`per_thread` = one strand per adaptor-derived label, `single` = one
+/// strand per subscription); `secret_env` names the env var holding the signing
 /// secret (the secret itself is never stored). The `name` is the URL path segment.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct WebhookSubscription {
     pub name: String,
     pub adaptor: String,
     pub soul_id: String,
-    pub session_strategy: String,
+    pub strand_strategy: String,
     pub secret_env: String,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
@@ -284,38 +287,27 @@ pub struct CreateWebhookRequest {
     pub soul_id: String,
     /// `per_thread` (default) or `single`.
     #[serde(default)]
-    pub session_strategy: Option<String>,
+    pub strand_strategy: Option<String>,
     pub secret_env: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct CreateSessionResponse {
-    pub session: SessionSummary,
+pub struct CreateStrandResponse {
+    pub strand: Strand,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SessionDetail {
-    pub session: Session,
-    pub profile: SessionProfile,
-    pub messages: Vec<SessionMessage>,
+pub struct StrandDetail {
+    pub strand: Strand,
+    pub messages: Vec<StrandMessage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct UpdateSessionRequest {
-    pub title: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SendSessionRequest {
+pub struct SendStrandRequest {
     pub content: Vec<MessagePart>,
-    /// Soul to address this send to. Empty/absent → the runtime's default soul,
-    /// preserving the pre-multi-soul path. The (soul, session) pair is acquired
-    /// at send time, so this is the only place a non-default soul is selected.
-    #[serde(default)]
-    pub soul_id: Option<String>,
 }
 
-impl SendSessionRequest {
+impl SendStrandRequest {
     pub fn text(&self) -> String {
         MessageContent {
             parts: self.content.clone(),
@@ -325,18 +317,42 @@ impl SendSessionRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SendSessionAcceptedResponse {
-    pub session: SessionSummary,
-    pub soul_session: SoulSession,
-    pub soul_profile: SoulProfile,
+pub struct SendStrandAcceptedResponse {
+    pub strand: Strand,
     pub turn: Turn,
-    pub user_message: SessionMessage,
+    /// The content this send just enqueued, once the driver has actually
+    /// committed it to the timeline. Absent when this send coalesced into an
+    /// already-running turn — durably enqueued, but the driver has not drained
+    /// it yet (it will, when that turn completes and re-pokes).
+    pub user_message: Option<StrandMessage>,
+}
+
+/// How an ingest adaptor addresses a strand. Resolution is atomic (see
+/// `SantiStore::resolve_strand_selector`) — the STRATEGY is the adaptor's: the
+/// operator addresses an already-existing strand by id; a webhook addresses
+/// one by an opaque label, scoped to its soul (find-or-create).
+#[derive(Debug, Clone)]
+pub enum StrandSelector {
+    ById(String),
+    ByLabel { soul_id: String, label: String },
+}
+
+/// The result of `ingest` — the one inbound path (a send, a webhook event).
+/// `Accepted` confirms durable enqueue only, not that a turn/message now
+/// exists (the driver may still be draining a running turn's inbox later).
+/// `Rejected` is a normal outcome (the inbox gate, a scale safety valve), not
+/// an error — handling it is the adaptor's own policy (surface it, or
+/// silently drop + log).
+#[derive(Debug, Clone)]
+pub enum IngestOutcome {
+    Accepted { strand_id: String },
+    Rejected { reason: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SantiStreamEvent {
     pub event_id: String,
-    pub session_id: String,
+    pub strand_id: String,
     pub created_at: Timestamp,
     pub payload: SantiStreamPayload,
 }
@@ -363,7 +379,7 @@ pub struct TurnActivity {
 pub enum SantiStreamPayload {
     StreamOpen,
     MessageCreated {
-        message: SessionMessage,
+        message: StrandMessage,
     },
     MessageDelta {
         message_id: String,
@@ -373,7 +389,7 @@ pub enum SantiStreamPayload {
     },
     MessageCompleted {
         turn_id: String,
-        message: SessionMessage,
+        message: StrandMessage,
     },
     ToolCallCreated {
         tool_call: ToolCall,
@@ -409,18 +425,15 @@ pub enum SantiStreamPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SessionRuntimeSnapshot {
-    pub session: Session,
-    pub profile: SessionProfile,
-    pub soul_session: Option<SoulSession>,
-    pub soul_profile: Option<SoulProfile>,
-    pub messages: Vec<SessionMessage>,
+pub struct StrandRuntimeSnapshot {
+    pub strand: Strand,
+    pub messages: Vec<StrandMessage>,
     pub turns: Vec<Turn>,
     pub thinking_spans: Vec<ThinkingSpan>,
     pub tool_calls: Vec<ToolCall>,
     pub tool_results: Vec<ToolResult>,
     pub compacts: Vec<Compact>,
-    pub effects: Vec<SessionEffect>,
+    pub effects: Vec<StrandEffect>,
 }
 
 pub fn timestamp_now() -> Timestamp {

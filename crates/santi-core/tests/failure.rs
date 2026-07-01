@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use futures_util::stream;
 use santi_core::{
     ActorType, MessageKind, MessagePart, MessageState, SantiService, SantiServiceConfig,
-    SendSessionRequest,
+    SendStrandRequest,
 };
 use santi_provider::{
     ProviderClient, ProviderEvent, ProviderItem, ProviderMetadata, ProviderRequest, ProviderStream,
@@ -67,10 +67,10 @@ async fn records_failed_system() {
         ..FailureProvider::default()
     });
     let service = open_service(&temp, provider.clone());
-    let session = service.create_session().expect("create session").session;
-    let response = send_text(&service, &session.session.id, "trigger failure").await;
+    let strand = service.create_strand().expect("create strand").strand;
+    let response = send_text(&service, &strand.id, "trigger failure").await;
 
-    let runtime = wait_for_failed_turn(&service, &session.session.id, &response.turn.id).await;
+    let runtime = wait_for_failed_turn(&service, &strand.id, &response.turn.id).await;
     let failed_turn = runtime
         .turns
         .iter()
@@ -88,7 +88,7 @@ async fn records_failed_system() {
     assert_eq!(
         system_message.content_text,
         format!(
-            "<santi-system>\nkind: turn_failed\nturn_id: {}\ntrace: log://turn/{}\nsummary: Previous response attempt failed before completion.\n</santi-system>",
+            "<system_message>\nkind: turn_failed\nturn_id: {}\ntrace: log://turn/{}\nsummary: Previous response attempt failed before completion.\n</system_message>",
             response.turn.id, response.turn.id
         )
     );
@@ -97,18 +97,20 @@ async fn records_failed_system() {
     assert!(!system_message.content_text.contains("Unauthorized"));
     assert!(!system_message.content_text.contains("secret detail"));
 
-    let retry = send_text(&service, &session.session.id, "continue after failure").await;
-    wait_for_failed_turn(&service, &session.session.id, &retry.turn.id).await;
+    let retry = send_text(&service, &strand.id, "continue after failure").await;
+    wait_for_failed_turn(&service, &strand.id, &retry.turn.id).await;
 
     let requests = provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
+    // A santi_system notice is a runtime-authored fact, not user speech — the
+    // provider hears it as `system`, not `user` (see message_to_provider_item).
     assert!(
         requests[1]
             .input
             .iter()
             .any(
-                |message| as_text(message).is_some_and(|(role, content)| role == "user"
-                    && content.contains("<santi-system>")
+                |message| as_text(message).is_some_and(|(role, content)| role == "system"
+                    && content.contains("<system_message>")
                     && content.contains("kind: turn_failed"))
             )
     );
@@ -122,10 +124,10 @@ async fn preserves_aborted_output() {
         ..FailureProvider::default()
     });
     let service = open_service(&temp, provider.clone());
-    let session = service.create_session().expect("create session").session;
-    let response = send_text(&service, &session.session.id, "trigger stream failure").await;
+    let strand = service.create_strand().expect("create strand").strand;
+    let response = send_text(&service, &strand.id, "trigger stream failure").await;
 
-    let runtime = wait_for_failed_turn(&service, &session.session.id, &response.turn.id).await;
+    let runtime = wait_for_failed_turn(&service, &strand.id, &response.turn.id).await;
     let partial_message = runtime
         .messages
         .iter()
@@ -142,17 +144,12 @@ async fn preserves_aborted_output() {
         .find(|message| message.message.message_kind == MessageKind::SantiSystem)
         .expect("santi system failure message");
     assert!(
-        partial_message.relation.session_seq < system_message.relation.session_seq,
+        partial_message.relation.strand_seq < system_message.relation.strand_seq,
         "partial output should precede failure fact"
     );
 
-    let retry = send_text(
-        &service,
-        &session.session.id,
-        "continue with preserved partial",
-    )
-    .await;
-    wait_for_failed_turn(&service, &session.session.id, &retry.turn.id).await;
+    let retry = send_text(&service, &strand.id, "continue with preserved partial").await;
+    wait_for_failed_turn(&service, &strand.id, &retry.turn.id).await;
 
     let requests = provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
@@ -162,8 +159,9 @@ async fn preserves_aborted_output() {
         })
     }));
     assert!(requests[1].input.iter().any(|message| {
-        as_text(message)
-            .is_some_and(|(role, content)| role == "user" && content.contains("kind: turn_failed"))
+        as_text(message).is_some_and(|(role, content)| {
+            role == "system" && content.contains("kind: turn_failed")
+        })
     }));
 }
 
@@ -182,33 +180,32 @@ fn open_service(temp: &tempfile::TempDir, provider: Arc<FailureProvider>) -> San
 
 async fn send_text(
     service: &SantiService,
-    session_id: &str,
+    strand_id: &str,
     text: &str,
-) -> santi_core::SendSessionAcceptedResponse {
+) -> santi_core::SendStrandAcceptedResponse {
     service
-        .send_session(
-            session_id,
-            SendSessionRequest {
+        .send_strand(
+            strand_id,
+            SendStrandRequest {
                 content: vec![MessagePart::Text {
                     text: text.to_string(),
                 }],
-                soul_id: None,
             },
         )
         .await
-        .expect("send session")
+        .expect("send strand")
 }
 
 async fn wait_for_failed_turn(
     service: &SantiService,
-    session_id: &str,
+    strand_id: &str,
     turn_id: &str,
-) -> santi_core::SessionRuntimeSnapshot {
+) -> santi_core::StrandRuntimeSnapshot {
     for _ in 0..50 {
         let runtime = service
-            .runtime_snapshot(session_id)
+            .runtime_snapshot(strand_id)
             .expect("runtime snapshot")
-            .expect("session runtime");
+            .expect("strand runtime");
         let turn_failed = runtime
             .turns
             .iter()

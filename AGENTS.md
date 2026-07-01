@@ -35,6 +35,25 @@ cargo test --locked --workspace
 CI (`.github/workflows/guard.yml`) runs `flavor check` plus the Rust
 fmt/clippy/test triad on PRs and a 3-OS matrix on `main`.
 
+## Trigger a single turn locally (hot path)
+
+To exercise a real end-to-end turn, prefer reusing the repo-root
+`santi.toml` — it already configures a working provider, so no ad-hoc
+config or env wiring is needed. `santi service serve` reads `./santi.toml`
+by default; drive one turn and stop when it lands:
+
+```sh
+santi service serve &                                   # reads ./santi.toml
+SID=$(santi session create | jq -r .session.session.id)
+SANTI_SESSION=$SID santi session send 'Reply with exactly: OK' --watch
+```
+
+`--watch` follows the SSE stream and exits when the soul_session goes idle
+(after the turn completes), so it doubles as the wait — no sleep/poll dance.
+`--session`/`SANTI_SESSION` set a default session id; `--soul`/`SANTI_SOUL`
+pick a non-default soul (empty → the runtime's default soul). To address a
+soul ad hoc without a default: `santi --soul <id> session send <sid> '…'`.
+
 ## Conventions
 
 - Edition 2024, MIT. Workspace dependencies are pinned in the root

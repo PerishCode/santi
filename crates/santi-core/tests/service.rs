@@ -391,6 +391,22 @@ async fn send_session_addresses_explicit_soul() {
         .await
         .expect("send session");
     assert_eq!(default_response.soul_profile.soul_id, default_soul);
+
+    // An unknown soul is rejected cleanly (no orphan soul_session), not a 500.
+    let stray = service.create_session().expect("create session").session;
+    let error = service
+        .send_session(
+            &stray.session.id,
+            SendSessionRequest {
+                content: vec![MessagePart::Text {
+                    text: "nobody home".to_string(),
+                }],
+                soul_id: Some("soul_does_not_exist".to_string()),
+            },
+        )
+        .await
+        .expect_err("unknown soul should error");
+    assert!(error.contains("unknown soul"), "got: {error}");
 }
 
 #[tokio::test]

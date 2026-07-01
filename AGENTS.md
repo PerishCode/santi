@@ -50,9 +50,21 @@ SANTI_SESSION=$SID santi session send 'Reply with exactly: OK' --watch
 
 `--watch` follows the SSE stream and exits when the soul_session goes idle
 (after the turn completes), so it doubles as the wait — no sleep/poll dance.
+It stays robust when sends coalesce: a completed turn that spawns a follow-on
+is still awaited to full idle.
+
+`--watch` relays raw SSE frames (one JSON object per line), same shape as
+`session events`. Distill the reply with jq:
+
+```sh
+… send '…' --watch | jq -rc 'select(.payload.type=="message_completed")
+                             | .payload.message.content_text'
+```
+
 `--session`/`SANTI_SESSION` set a default session id; `--soul`/`SANTI_SOUL`
-pick a non-default soul (empty → the runtime's default soul). To address a
-soul ad hoc without a default: `santi --soul <id> session send <sid> '…'`.
+pick a non-default soul (empty → the runtime's default soul; an unknown soul
+is rejected, not silently created). To address a soul ad hoc without a
+default: `santi --soul <id> session send <sid> '…'`.
 
 ## Conventions
 

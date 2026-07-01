@@ -390,6 +390,13 @@ impl SantiStore {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         ensure_session(&tx, session_id)?;
+        // Reject an unknown soul before inserting a pair: otherwise a bad
+        // soul_id (now user-suppliable via `send`) would create an orphan
+        // soul_session pointing at no soul, surfacing later as a cryptic
+        // "soul_profile disappeared".
+        if soul_profile_by_id(&tx, soul_id)?.is_none() {
+            return Err(format!("unknown soul: {soul_id}"));
+        }
         let now = timestamp_now();
         let existing = soul_session_by_pair(&tx, soul_id, session_id)?;
         let soul_session = if let Some(existing) = existing {

@@ -47,13 +47,13 @@ impl ProviderClient for FakeProvider {
                         "id": "item_tool",
                         "call_id": "call_shell",
                         "name": "shell",
-                        "arguments": r#"{"command":"pwd && printf \"\\n$SANTI_SESSION_MEMORY_DIR\"","cwd":"session://"}"#,
+                        "arguments": r#"{"command":"pwd && printf \"\\n$SANTI_SESSION_MEMORY_DIR\\n$SANTI_SOUL_ID\\n$SANTI_SESSION_ID\"","cwd":"session://"}"#,
                     }),
                     call_id: "call_shell".to_string(),
                     name: "shell".to_string(),
-                    arguments_raw: r#"{"command":"pwd && printf \"\\n$SANTI_SESSION_MEMORY_DIR\"","cwd":"session://"}"#.to_string(),
+                    arguments_raw: r#"{"command":"pwd && printf \"\\n$SANTI_SESSION_MEMORY_DIR\\n$SANTI_SOUL_ID\\n$SANTI_SESSION_ID\"","cwd":"session://"}"#.to_string(),
                     arguments: json!({
-                        "command": "pwd && printf \"\\n$SANTI_SESSION_MEMORY_DIR\"",
+                        "command": "pwd && printf \"\\n$SANTI_SESSION_MEMORY_DIR\\n$SANTI_SOUL_ID\\n$SANTI_SESSION_ID\"",
                         "cwd": SESSION_WORKSPACE_URI
                     }),
                 })),
@@ -247,6 +247,16 @@ async fn dispatches_tools() {
         .join(&session.session.id)
         .join("memory");
     assert!(stdout.contains(&session_memory_dir.display().to_string()));
+    // Self-involved env: the soul's shell inherits its own soul_id + session_id,
+    // so `santi …` from the shell auto-scopes to itself.
+    assert!(
+        stdout.contains("soul_default"),
+        "SANTI_SOUL_ID in shell env: {stdout}"
+    );
+    assert!(
+        stdout.contains(&session.session.id),
+        "SANTI_SESSION_ID in shell env: {stdout}"
+    );
     let cwd = output
         .get("cwd")
         .and_then(|value| value.as_str())

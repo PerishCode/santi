@@ -192,6 +192,7 @@ async fn send_text(
                 content: vec![MessagePart::Text {
                     text: text.to_string(),
                 }],
+                soul_id: None,
             },
         )
         .await

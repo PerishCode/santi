@@ -1,8 +1,9 @@
 use async_trait::async_trait;
 use futures_util::stream;
 use santi_core::{
-    MessagePart, ObjectBucket, ObjectUri, SESSION_WORKSPACE_URI, SOUL_WORKSPACE_URI, SantiService,
-    SantiServiceConfig, SendSessionRequest, session_memory_uri, soul_memory_uri,
+    CreateSoulRequest, MessagePart, ObjectBucket, ObjectUri, SESSION_WORKSPACE_URI,
+    SOUL_WORKSPACE_URI, SantiService, SantiServiceConfig, SendSessionRequest, session_memory_uri,
+    soul_memory_uri,
 };
 use santi_provider::{
     ProviderClient, ProviderEvent, ProviderFunctionCall, ProviderItem, ProviderMetadata,
@@ -93,6 +94,7 @@ async fn sends_with_runtime() {
                 content: vec![MessagePart::Text {
                     text: "hello provider".to_string(),
                 }],
+                soul_id: None,
             },
         )
         .await
@@ -214,6 +216,7 @@ async fn dispatches_tools() {
                 content: vec![MessagePart::Text {
                     text: "run tool".to_string(),
                 }],
+                soul_id: None,
             },
         )
         .await
@@ -329,6 +332,128 @@ async fn ingest_external_event_triggers_turn() {
             )
         })
     }));
+}
+
+#[tokio::test]
+async fn send_session_addresses_explicit_soul() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let provider = Arc::new(FakeProvider::default());
+    let service = SantiService::open(
+        SantiServiceConfig {
+            database_path: temp.path().join("santi.sqlite").display().to_string(),
+            runtime_root: temp.path().join("runtime").display().to_string(),
+            execution_root: temp.path().join("execution").display().to_string(),
+            bind_addr: Some("127.0.0.1:0".to_string()),
+        },
+        provider.clone(),
+    )
+    .expect("open service");
+
+    let default_soul = service.list_souls().expect("list souls")[0].soul_id.clone();
+    let secretary = service
+        .create_soul(CreateSoulRequest {
+            soul_name: "Secretary".to_string(),
+            nickname: "sec".to_string(),
+            desc: None,
+        })
+        .expect("create soul");
+    assert_ne!(secretary.soul_id, default_soul);
+
+    // An explicit soul_id binds this (soul, session) pair to that soul.
+    let session = service.create_session().expect("create session").session;
+    let response = service
+        .send_session(
+            &session.session.id,
+            SendSessionRequest {
+                content: vec![MessagePart::Text {
+                    text: "for the secretary".to_string(),
+                }],
+                soul_id: Some(secretary.soul_id.clone()),
+            },
+        )
+        .await
+        .expect("send session");
+    assert_eq!(response.soul_profile.soul_id, secretary.soul_id);
+    assert_eq!(response.soul_session.soul_id, secretary.soul_id);
+
+    // Absent soul_id keeps the pre-multi-soul path: the runtime's default soul.
+    let other = service.create_session().expect("create session").session;
+    let default_response = service
+        .send_session(
+            &other.session.id,
+            SendSessionRequest {
+                content: vec![MessagePart::Text {
+                    text: "for whoever".to_string(),
+                }],
+                soul_id: None,
+            },
+        )
+        .await
+        .expect("send session");
+    assert_eq!(default_response.soul_profile.soul_id, default_soul);
+
+    // An unknown soul is rejected cleanly (no orphan soul_session), not a 500.
+    let stray = service.create_session().expect("create session").session;
+    let error = service
+        .send_session(
+            &stray.session.id,
+            SendSessionRequest {
+                content: vec![MessagePart::Text {
+                    text: "nobody home".to_string(),
+                }],
+                soul_id: Some("soul_does_not_exist".to_string()),
+            },
+        )
+        .await
+        .expect_err("unknown soul should error");
+    assert!(error.contains("unknown soul"), "got: {error}");
+}
+
+#[tokio::test]
+async fn completed_turn_emits_turn_completed_event() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let provider = Arc::new(FakeProvider::default());
+    let service = SantiService::open(
+        SantiServiceConfig {
+            database_path: temp.path().join("santi.sqlite").display().to_string(),
+            runtime_root: temp.path().join("runtime").display().to_string(),
+            execution_root: temp.path().join("execution").display().to_string(),
+            bind_addr: Some("127.0.0.1:0".to_string()),
+        },
+        provider.clone(),
+    )
+    .expect("open service");
+
+    // Subscribe before sending so no lifecycle event is missed.
+    let mut events = service.subscribe_stream();
+    let session = service.create_session().expect("create session").session;
+    let response = service
+        .send_session(
+            &session.session.id,
+            SendSessionRequest {
+                content: vec![MessagePart::Text {
+                    text: "say hi".to_string(),
+                }],
+                soul_id: None,
+            },
+        )
+        .await
+        .expect("send session");
+
+    // The CLI `--watch` idle check relies on a terminal turn event carrying the
+    // same turn_id the send landed on. Drain the stream until it arrives.
+    let turn_id = response.turn.id.clone();
+    let completed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match events.recv().await.expect("stream event").payload {
+                santi_core::SantiStreamPayload::TurnCompleted { turn_id } => break turn_id,
+                _ => continue,
+            }
+        }
+    })
+    .await
+    .expect("turn_completed within timeout");
+    assert_eq!(completed, turn_id);
 }
 
 async fn wait_for_any_completed_turn(

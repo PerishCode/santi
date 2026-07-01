@@ -179,7 +179,7 @@ async fn create_session(
     service
         .create_session()
         .map(Json)
-        .map_err(ApiError::internal)
+        .map_err(ApiError::from_service)
 }
 
 #[utoipa::path(
@@ -193,7 +193,7 @@ async fn list_sessions(
     service
         .list_sessions()
         .map(Json)
-        .map_err(ApiError::internal)
+        .map_err(ApiError::from_service)
 }
 
 #[utoipa::path(
@@ -209,7 +209,7 @@ async fn create_soul(
     service
         .create_soul(request)
         .map(Json)
-        .map_err(ApiError::internal)
+        .map_err(ApiError::from_service)
 }
 
 #[utoipa::path(
@@ -220,7 +220,10 @@ async fn create_soul(
 async fn list_souls(
     State(service): State<SantiService>,
 ) -> Result<Json<Vec<SoulProfile>>, ApiError> {
-    service.list_souls().map(Json).map_err(ApiError::internal)
+    service
+        .list_souls()
+        .map(Json)
+        .map_err(ApiError::from_service)
 }
 
 #[utoipa::path(
@@ -237,7 +240,7 @@ async fn get_soul(
     State(service): State<SantiService>,
     Path(soul_id): Path<String>,
 ) -> Result<Json<SoulProfile>, ApiError> {
-    match service.soul(&soul_id).map_err(ApiError::internal)? {
+    match service.soul(&soul_id).map_err(ApiError::from_service)? {
         Some(soul) => Ok(Json(soul)),
         None => Err(ApiError::not_found("soul not found")),
     }
@@ -270,7 +273,7 @@ async fn list_webhooks(
     service
         .list_webhooks()
         .map(Json)
-        .map_err(ApiError::internal)
+        .map_err(ApiError::from_service)
 }
 
 /// Webhook ingest endpoint. Not bearer-gated — authenticity is established by the
@@ -296,7 +299,7 @@ async fn ingest_webhook(
 ) -> Result<StatusCode, ApiError> {
     let subscription = service
         .webhook(&name)
-        .map_err(ApiError::internal)?
+        .map_err(ApiError::from_service)?
         .ok_or_else(|| ApiError::not_found("webhook not found"))?;
     let adaptor = adaptor_for(&subscription.adaptor)
         .ok_or_else(|| ApiError::internal(format!("unknown adaptor {}", subscription.adaptor)))?;
@@ -351,7 +354,7 @@ async fn get_session(
 ) -> Result<Json<SessionDetail>, ApiError> {
     service
         .session(&session_id)
-        .map_err(ApiError::internal)?
+        .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("session not found"))
 }
@@ -374,7 +377,7 @@ async fn update_session(
 ) -> Result<Json<SessionSummary>, ApiError> {
     service
         .update_session(&session_id, request)
-        .map_err(ApiError::internal)?
+        .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("session not found"))
 }
@@ -395,7 +398,7 @@ async fn list_messages(
 ) -> Result<Json<Vec<santi_core::SessionMessage>>, ApiError> {
     service
         .session(&session_id)
-        .map_err(ApiError::internal)?
+        .map_err(ApiError::from_service)?
         .map(|detail| Json(detail.messages))
         .ok_or_else(|| ApiError::not_found("session not found"))
 }
@@ -428,7 +431,7 @@ async fn session_events(
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
     let session = service
         .session(&session_id)
-        .map_err(ApiError::internal)?
+        .map_err(ApiError::from_service)?
         .ok_or_else(|| ApiError::not_found("session not found"))?;
     drop(session);
 
@@ -474,7 +477,7 @@ async fn send_session(
         .send_session(&session_id, request)
         .await
         .map(Json)
-        .map_err(ApiError::internal)
+        .map_err(ApiError::from_service)
 }
 
 #[utoipa::path(
@@ -493,7 +496,7 @@ async fn runtime_snapshot(
 ) -> Result<Json<SessionRuntimeSnapshot>, ApiError> {
     service
         .runtime_snapshot(&session_id)
-        .map_err(ApiError::internal)?
+        .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("session not found"))
 }
@@ -523,6 +526,7 @@ fn sse_event_name(payload: &SantiStreamPayload) -> &'static str {
         SantiStreamPayload::MaterialUpdated { .. } => "material_updated",
         SantiStreamPayload::TurnStarted { .. } => "turn_started",
         SantiStreamPayload::TurnActivity { .. } => "turn_activity",
+        SantiStreamPayload::TurnCompleted { .. } => "turn_completed",
         SantiStreamPayload::TurnFailed { .. } => "turn_failed",
     }
 }
@@ -573,17 +577,26 @@ impl ApiError {
         }
     }
 
+    /// Classify a `santi-core` service error (a plain message) into an HTTP
+    /// status. Referenced-but-absent resources are 404; rejected input is 400;
+    /// broken invariants ("… disappeared") stay 500. Unrecognized messages
+    /// degrade to 500, so routing any service error through here is safe.
     pub(crate) fn from_service(message: String) -> Self {
-        match message.as_str() {
-            "session not found" | "soul not found" => Self::not_found(message),
-            _ if message.contains("object key")
-                || message.contains("object uri")
-                || message.contains("path segment")
-                || message.contains("path separators") =>
-            {
-                Self::bad_request(message)
-            }
-            _ => Self::internal(message),
+        let text = message.as_str();
+        if text == "session not found" || text == "soul not found" || text.ends_with("not found") {
+            Self::not_found(message)
+        } else if text.starts_with("unknown soul")
+            || text.contains("must not be empty")
+            || text.contains("must contain text")
+            || text.starts_with("session_strategy must be")
+            || text.contains("object key")
+            || text.contains("object uri")
+            || text.contains("path segment")
+            || text.contains("path separators")
+        {
+            Self::bad_request(message)
+        } else {
+            Self::internal(message)
         }
     }
 }
@@ -663,3 +676,45 @@ impl IntoResponse for ApiError {
     ))
 )]
 struct ApiDoc;
+
+#[cfg(test)]
+mod tests {
+    use super::ApiError;
+    use axum::http::StatusCode;
+
+    fn status(message: &str) -> StatusCode {
+        ApiError::from_service(message.to_string()).status
+    }
+
+    #[test]
+    fn classifies_service_errors_by_status() {
+        // Absent referenced resources → 404.
+        assert_eq!(status("session not found"), StatusCode::NOT_FOUND);
+        assert_eq!(status("soul not found"), StatusCode::NOT_FOUND);
+
+        // Rejected input → 400.
+        assert_eq!(status("unknown soul: soul_x"), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            status("send content must contain text"),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            status("soul_name must not be empty"),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            status("session_strategy must be 'per_thread' or 'single'"),
+            StatusCode::BAD_REQUEST
+        );
+
+        // Broken invariants and unrecognized messages → 500.
+        assert_eq!(
+            status("soul_session disappeared"),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            status("something unexpected"),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+}

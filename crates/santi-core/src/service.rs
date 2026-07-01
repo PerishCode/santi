@@ -205,7 +205,7 @@ impl SantiService {
         Ok(Some(SessionDetail {
             profile: self
                 .store
-                .runtime_snapshot(session_id)?
+                .runtime_snapshot(self.store.default_soul_id(), session_id)?
                 .map(|snapshot| snapshot.profile)
                 .ok_or_else(|| "session disappeared".to_string())?,
             session,
@@ -225,7 +225,10 @@ impl SantiService {
         &self,
         session_id: &str,
     ) -> Result<Option<SessionRuntimeSnapshot>, String> {
-        self.store.runtime_snapshot(session_id)
+        // Session-level view from the default soul's vantage (the pre-multi-soul
+        // shortcut the GET /runtime endpoint still uses).
+        self.store
+            .runtime_snapshot(self.store.default_soul_id(), session_id)
     }
 
     pub async fn send_session(
@@ -255,9 +258,15 @@ impl SantiService {
                 MessageIntake::Request,
             )?
             .session_message;
+        let soul_id = request
+            .soul_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .unwrap_or_else(|| self.store.default_soul_id());
         let soul_session = self
             .store
-            .acquire_soul_session(self.store.default_soul_id(), session_id)?
+            .acquire_soul_session(soul_id, session_id)?
             .soul_session;
         self.store
             .append_message_ref(&soul_session.id, &user_message.message.id)?;
@@ -277,7 +286,7 @@ impl SantiService {
 
         let snapshot = self
             .store
-            .runtime_snapshot(session_id)?
+            .runtime_snapshot(soul_id, session_id)?
             .ok_or_else(|| "soul_session disappeared".to_string())?;
         let accepted_soul_session = snapshot
             .soul_session
@@ -414,13 +423,19 @@ impl SantiService {
                 }
             }
         };
-        if let Err(error) = self.store.complete_turn(
+        match self.store.complete_turn(
             turn_id,
             assistant_seq,
             &self.provider.metadata().provider,
             provider_response_id,
         ) {
-            self.fail_background_turn(session_id, turn_id, error, String::new());
+            Ok(_) => self.publish_stream(
+                session_id,
+                SantiStreamPayload::TurnCompleted {
+                    turn_id: turn_id.to_string(),
+                },
+            ),
+            Err(error) => self.fail_background_turn(session_id, turn_id, error, String::new()),
         }
     }
 

@@ -97,6 +97,10 @@ function buildMetadata(
     manage: { unix: `${pub}/manage.sh`, windows: `${pub}/manage.ps1` },
     artifacts: {
       linuxX64: artifact("santi-x86_64-unknown-linux-gnu.tar.gz", "application/gzip"),
+      debX64: artifact(
+        "santi-x86_64-unknown-linux-gnu.deb",
+        "application/vnd.debian.binary-package",
+      ),
       macArm64: artifact("santi-aarch64-apple-darwin.tar.gz", "application/gzip"),
       macX64: artifact("santi-x86_64-apple-darwin.tar.gz", "application/gzip"),
       winX64: artifact("santi-x86_64-pc-windows-msvc.zip", "application/zip"),

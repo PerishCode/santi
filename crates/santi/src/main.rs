@@ -64,6 +64,13 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Offline pre-check of the on-disk store + default soul memory (read-only).
+    /// A local ops command (NOT an HTTP client): exits non-zero when unhealthy,
+    /// so the upgrade flow can gate on it. See PHASE-07.
+    Doctor,
+    /// Offline store-level ops (act directly on the DB, no running service).
+    #[command(subcommand)]
+    Inbox(InboxCommand),
     /// GET /api/v1/health
     Health,
     /// Strand resources under /api/v1/strands
@@ -110,6 +117,18 @@ enum CompactCommand {
 }
 
 #[derive(Subcommand)]
+enum InboxCommand {
+    /// Enqueue one `santi_system` record into a strand's durable inbox WITHOUT a
+    /// running service (a direct MQ producer). The strand comes from
+    /// --strand/SANTI_STRAND_ID and must already exist. Used by the self-upgrade
+    /// flow to seed the "come look" record before starting the final version.
+    Seed {
+        /// The message text (the "come look" occurrence).
+        text: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum StrandCommand {
     /// POST /api/v1/strands
     Create,
@@ -145,6 +164,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Service { args } => run_service(args).await,
+        Command::Doctor => run_doctor(),
+        Command::Inbox(inbox) => run_inbox(inbox, cli.strand),
         other => {
             let defaults = ClientDefaults {
                 strand: cli.strand,
@@ -185,6 +206,38 @@ impl ClientDefaults {
     }
 }
 
+/// Offline pre-check (local ops, no HTTP). Prints the report as JSON to stdout
+/// and exits non-zero when unhealthy, so a caller (the upgrade flow) can gate.
+fn run_doctor() -> Result<()> {
+    let report = santi_api::ops::doctor().map_err(|error| anyhow::anyhow!(error))?;
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    if !report.ok {
+        anyhow::bail!("doctor: unhealthy (see report above)");
+    }
+    Ok(())
+}
+
+/// Offline inbox producer (local ops, no HTTP). Resolves the strand from
+/// --strand/SANTI_STRAND_ID and seeds a durable record; exits non-zero if the
+/// inbox gate rejects it, so the upgrade flow notices a badly-behind strand.
+fn run_inbox(command: InboxCommand, default_strand: Option<String>) -> Result<()> {
+    match command {
+        InboxCommand::Seed { text } => {
+            let strand_id = default_strand
+                .map(|id| id.trim().to_string())
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("no strand id: set --strand / SANTI_STRAND_ID"))?;
+            let report = santi_api::ops::inbox_seed(&strand_id, &text)
+                .map_err(|error| anyhow::anyhow!(error))?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if !report.accepted {
+                anyhow::bail!("inbox seed rejected: {}", report.reason.unwrap_or_default());
+            }
+            Ok(())
+        }
+    }
+}
+
 /// Run the runtime server in-process via `santi-api`.
 async fn run_service(args: Vec<String>) -> Result<()> {
     let argv = std::iter::once("santi".to_string()).chain(args);
@@ -214,6 +267,8 @@ async fn run_client(
     let base = base_url.trim_end_matches('/').to_string();
     match command {
         Command::Service { .. } => unreachable!("service is handled before the client path"),
+        Command::Doctor => unreachable!("doctor is handled before the client path"),
+        Command::Inbox(_) => unreachable!("inbox is handled before the client path"),
         Command::Health => get(&client, &format!("{base}/api/v1/health")).await,
         Command::Strand(StrandCommand::Create) => {
             post(&client, &format!("{base}/api/v1/strands"), None).await

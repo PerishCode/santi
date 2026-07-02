@@ -1,4 +1,5 @@
 pub mod config;
+pub mod ops;
 pub mod provider;
 
 mod bucket;

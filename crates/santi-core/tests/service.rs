@@ -418,6 +418,68 @@ async fn boot_recovery_drains_stranded_inbox_entries() {
     );
 }
 
+/// Graceful shutdown pauses inbox CONSUMPTION (no new turns start) while ingest
+/// keeps PRODUCING durably; a later fresh boot then drains what queued up. This
+/// is the enabling behavior for self-upgrade: quiesce → stop → swap → start →
+/// boot recovery wakes the soul on whatever queued during the window (PHASE-07).
+#[tokio::test]
+async fn graceful_shutdown_pauses_consumption_but_not_production() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let config = SantiServiceConfig {
+        database_path: temp.path().join("santi.sqlite").display().to_string(),
+        runtime_root: temp.path().join("runtime").display().to_string(),
+        execution_root: temp.path().join("execution").display().to_string(),
+        bind_addr: Some("127.0.0.1:0".to_string()),
+    };
+    let provider = Arc::new(FakeProvider::default());
+
+    // A quiescing service: it accepts (durably enqueues) but starts NO turn.
+    let strand_id = {
+        let service = SantiService::open(config.clone(), provider.clone()).expect("open service");
+        service.begin_shutdown();
+        assert!(service.is_shutting_down());
+        let outcome = service
+            .ingest_external_event(
+                "soul_default",
+                "shutdown:quiesce",
+                "arrived while quiescing".to_string(),
+            )
+            .expect("ingest during shutdown");
+        match outcome {
+            santi_core::IngestOutcome::Accepted { strand_id } => strand_id,
+            other => panic!("expected accepted, got {other:?}"),
+        }
+    };
+
+    // Consumption paused: no turn was started. Production intact: the record is
+    // durably queued (exactly what boot recovery scans for).
+    let store = SantiStore::open(&config.database_path).expect("open store directly");
+    assert_eq!(
+        store.running_turn_count().expect("count"),
+        0,
+        "shutdown must not start a turn"
+    );
+    assert!(
+        store
+            .strands_with_pending_requests()
+            .expect("pending")
+            .contains(&strand_id),
+        "the ingested record must still be durably queued"
+    );
+    drop(store);
+
+    // A fresh service (not shutting down) drains the backlog on boot.
+    let service = SantiService::open(config, provider.clone()).expect("reopen service");
+    service.resume_pending();
+    let runtime = wait_for_any_completed_turn(&service, &strand_id).await;
+    assert!(
+        runtime
+            .messages
+            .iter()
+            .any(|message| message.content_text == "arrived while quiescing")
+    );
+}
+
 #[tokio::test]
 async fn send_strand_targets_the_strands_own_soul() {
     let temp = tempfile::tempdir().expect("temp dir");

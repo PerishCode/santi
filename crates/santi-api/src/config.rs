@@ -277,6 +277,32 @@ pub(crate) fn santi_home() -> PathBuf {
     PathBuf::from(base).join(".santi")
 }
 
+/// The runtime data locations, all anchored on `santi_home()` unless an explicit
+/// env overrides. Pure computation — creating the dirs is the caller's job (the
+/// offline ops paths read without creating; `serve` creates). Shared by `serve`,
+/// `santi doctor`, and `santi inbox seed` so they never drift.
+#[derive(Debug, Clone)]
+pub struct RuntimePaths {
+    pub database_path: PathBuf,
+    pub runtime_root: PathBuf,
+    pub execution_root: PathBuf,
+}
+
+pub fn resolve_runtime_paths() -> RuntimePaths {
+    let home = santi_home();
+    RuntimePaths {
+        database_path: optional_env("SANTI_DB")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join("runtime").join("db")),
+        runtime_root: optional_env("SANTI_RUNTIME_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join("runtime")),
+        execution_root: optional_env("SANTI_EXECUTION_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join("execution")),
+    }
+}
+
 fn expand_home(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/")
         && let Ok(home) = env::var("HOME")

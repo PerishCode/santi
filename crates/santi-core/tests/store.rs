@@ -539,3 +539,52 @@ fn create_soul_and_label_anchoring() {
             .is_err()
     );
 }
+
+#[test]
+fn read_schema_version_none_when_db_absent() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let missing = temp.path().join("nope.sqlite");
+    assert_eq!(
+        santi_core::read_schema_version(&missing).expect("read"),
+        None
+    );
+}
+
+#[test]
+fn read_schema_version_is_readonly_and_matches_after_open() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let db = temp.path().join("santi.sqlite");
+
+    // A DB stamped at a stale version: the probe reports it AS-IS and, crucially,
+    // does NOT migrate/wipe it (unlike SantiStore::open).
+    {
+        let conn = Connection::open(&db).expect("open sqlite");
+        conn.pragma_update(None, "user_version", 5u32)
+            .expect("stamp version");
+    }
+    assert_eq!(
+        santi_core::read_schema_version(&db).expect("read"),
+        Some(5),
+        "probe must report the stored version, not migrate it"
+    );
+    assert_eq!(
+        santi_core::read_schema_version(&db).expect("read again"),
+        Some(5),
+        "a second probe still sees the stale version — the first was read-only"
+    );
+
+    // Opening the store DOES migrate to the runtime's version.
+    let store = SantiStore::open(&db).expect("open store");
+    drop(store);
+    assert_eq!(
+        santi_core::read_schema_version(&db).expect("read post-open"),
+        Some(santi_core::SCHEMA_VERSION)
+    );
+}
+
+#[test]
+fn soul_memory_file_composes_under_runtime_root() {
+    let path = santi_core::soul_memory_file("/srv/santi/runtime", "soul_default");
+    assert!(path.ends_with("souls/soul_default/memory/MEMORY.md"));
+    assert!(path.starts_with("/srv/santi/runtime"));
+}

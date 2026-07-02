@@ -128,7 +128,9 @@ impl SantiService {
     }
 
     pub(super) fn soul_memory_file(&self, soul_id: &str) -> PathBuf {
-        self.soul_memory_dir(soul_id).join("MEMORY.md")
+        // Delegate to the free function so offline ops (`santi doctor`) and the
+        // running service always resolve the same path.
+        crate::store::soul_memory_file(self.runtime_root(), soul_id)
     }
 
     pub(super) fn strand_memory_dir(&self, strand_id: &str) -> PathBuf {

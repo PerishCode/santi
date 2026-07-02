@@ -9,7 +9,11 @@ use futures_util::StreamExt;
 use santi_provider::{ProviderClient, ProviderEvent, ProviderRequest};
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, Instant},
 };
 use tokio::sync::broadcast;
 
@@ -34,6 +38,11 @@ pub struct SantiService {
     pub(crate) config: SantiServiceConfig,
     material_cache: Arc<Mutex<HashMap<MaterialCacheKey, StrandMaterial>>>,
     stream_events: broadcast::Sender<SantiStreamEvent>,
+    /// Graceful-shutdown latch (PHASE-07): once set, `poke` refuses to START new
+    /// turns, so inbox CONSUMPTION pauses while ingest keeps durably enqueuing
+    /// (the inbox is an MQ — we stop consuming, never producing). The in-flight
+    /// turn is left to finish; `drain_running_turns` waits it out.
+    shutting_down: Arc<AtomicBool>,
 }
 
 type MaterialCacheKey = (String, MaterialKind);
@@ -67,7 +76,46 @@ impl SantiService {
             config,
             material_cache: Arc::new(Mutex::new(HashMap::new())),
             stream_events: broadcast::channel(1024).0,
+            shutting_down: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    /// Begin a graceful shutdown: stop consuming the inbox (no new turns start).
+    /// Idempotent. Ingest still durably enqueues; the in-flight turn finishes.
+    pub fn begin_shutdown(&self) {
+        self.shutting_down.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_shutting_down(&self) -> bool {
+        self.shutting_down.load(Ordering::SeqCst)
+    }
+
+    /// Wait until no turn is `running` (the in-flight turn finished), or until
+    /// `cap` elapses. Called after the HTTP server has stopped accepting, so no
+    /// new turns can appear once shutdown has begun. On cap-timeout it returns
+    /// anyway: the still-running turn will be reconciled to `interrupted` on the
+    /// next boot (honest occurrence), and the external upgrade flow's own bound
+    /// (SIGKILL) is the hard stop.
+    pub async fn drain_running_turns(&self, cap: Duration) {
+        let start = Instant::now();
+        loop {
+            match self.store.running_turn_count() {
+                Ok(0) => return,
+                Ok(remaining) => {
+                    if start.elapsed() >= cap {
+                        eprintln!(
+                            "santi: shutdown drain cap reached with {remaining} turn(s) still running; leaving them to boot-recovery"
+                        );
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+                Err(error) => {
+                    eprintln!("santi: shutdown drain scan failed: {error}");
+                    return;
+                }
+            }
+        }
     }
 
     /// Re-drive strands left "behind" by a crash (their inbox durably holds
@@ -340,6 +388,13 @@ impl SantiService {
     /// coalesces) or there is nothing pending. The atomic guard in
     /// `try_start_turn` keeps "one present per thread of experience".
     fn poke(&self, strand_id: &str, trigger_type: &str) -> DrivenTurn {
+        // Graceful shutdown: pause CONSUMPTION. The content stays durably in the
+        // inbox (ingest already enqueued it) and boot recovery drains it on the
+        // next start. This also stops the completion re-poke from spawning a
+        // follow-on turn, so an in-flight turn can finish and the strand quiesce.
+        if self.is_shutting_down() {
+            return None;
+        }
         match self.store.try_start_turn(strand_id, trigger_type, None) {
             Ok(Some(started)) => {
                 for message in started.drained_messages.iter().cloned() {

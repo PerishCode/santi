@@ -308,6 +308,19 @@ impl SantiStore {
         .map_err(|error| error.to_string())
     }
 
+    /// How many turns are currently `running`. Used by graceful shutdown to
+    /// wait for the in-flight turn to finish (0 ⟺ the strand has quiesced).
+    pub fn running_turn_count(&self) -> Result<usize, String> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM turns WHERE status = 'running'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count as usize)
+        .map_err(|error| error.to_string())
+    }
+
     /// Strands that are "behind" (their inbox is non-empty). Used on boot to
     /// re-drive durable requests stranded by a crash (liveness) — the inbox
     /// itself is durable, so this is exactly "which strands still have

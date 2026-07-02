@@ -21,8 +21,14 @@ use db::*;
 use rows::{actor_type_db, collect_rows, map_webhook_row, message_state_db};
 use schema::SCHEMA;
 
-const SANTI_SCHEMA_VERSION: u32 = 19;
-const DEFAULT_SOUL_ID: &str = "soul_default";
+/// The schema version this binary expects. On open, a DB at any other version
+/// is wiped + rebuilt (beta: no back-compat migrations yet — see PHASE-07 crux #5).
+/// Public so ops paths (`santi doctor`) can compare a DB's `user_version` to it
+/// WITHOUT opening the store (which would migrate/wipe).
+pub const SCHEMA_VERSION: u32 = 19;
+/// The default soul's id. Public so offline ops (doctor/seed) can address it
+/// without a running service.
+pub const DEFAULT_SOUL_ID: &str = "soul_default";
 /// The runtime's one system actor identity. No account/user: every non-soul
 /// actor speaks as `system`, whether it's a runtime-authored notice (kind
 /// santi_system) or opaque world-inbound content (kind text) — the sender's
@@ -52,6 +58,37 @@ pub struct StartedTurn {
     pub drained_messages: Vec<StrandMessage>,
 }
 
+/// Read a DB's `user_version` WITHOUT opening the store (which would migrate
+/// and, on a version mismatch, WIPE). `Ok(None)` when the file does not exist
+/// yet (a fresh instance). Read-only: safe to run against a live service (WAL)
+/// or a stopped one. Used by the offline pre-check `santi doctor`.
+pub fn read_schema_version(path: impl AsRef<Path>) -> Result<Option<u32>, String> {
+    if !path.as_ref().exists() {
+        return Ok(None);
+    }
+    let conn = Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )
+    .map_err(|error| error.to_string())?;
+    conn.query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+/// The default soul's memory file, given a runtime root:
+/// `<runtime_root>/souls/<soul_id>/memory/MEMORY.md`. A free function so offline
+/// ops can compute the path without a `SantiService`; the running service's
+/// `soul_memory_file` (service/tools.rs) delegates here to stay in lockstep.
+pub fn soul_memory_file(runtime_root: impl AsRef<Path>, soul_id: &str) -> std::path::PathBuf {
+    runtime_root
+        .as_ref()
+        .join("souls")
+        .join(soul_id)
+        .join("memory")
+        .join(crate::workspace_uri::MEMORY_FILE)
+}
+
 impl SantiStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, String> {
         if let Some(parent) = path.as_ref().parent() {
@@ -71,7 +108,7 @@ impl SantiStore {
         let version = conn
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .map_err(|error| error.to_string())?;
-        if version != SANTI_SCHEMA_VERSION {
+        if version != SCHEMA_VERSION {
             conn.execute_batch(
                 r#"
                 DROP TABLE IF EXISTS response_stream_deltas;
@@ -107,7 +144,7 @@ impl SantiStore {
         }
         conn.execute_batch(SCHEMA)
             .map_err(|error| error.to_string())?;
-        conn.pragma_update(None, "user_version", SANTI_SCHEMA_VERSION)
+        conn.pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|error| error.to_string())?;
         Ok(())
     }

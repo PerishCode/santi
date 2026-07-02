@@ -251,16 +251,25 @@ impl SystemHost {
         Self { paths, backup }
     }
 
-    fn systemctl(&self, action: &str) -> Result<(), String> {
-        let status = Command::new("systemctl")
-            .args([action, SANTI_SERVICE])
+    /// Run a privileged command via `sudo -n`. The oneshot upgrade unit runs as
+    /// the santi user (so runtime files it writes stay santi-owned), and santi
+    /// has passwordless sudo — so systemctl/dpkg go through sudo. `-n` never
+    /// prompts: if sudo would need a password it fails fast + visibly.
+    fn privileged(&self, args: &[&str]) -> Result<(), String> {
+        let status = Command::new("sudo")
+            .arg("-n")
+            .args(args)
             .status()
-            .map_err(|error| format!("systemctl {action}: {error}"))?;
+            .map_err(|error| format!("sudo -n {}: {error}", args.join(" ")))?;
         if status.success() {
             Ok(())
         } else {
-            Err(format!("systemctl {action} {SANTI_SERVICE} failed"))
+            Err(format!("sudo -n {} failed", args.join(" ")))
         }
+    }
+
+    fn systemctl(&self, action: &str) -> Result<(), String> {
+        self.privileged(&["systemctl", action, SANTI_SERVICE])
     }
 }
 
@@ -291,16 +300,7 @@ impl UpgradeHost for SystemHost {
     }
 
     fn install(&mut self, deb: &str) -> Result<(), String> {
-        let status = Command::new("dpkg")
-            .arg("-i")
-            .arg(deb)
-            .status()
-            .map_err(|error| format!("dpkg -i: {error}"))?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(format!("dpkg -i {deb} failed"))
-        }
+        self.privileged(&["dpkg", "-i", deb])
     }
 
     fn trial_probe(&mut self) -> Result<bool, String> {

@@ -2,7 +2,7 @@ use std::{convert::Infallible, env, fs, net::SocketAddr, sync::Arc};
 
 use crate::{
     config, provider,
-    webhook::{WebhookError, adaptor_for},
+    webhook::{WebhookError, WebhookOutcome, adaptor_for},
 };
 use axum::{
     Json, Router,
@@ -335,7 +335,7 @@ async fn ingest_webhook(
     Path(name): Path<String>,
     headers: HeaderMap,
     body: Bytes,
-) -> Result<StatusCode, ApiError> {
+) -> Result<Response, ApiError> {
     let subscription = service
         .webhook(&name)
         .map_err(ApiError::from_service)?
@@ -356,13 +356,19 @@ async fn ingest_webhook(
     adaptor
         .verify(&headers, &body, &secret)
         .map_err(ApiError::from_webhook)?;
-    let event = adaptor
-        .normalize(&headers, &body, &name)
-        .map_err(ApiError::from_webhook)?;
+    let event = match adaptor
+        .normalize(&headers, &body, &secret, &name)
+        .map_err(ApiError::from_webhook)?
+    {
+        // Control-plane request (e.g. feishu's url_verification challenge):
+        // answered on the spot, never touches a strand.
+        WebhookOutcome::Reply(reply) => return Ok((StatusCode::OK, Json(reply)).into_response()),
+        WebhookOutcome::Event(event) => event,
+    };
     // Out-of-scope events and the soul's own actions verify fine but produce no
     // turn — the loop guard and the scope filter live in the adaptor.
     if !event.in_scope || event.self_authored {
-        return Ok(StatusCode::OK);
+        return Ok(StatusCode::OK.into_response());
     }
     // `per_thread` anchors on the adaptor's fine-grained label; `single` collapses
     // every event for this subscription into one strand.
@@ -383,7 +389,7 @@ async fn ingest_webhook(
             eprintln!("santi: webhook ingest rejected for {name}: {reason}");
         }
     }
-    Ok(StatusCode::OK)
+    Ok(StatusCode::OK.into_response())
 }
 
 #[utoipa::path(

@@ -5,8 +5,11 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+aes.workspace = true
 async-stream.workspace = true
 axum.workspace = true
+base64.workspace = true
+cbc.workspace = true
 clap.workspace = true
 futures-core.workspace = true
 futures-util.workspace = true

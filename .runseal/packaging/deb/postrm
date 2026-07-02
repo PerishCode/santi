@@ -1,0 +1,16 @@
+#!/bin/sh
+# santi postrm: reload systemd after the unit files go away. NEVER deletes the
+# runtime (/home/santi/.santi) — that holds the soul's memory, the one thing that
+# must survive across installs (PHASE-07). Removal of runtime data, if ever
+# wanted, is a deliberate operator action, not a package side effect.
+set -e
+
+case "$1" in
+remove | purge)
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl daemon-reload || true
+    fi
+    ;;
+esac
+
+exit 0

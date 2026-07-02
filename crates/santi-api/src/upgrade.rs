@@ -202,13 +202,15 @@ pub fn launch(deb: &str) -> Result<UpgradeStarted, String> {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     fs::write(&request, deb).map_err(|error| format!("write upgrade request: {error}"))?;
-    // `--no-block`: return immediately; the oneshot unit runs under PID 1.
-    let status = Command::new("systemctl")
-        .args(["start", "--no-block", UPGRADE_SERVICE])
+    // `sudo -n`: the launcher is invoked by the santi user (Liberte's shell), and
+    // starting a system unit is privileged (santi has passwordless sudo). `--no-block`:
+    // return immediately; the oneshot unit runs under PID 1, outside santi's cgroup.
+    let status = Command::new("sudo")
+        .args(["-n", "systemctl", "start", "--no-block", UPGRADE_SERVICE])
         .status()
-        .map_err(|error| format!("systemctl start {UPGRADE_SERVICE}: {error}"))?;
+        .map_err(|error| format!("sudo -n systemctl start {UPGRADE_SERVICE}: {error}"))?;
     if !status.success() {
-        return Err(format!("systemctl start {UPGRADE_SERVICE} failed"));
+        return Err(format!("sudo -n systemctl start {UPGRADE_SERVICE} failed"));
     }
     Ok(UpgradeStarted {
         status: "started",

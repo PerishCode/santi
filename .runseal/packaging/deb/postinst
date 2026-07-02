@@ -1,0 +1,37 @@
+#!/bin/sh
+# santi postinst: provision the service user, config dir, and systemd units.
+# Deliberately does NOT auto-START the service — starting needs operator-provided
+# secrets in /etc/santi/santi.env, and during a self-upgrade the `santi upgrade`
+# orchestrator owns the stop/start around dpkg. We only install + enable; the
+# estate bootstrap (or the orchestrator) starts it once config is present.
+set -e
+
+case "$1" in
+configure)
+    # System user/group owning the runtime (matches the estate's hk-03 setup).
+    if ! getent group santi >/dev/null 2>&1; then
+        addgroup --system santi
+    fi
+    if ! getent passwd santi >/dev/null 2>&1; then
+        adduser --system --ingroup santi --home /home/santi \
+            --shell /usr/sbin/nologin --disabled-password santi
+    fi
+
+    # Config dir + example env. Never clobber a real santi.env (operator secrets).
+    mkdir -p /etc/santi
+    chmod 755 /etc/santi
+
+    # Runtime home (soul memory lives here — created, never wiped by the package).
+    mkdir -p /home/santi/.santi
+    chown -R santi:santi /home/santi/.santi
+
+    # systemd: reload + enable both units. daemon-reload/enable are best-effort
+    # so the package configures cleanly in containers without a live systemd.
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl daemon-reload || true
+        systemctl enable santi.service || true
+    fi
+    ;;
+esac
+
+exit 0

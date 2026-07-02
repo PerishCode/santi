@@ -1,0 +1,12 @@
+Package: santi
+Version: __VERSION__
+Architecture: amd64
+Maintainer: PerishCode <noreply@perish.top>
+Depends: adduser, tar, dpkg
+Section: admin
+Priority: optional
+Homepage: https://santi.perish.top
+Description: santi runtime
+ A standalone agent runtime: a container that keeps souls and runs their
+ strands. Ships the `santi` binary, the santi.service unit, and the
+ santi-upgrade.service oneshot unit used for Liberte-driven self-upgrade.

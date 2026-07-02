@@ -1,0 +1,14 @@
+#!/bin/sh
+# santi prerm: stop the service only on a real removal — NOT on `upgrade`, where
+# the `santi upgrade` orchestrator already stopped it and owns the restart.
+set -e
+
+case "$1" in
+remove | deconfigure)
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl stop santi.service || true
+    fi
+    ;;
+esac
+
+exit 0

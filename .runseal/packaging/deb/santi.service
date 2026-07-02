@@ -1,0 +1,27 @@
+[Unit]
+Description=santi runtime
+Documentation=https://santi.perish.top
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=santi
+Group=santi
+# Operator-managed secrets + config (env:// refs resolve from here). The .deb
+# ships an example at /etc/santi/santi.env.example; it never overwrites a real
+# one. Optional (`-`): a missing file does not fail unit load — `serve` then
+# fails cleanly on unresolved provider config instead.
+EnvironmentFile=-/etc/santi/santi.env
+Environment=SANTI_HOME=/home/santi/.santi
+ExecStart=/usr/bin/santi service serve
+Restart=on-failure
+RestartSec=2
+# Graceful shutdown: santi pauses inbox consumption on SIGTERM and drains its
+# in-flight turn (SANTI_SHUTDOWN_GRACE_SECS, default 600). TimeoutStopSec MUST be
+# >= that grace, or systemd SIGKILLs the drain mid-turn. Keep a margin.
+KillSignal=SIGTERM
+TimeoutStopSec=620
+
+[Install]
+WantedBy=multi-user.target

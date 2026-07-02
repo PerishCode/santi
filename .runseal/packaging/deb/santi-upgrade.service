@@ -1,0 +1,29 @@
+# The detached oneshot unit that performs a self-upgrade (PHASE-07 STEP 4).
+#
+# `santi upgrade <deb>` (the launcher) writes the request and kicks this unit
+# with `systemctl start --no-block`. Because the work runs HERE — under systemd
+# (PID 1), NOT inside santi.service's cgroup — stopping santi.service during the
+# upgrade does not kill the upgrader (the self-restart-from-own-cgroup problem).
+#
+# Runs as the santi user (not root) so every runtime file it writes — the
+# snapshot, the restored tree, the seeded "come look" inbox record — stays owned
+# by santi. The privileged steps (dpkg / systemctl stop|start of santi.service)
+# go through santi's passwordless sudo; that is a SystemHost detail tuned on-box
+# in STEP 6.
+[Unit]
+Description=santi self-upgrade (oneshot)
+Documentation=https://santi.perish.top
+
+[Service]
+Type=oneshot
+User=santi
+Group=santi
+EnvironmentFile=-/etc/santi/santi.env
+Environment=SANTI_HOME=/home/santi/.santi
+# Reads the deb to install from the request file the launcher wrote.
+ExecStart=/usr/bin/santi upgrade --run
+# Must exceed SANTI_UPGRADE_TIMEOUT_SECS (default 600) — the whole quiesce →
+# swap → probe → start budget — with a margin, before systemd's hard SIGKILL.
+TimeoutStartSec=900
+
+# No [Install]: this unit is never enabled; it is started on demand by the launcher.

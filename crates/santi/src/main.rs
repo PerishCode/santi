@@ -22,6 +22,14 @@ use futures_util::{Stream, StreamExt};
 /// `turn_completed`, so we wait briefly to catch it rather than exit early.
 const WATCH_IDLE_GRACE: Duration = Duration::from_millis(1500);
 
+/// Per-request timeout for the immediate (non-streaming) commands. Generous for
+/// a snapshot read, yet bounded so a request that never gets answered fails fast
+/// instead of hanging forever — notably a client command run from inside the
+/// soul's own turn, which connects back to the turn-holding server (self-call);
+/// the timeout turns that wedge into a fast error the turn can move past. The
+/// streaming path (`follow`) is deliberately exempt: SSE is a long-lived body.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
 const DEFAULT_BASE_URL: &str = "http://127.0.0.1:43307";
 
 #[derive(Parser)]
@@ -434,6 +442,7 @@ fn build_client(api_key: Option<&str>) -> Result<reqwest::Client> {
 async fn get(client: &reqwest::Client, url: &str) -> Result<()> {
     let response = client
         .get(url)
+        .timeout(REQUEST_TIMEOUT)
         .send()
         .await
         .with_context(|| format!("GET {url}"))?;
@@ -441,7 +450,7 @@ async fn get(client: &reqwest::Client, url: &str) -> Result<()> {
 }
 
 async fn post(client: &reqwest::Client, url: &str, body: Option<serde_json::Value>) -> Result<()> {
-    let mut request = client.post(url);
+    let mut request = client.post(url).timeout(REQUEST_TIMEOUT);
     if let Some(body) = body {
         request = request.json(&body);
     }
@@ -497,8 +506,12 @@ async fn send(
     watch: bool,
 ) -> Result<()> {
     let url = format!("{base}/api/v1/strands/{strand_id}/send");
+    // The send itself returns as soon as the message is enqueued (it does not
+    // wait for the turn), so it is an immediate request and gets the timeout;
+    // the optional `--watch` below follows the SSE stream, which does not.
     let response = client
         .post(&url)
+        .timeout(REQUEST_TIMEOUT)
         .json(&body)
         .send()
         .await

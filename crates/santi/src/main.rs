@@ -71,6 +71,16 @@ enum Command {
     /// Offline store-level ops (act directly on the DB, no running service).
     #[command(subcommand)]
     Inbox(InboxCommand),
+    /// Self-upgrade (PHASE-07). Without `--run`: launch the detached upgrade unit
+    /// and return fast with a signal. With `--run`: the orchestration itself (what
+    /// the shipped `santi-upgrade.service` oneshot unit invokes). Local ops.
+    Upgrade {
+        /// The `.deb` to install (path or, later, a downloaded artifact).
+        deb: Option<String>,
+        /// Run the orchestration in-process instead of launching the unit.
+        #[arg(long)]
+        run: bool,
+    },
     /// GET /api/v1/health
     Health,
     /// Strand resources under /api/v1/strands
@@ -166,6 +176,7 @@ async fn main() -> Result<()> {
         Command::Service { args } => run_service(args).await,
         Command::Doctor => run_doctor(),
         Command::Inbox(inbox) => run_inbox(inbox, cli.strand),
+        Command::Upgrade { deb, run } => run_upgrade(deb, run),
         other => {
             let defaults = ClientDefaults {
                 strand: cli.strand,
@@ -238,6 +249,22 @@ fn run_inbox(command: InboxCommand, default_strand: Option<String>) -> Result<()
     }
 }
 
+/// Self-upgrade (local ops, no HTTP). `--run` executes the orchestration (what
+/// the oneshot unit calls); otherwise it launches that unit detached and returns
+/// the fast signal (监听 / 最长超时 Xmin / 日志位置).
+fn run_upgrade(deb: Option<String>, run: bool) -> Result<()> {
+    if run {
+        let report = santi_api::upgrade::run(deb).map_err(|error| anyhow::anyhow!(error))?;
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        Ok(())
+    } else {
+        let deb = deb.ok_or_else(|| anyhow::anyhow!("usage: santi upgrade <deb> [--run]"))?;
+        let started = santi_api::upgrade::launch(&deb).map_err(|error| anyhow::anyhow!(error))?;
+        println!("{}", serde_json::to_string_pretty(&started)?);
+        Ok(())
+    }
+}
+
 /// Run the runtime server in-process via `santi-api`.
 async fn run_service(args: Vec<String>) -> Result<()> {
     let argv = std::iter::once("santi".to_string()).chain(args);
@@ -269,6 +296,7 @@ async fn run_client(
         Command::Service { .. } => unreachable!("service is handled before the client path"),
         Command::Doctor => unreachable!("doctor is handled before the client path"),
         Command::Inbox(_) => unreachable!("inbox is handled before the client path"),
+        Command::Upgrade { .. } => unreachable!("upgrade is handled before the client path"),
         Command::Health => get(&client, &format!("{base}/api/v1/health")).await,
         Command::Strand(StrandCommand::Create) => {
             post(&client, &format!("{base}/api/v1/strands"), None).await

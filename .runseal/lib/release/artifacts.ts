@@ -11,6 +11,8 @@ export interface Artifact {
   member: string;
   metadataKey: string;
   contentType: string;
+  /** "archive" = tar.gz/zip of the bare binary; "deb" = a Debian package. */
+  kind?: "archive" | "deb";
 }
 
 export const ARTIFACTS: Artifact[] = [
@@ -20,6 +22,17 @@ export const ARTIFACTS: Artifact[] = [
     member: "santi",
     metadataKey: "linuxX64",
     contentType: "application/gzip",
+  },
+  {
+    // Server-only Debian package built alongside the linux-gnu tarball (same
+    // build job). The low-friction entry for Liberte-driven self-upgrade
+    // (PHASE-07): ships the binary + systemd units + maintainer scripts.
+    target: "x86_64-unknown-linux-gnu",
+    archive: "santi-x86_64-unknown-linux-gnu.deb",
+    member: "usr/bin/santi",
+    metadataKey: "debX64",
+    contentType: "application/vnd.debian.binary-package",
+    kind: "deb",
   },
   {
     target: "aarch64-apple-darwin",
@@ -48,12 +61,14 @@ export function artifactDir(repo: string, version: string): string {
   return join(repo, "dist", version);
 }
 
-/** Build `santi` for $TARGET (or the host) and archive it into dist/<version>/. */
+/** Build `santi` for $TARGET (or the host) and produce every artifact bound to
+ * that target into dist/<version>/ — the linux-gnu target yields BOTH the tarball
+ * and the `.deb`. */
 export async function pkg(repo: string): Promise<void> {
   const version = required("RELEASE_VERSION");
   const target = (Deno.env.get("TARGET") ?? "").trim() || (await hostTarget());
-  const spec = ARTIFACTS.find((a) => a.target === target);
-  if (!spec) fail(`unsupported target: ${target}`);
+  const specs = ARTIFACTS.filter((a) => a.target === target);
+  if (specs.length === 0) fail(`unsupported target: ${target}`);
 
   const dir = artifactDir(repo, version);
   Deno.mkdirSync(dir, { recursive: true });
@@ -66,23 +81,73 @@ export async function pkg(repo: string): Promise<void> {
     fail(`cargo build failed for ${target}`);
   }
 
-  const bin = join(repo, "target", target, "release", spec.member);
-  const stage = await Deno.makeTempDir();
-  await Deno.copyFile(bin, join(stage, spec.member));
-  if (!spec.member.endsWith(".exe")) {
-    try {
-      Deno.chmodSync(join(stage, spec.member), 0o755);
-    } catch {
-      // non-unix; ignore
+  const binMember = specs.find((s) => (s.kind ?? "archive") === "archive")?.member ?? "santi";
+  const bin = join(repo, "target", target, "release", binMember);
+
+  for (const spec of specs) {
+    const out = join(dir, spec.archive);
+    if ((spec.kind ?? "archive") === "deb") {
+      await buildDeb(repo, version, bin, out);
+    } else {
+      const stage = await Deno.makeTempDir();
+      await Deno.copyFile(bin, join(stage, spec.member));
+      if (!spec.member.endsWith(".exe")) {
+        try {
+          Deno.chmodSync(join(stage, spec.member), 0o755);
+        } catch {
+          // non-unix; ignore
+        }
+      }
+      const code = spec.archive.endsWith(".tar.gz")
+        ? await run("tar", ["-C", stage, "-czf", out, spec.member])
+        : await run("tar", ["-C", stage, "-a", "-c", "-f", out, spec.member]); // bsdtar (Windows) → zip
+      if (code !== 0) fail(`archiving ${spec.archive} failed`);
     }
+    console.log(out);
+  }
+}
+
+/** Stage the .deb tree from `.runseal/packaging/deb/` + the built binary and
+ * `dpkg-deb --build` it. Requires `dpkg-deb` (present on the ubuntu build job). */
+async function buildDeb(
+  repo: string,
+  version: string,
+  binPath: string,
+  outPath: string,
+): Promise<void> {
+  // Debian version: drop the leading `v` (`v0.1.0-beta.11` → `0.1.0-beta.11`).
+  const debVersion = version.replace(/^v/, "");
+  const src = join(repo, ".runseal", "packaging", "deb");
+  const stage = await Deno.makeTempDir();
+  const mkdir = (rel: string) => Deno.mkdirSync(join(stage, rel), { recursive: true });
+  mkdir("usr/bin");
+  mkdir("lib/systemd/system");
+  mkdir("etc/santi");
+  mkdir("DEBIAN");
+
+  await Deno.copyFile(binPath, join(stage, "usr/bin/santi"));
+  Deno.chmodSync(join(stage, "usr/bin/santi"), 0o755);
+  await Deno.copyFile(join(src, "santi.service"), join(stage, "lib/systemd/system/santi.service"));
+  await Deno.copyFile(
+    join(src, "santi-upgrade.service"),
+    join(stage, "lib/systemd/system/santi-upgrade.service"),
+  );
+  await Deno.copyFile(
+    join(src, "santi.env.example"),
+    join(stage, "etc/santi/santi.env.example"),
+  );
+
+  const control = Deno.readTextFileSync(join(src, "control")).replaceAll("__VERSION__", debVersion);
+  Deno.writeTextFileSync(join(stage, "DEBIAN/control"), control);
+  for (const script of ["postinst", "prerm", "postrm"]) {
+    await Deno.copyFile(join(src, script), join(stage, "DEBIAN", script));
+    Deno.chmodSync(join(stage, "DEBIAN", script), 0o755);
   }
 
-  const out = join(dir, spec.archive);
-  const code = spec.archive.endsWith(".tar.gz")
-    ? await run("tar", ["-C", stage, "-czf", out, spec.member])
-    : await run("tar", ["-C", stage, "-a", "-c", "-f", out, spec.member]); // bsdtar (Windows) → zip
-  if (code !== 0) fail(`archiving ${spec.archive} failed`);
-  console.log(out);
+  // --root-owner-group: files owned by root:root without needing fakeroot/sudo.
+  if (await run("dpkg-deb", ["--root-owner-group", "--build", stage, outPath]) !== 0) {
+    fail(`dpkg-deb --build failed for ${outPath}`);
+  }
 }
 
 /** Write checksums.txt (VERSION header + sha256 of each archive). */
@@ -123,6 +188,15 @@ export async function verifyMembers(repo: string): Promise<void> {
   const dir = artifactDir(repo, version);
   for (const spec of ARTIFACTS) {
     const path = join(dir, spec.archive);
+    if ((spec.kind ?? "archive") === "deb") {
+      // A .deb is an `ar` archive; list its payload with dpkg-deb (paths are
+      // `./usr/bin/santi`), and confirm the maintainer scripts are executable.
+      const contents = (await capture("dpkg-deb", ["--contents", path])).stdout;
+      if (!contents.includes(`/${spec.member}`)) {
+        fail(`missing ${spec.member} in ${spec.archive}`);
+      }
+      continue;
+    }
     const names = spec.archive.endsWith(".tar.gz")
       ? (await capture("tar", ["-tzf", path])).stdout
       : (await capture("unzip", ["-Z1", path])).stdout;

@@ -108,7 +108,9 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.target }}
-          path: dist/${{ needs.metadata.outputs.release_version }}/${{ matrix.archive }}
+          # Glob so the linux-gnu job uploads BOTH its tarball and its .deb; each
+          # target's outputs are named `santi-<target>.<ext>`.
+          path: dist/${{ needs.metadata.outputs.release_version }}/santi-${{ matrix.target }}.*
 
   publish:
     needs: [metadata, build]

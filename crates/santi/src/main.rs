@@ -44,10 +44,24 @@ struct Cli {
     #[arg(long, global = true, env = "SANTI_API_URL", default_value = DEFAULT_BASE_URL)]
     base_url: String,
 
-    /// Bearer token sent on client requests when the server requires one.
-    /// Falls back to SANTI_API_KEY. Only used by the HTTP client commands.
+    /// Static bearer token sent on client requests. Falls back to SANTI_API_KEY.
+    /// Transitional: santi itself no longer gates on this; prefer the edge-auth
+    /// (authentik client_credentials) flags below to reach santi behind forward-auth.
     #[arg(long, global = true, env = "SANTI_API_KEY")]
     api_key: Option<String>,
+
+    /// Edge auth via authentik client_credentials. When token-url, client-id,
+    /// username AND password are all set, the client exchanges them for a
+    /// short-lived JWT (cached locally, ~1h) and sends THAT as the bearer instead
+    /// of --api-key — the way to reach santi behind authentik forward-auth.
+    #[arg(long, global = true, env = "SANTI_AUTH_TOKEN_URL")]
+    auth_token_url: Option<String>,
+    #[arg(long, global = true, env = "SANTI_AUTH_CLIENT_ID")]
+    auth_client_id: Option<String>,
+    #[arg(long, global = true, env = "SANTI_AUTH_USERNAME")]
+    auth_username: Option<String>,
+    #[arg(long, global = true, env = "SANTI_AUTH_PASSWORD")]
+    auth_password: Option<String>,
 
     /// Default strand id used when a strand subcommand omits an explicit id.
     /// Falls back to SANTI_STRAND_ID. Empty/absent → an id must be passed.
@@ -190,7 +204,15 @@ async fn main() -> Result<()> {
                 strand: cli.strand,
                 soul: cli.soul,
             };
-            run_client(&cli.base_url, cli.api_key.as_deref(), &defaults, other).await
+            let bearer = resolve_edge_bearer(
+                cli.auth_token_url.as_deref(),
+                cli.auth_client_id.as_deref(),
+                cli.auth_username.as_deref(),
+                cli.auth_password.as_deref(),
+                cli.api_key.as_deref(),
+            )
+            .await?;
+            run_client(&cli.base_url, bearer.as_deref(), &defaults, other).await
         }
     }
 }
@@ -294,11 +316,11 @@ async fn run_service(args: Vec<String>) -> Result<()> {
 /// Transport-only HTTP client against a running server.
 async fn run_client(
     base_url: &str,
-    api_key: Option<&str>,
+    bearer: Option<&str>,
     defaults: &ClientDefaults,
     command: Command,
 ) -> Result<()> {
-    let client = build_client(api_key)?;
+    let client = build_client(bearer)?;
     let base = base_url.trim_end_matches('/').to_string();
     match command {
         Command::Service { .. } => unreachable!("service is handled before the client path"),
@@ -424,19 +446,183 @@ fn split_send_args(mut args: Vec<String>, defaults: &ClientDefaults) -> Result<(
     }
 }
 
-/// Build an HTTP client that attaches `Authorization: Bearer <key>` to every
-/// request when an api key is configured.
-fn build_client(api_key: Option<&str>) -> Result<reqwest::Client> {
+/// Build an HTTP client that attaches `Authorization: Bearer <token>` to every
+/// request when a bearer is configured.
+fn build_client(bearer: Option<&str>) -> Result<reqwest::Client> {
     let mut builder = reqwest::Client::builder();
-    if let Some(key) = api_key {
+    if let Some(token) = bearer {
         let mut headers = reqwest::header::HeaderMap::new();
-        let mut value = reqwest::header::HeaderValue::from_str(&format!("Bearer {key}"))
-            .context("invalid api key")?;
+        let mut value = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
+            .context("invalid bearer token")?;
         value.set_sensitive(true);
         headers.insert(reqwest::header::AUTHORIZATION, value);
         builder = builder.default_headers(headers);
     }
     builder.build().context("build http client")
+}
+
+/// Resolve the bearer for edge-gated requests. When the authentik
+/// client_credentials config is fully present, exchange it for a short-lived JWT
+/// (locally cached); otherwise fall back to the static `--api-key` (transitional),
+/// or no auth at all — on-box localhost needs none.
+async fn resolve_edge_bearer(
+    token_url: Option<&str>,
+    client_id: Option<&str>,
+    username: Option<&str>,
+    password: Option<&str>,
+    api_key: Option<&str>,
+) -> Result<Option<String>> {
+    if let (Some(url), Some(cid), Some(user), Some(pw)) = (token_url, client_id, username, password)
+    {
+        return Ok(Some(edge_jwt_cached(url, cid, user, pw).await?));
+    }
+    Ok(api_key.map(str::to_string))
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Return a valid edge JWT, reusing a cached one until ~60s before it expires and
+/// otherwise fetching a fresh one via client_credentials. Cache errors are
+/// non-fatal — a bad/missing cache just means a fresh fetch.
+async fn edge_jwt_cached(
+    token_url: &str,
+    client_id: &str,
+    username: &str,
+    password: &str,
+) -> Result<String> {
+    let now = now_secs();
+    let path = edge_token_cache_path(token_url, client_id, username);
+    if let Some(p) = &path
+        && let Ok(bytes) = std::fs::read(p)
+        && let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes)
+        && let Some(token) = v.get("access_token").and_then(|t| t.as_str())
+        && v.get("expires_at").and_then(|t| t.as_u64()).unwrap_or(0) > now + 60
+    {
+        return Ok(token.to_string());
+    }
+    let (access_token, expires_in) =
+        fetch_edge_jwt(token_url, client_id, username, password).await?;
+    if let Some(p) = &path {
+        let v = serde_json::json!({ "access_token": access_token, "expires_at": now + expires_in });
+        let _ = write_token_cache(p, &v);
+    }
+    Ok(access_token)
+}
+
+/// One `grant_type=client_credentials` exchange against authentik's token
+/// endpoint. Returns `(access_token, expires_in_secs)`.
+async fn fetch_edge_jwt(
+    token_url: &str,
+    client_id: &str,
+    username: &str,
+    password: &str,
+) -> Result<(String, u64)> {
+    let client = reqwest::Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .context("build token client")?;
+    let body = form_urlencode(&[
+        ("grant_type", "client_credentials"),
+        ("client_id", client_id),
+        ("username", username),
+        ("password", password),
+        ("scope", "openid"),
+    ]);
+    let response = client
+        .post(token_url)
+        .header(
+            reqwest::header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded",
+        )
+        .body(body)
+        .send()
+        .await
+        .with_context(|| format!("POST {token_url}"))?;
+    let status = response.status();
+    let text = response.text().await.context("read token response")?;
+    if !status.is_success() {
+        let detail: String = text.chars().take(200).collect();
+        anyhow::bail!("edge token endpoint {token_url} -> {status}: {detail}");
+    }
+    let value: serde_json::Value = serde_json::from_str(&text).context("parse token response")?;
+    let access_token = value
+        .get("access_token")
+        .and_then(|t| t.as_str())
+        .context("token response missing access_token")?
+        .to_string();
+    let expires_in = value
+        .get("expires_in")
+        .and_then(|t| t.as_u64())
+        .unwrap_or(3600);
+    Ok((access_token, expires_in))
+}
+
+/// Where the edge JWT is cached. `SANTI_TOKEN_CACHE` overrides with an explicit
+/// file path; else `$HOME/.cache/santi/edge-jwt-<key>.json`; else the temp dir.
+/// `<key>` derives from (token_url, client_id, username) so distinct edges don't
+/// collide.
+fn edge_token_cache_path(
+    token_url: &str,
+    client_id: &str,
+    username: &str,
+) -> Option<std::path::PathBuf> {
+    use std::hash::{Hash, Hasher};
+    if let Ok(explicit) = std::env::var("SANTI_TOKEN_CACHE")
+        && !explicit.trim().is_empty()
+    {
+        return Some(std::path::PathBuf::from(explicit));
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    token_url.hash(&mut hasher);
+    client_id.hash(&mut hasher);
+    username.hash(&mut hasher);
+    let key = format!("{:016x}", hasher.finish());
+    let dir = std::env::var("HOME")
+        .ok()
+        .map(|home| std::path::PathBuf::from(home).join(".cache/santi"))
+        .unwrap_or_else(std::env::temp_dir);
+    Some(dir.join(format!("edge-jwt-{key}.json")))
+}
+
+/// Encode key/value pairs as `application/x-www-form-urlencoded` (RFC 3986
+/// unreserved set kept literal, space → `+`, everything else percent-encoded).
+fn form_urlencode(pairs: &[(&str, &str)]) -> String {
+    fn enc(input: &str) -> String {
+        let mut out = String::with_capacity(input.len());
+        for byte in input.bytes() {
+            match byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    out.push(byte as char)
+                }
+                b' ' => out.push('+'),
+                _ => out.push_str(&format!("%{byte:02X}")),
+            }
+        }
+        out
+    }
+    pairs
+        .iter()
+        .map(|(k, v)| format!("{}={}", enc(k), enc(v)))
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+fn write_token_cache(path: &std::path::Path, value: &serde_json::Value) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, serde_json::to_vec(value)?)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
 }
 
 async fn get(client: &reqwest::Client, url: &str) -> Result<()> {
@@ -695,6 +881,18 @@ mod tests {
         assert_eq!(defaults(None, Some("soul_x")).soul(), Some("soul_x"));
         assert_eq!(defaults(None, Some("   ")).soul(), None);
         assert_eq!(defaults(None, None).soul(), None);
+    }
+
+    #[test]
+    fn form_urlencode_encodes_reserved_chars() {
+        assert_eq!(
+            form_urlencode(&[("grant_type", "client_credentials"), ("scope", "openid")]),
+            "grant_type=client_credentials&scope=openid"
+        );
+        // reserved / non-unreserved bytes get percent-encoded; space → '+'
+        assert_eq!(form_urlencode(&[("k", "a b&c=d/e")]), "k=a+b%26c%3Dd%2Fe");
+        // the RFC 3986 unreserved set stays literal
+        assert_eq!(form_urlencode(&[("x", "Az0-_.~")]), "x=Az0-_.~");
     }
 
     #[test]

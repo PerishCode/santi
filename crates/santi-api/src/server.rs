@@ -1,4 +1,4 @@
-use std::{convert::Infallible, env, fs, net::SocketAddr, sync::Arc};
+use std::{convert::Infallible, env, fs, net::SocketAddr};
 
 use crate::{
     config, provider,
@@ -7,9 +7,8 @@ use crate::{
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{Path, Query, Request, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    middleware::{self, Next},
     response::{
         IntoResponse, Response, Sse,
         sse::{Event, KeepAlive},
@@ -60,16 +59,10 @@ pub async fn serve(config: config::ConfigService) -> Result<(), String> {
     let listener = tokio::net::TcpListener::bind(address)
         .await
         .map_err(|error| error.to_string())?;
-    // Optional bearer auth: when SANTI_API_KEY is set, every endpoint except
-    // /health requires `Authorization: Bearer <key>`. Unset = open (default).
-    let api_key: Option<Arc<str>> = env::var("SANTI_API_KEY")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .map(Arc::from);
-    if api_key.is_some() {
-        println!("santi-api: bearer auth enabled");
-    }
+    // santi carries NO auth of its own: access control lives entirely at the edge
+    // (authentik forward-auth in front of the window nginx; on-box callers reach
+    // 127.0.0.1 directly). The only in-process gate is webhook signature
+    // verification (per subscription), which is independent of this and untouched.
     // Liveness: re-drive any requests stranded by a previous crash.
     service.resume_pending();
     println!("santi-api listening on http://{address}");
@@ -87,7 +80,7 @@ pub async fn serve(config: config::ConfigService) -> Result<(), String> {
         }
     };
     let drainer = service.clone();
-    axum::serve(listener, router(service, api_key))
+    axum::serve(listener, router(service))
         .with_graceful_shutdown(shutdown_signal)
         .await
         .map_err(|error| error.to_string())?;
@@ -139,9 +132,9 @@ fn bind_addr_string() -> String {
     format!("{host}:{port}")
 }
 
-fn router(service: SantiService, api_key: Option<Arc<str>>) -> Router {
-    // Everything except /health is bearer-gated when a key is configured.
-    let protected = Router::new()
+fn router(service: SantiService) -> Router {
+    // No auth layer: every route is served plainly (edge-gated, on-box localhost).
+    let api = Router::new()
         .route("/api/v1/openapi.json", get(openapi))
         .route("/api/v1/strands", post(create_strand).get(list_strands))
         .route("/api/v1/souls", post(create_soul).get(list_souls))
@@ -161,15 +154,14 @@ fn router(service: SantiService, api_key: Option<Arc<str>>) -> Router {
         .route(
             "/api/v1/bucket/{soul_id}/{strand_id}/{*key}",
             get(crate::bucket::get_bucket_object),
-        )
-        .route_layer(middleware::from_fn_with_state(api_key, require_bearer));
+        );
 
     Router::new()
         .route("/api/v1/health", get(health))
-        // Webhook ingest is NOT bearer-gated — it is gated by the adaptor's
-        // signature verification against the subscription's shared secret.
+        // Webhook ingest is gated by the adaptor's signature verification against
+        // the subscription's shared secret (independent of any transport auth).
         .route("/api/v1/webhooks/{name}", post(ingest_webhook))
-        .merge(protected)
+        .merge(api)
         .layer(TraceLayer::new_for_http())
         .layer(
             CorsLayer::new()
@@ -178,25 +170,6 @@ fn router(service: SantiService, api_key: Option<Arc<str>>) -> Router {
                 .allow_headers(Any),
         )
         .with_state(service)
-}
-
-/// Enforce `Authorization: Bearer <key>` when an API key is configured.
-async fn require_bearer(
-    State(expected): State<Option<Arc<str>>>,
-    request: Request,
-    next: Next,
-) -> Result<Response, ApiError> {
-    if let Some(expected) = expected.as_deref() {
-        let presented = request
-            .headers()
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.strip_prefix("Bearer "));
-        if presented != Some(expected) {
-            return Err(ApiError::unauthorized("missing or invalid bearer token"));
-        }
-    }
-    Ok(next.run(request).await)
 }
 
 #[utoipa::path(

@@ -147,8 +147,19 @@ enum ImCommand {
     /// inbox. OFFLINE (a direct store write, no HTTP — a mid-turn reply never
     /// re-enters the turn-holding server). Conversation from --strand/SANTI_STRAND_ID.
     Reply {
-        /// The reply text.
-        text: String,
+        /// The reply text. For multi-line or shell-sensitive content, prefer
+        /// --file or --stdin.
+        #[arg(
+            conflicts_with_all = ["file", "stdin"],
+            required_unless_present_any = ["file", "stdin"]
+        )]
+        text: Option<String>,
+        /// Read the reply text from a file (or `-` for stdin).
+        #[arg(long, value_name = "PATH", conflicts_with_all = ["text", "stdin"])]
+        file: Option<String>,
+        /// Read the reply text from stdin.
+        #[arg(long, conflicts_with_all = ["text", "file"])]
+        stdin: bool,
     },
 }
 
@@ -240,7 +251,10 @@ async fn main() -> Result<()> {
         Command::Upgrade { deb, run } => run_upgrade(deb, run),
         // The soul's IM reply is an offline store write (like `inbox seed`) — no
         // HTTP, so a mid-turn reply never re-enters the turn-holding server.
-        Command::Im(ImCommand::Reply { text }) => run_im_reply(text, cli.strand),
+        Command::Im(ImCommand::Reply { text, file, stdin }) => {
+            let text = read_im_reply_text(text, file, stdin)?;
+            run_im_reply(text, cli.strand)
+        }
         other => {
             let defaults = ClientDefaults {
                 strand: cli.strand,
@@ -488,16 +502,34 @@ async fn run_client(
     }
 }
 
-/// Read a compact summary from a file, or stdin when the path is `-`.
-fn read_summary_file(path: &str) -> Result<String> {
+/// Resolve the soul's IM reply body from exactly one supported source.
+fn read_im_reply_text(text: Option<String>, file: Option<String>, stdin: bool) -> Result<String> {
+    match (text, file, stdin) {
+        (Some(text), None, false) => Ok(text),
+        (None, Some(path), false) => read_text_file(&path, "reply"),
+        (None, None, true) => read_text_file("-", "reply"),
+        (None, None, false) => {
+            anyhow::bail!("im reply requires <text>, --file <path>, or --stdin")
+        }
+        _ => anyhow::bail!("im reply accepts exactly one of <text>, --file <path>, or --stdin"),
+    }
+}
+
+/// Read a text value from a file, or stdin when the path is `-`.
+fn read_text_file(path: &str, label: &str) -> Result<String> {
     if path == "-" {
         let mut buf = String::new();
         std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
-            .context("read summary from stdin")?;
+            .with_context(|| format!("read {label} from stdin"))?;
         Ok(buf)
     } else {
-        std::fs::read_to_string(path).with_context(|| format!("read summary file {path}"))
+        std::fs::read_to_string(path).with_context(|| format!("read {label} file {path}"))
     }
+}
+
+/// Read a compact summary from a file, or stdin when the path is `-`.
+fn read_summary_file(path: &str) -> Result<String> {
+    read_text_file(path, "summary")
 }
 
 /// Minimal percent-encoding for a query-string value (the client has no URL dep).
@@ -1085,6 +1117,66 @@ mod tests {
 
         // One arg with no default strand is a usage error, not a silent send.
         assert!(split_send_args(vec!["hello".into()], &defaults(None, None)).is_err());
+    }
+
+    #[test]
+    fn im_reply_accepts_exactly_one_text_source() {
+        let parsed = Cli::try_parse_from(["santi", "im", "reply", "hello"]).unwrap();
+        let Command::Im(ImCommand::Reply { text, file, stdin }) = parsed.command else {
+            panic!("expected im reply command");
+        };
+        assert_eq!(text.as_deref(), Some("hello"));
+        assert_eq!(file, None);
+        assert!(!stdin);
+
+        let parsed = Cli::try_parse_from(["santi", "im", "reply", "--file", "reply.txt"]).unwrap();
+        let Command::Im(ImCommand::Reply { text, file, stdin }) = parsed.command else {
+            panic!("expected im reply command");
+        };
+        assert_eq!(text, None);
+        assert_eq!(file.as_deref(), Some("reply.txt"));
+        assert!(!stdin);
+
+        let parsed = Cli::try_parse_from(["santi", "im", "reply", "--stdin"]).unwrap();
+        let Command::Im(ImCommand::Reply { text, file, stdin }) = parsed.command else {
+            panic!("expected im reply command");
+        };
+        assert_eq!(text, None);
+        assert_eq!(file, None);
+        assert!(stdin);
+    }
+
+    #[test]
+    fn im_reply_rejects_missing_or_conflicting_text_sources() {
+        assert!(Cli::try_parse_from(["santi", "im", "reply"]).is_err());
+        assert!(Cli::try_parse_from(["santi", "im", "reply", "hello", "--stdin"]).is_err());
+        assert!(
+            Cli::try_parse_from(["santi", "im", "reply", "--file", "reply.txt", "--stdin"])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn read_im_reply_text_reads_positional_and_file_sources() {
+        assert_eq!(
+            read_im_reply_text(Some("hello".into()), None, false).unwrap(),
+            "hello"
+        );
+
+        let path = std::env::temp_dir().join(format!(
+            "santi-im-reply-test-{}-{}.txt",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let expected = "multi\nline `reply`\n";
+        std::fs::write(&path, expected).unwrap();
+        let content =
+            read_im_reply_text(None, Some(path.to_string_lossy().into_owned()), false).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(content, expected);
     }
 
     #[test]

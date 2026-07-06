@@ -13,6 +13,7 @@ use crate::{
 mod assembly;
 mod compact;
 mod db;
+mod im;
 mod rows;
 mod runtime;
 mod schema;
@@ -25,7 +26,7 @@ use schema::SCHEMA;
 /// is wiped + rebuilt (beta: no back-compat migrations yet — see PHASE-07 crux #5).
 /// Public so ops paths (`santi doctor`) can compare a DB's `user_version` to it
 /// WITHOUT opening the store (which would migrate/wipe).
-pub const SCHEMA_VERSION: u32 = 19;
+pub const SCHEMA_VERSION: u32 = 20;
 /// The default soul's id. Public so offline ops (doctor/seed) can address it
 /// without a running service.
 pub const DEFAULT_SOUL_ID: &str = "soul_default";
@@ -95,6 +96,10 @@ impl SantiStore {
             std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
         let conn = Connection::open(path).map_err(|error| error.to_string())?;
+        // Wait (don't fail) when another connection holds the write lock — the
+        // offline `im reply` egress writes the same file while the server runs.
+        conn.busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(|error| error.to_string())?;
         let store = Self {
             conn: Arc::new(Mutex::new(conn)),
         };
@@ -117,6 +122,8 @@ impl SantiStore {
                 DROP TABLE IF EXISTS conversations;
                 DROP TABLE IF EXISTS r_strand_entries;
                 DROP TABLE IF EXISTS strand_inbox;
+                DROP TABLE IF EXISTS im_inbox;
+                DROP TABLE IF EXISTS im_participants;
                 DROP TABLE IF EXISTS compacts;
                 DROP TABLE IF EXISTS thinking_spans;
                 DROP TABLE IF EXISTS tool_results;

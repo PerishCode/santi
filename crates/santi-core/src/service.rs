@@ -1,4 +1,5 @@
 mod failure;
+mod im;
 mod materials;
 mod text_delta;
 mod thinking;

@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, Strand, Timestamp, soul_memory_uri,
+    IM_LABEL_PREFIX, SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, Strand, Timestamp, soul_memory_uri,
     strand_memory_uri, timestamp_from_system_time,
 };
 
@@ -51,7 +51,7 @@ pub(crate) fn render_system_prompt(request: SystemPromptRequest<'_>) -> Result<S
     let soul_source = soul_memory_uri();
     let strand_source = strand_memory_uri();
 
-    Ok([
+    let mut sections = vec![
         constitution,
         format!("{soul_source} will always be displayed in [santi-soul]."),
         format!("{strand_source} will always be displayed in [santi-strand]."),
@@ -60,10 +60,45 @@ pub(crate) fn render_system_prompt(request: SystemPromptRequest<'_>) -> Result<S
         ),
         render_system_message_description(),
         render_meta(&request),
-        render_memory_section("santi-soul", &soul_source, &soul_memory),
-        render_memory_section("santi-strand", &strand_source, &strand_memory),
-    ]
-    .join("\n\n"))
+    ];
+    // Reply-capability meta: only for an IM conversation strand, and only here
+    // (not a runtime concept). Announces the ambient egress; the address is the
+    // conversation itself (this strand) — never body-text the soul must copy.
+    if let Some(capability) = render_im_reply_capability(&request) {
+        sections.push(capability);
+    }
+    sections.push(render_memory_section(
+        "santi-soul",
+        &soul_source,
+        &soul_memory,
+    ));
+    sections.push(render_memory_section(
+        "santi-strand",
+        &strand_source,
+        &strand_memory,
+    ));
+    Ok(sections.join("\n\n"))
+}
+
+/// The IM reply-capability block — present ONLY when this strand is an IM
+/// conversation (`im:` label). It tells the soul how to reach the person, the
+/// same way its shell reaches other worlds; the reply target is this very
+/// conversation (ambient), so nothing addressable is exposed as body-text.
+fn render_im_reply_capability(request: &SystemPromptRequest<'_>) -> Option<String> {
+    let label = request.strand.external_label.as_deref()?;
+    if !label.starts_with(IM_LABEL_PREFIX) {
+        return None;
+    }
+    Some(
+        [
+            "[santi-im]",
+            "This strand is an IM conversation with a person. To send them a reply, run in your shell:",
+            "  santi im reply \"<your message>\"",
+            "It delivers your message to that person and returns at once (they read it in their own client).",
+            "That command is the ONLY way your words reach them — a natural-language reply in the strand is not delivered.",
+        ]
+        .join("\n"),
+    )
 }
 
 /// The `[santi]` block: a config file override, else the encoded default.
@@ -147,4 +182,55 @@ fn read_memory_material(path: &Path) -> Result<MemoryMaterial, String> {
 struct MemoryMaterial {
     content: String,
     updated_at: Option<Timestamp>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Strand, timestamp_now};
+
+    fn strand_with_label(label: Option<&str>) -> Strand {
+        Strand {
+            id: "ss_test".to_string(),
+            soul_id: "soul_default".to_string(),
+            external_label: label.map(str::to_string),
+            strand_memory: String::new(),
+            provider_state: None,
+            next_seq: 1,
+            last_seen_strand_seq: 0,
+            parent_strand_id: None,
+            fork_point: None,
+            created_at: timestamp_now(),
+            updated_at: timestamp_now(),
+        }
+    }
+
+    fn request_for(strand: &Strand) -> SystemPromptRequest<'_> {
+        SystemPromptRequest {
+            strand_id: &strand.id,
+            strand,
+            constitution_path: PathBuf::new(),
+            soul_memory_path: PathBuf::new(),
+            strand_memory_path: PathBuf::new(),
+            is_default_soul: false,
+        }
+    }
+
+    #[test]
+    fn im_reply_capability_only_for_im_conversation_strands() {
+        // An IM conversation strand gets the ambient egress announcement.
+        let im = strand_with_label(Some("im:operator"));
+        let capability =
+            render_im_reply_capability(&request_for(&im)).expect("im strand has the capability");
+        assert!(capability.contains("[santi-im]"));
+        assert!(capability.contains("santi im reply"));
+
+        // A webhook (github) strand is NOT an IM conversation — it replies native.
+        let github = strand_with_label(Some("github:ops:issue:PerishCode/santi#1"));
+        assert!(render_im_reply_capability(&request_for(&github)).is_none());
+
+        // A plain id-only strand — nothing injected.
+        let plain = strand_with_label(None);
+        assert!(render_im_reply_capability(&request_for(&plain)).is_none());
+    }
 }

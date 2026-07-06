@@ -172,4 +172,31 @@ CREATE INDEX IF NOT EXISTS idx_tool_results_tool_call_id ON tool_results (tool_c
 CREATE INDEX IF NOT EXISTS idx_thinking_spans_turn_id_created_at ON thinking_spans (turn_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_r_strand_entries_target_lookup ON r_strand_entries (target_type, target_id);
 CREATE INDEX IF NOT EXISTS idx_r_strand_entries_seq ON r_strand_entries (strand_id, strand_seq);
+
+-- ── IM layer (im_*) ──────────────────────────────────────────────────────────
+-- A plain messenger integrated into the santi binary for cold-start; conceptually
+-- ORTHOGONAL to the runtime (souls/strands/turns). These tables are the IM's own
+-- store — the runtime never reads them. A participant is a persistent messaging
+-- endpoint (a human/CLI peer with a passive inbox; a soul participant's "inbox" is
+-- its strand and is NOT stored here). `source` addressing lives entirely here, in
+-- the IM's envelope — never in the runtime primitive or `strand_inbox`.
+CREATE TABLE IF NOT EXISTS im_participants (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('human', 'soul')),
+    created_at TEXT NOT NULL
+);
+
+-- The passive inbox for a (human/CLI) participant: the return values it catches.
+-- `seq` is a global monotonic cursor (caller polls `WHERE participant_id=? AND
+-- seq > since`); `from_ref` names the soul strand that replied. Retained for audit
+-- (the IM conversation history); no ack — the caller's high-water `seq` is the ack.
+CREATE TABLE IF NOT EXISTS im_inbox (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    participant_id TEXT NOT NULL,
+    from_ref TEXT,
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_im_inbox_participant_seq ON im_inbox (participant_id, seq);
 "#;

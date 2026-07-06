@@ -124,6 +124,40 @@ pub fn inbox_seed_at(
     })
 }
 
+/// The result of an offline IM reply — the soul's egress into a participant inbox.
+#[derive(Debug, Clone, Serialize)]
+pub struct ImReplyReport {
+    pub participant_id: String,
+    /// The delivered entry's cursor seq (what the participant's poll advances past).
+    pub seq: i64,
+}
+
+/// Deliver the soul's reply into an IM participant's passive inbox WITHOUT reaching
+/// the running runtime over HTTP — a direct store write (the mirror of `inbox_seed`),
+/// so a soul replying MID-TURN never re-enters the turn-holding server (no self-call
+/// deadlock). `strand_id` is the ambient current conversation (`SANTI_STRAND_ID` in
+/// the soul's shell env); it must be an IM conversation (an `im:<participant>` label)
+/// — the reply-routing correlation resolves the target participant from it.
+pub fn im_reply(strand_id: &str, content: &str) -> Result<ImReplyReport, String> {
+    im_reply_at(&config::resolve_runtime_paths(), strand_id, content)
+}
+
+pub fn im_reply_at(
+    paths: &RuntimePaths,
+    strand_id: &str,
+    content: &str,
+) -> Result<ImReplyReport, String> {
+    let store = santi_core::SantiStore::open(&paths.database_path)?;
+    let participant_id = store
+        .im_participant_for_strand(strand_id)?
+        .ok_or_else(|| format!("strand {strand_id} is not an IM conversation"))?;
+    let entry = store.enqueue_im_inbox(&participant_id, Some(strand_id), content)?;
+    Ok(ImReplyReport {
+        participant_id,
+        seq: entry.seq,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,6 +274,47 @@ mod tests {
             started.drained_messages[0].message.message_kind,
             santi_core::MessageKind::SantiSystem
         );
+    }
+
+    #[test]
+    fn im_reply_delivers_into_the_conversations_participant_inbox() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let paths = paths_under(temp.path());
+        // The IM send would have created an `im:<participant>` conversation strand.
+        let strand_id = {
+            let store = santi_core::SantiStore::open(&paths.database_path).expect("open");
+            store.ensure_im_participant("operator", "human").unwrap();
+            store
+                .find_or_create_strand_by_label(santi_core::DEFAULT_SOUL_ID, "im:operator")
+                .expect("conversation strand")
+                .id
+        };
+
+        // The soul's offline egress: reply into the current conversation.
+        let report = im_reply_at(&paths, &strand_id, "一切正常，我在。").unwrap();
+        assert_eq!(report.participant_id, "operator");
+        assert!(report.seq > 0);
+
+        // The participant polls its inbox and sees exactly that reply, from the
+        // conversation strand — the read-then-cursor delivery, no ack.
+        let store = santi_core::SantiStore::open(&paths.database_path).expect("reopen");
+        let entries = store.poll_im_inbox("operator", 0).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].content, "一切正常，我在。");
+        assert_eq!(entries[0].from_ref.as_deref(), Some(strand_id.as_str()));
+    }
+
+    #[test]
+    fn im_reply_into_a_non_conversation_strand_errors() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let paths = paths_under(temp.path());
+        let strand_id = {
+            let store = santi_core::SantiStore::open(&paths.database_path).expect("open");
+            store.create_strand().expect("create strand").id
+        };
+        // A plain strand isn't an IM conversation — no participant to reach.
+        let err = im_reply_at(&paths, &strand_id, "x").unwrap_err();
+        assert!(err.contains("not an IM conversation"), "got: {err}");
     }
 
     #[test]

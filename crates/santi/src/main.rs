@@ -10,7 +10,7 @@
 
 use std::collections::HashSet;
 use std::io::Write as _;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -111,6 +111,45 @@ enum Command {
     /// Compact a strand's own timeline, or query a compact's detail.
     #[command(subcommand)]
     Compact(CompactCommand),
+    /// The plain IM integrated into santi — converse with a soul as a persistent
+    /// participant (send/poll over HTTP), or the soul's offline reply egress.
+    #[command(subcommand)]
+    Im(ImCommand),
+}
+
+#[derive(Subcommand)]
+enum ImCommand {
+    /// Send a message to a soul via the integrated IM, as a persistent
+    /// participant, and (with --reply) wait for the soul's reply. Target soul
+    /// from --soul/SANTI_SOUL_ID; participant from --as/SANTI_IM_PARTICIPANT.
+    Send {
+        /// The message text.
+        text: String,
+        /// Your persistent participant id (your IM identity + reply address).
+        #[arg(long = "as", env = "SANTI_IM_PARTICIPANT", default_value = "operator")]
+        participant: String,
+        /// After sending, poll your inbox until the soul replies (or timeout).
+        #[arg(long)]
+        reply: bool,
+        /// Max seconds to wait for a reply with --reply (turns run minutes).
+        #[arg(long, default_value_t = 300)]
+        reply_timeout: u64,
+    },
+    /// Poll a participant's IM inbox once — entries past --since (0 = all).
+    Poll {
+        /// The participant id whose inbox to read.
+        #[arg(long = "as", env = "SANTI_IM_PARTICIPANT", default_value = "operator")]
+        participant: String,
+        #[arg(long, default_value_t = 0)]
+        since: i64,
+    },
+    /// The soul's egress: reply into the current IM conversation's participant
+    /// inbox. OFFLINE (a direct store write, no HTTP — a mid-turn reply never
+    /// re-enters the turn-holding server). Conversation from --strand/SANTI_STRAND_ID.
+    Reply {
+        /// The reply text.
+        text: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -199,6 +238,9 @@ async fn main() -> Result<()> {
         Command::Doctor => run_doctor(),
         Command::Inbox(inbox) => run_inbox(inbox, cli.strand),
         Command::Upgrade { deb, run } => run_upgrade(deb, run),
+        // The soul's IM reply is an offline store write (like `inbox seed`) — no
+        // HTTP, so a mid-turn reply never re-enters the turn-holding server.
+        Command::Im(ImCommand::Reply { text }) => run_im_reply(text, cli.strand),
         other => {
             let defaults = ClientDefaults {
                 strand: cli.strand,
@@ -277,6 +319,23 @@ fn run_inbox(command: InboxCommand, default_strand: Option<String>) -> Result<()
             Ok(())
         }
     }
+}
+
+/// The soul's IM reply egress (local ops, no HTTP). Resolves the current IM
+/// conversation from --strand/SANTI_STRAND_ID (ambient in the soul's shell) and
+/// delivers the reply into that conversation's participant inbox — a direct store
+/// write, so a mid-turn reply never re-enters the turn-holding server.
+fn run_im_reply(text: String, default_strand: Option<String>) -> Result<()> {
+    let strand_id = default_strand
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!("no strand id: set --strand / SANTI_STRAND_ID (the IM conversation)")
+        })?;
+    let report =
+        santi_api::ops::im_reply(&strand_id, &text).map_err(|error| anyhow::anyhow!(error))?;
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
 }
 
 /// Self-upgrade (local ops, no HTTP). `--run` executes the orchestration (what
@@ -359,6 +418,32 @@ async fn run_client(
         Command::Strand(StrandCommand::Events { id }) => {
             let id = defaults.resolve_strand(id)?;
             follow(&client, &format!("{base}/api/v1/strands/{id}/events")).await
+        }
+        Command::Im(ImCommand::Send {
+            text,
+            participant,
+            reply,
+            reply_timeout,
+        }) => {
+            let soul = defaults
+                .soul()
+                .ok_or_else(|| anyhow::anyhow!("no target soul: set --soul / SANTI_SOUL_ID"))?;
+            let body = serde_json::json!({
+                "soul_id": soul,
+                "participant_id": participant,
+                "content": text,
+            });
+            im_send(&client, &base, body, &participant, reply, reply_timeout).await
+        }
+        Command::Im(ImCommand::Poll { participant, since }) => {
+            get(
+                &client,
+                &format!("{base}/api/v1/im/inbox/{participant}?since={since}"),
+            )
+            .await
+        }
+        Command::Im(ImCommand::Reply { .. }) => {
+            unreachable!("im reply is handled before the client path")
         }
         Command::Compact(CompactCommand::Exec {
             from,
@@ -680,6 +765,100 @@ async fn follow(client: &reqwest::Client, url: &str) -> Result<()> {
         stdout.flush().ok();
     }
     Ok(())
+}
+
+/// IM send: POST the message, then (with --reply) poll the participant's inbox
+/// for the soul's reply until it arrives or the timeout elapses. Baselines the
+/// inbox high-water BEFORE sending so only the NEW reply is shown; on silence it
+/// returns (the reply may still arrive later — the caller can poll it).
+async fn im_send(
+    client: &reqwest::Client,
+    base: &str,
+    body: serde_json::Value,
+    participant: &str,
+    reply: bool,
+    reply_timeout: u64,
+) -> Result<()> {
+    let baseline = if reply {
+        im_inbox_high_water(client, base, participant).await?
+    } else {
+        0
+    };
+    let url = format!("{base}/api/v1/im/send");
+    let response = client
+        .post(&url)
+        .timeout(REQUEST_TIMEOUT)
+        .json(&body)
+        .send()
+        .await
+        .with_context(|| format!("POST {url}"))?;
+    let status = response.status();
+    let text = response.text().await.context("read response body")?;
+    if !status.is_success() {
+        println!("{text}");
+        anyhow::bail!("im send failed with status {status}");
+    }
+    if !reply {
+        match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(value) => println!("{}", serde_json::to_string_pretty(&value)?),
+            Err(_) => println!("{text}"),
+        }
+        return Ok(());
+    }
+    // Poll for the reply. A real turn runs minutes; poll gently past the baseline.
+    let inbox_url = format!("{base}/api/v1/im/inbox/{participant}?since={baseline}");
+    let deadline = Instant::now() + Duration::from_secs(reply_timeout);
+    loop {
+        let entries: serde_json::Value = client
+            .get(&inbox_url)
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .with_context(|| format!("GET {inbox_url}"))?
+            .json()
+            .await
+            .context("parse inbox")?;
+        if entries
+            .as_array()
+            .is_some_and(|entries| !entries.is_empty())
+        {
+            println!("{}", serde_json::to_string_pretty(&entries)?);
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            eprintln!(
+                "(no reply within {reply_timeout}s — it may still arrive; poll: santi im poll --as {participant} --since {baseline})"
+            );
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
+/// The current max `seq` in a participant's inbox — the baseline a `--reply` send
+/// polls past, so it shows only the new reply, not the conversation history.
+async fn im_inbox_high_water(
+    client: &reqwest::Client,
+    base: &str,
+    participant: &str,
+) -> Result<i64> {
+    let url = format!("{base}/api/v1/im/inbox/{participant}?since=0");
+    let entries: serde_json::Value = client
+        .get(&url)
+        .timeout(REQUEST_TIMEOUT)
+        .send()
+        .await
+        .with_context(|| format!("GET {url}"))?
+        .json()
+        .await
+        .context("parse inbox")?;
+    Ok(entries
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.get("seq").and_then(serde_json::Value::as_i64))
+        .max()
+        .unwrap_or(0))
 }
 
 /// POST a send, then optionally `--watch` the stream until the strand is

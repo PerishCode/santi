@@ -349,6 +349,57 @@ pub enum IngestOutcome {
     Rejected { reason: String },
 }
 
+/// The external-label prefix that marks a strand as an IM conversation. The IM
+/// layer builds `im:<participant_id>` labels; the reply-routing correlation
+/// strips this back to the participant. Shared by the IM store, the API send
+/// handler, and the offline `im reply` egress.
+pub const IM_LABEL_PREFIX: &str = "im:";
+
+/// IM inbound: a participant sends `content` to the soul `soul_id`. The runtime
+/// primitive stays source-less — the sender's address (`participant_id`) is IM
+/// envelope only, carried into the `im:<participant_id>` conversation label.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ImSendRequest {
+    pub soul_id: String,
+    pub participant_id: String,
+    pub content: String,
+}
+
+/// Result of an IM send: durable-enqueue confirmation (the soul may still be
+/// mid-turn). Poll `GET /api/v1/im/inbox/{participant_id}` for the reply.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ImSendResponse {
+    pub accepted: bool,
+    pub participant_id: String,
+    pub strand_id: Option<String>,
+    pub reason: Option<String>,
+}
+
+/// A persistent IM participant — a messaging endpoint in the plain IM integrated
+/// into santi (conceptually orthogonal to the runtime). A `human` participant has
+/// a passive inbox (polled); a `soul` participant's inbox is its strand and is
+/// NOT stored in the IM tables.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ImParticipant {
+    pub id: String,
+    pub kind: String,
+    pub created_at: Timestamp,
+}
+
+/// One delivered message in a participant's IM inbox — a return value it catches.
+/// `seq` is a global monotonic cursor (the caller polls `seq > since` and dedups
+/// by it; the high-water `seq` IS the ack). `from_ref` names the soul strand that
+/// replied.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ImInboxEntry {
+    pub seq: i64,
+    pub id: String,
+    pub participant_id: String,
+    pub from_ref: Option<String>,
+    pub content: String,
+    pub created_at: Timestamp,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SantiStreamEvent {
     pub event_id: String,

@@ -18,10 +18,11 @@ use axum::{
 use futures_core::Stream;
 use santi_core::{
     CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSoulRequest,
-    CreateStrandResponse, CreateWebhookRequest, ErrorResponse, HealthResponse, IngestOutcome,
-    MaterialRequest, SantiService, SantiServiceConfig, SantiStreamEvent, SantiStreamPayload,
-    SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand, StrandDetail, StrandMaterial,
-    StrandRuntimeSnapshot, WebhookSubscription, prefixed_id, timestamp_now,
+    CreateStrandResponse, CreateWebhookRequest, ErrorResponse, HealthResponse, ImInboxEntry,
+    ImSendRequest, ImSendResponse, IngestOutcome, MaterialRequest, SantiService,
+    SantiServiceConfig, SantiStreamEvent, SantiStreamPayload, SendStrandAcceptedResponse,
+    SendStrandRequest, Soul, Strand, StrandDetail, StrandMaterial, StrandRuntimeSnapshot,
+    WebhookSubscription, prefixed_id, timestamp_now,
 };
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -151,6 +152,10 @@ fn router(service: SantiService) -> Router {
         .route("/api/v1/strands/{strand_id}/compact", post(compact_exec))
         .route("/api/v1/compacts/{compact_id}", get(compact_query))
         .route("/api/v1/strands/{strand_id}/runtime", get(runtime_snapshot))
+        // IM layer (orthogonal to the runtime; shares the server for cold-start):
+        // send into a soul's IM conversation, poll a participant's passive inbox.
+        .route("/api/v1/im/send", post(send_im))
+        .route("/api/v1/im/inbox/{participant_id}", get(poll_im))
         .route(
             "/api/v1/bucket/{soul_id}/{strand_id}/{*key}",
             get(crate::bucket::get_bucket_object),
@@ -567,6 +572,74 @@ async fn runtime_snapshot(
         .ok_or_else(|| ApiError::not_found("strand not found"))
 }
 
+// ── IM layer routes ─────────────────────────────────────────────────────────
+// The plain IM integrated into santi. `strand send`/the runtime stay source-less;
+// the participant address is IM envelope only. Inbound reuses the runtime primitive
+// (Text into an `im:<participant>` conversation strand). The reply comes back into
+// the participant's passive inbox (written by the soul's offline `im reply` egress).
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/im/send",
+    request_body = ImSendRequest,
+    responses(
+        (status = 200, body = ImSendResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 500, body = ErrorResponse)
+    )
+)]
+async fn send_im(
+    State(service): State<SantiService>,
+    Json(request): Json<ImSendRequest>,
+) -> Result<Json<ImSendResponse>, ApiError> {
+    let outcome = service
+        .im_send(&request.soul_id, &request.participant_id, &request.content)
+        .map_err(ApiError::from_service)?;
+    let response = match outcome {
+        IngestOutcome::Accepted { strand_id } => ImSendResponse {
+            accepted: true,
+            participant_id: request.participant_id,
+            strand_id: Some(strand_id),
+            reason: None,
+        },
+        IngestOutcome::Rejected { reason } => ImSendResponse {
+            accepted: false,
+            participant_id: request.participant_id,
+            strand_id: None,
+            reason: Some(reason),
+        },
+    };
+    Ok(Json(response))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/im/inbox/{participant_id}",
+    params(
+        ("participant_id" = String, Path),
+        ("since" = Option<i64>, Query)
+    ),
+    responses(
+        (status = 200, body = Vec<ImInboxEntry>),
+        (status = 500, body = ErrorResponse)
+    )
+)]
+async fn poll_im(
+    State(service): State<SantiService>,
+    Path(participant_id): Path<String>,
+    Query(params): Query<ImPollParams>,
+) -> Result<Json<Vec<ImInboxEntry>>, ApiError> {
+    service
+        .im_poll(&participant_id, params.since.unwrap_or(0))
+        .map(Json)
+        .map_err(ApiError::from_service)
+}
+
+#[derive(serde::Deserialize)]
+struct ImPollParams {
+    since: Option<i64>,
+}
+
 async fn openapi() -> Json<utoipa::openapi::OpenApi> {
     Json(ApiDoc::openapi())
 }
@@ -700,6 +773,8 @@ impl IntoResponse for ApiError {
         compact_exec,
         compact_query,
         runtime_snapshot,
+        send_im,
+        poll_im,
         crate::bucket::get_bucket_object
     ),
     components(schemas(
@@ -712,6 +787,10 @@ impl IntoResponse for ApiError {
         MaterialRequest,
         SendStrandRequest,
         SendStrandAcceptedResponse,
+        santi_core::ImSendRequest,
+        santi_core::ImSendResponse,
+        santi_core::ImInboxEntry,
+        santi_core::ImParticipant,
         StrandDetail,
         StrandMaterial,
         StrandRuntimeSnapshot,

@@ -1,0 +1,26 @@
+# santi ops SSH config — SEED. Copy to `.local/ssh/config` (gitignored) and fill:
+#   - HostName for each host below
+#   - the private key at `.local/ssh/id_santi_ops` (0600), referenced under Host *
+#   - `.local/ssh/known_hosts` is populated on first connect (accept-new)
+#
+# The `:ssh` and `:deploy` wrappers run `ssh -F .local/ssh/config <host>` from the
+# repo root, so all paths here are relative to the repo root. Real IPs are a
+# secret on a PUBLIC repo — they live only in `.local/`, never in this template.
+
+Host *
+  User root
+  IdentityFile .local/ssh/id_santi_ops
+  UserKnownHostsFile .local/ssh/known_hosts
+  IdentitiesOnly yes
+  BatchMode yes
+  StrictHostKeyChecking accept-new
+  ConnectTimeout 10
+  ServerAliveInterval 15
+  ServerAliveCountMax 4
+  ControlMaster auto
+  ControlPath .local/ssh/cm-%h-%p
+  ControlPersist 60s
+
+# santi's live host (the runtime + its k3s work surface).
+Host hk-03.zxiyun
+  HostName <FILL: hk-03 ip>

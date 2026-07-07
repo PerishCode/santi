@@ -105,6 +105,29 @@ pub fn inbox_seed_at(
     if store.strand(strand_id)?.is_none() {
         return Err(format!("unknown strand: {strand_id}"));
     }
+    inbox_seed_existing_strand(&store, strand_id, text)
+}
+
+/// Enqueue into the strand anchored by a stable label, creating it if it is
+/// missing. This is the offline twin of webhook per-thread ingest's
+/// label→strand materialization: the label is the durable routing anchor, while
+/// the concrete strand id is a replaceable room.
+pub(crate) fn inbox_seed_by_label_at(
+    paths: &RuntimePaths,
+    soul_id: &str,
+    label: &str,
+    text: &str,
+) -> Result<SeedReport, String> {
+    let store = santi_core::SantiStore::open(&paths.database_path)?;
+    let strand = store.find_or_create_strand_by_label(soul_id, label)?;
+    inbox_seed_existing_strand(&store, &strand.id, text)
+}
+
+fn inbox_seed_existing_strand(
+    store: &santi_core::SantiStore,
+    strand_id: &str,
+    text: &str,
+) -> Result<SeedReport, String> {
     let outcome = store.enqueue_inbox(
         strand_id,
         santi_core::MessageKind::SantiSystem,

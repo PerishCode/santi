@@ -68,9 +68,21 @@ pub struct UpgradeReport {
     pub outcome: Outcome,
     /// The text seeded into the soul's inbox ("come look" / failure feedback).
     pub record: String,
-    /// Whether the record was durably enqueued (false ⟺ no self-strand
-    /// configured or the seed was rejected; the upgrade still completes).
+    /// Whether the record was durably enqueued (false ⟺ the seed failed; the
+    /// upgrade still completes, but `warnings` makes the failure loud).
     pub seeded: bool,
+    /// The concrete strand that received the record. It is a materialized room;
+    /// the durable addressing anchor is a stable label.
+    pub seeded_strand_id: Option<String>,
+    /// Explicit warnings that must not be hidden behind `seeded: false`.
+    pub warnings: Vec<String>,
+}
+
+/// The successful result of seeding a come-look record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SeedOutcome {
+    pub strand_id: String,
+    pub warnings: Vec<String>,
 }
 
 /// The launcher's fast return: "started listening, max timeout, log location".
@@ -100,7 +112,7 @@ pub trait UpgradeHost {
     fn rollback(&mut self) -> Result<(), String>;
     /// Seed one durable "come look" record into the soul's self-strand, offline,
     /// using the FINAL version's binary/schema. Best-effort at the call site.
-    fn seed(&mut self, text: &str) -> Result<(), String>;
+    fn seed(&mut self, text: &str) -> Result<SeedOutcome, String>;
     /// Start the FINAL version for real (boot recovery then drains the seed).
     fn start(&mut self) -> Result<(), String>;
 }
@@ -138,9 +150,22 @@ pub fn run_upgrade<H: UpgradeHost>(
 
     // Seed the truthful record (offline, into the FINAL DB) BEFORE the final
     // start, so boot recovery is guaranteed to wake the soul into it. Seeding is
-    // best-effort: a missing self-strand must not abort an otherwise-done upgrade.
+    // best-effort, but failures must be loud: never hide them behind `seeded:false`.
     let record = compose_record(deb, &outcome);
-    let seeded = host.seed(&record).is_ok();
+    let mut warnings = Vec::new();
+    let (seeded, seeded_strand_id) = match host.seed(&record) {
+        Ok(seed) => {
+            warnings.extend(seed.warnings);
+            (true, Some(seed.strand_id))
+        }
+        Err(error) => {
+            warnings.push(format!("come-look seed failed: {error}"));
+            (false, None)
+        }
+    };
+    for warning in &warnings {
+        eprintln!("santi: upgrade warning: {warning}");
+    }
 
     // Start the final version for real.
     host.start()?;
@@ -149,6 +174,8 @@ pub fn run_upgrade<H: UpgradeHost>(
         outcome,
         record,
         seeded,
+        seeded_strand_id,
+        warnings,
     })
 }
 
@@ -180,6 +207,57 @@ pub fn upgrade_timeout() -> Duration {
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(600);
     Duration::from_secs(secs)
+}
+
+fn self_ops_label(soul_id: &str) -> String {
+    format!("soul:{soul_id}:ops")
+}
+
+fn seed_come_look_at(
+    paths: &RuntimePaths,
+    soul_id: &str,
+    configured_strand: Option<&str>,
+    text: &str,
+) -> Result<SeedOutcome, String> {
+    let mut warnings = Vec::new();
+    if let Some(strand_id) = configured_strand
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        match crate::ops::inbox_seed_at(paths, strand_id, text) {
+            Ok(report) if report.accepted => {
+                return Ok(SeedOutcome {
+                    strand_id: report.strand_id,
+                    warnings,
+                });
+            }
+            Ok(report) => {
+                warnings.push(format!(
+                    "configured SANTI_STRAND_ID {strand_id} rejected the come-look seed: {}.                      Falling back to stable self-strand label.",
+                    report.reason.unwrap_or_else(|| "seed rejected".to_string())
+                ));
+            }
+            Err(error) => {
+                warnings.push(format!(
+                    "configured SANTI_STRAND_ID {strand_id} could not receive the come-look seed:                      {error}. Falling back to stable self-strand label."
+                ));
+            }
+        }
+    }
+
+    let label = self_ops_label(soul_id);
+    let report = crate::ops::inbox_seed_by_label_at(paths, soul_id, &label, text)?;
+    if report.accepted {
+        Ok(SeedOutcome {
+            strand_id: report.strand_id,
+            warnings,
+        })
+    } else {
+        Err(format!(
+            "stable self-strand label {label} rejected the come-look seed: {}",
+            report.reason.unwrap_or_else(|| "seed rejected".to_string())
+        ))
+    }
 }
 
 fn request_path(paths: &RuntimePaths) -> PathBuf {
@@ -349,18 +427,14 @@ impl UpgradeHost for SystemHost {
         Ok(())
     }
 
-    fn seed(&mut self, text: &str) -> Result<(), String> {
-        let strand = env::var("SANTI_STRAND_ID")
+    fn seed(&mut self, text: &str) -> Result<SeedOutcome, String> {
+        let soul_id = env::var("SANTI_SOUL_ID")
             .ok()
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
-            .ok_or("no SANTI_STRAND_ID configured for the come-look record")?;
-        let report = crate::ops::inbox_seed_at(&self.paths, &strand, text)?;
-        if report.accepted {
-            Ok(())
-        } else {
-            Err(report.reason.unwrap_or_else(|| "seed rejected".to_string()))
-        }
+            .unwrap_or_else(|| santi_core::DEFAULT_SOUL_ID.to_string());
+        let configured_strand = env::var("SANTI_STRAND_ID").ok();
+        seed_come_look_at(&self.paths, &soul_id, configured_strand.as_deref(), text)
     }
 
     fn start(&mut self) -> Result<(), String> {

@@ -1,6 +1,7 @@
 mod failure;
 mod im;
 mod materials;
+mod runtime_notice;
 mod text_delta;
 mod thinking;
 mod timing;
@@ -29,6 +30,7 @@ use crate::{
     TurnActivityState, WebhookSubscription, prefixed_id, timestamp_now,
 };
 use failure::ProviderTurnFailure;
+use runtime_notice::{ProviderInputObservation, RuntimeNoticeBus};
 use text_delta::TextDeltaUpdate;
 use timing::{ProviderTurnTiming, provider_event_name};
 
@@ -39,6 +41,7 @@ pub struct SantiService {
     pub(crate) config: SantiServiceConfig,
     material_cache: Arc<Mutex<HashMap<MaterialCacheKey, StrandMaterial>>>,
     stream_events: broadcast::Sender<SantiStreamEvent>,
+    runtime_notices: RuntimeNoticeBus,
     /// Graceful-shutdown latch (PHASE-07): once set, `poke` refuses to START new
     /// turns, so inbox CONSUMPTION pauses while ingest keeps durably enqueuing
     /// (the inbox is an MQ — we stop consuming, never producing). The in-flight
@@ -77,6 +80,7 @@ impl SantiService {
             config,
             material_cache: Arc::new(Mutex::new(HashMap::new())),
             stream_events: broadcast::channel(1024).0,
+            runtime_notices: RuntimeNoticeBus::new(),
             shutting_down: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -444,6 +448,7 @@ impl SantiService {
                 );
             }
         }
+        self.drain_internal_runtime_notices_for_turn(&turn_id);
         // Re-check: a turn is one thread "catching up"; requests that arrived
         // during it (seq past this turn's start) make the strand behind
         // again → drive the next turn now.
@@ -514,6 +519,7 @@ impl SantiService {
             // the previous round (no function_call_outputs side-channel).
             let input = provider_try!(provider_input(&self.store, strand_id));
             let metadata = self.provider.metadata();
+            let provider_family = metadata.provider.to_string();
             let request = ProviderRequest {
                 model: metadata.model,
                 instructions: Some(provider_try!(self.system_prompt_text(strand_id))),
@@ -526,6 +532,15 @@ impl SantiService {
                 request.input.len(),
                 request.instructions.as_ref().map_or(0, |text| text.len()),
             );
+            self.observe_provider_input_for_notices(ProviderInputObservation {
+                strand_id,
+                turn_id,
+                round,
+                provider: &provider_family,
+                model: &request.model,
+                input: &request.input,
+                instructions: request.instructions.as_deref(),
+            });
             self.publish_turn_activity(strand_id, turn_id, TurnActivityState::Requesting, None);
             let mut stream = match self.provider.stream_response(request).await {
                 Ok(stream) => {

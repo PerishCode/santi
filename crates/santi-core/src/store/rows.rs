@@ -118,16 +118,12 @@ pub(super) fn map_tool_call_row(row: &Row<'_>) -> rusqlite::Result<ToolCall> {
     let arguments = serde_json::from_str::<Value>(&arguments_text).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(error))
     })?;
-    let provider_item: Option<String> = row.get(4)?;
     Ok(ToolCall {
         id: row.get(0)?,
         turn_id: row.get(1)?,
         tool_name: row.get(2)?,
         arguments,
-        provider_item: provider_item.and_then(|value| serde_json::from_str(&value).ok()),
-        item_id: row.get(5)?,
-        response_id: row.get(6)?,
-        created_at: row.get(7)?,
+        created_at: row.get(4)?,
     })
 }
 

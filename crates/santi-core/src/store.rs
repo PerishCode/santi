@@ -26,7 +26,7 @@ use schema::SCHEMA;
 /// is wiped + rebuilt (beta: no back-compat migrations yet — see PHASE-07 crux #5).
 /// Public so ops paths (`santi doctor`) can compare a DB's `user_version` to it
 /// WITHOUT opening the store (which would migrate/wipe).
-pub const SCHEMA_VERSION: u32 = 20;
+pub const SCHEMA_VERSION: u32 = 21;
 /// The default soul's id. Public so offline ops (doctor/seed) can address it
 /// without a running service.
 pub const DEFAULT_SOUL_ID: &str = "soul_default";
@@ -114,8 +114,13 @@ impl SantiStore {
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .map_err(|error| error.to_string())?;
         if version != SCHEMA_VERSION {
+            // Tier boundary (PHASE-09 decision #2, thin form): every table below is
+            // EPHEMERAL-tier (rooms / timeline / provider replay material) — a schema
+            // bump may drop-recreate them. A future DURABLE tier (attention / effects
+            // / checkpoints ledger) must instead be MIGRATED, never listed here.
             conn.execute_batch(
                 r#"
+                DROP TABLE IF EXISTS provider_replay_material;
                 DROP TABLE IF EXISTS response_stream_deltas;
                 DROP TABLE IF EXISTS response_runs;
                 DROP TABLE IF EXISTS message_text_contents;

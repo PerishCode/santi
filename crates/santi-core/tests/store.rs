@@ -213,6 +213,7 @@ fn projects_timeline_to_interleaved_items() {
             "shell",
             &serde_json::json!({ "command": "echo hi" }),
             &ToolCallProvenance {
+                provider_family: "openai".to_string(),
                 item: Some(serde_json::json!({ "type": "function_call", "id": "fc_1" })),
                 item_id: Some("fc_1".to_string()),
                 response_id: Some("resp_1".to_string()),

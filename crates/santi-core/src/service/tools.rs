@@ -23,6 +23,7 @@ impl SantiService {
             &call.name,
             &call.arguments,
             &crate::ToolCallProvenance {
+                provider_family: self.provider.metadata().provider.to_string(),
                 item: Some(call.item.clone()),
                 item_id: call.item_id.clone(),
                 response_id: Some(call.response_id.clone()),

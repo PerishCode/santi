@@ -120,29 +120,52 @@ impl SantiStore {
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let now = timestamp_now();
         let strand_id = turn_strand_id(&tx, turn_id)?;
-        let provider_item_text = provenance
-            .item
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(|error| error.to_string())?;
+        // Neutral occurrence: no provider plumbing (PHASE-09 decision #9).
         tx.execute(
             r#"
-            INSERT INTO tool_calls (id, turn_id, tool_name, arguments, provider_item, item_id, response_id, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            INSERT INTO tool_calls (id, turn_id, tool_name, arguments, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
             "#,
             params![
                 tool_call_id,
                 turn_id,
                 tool_name,
                 serde_json::to_string(arguments).map_err(|error| error.to_string())?,
-                provider_item_text,
-                provenance.item_id,
-                provenance.response_id,
                 now
             ],
         )
         .map_err(|error| error.to_string())?;
+        // Adaptor-owned replay material, side-stored. A function_call's raw item
+        // is REGENERABLE (the adaptor can synthesize it from the neutral fields),
+        // so a bad blob is a droppable cache-miss, never a durable poison.
+        let provider_item_text = provenance
+            .item
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| error.to_string())?;
+        if provider_item_text.is_some()
+            || provenance.item_id.is_some()
+            || provenance.response_id.is_some()
+        {
+            tx.execute(
+                r#"
+                INSERT INTO provider_replay_material
+                    (tool_call_id, provider_family, kind, blob, item_id, response_id, schema_version, created_at)
+                VALUES (?1, ?2, 'regenerable', ?3, ?4, ?5, ?6, ?7)
+                "#,
+                params![
+                    tool_call_id,
+                    provenance.provider_family,
+                    provider_item_text,
+                    provenance.item_id,
+                    provenance.response_id,
+                    crate::SCHEMA_VERSION,
+                    now
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        }
         append_entry_in_tx(&tx, &strand_id, StrandTargetType::ToolCall, tool_call_id)?;
         tx.commit().map_err(|error| error.to_string())?;
         tool_call_by_id(&conn, tool_call_id)?.ok_or_else(|| "created tool_call missing".to_string())

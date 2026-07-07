@@ -105,6 +105,29 @@ pub fn inbox_seed_at(
     if store.strand(strand_id)?.is_none() {
         return Err(format!("unknown strand: {strand_id}"));
     }
+    inbox_seed_existing_strand(&store, strand_id, text)
+}
+
+/// Enqueue into the strand anchored by a stable label, creating it if it is
+/// missing. This is the offline twin of webhook per-thread ingest's
+/// label→strand materialization: the label is the durable routing anchor, while
+/// the concrete strand id is a replaceable room.
+pub(crate) fn inbox_seed_by_label_at(
+    paths: &RuntimePaths,
+    soul_id: &str,
+    label: &str,
+    text: &str,
+) -> Result<SeedReport, String> {
+    let store = santi_core::SantiStore::open(&paths.database_path)?;
+    let strand = store.find_or_create_strand_by_label(soul_id, label)?;
+    inbox_seed_existing_strand(&store, &strand.id, text)
+}
+
+fn inbox_seed_existing_strand(
+    store: &santi_core::SantiStore,
+    strand_id: &str,
+    text: &str,
+) -> Result<SeedReport, String> {
     let outcome = store.enqueue_inbox(
         strand_id,
         santi_core::MessageKind::SantiSystem,
@@ -273,6 +296,46 @@ mod tests {
         assert_eq!(
             started.drained_messages[0].message.message_kind,
             santi_core::MessageKind::SantiSystem
+        );
+    }
+
+    #[test]
+    fn seed_by_label_creates_labeled_strand_and_is_drainable_on_boot() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let paths = paths_under(temp.path());
+        santi_core::SantiStore::open(&paths.database_path).expect("open");
+
+        let label = "soul:soul_default:ops";
+        let report = inbox_seed_by_label_at(
+            &paths,
+            santi_core::DEFAULT_SOUL_ID,
+            label,
+            "upgrade finished — come look",
+        )
+        .unwrap();
+        assert!(report.accepted);
+
+        let store = santi_core::SantiStore::open(&paths.database_path).expect("reopen");
+        let strand = store
+            .strand(&report.strand_id)
+            .unwrap()
+            .expect("labeled strand exists");
+        assert_eq!(strand.external_label.as_deref(), Some(label));
+        assert!(
+            store
+                .strands_with_pending_requests()
+                .unwrap()
+                .contains(&report.strand_id),
+            "boot recovery would re-drive this strand"
+        );
+        let started = store
+            .try_start_turn(&report.strand_id, "strand_send", None)
+            .unwrap()
+            .expect("a turn starts by draining the labeled seed");
+        assert_eq!(started.drained_messages.len(), 1);
+        assert_eq!(
+            started.drained_messages[0].content_text,
+            "upgrade finished — come look"
         );
     }
 

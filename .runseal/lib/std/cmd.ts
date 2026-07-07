@@ -36,6 +36,7 @@ export async function run(
     args,
     cwd: options.cwd,
     env: options.env,
+    stdin: "inherit",
     stdout: "inherit",
     stderr: "inherit",
   }).output();

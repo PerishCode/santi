@@ -12,10 +12,13 @@ import { hostDeclared } from "@/lib/sshconfig.ts";
 const SSH_CONFIG = ".local/ssh/config"; // relative to the repo root
 
 function usage(): void {
-  console.log("Usage: runseal :ssh <host> [-- <remote-command>...]");
+  console.log("Usage: runseal :ssh <host> [--tty] [-- <remote-command>...]");
   console.log("");
   console.log("Reaches a santi-operated host through .local/ssh/config (gitignored;");
   console.log("seed .runseal/templates/ssh/config). The host must be declared by a Host line.");
+  console.log("");
+  console.log("With no remote command, :ssh opens an interactive shell and allocates a TTY");
+  console.log("when stdin is a terminal. Use --tty to force TTY allocation for a remote command.");
 }
 
 const args = [...Deno.args];
@@ -30,7 +33,11 @@ if (["-h", "--help", "help"].includes(args[0])) {
 
 const root = repoRoot();
 const host = args[0];
-const rest = args.slice(1);
+let rest = args.slice(1);
+const forceTty = rest[0] === "--tty";
+if (forceTty) {
+  rest = rest.slice(1);
+}
 
 if (!(await hostDeclared(`${root}/${SSH_CONFIG}`, host))) {
   console.error(
@@ -40,11 +47,13 @@ if (!(await hostDeclared(`${root}/${SSH_CONFIG}`, host))) {
 }
 
 // cwd = repo root so the config's relative IdentityFile (.local/ssh/…) resolves.
+const interactiveStdin = Deno.stdin.isTerminal();
+const ttyArgs = forceTty || (rest.length === 0 && interactiveStdin) ? ["-tt"] : [];
 let code: number;
 if (rest.length === 0) {
-  code = await run("ssh", ["-F", SSH_CONFIG, host], { cwd: root });
+  code = await run("ssh", [...ttyArgs, "-F", SSH_CONFIG, host], { cwd: root });
 } else if (rest[0] === "--") {
-  code = await run("ssh", ["-F", SSH_CONFIG, host, ...rest.slice(1)], { cwd: root });
+  code = await run("ssh", [...ttyArgs, "-F", SSH_CONFIG, host, ...rest.slice(1)], { cwd: root });
 } else {
   console.error(":ssh: remote command must be separated with --");
   Deno.exit(2);

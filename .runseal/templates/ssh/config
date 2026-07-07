@@ -8,7 +8,6 @@
 # secret on a PUBLIC repo — they live only in `.local/`, never in this template.
 
 Host *
-  User root
   IdentityFile .local/ssh/id_santi_ops
   UserKnownHostsFile .local/ssh/known_hosts
   IdentitiesOnly yes
@@ -18,9 +17,16 @@ Host *
   ServerAliveInterval 15
   ServerAliveCountMax 4
   ControlMaster auto
-  ControlPath .local/ssh/cm-%h-%p
+  ControlPath .local/ssh/cm-%r@%h-%p
   ControlPersist 60s
 
-# santi's live host (the runtime + its k3s work surface).
+# Host root namespace: machine-level ops, package/systemd/k3s break-glass.
 Host hk-03.zxiyun
   HostName <FILL: hk-03 ip>
+  User root
+
+# Project/user namespace: day-to-day santi repo/runtime work as the service user
+# (for example `~/santi-dev`, `gh`, and runtime-owned files) without a sudo hop.
+Host santi.hk-03.zxiyun
+  HostName <FILL: hk-03 ip>
+  User santi

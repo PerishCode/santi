@@ -6,7 +6,7 @@ use super::{
     SantiStore,
     db::{
         compacts_for_strand, message_record_by_id, message_seq_in_strand, message_to_provider_item,
-        thinking_span_by_id, tool_call_by_id, tool_result_by_id,
+        regenerable_replay_material, thinking_span_by_id, tool_call_by_id, tool_result_by_id,
     },
 };
 
@@ -101,13 +101,18 @@ impl SantiStore {
                 }
                 "tool_call" => {
                     if let Some(tool_call) = tool_call_by_id(&conn, &target_id)? {
+                        // The raw wire item is adaptor-owned advisory replay
+                        // material, side-stored — the neutral tool_call carries
+                        // no provider plumbing. The adaptor validates it and
+                        // regenerates from the neutral fields if it is invalid.
+                        let (item, item_id) = regenerable_replay_material(&conn, &tool_call.id)?;
                         input.push(ProviderItem::FunctionCall {
                             call_id: tool_call.id,
                             name: tool_call.tool_name,
                             arguments_raw: serde_json::to_string(&tool_call.arguments)
                                 .map_err(|error| error.to_string())?,
-                            item: tool_call.provider_item,
-                            item_id: tool_call.item_id,
+                            item,
+                            item_id,
                         });
                     }
                 }

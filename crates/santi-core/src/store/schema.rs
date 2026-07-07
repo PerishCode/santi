@@ -86,14 +86,35 @@ CREATE TABLE IF NOT EXISTS turns (
     finished_at TEXT
 );
 
+-- Neutral occurrence: what tool was called with what arguments. Provider-
+-- agnostic, part of the durable-occurrence timeline. It carries NO provider
+-- wire plumbing (see provider_replay_material) — a neutral read (soul context,
+-- audit, fork) structurally cannot reach provider-specific ids/blobs.
 CREATE TABLE IF NOT EXISTS tool_calls (
     id TEXT PRIMARY KEY,
     turn_id TEXT NOT NULL,
     tool_name TEXT NOT NULL,
     arguments TEXT NOT NULL,
-    provider_item TEXT,
+    created_at TEXT NOT NULL
+);
+
+-- Adaptor-owned, provider-scoped REPLAY MATERIAL for a tool_call: the raw wire
+-- item + wire ids the adaptor used, kept ONLY so a provider adaptor can re-present
+-- the call to that same provider. It is NOT occurrence truth and only the adaptor
+-- projection may interpret it (PHASE-09 decision #9). `kind`:
+--   'regenerable'   — advisory cache; if invalid, drop it and synthesize from the
+--                     neutral fields (the fc-id poison heals here).
+--   'irreplaceable' — a credential/state that cannot be re-synthesized (e.g. a
+--                     future encrypted-reasoning blob); on invalid/missing it is
+--                     quarantined/omitted, NEVER silently regenerated.
+CREATE TABLE IF NOT EXISTS provider_replay_material (
+    tool_call_id TEXT PRIMARY KEY,
+    provider_family TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('regenerable', 'irreplaceable')),
+    blob TEXT,
     item_id TEXT,
     response_id TEXT,
+    schema_version INTEGER,
     created_at TEXT NOT NULL
 );
 

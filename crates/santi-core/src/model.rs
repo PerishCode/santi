@@ -110,11 +110,6 @@ pub struct ToolCall {
     pub turn_id: String,
     pub tool_name: String,
     pub arguments: Value,
-    /// The provider's raw function_call item (replayed verbatim by the Responses
-    /// adapter). Null for older rows / providers that don't surface one.
-    pub provider_item: Option<Value>,
-    pub item_id: Option<String>,
-    pub response_id: Option<String>,
     pub created_at: Timestamp,
 }
 
@@ -123,6 +118,10 @@ pub struct ToolCall {
 /// chat_completions and older rows may have none.
 #[derive(Debug, Clone, Default)]
 pub struct ToolCallProvenance {
+    /// The provider FAMILY this material belongs to (from `ProviderMetadata::
+    /// provider`). Persisted so an adaptor can refuse to replay material minted
+    /// for a different provider (PHASE-09 decision #9: unusable on mismatch).
+    pub provider_family: String,
     pub item: Option<Value>,
     pub item_id: Option<String>,
     pub response_id: Option<String>,

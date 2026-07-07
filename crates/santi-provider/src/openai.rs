@@ -159,16 +159,24 @@ fn response_input(request: &ProviderRequest) -> Value {
                 item,
                 ..
             } => {
-                // Replay the provider's raw item verbatim when present; else
-                // synthesize a function_call item from stored fields.
-                items.push(item.clone().unwrap_or_else(|| {
+                // The raw item is adaptor-owned advisory REPLAY CACHE, not truth.
+                // Validate it before re-sending; if it is absent or invalid (e.g.
+                // an upstream `item_`-prefixed id the API rejects on input), treat
+                // it as a cache-miss and regenerate from the neutral fields. A bad
+                // blob can never become a durable poison this way — old wedged
+                // strands self-heal on re-assembly. (PHASE-09 SLICE 0 invariant.)
+                let wire = validated_function_call_replay(item).unwrap_or_else(|| {
+                    eprintln!(
+                        "santi-provider: ignored invalid openai replay cache for call {call_id}; regenerated from canonical event"
+                    );
                     json!({
                         "type": "function_call",
                         "call_id": call_id,
                         "name": name,
                         "arguments": arguments_raw,
                     })
-                }));
+                });
+                items.push(wire);
             }
             ProviderItem::FunctionCallOutput { call_id, output } => {
                 items.push(json!({
@@ -180,6 +188,40 @@ fn response_input(request: &ProviderRequest) -> Value {
         }
     }
     json!(items)
+}
+
+/// Validate an adaptor-owned function_call REPLAY blob before re-sending it to
+/// the Responses API. The blob is `regenerable` advisory material: return `Some`
+/// only when it is safe to replay verbatim; return `None` (a cache-miss) when it
+/// is absent or invalid — the caller regenerates the item from the neutral
+/// tool_call fields. This is the OpenAI adaptor's own wire rule (per-adaptor
+/// validation); other adaptors validate their own material.
+///
+/// Guards the upstream inconsistency behind this session's fc-id poison: a
+/// Responses proxy may emit a function_call whose output-item `id` is `item_`-
+/// prefixed, yet reject that same id on input ("Expected an ID that begins with
+/// 'fc'"). Rather than forward known-invalid input and let the provider 400
+/// (which also wedges the strand), we drop the blob and regenerate.
+///
+/// NOTE: only `regenerable` material reaches here. `irreplaceable` provider
+/// material (e.g. a future encrypted-reasoning credential) must NOT be validated
+/// through this path and is NEVER silently regenerated — modeling it is deferred,
+/// but it must never be quietly treated as regenerable.
+fn validated_function_call_replay(item: &Option<Value>) -> Option<Value> {
+    let item = item.as_ref()?;
+    if item.get("type").and_then(Value::as_str) != Some("function_call") {
+        return None;
+    }
+    // The output-item `id`, when present, must be `fc`-prefixed on the way back
+    // in. `call_id` (the neutral pairing key) is preserved separately, and the
+    // synthesized fallback carries no `id` at all, so dropping a bad-id blob is a
+    // clean regeneration, not a lossy drop.
+    if let Some(id) = item.get("id").and_then(Value::as_str)
+        && !id.starts_with("fc")
+    {
+        return None;
+    }
+    Some(item.clone())
 }
 
 fn map_tools(tools: Vec<ProviderTool>) -> Vec<Value> {
@@ -446,4 +488,90 @@ struct OpenAIError {
     message: Option<String>,
     #[allow(dead_code)]
     raw: Option<Value>,
+}
+
+#[cfg(test)]
+mod slice0_replay_tests {
+    use super::*;
+    use crate::{ProviderItem, ProviderRequest};
+
+    fn req_with(item: Option<Value>) -> ProviderRequest {
+        ProviderRequest {
+            model: "m".into(),
+            instructions: None,
+            input: vec![ProviderItem::FunctionCall {
+                call_id: "call_1".into(),
+                name: "shell".into(),
+                arguments_raw: "{}".into(),
+                item,
+                item_id: None,
+            }],
+            tools: None,
+            previous_response_id: None,
+        }
+    }
+
+    fn function_call_item(input: &Value) -> Value {
+        input
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|it| it.get("type").and_then(Value::as_str) == Some("function_call"))
+            .expect("a function_call item")
+            .clone()
+    }
+
+    #[test]
+    fn poisoned_item_prefixed_id_is_regenerated_not_forwarded() {
+        // The exact SLICE-0 poison: an upstream `item_`-prefixed id the Responses
+        // API rejects on input. A strand whose timeline holds this must re-assemble
+        // WITHOUT forwarding the bad id — it is dropped + regenerated from canonical.
+        let poisoned = json!({
+            "type": "function_call", "call_id": "call_1",
+            "name": "shell", "arguments": "{}", "id": "item_deadbeef"
+        });
+        let fc = function_call_item(&response_input(&req_with(Some(poisoned))));
+        match fc.get("id").and_then(Value::as_str) {
+            None => {}
+            Some(id) => assert!(id.starts_with("fc"), "must not forward a non-fc id: {id}"),
+        }
+        assert_eq!(fc.get("call_id").and_then(Value::as_str), Some("call_1"));
+        assert_eq!(fc.get("name").and_then(Value::as_str), Some("shell"));
+    }
+
+    #[test]
+    fn valid_fc_id_is_replayed_verbatim() {
+        let good = json!({
+            "type": "function_call", "call_id": "call_1",
+            "name": "shell", "arguments": "{}", "id": "fc_ok"
+        });
+        let fc = function_call_item(&response_input(&req_with(Some(good))));
+        assert_eq!(
+            fc.get("id").and_then(Value::as_str),
+            Some("fc_ok"),
+            "a valid fc-id blob keeps item-fidelity"
+        );
+    }
+
+    #[test]
+    fn absent_material_synthesizes_from_canonical() {
+        let fc = function_call_item(&response_input(&req_with(None)));
+        assert!(fc.get("id").is_none());
+        assert_eq!(fc.get("call_id").and_then(Value::as_str), Some("call_1"));
+    }
+
+    #[test]
+    fn validator_gates_on_fc_prefix_and_shape() {
+        assert!(
+            validated_function_call_replay(&Some(json!({"type":"function_call","id":"fc_1"})))
+                .is_some()
+        );
+        assert!(validated_function_call_replay(&Some(json!({"type":"function_call"}))).is_some());
+        assert!(
+            validated_function_call_replay(&Some(json!({"type":"function_call","id":"item_1"})))
+                .is_none()
+        );
+        assert!(validated_function_call_replay(&Some(json!({"type":"message"}))).is_none());
+        assert!(validated_function_call_replay(&None).is_none());
+    }
 }

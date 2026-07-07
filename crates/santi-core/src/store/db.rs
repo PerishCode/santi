@@ -315,12 +315,39 @@ pub(super) fn tool_call_by_id(
     tool_call_id: &str,
 ) -> Result<Option<ToolCall>, String> {
     conn.query_row(
-        "SELECT id, turn_id, tool_name, arguments, provider_item, item_id, response_id, created_at FROM tool_calls WHERE id = ?1 LIMIT 1",
+        "SELECT id, turn_id, tool_name, arguments, created_at FROM tool_calls WHERE id = ?1 LIMIT 1",
         params![tool_call_id],
         map_tool_call_row,
     )
     .optional()
     .map_err(|error| error.to_string())
+}
+
+/// Load a tool_call's REGENERABLE provider replay material (raw wire item +
+/// item_id), if any. The blob is advisory: the caller (an adaptor) still
+/// validates it and, if invalid, regenerates from the neutral tool_call fields.
+/// Irreplaceable material is deliberately NOT returned here — it must never be
+/// treated as regenerable (PHASE-09 decision #9).
+pub(super) fn regenerable_replay_material(
+    conn: &Connection,
+    tool_call_id: &str,
+) -> Result<(Option<serde_json::Value>, Option<String>), String> {
+    conn.query_row(
+        "SELECT blob, item_id FROM provider_replay_material \
+         WHERE tool_call_id = ?1 AND kind = 'regenerable' LIMIT 1",
+        params![tool_call_id],
+        |row| {
+            let blob: Option<String> = row.get(0)?;
+            let item_id: Option<String> = row.get(1)?;
+            Ok((blob, item_id))
+        },
+    )
+    .optional()
+    .map_err(|error| error.to_string())
+    .map(|found| match found {
+        Some((blob, item_id)) => (blob.and_then(|b| serde_json::from_str(&b).ok()), item_id),
+        None => (None, None),
+    })
 }
 
 pub(super) fn tool_result_by_id(

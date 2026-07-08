@@ -13,6 +13,7 @@ use crate::{
 mod assembly;
 mod compact;
 mod db;
+mod fork;
 mod im;
 mod rows;
 mod runtime;

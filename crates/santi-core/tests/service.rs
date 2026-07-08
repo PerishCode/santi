@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use futures_util::stream;
 use santi_core::{
-    CreateSoulRequest, MessageContent, MessageKind, MessagePart, ObjectBucket, ObjectUri,
-    SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, SantiService, SantiServiceConfig, SantiStore,
-    SendStrandRequest, soul_memory_uri, strand_memory_uri,
+    CreateSoulRequest, MaterialKind, MaterialRequest, MessageContent, MessageIntake, MessageKind,
+    MessagePart, ObjectBucket, ObjectUri, SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, SantiService,
+    SantiServiceConfig, SantiStore, SendStrandRequest, soul_memory_uri, strand_memory_uri,
 };
 use santi_provider::{
     ProviderClient, ProviderEvent, ProviderFunctionCall, ProviderItem, ProviderMetadata,
@@ -11,6 +11,7 @@ use santi_provider::{
 };
 use serde_json::json;
 use std::{
+    fs,
     path::Path,
     sync::{Arc, Mutex},
 };
@@ -740,4 +741,85 @@ async fn bucket_rejects_unsafe_keys() {
             .expect_err("unknown soul")
             .contains("soul not found")
     );
+}
+
+#[test]
+fn fork_strand_syncs_workspace_snapshot() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let runtime_root = temp.path().join("runtime");
+    let service = SantiService::open(
+        SantiServiceConfig {
+            database_path: temp.path().join("santi.sqlite").display().to_string(),
+            runtime_root: runtime_root.display().to_string(),
+            execution_root: temp.path().join("execution").display().to_string(),
+            bind_addr: Some("127.0.0.1:0".to_string()),
+        },
+        Arc::new(FakeProvider::default()),
+    )
+    .expect("open service");
+    let parent = service.create_strand().expect("create parent").strand;
+    let parent_dir = runtime_root.join("strands").join(&parent.id).join("memory");
+    fs::create_dir_all(parent_dir.join("notes")).expect("create parent workspace");
+    fs::write(parent_dir.join("MEMORY.md"), "# Parent strand memory\n").expect("write memory");
+    fs::write(parent_dir.join("notes/plan.md"), "plan v1\n").expect("write note");
+
+    let child = service.fork_strand(&parent.id).expect("fork").strand;
+    let child_dir = runtime_root.join("strands").join(&child.id).join("memory");
+    assert_eq!(
+        fs::read_to_string(child_dir.join("MEMORY.md")).expect("child memory"),
+        "# Parent strand memory\n"
+    );
+    assert_eq!(
+        fs::read_to_string(child_dir.join("notes/plan.md")).expect("child note"),
+        "plan v1\n"
+    );
+
+    fs::write(parent_dir.join("notes/plan.md"), "parent changed\n").expect("rewrite parent");
+    assert_eq!(
+        fs::read_to_string(child_dir.join("notes/plan.md")).expect("child note unchanged"),
+        "plan v1\n"
+    );
+}
+
+#[test]
+fn fork_strand_system_prompt_renders_topology_only() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let service = SantiService::open(
+        SantiServiceConfig {
+            database_path: temp.path().join("santi.sqlite").display().to_string(),
+            runtime_root: temp.path().join("runtime").display().to_string(),
+            execution_root: temp.path().join("execution").display().to_string(),
+            bind_addr: Some("127.0.0.1:0".to_string()),
+        },
+        Arc::new(FakeProvider::default()),
+    )
+    .expect("open service");
+    let parent = service.create_strand().expect("create parent").strand;
+    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store directly");
+    store
+        .append_santi_system_message(
+            &parent.id,
+            MessageContent::text("<system_message>\nkind: seed\n</system_message>"),
+            MessageIntake::Record,
+        )
+        .expect("append parent entry");
+    drop(store);
+    let child = service.fork_strand(&parent.id).expect("fork").strand;
+
+    let text = service
+        .strand_material(
+            &child.id,
+            MaterialRequest {
+                kind: MaterialKind::SystemPrompt,
+            },
+        )
+        .expect("system prompt")
+        .text;
+
+    assert!(text.contains("[santi-fork]"));
+    assert!(text.contains(&format!("parent_strand_id: {}", parent.id)));
+    assert!(text.contains("fork_point: 1"));
+    assert!(!text.contains("merge"));
+    assert!(!text.contains("sandbox"));
+    assert!(!text.contains("recommend"));
 }

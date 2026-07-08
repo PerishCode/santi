@@ -233,6 +233,8 @@ enum StrandCommand {
     Messages { id: Option<String> },
     /// GET /api/v1/strands/{id}/runtime (id falls back to --strand)
     Runtime { id: Option<String> },
+    /// POST /api/v1/strands/{id}/fork (id falls back to --strand)
+    Fork { id: Option<String> },
     /// POST /api/v1/strands/{id}/send.
     ///
     /// Positional forms: `send <id> <text>` or `send <text>` (id then falls
@@ -430,6 +432,10 @@ async fn run_client(
         Command::Strand(StrandCommand::Runtime { id }) => {
             let id = defaults.resolve_strand(id)?;
             get(&client, &format!("{base}/api/v1/strands/{id}/runtime")).await
+        }
+        Command::Strand(StrandCommand::Fork { id }) => {
+            let id = defaults.resolve_strand(id)?;
+            post(&client, &format!("{base}/api/v1/strands/{id}/fork"), None).await
         }
         Command::Strand(StrandCommand::Send { args, watch }) => {
             let (id, text) = split_send_args(args, defaults)?;
@@ -1145,6 +1151,21 @@ mod tests {
 
         // One arg with no default strand is a usage error, not a silent send.
         assert!(split_send_args(vec!["hello".into()], &defaults(None, None)).is_err());
+    }
+
+    #[test]
+    fn parses_strand_fork_command() {
+        let parsed = Cli::try_parse_from(["santi", "strand", "fork", "ss_parent"]).unwrap();
+        let Command::Strand(StrandCommand::Fork { id }) = parsed.command else {
+            panic!("expected strand fork command");
+        };
+        assert_eq!(id.as_deref(), Some("ss_parent"));
+
+        let parsed = Cli::try_parse_from(["santi", "strand", "fork"]).unwrap();
+        let Command::Strand(StrandCommand::Fork { id }) = parsed.command else {
+            panic!("expected strand fork command");
+        };
+        assert_eq!(id, None);
     }
 
     #[test]

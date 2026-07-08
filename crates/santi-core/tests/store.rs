@@ -616,6 +616,96 @@ fn read_schema_version_none_when_db_absent() {
 }
 
 #[test]
+fn schema_21_to_22_migrates_in_place_and_preserves_webhooks() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let db = temp.path().join("santi.sqlite");
+    {
+        let conn = Connection::open(&db).expect("open sqlite");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE souls (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE webhooks (
+                name TEXT PRIMARY KEY,
+                adaptor TEXT NOT NULL,
+                soul_id TEXT NOT NULL,
+                strand_strategy TEXT NOT NULL,
+                secret_env TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE strand_inbox (
+                id TEXT PRIMARY KEY,
+                strand_id TEXT NOT NULL,
+                message_kind TEXT NOT NULL CHECK (message_kind IN ('text', 'santi_system')),
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            INSERT INTO souls (id, created_at, updated_at)
+            VALUES ('soul_default', '2026-07-08T00:00:00Z', '2026-07-08T00:00:00Z');
+            INSERT INTO webhooks (
+                name, adaptor, soul_id, strand_strategy, secret_env, created_at, updated_at
+            ) VALUES (
+                'secretary', 'github', 'soul_default', 'per_thread',
+                'SANTI_WEBHOOK_GITHUB_SECRET', '2026-07-08T00:00:01Z', '2026-07-08T00:00:01Z'
+            );
+            INSERT INTO strand_inbox (id, strand_id, message_kind, content, created_at)
+            VALUES ('inbox_old', 'ss_existing', 'text', '{"parts":[]}', '2026-07-08T00:00:02Z');
+            PRAGMA user_version = 21;
+            "#,
+        )
+        .expect("seed v21 db");
+    }
+
+    let store = SantiStore::open(&db).expect("open migrates v21 to v22");
+    assert_eq!(
+        santi_core::read_schema_version(&db).expect("read version"),
+        Some(santi_core::SCHEMA_VERSION)
+    );
+    let webhooks = store.list_webhooks().expect("list webhooks");
+    assert_eq!(webhooks.len(), 1);
+    let webhook = &webhooks[0];
+    assert_eq!(webhook.name, "secretary");
+    assert_eq!(webhook.adaptor, "github");
+    assert_eq!(webhook.soul_id, "soul_default");
+    assert_eq!(webhook.strand_strategy, "per_thread");
+    assert_eq!(webhook.secret_env, "SANTI_WEBHOOK_GITHUB_SECRET");
+    assert!(store.soul("soul_default").expect("soul").is_some());
+    drop(store);
+
+    let conn = Connection::open(&db).expect("open sqlite");
+    for column in ["source_type", "source_ref", "source_metadata"] {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('strand_inbox') WHERE name = ?1",
+                [column],
+                |row| row.get(0),
+            )
+            .expect("column lookup");
+        assert_eq!(exists, 1, "missing migrated column {column}");
+    }
+    let pending_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM strand_inbox WHERE id = 'inbox_old'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("pending row count");
+    assert_eq!(pending_count, 1, "v21 pending inbox row was wiped");
+    let webhook_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM webhooks WHERE name = 'secretary'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("webhook count");
+    assert_eq!(webhook_count, 1, "webhook subscription was wiped");
+}
+
+#[test]
 fn read_schema_version_is_readonly_and_matches_after_open() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");

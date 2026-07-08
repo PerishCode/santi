@@ -24,8 +24,9 @@ use db::*;
 use rows::{actor_type_db, collect_rows, map_webhook_row, message_state_db};
 use schema::SCHEMA;
 
-/// The schema version this binary expects. On open, a DB at any other version
-/// is wiped + rebuilt (beta: no back-compat migrations yet — see PHASE-07 crux #5).
+/// The schema version this binary expects. On open, recognized runtime-schema
+/// migrations run in place; an unrecognized mismatch still falls back to the
+/// beta wipe + rebuild policy (see PHASE-07 crux #5 / PHASE-09 tier work).
 /// Public so ops paths (`santi doctor`) can compare a DB's `user_version` to it
 /// WITHOUT opening the store (which would migrate/wipe).
 pub const SCHEMA_VERSION: u32 = 22;
@@ -92,6 +93,39 @@ pub fn soul_memory_file(runtime_root: impl AsRef<Path>, soul_id: &str) -> std::p
         .join(crate::workspace_uri::MEMORY_FILE)
 }
 
+fn migrate_schema_21_to_22(conn: &Connection) -> Result<(), String> {
+    // v22 adds enqueue provenance to the inbox. These fields are nullable by
+    // design so existing v21 rows keep their original content/created_at
+    // semantics while new ingress can attach bounded source metadata.
+    add_column_if_missing(conn, "strand_inbox", "source_type", "TEXT")?;
+    add_column_if_missing(conn, "strand_inbox", "source_ref", "TEXT")?;
+    add_column_if_missing(conn, "strand_inbox", "source_metadata", "TEXT")?;
+    Ok(())
+}
+
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), String> {
+    let count: i64 = conn
+        .query_row(
+            &format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1"),
+            params![column],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if count == 0 {
+        conn.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 impl SantiStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, String> {
         if let Some(parent) = path.as_ref().parent() {
@@ -115,11 +149,16 @@ impl SantiStore {
         let version = conn
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .map_err(|error| error.to_string())?;
-        if version != SCHEMA_VERSION {
-            // Tier boundary (PHASE-09 decision #2, thin form): every table below is
-            // EPHEMERAL-tier (rooms / timeline / provider replay material) — a schema
-            // bump may drop-recreate them. A future DURABLE tier (attention / effects
-            // / checkpoints ledger) must instead be MIGRATED, never listed here.
+        if version == 21 && SCHEMA_VERSION == 22 {
+            // v21 -> v22 is additive: PR #47 only adds bounded inbox-source
+            // provenance columns. Migrate it in place so live ingress topology
+            // (notably `webhooks` / the secretary subscription) cannot be
+            // silently severed by this schema bump.
+            migrate_schema_21_to_22(&conn)?;
+        } else if version != SCHEMA_VERSION {
+            // Fallback beta policy for unrecognized schema jumps: drop the
+            // current runtime workspace and rebuild it. This must keep shrinking
+            // as more runtime topology/evidence graduates into migrated tiers.
             conn.execute_batch(
                 r#"
                 DROP TABLE IF EXISTS provider_replay_material;

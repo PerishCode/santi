@@ -19,7 +19,10 @@ use std::{
     path::Path,
     sync::{Arc, Mutex},
 };
-use tokio::time::{Duration, sleep};
+use tokio::{
+    sync::Notify,
+    time::{Duration, sleep},
+};
 
 #[derive(Clone, Default)]
 struct FakeProvider {
@@ -74,6 +77,63 @@ impl ProviderClient for FakeProvider {
             Ok(ProviderEvent::TextDelta("hi from runtime".to_string())),
             Ok(ProviderEvent::Completed {
                 provider_response_id: Some("fake-response-id".to_string()),
+            }),
+        ])))
+    }
+}
+
+#[derive(Clone)]
+struct GatedFirstProvider {
+    requests: Arc<Mutex<Vec<ProviderRequest>>>,
+    first_request_seen: Arc<Notify>,
+    release_first_request: Arc<Notify>,
+}
+
+impl GatedFirstProvider {
+    fn new() -> Self {
+        Self {
+            requests: Arc::new(Mutex::new(Vec::new())),
+            first_request_seen: Arc::new(Notify::new()),
+            release_first_request: Arc::new(Notify::new()),
+        }
+    }
+
+    async fn wait_for_first_request(&self) {
+        tokio::time::timeout(Duration::from_secs(5), self.first_request_seen.notified())
+            .await
+            .expect("first provider request observed");
+    }
+
+    fn release_first_request(&self) {
+        self.release_first_request.notify_one();
+    }
+}
+
+#[async_trait]
+impl ProviderClient for GatedFirstProvider {
+    fn metadata(&self) -> ProviderMetadata {
+        ProviderMetadata {
+            provider: Arc::from("gated-provider"),
+            model: "gated-model".to_string(),
+        }
+    }
+
+    async fn stream_response(&self, request: ProviderRequest) -> Result<ProviderStream, String> {
+        let index = {
+            let mut requests = self.requests.lock().unwrap();
+            requests.push(request);
+            requests.len()
+        };
+        if index == 1 {
+            self.first_request_seen.notify_one();
+            self.release_first_request.notified().await;
+        }
+        Ok(Box::pin(stream::iter(vec![
+            Ok(ProviderEvent::TextDelta(format!(
+                "provider response {index}"
+            ))),
+            Ok(ProviderEvent::Completed {
+                provider_response_id: Some(format!("gated-response-{index}")),
             }),
         ])))
     }
@@ -653,6 +713,119 @@ async fn compact_reminder_after_completed_turn_does_not_drive_duplicate_turn() {
 }
 
 #[tokio::test]
+async fn request_arriving_during_running_turn_drives_one_follow_on_turn() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let provider = Arc::new(GatedFirstProvider::new());
+    let service = SantiService::open(
+        SantiServiceConfig {
+            database_path: temp.path().join("santi.sqlite").display().to_string(),
+            runtime_root: temp.path().join("runtime").display().to_string(),
+            execution_root: temp.path().join("execution").display().to_string(),
+            bind_addr: Some("127.0.0.1:0".to_string()),
+        },
+        provider.clone(),
+    )
+    .expect("open service");
+
+    let strand = service.create_strand().expect("create strand").strand;
+    let first = service
+        .send_strand(
+            &strand.id,
+            SendStrandRequest {
+                content: vec![MessagePart::Text {
+                    text: "first request".to_string(),
+                }],
+            },
+        )
+        .await
+        .expect("send first request");
+    let first_turn_id = first.turn.id.clone();
+    assert_eq!(
+        first
+            .user_message
+            .as_ref()
+            .expect("first send drove synchronously")
+            .content_text,
+        "first request"
+    );
+
+    provider.wait_for_first_request().await;
+
+    let second = service
+        .send_strand(
+            &strand.id,
+            SendStrandRequest {
+                content: vec![MessagePart::Text {
+                    text: "second request".to_string(),
+                }],
+            },
+        )
+        .await
+        .expect("send second request while first is running");
+    assert_eq!(
+        second.turn.id, first_turn_id,
+        "a send during a running turn should report the turn it coalesced into"
+    );
+    assert!(
+        second.user_message.is_none(),
+        "coalesced send is still in the inbox, not yet a timeline message"
+    );
+
+    let running = service
+        .runtime_snapshot(&strand.id)
+        .expect("runtime snapshot")
+        .expect("strand runtime");
+    assert_eq!(running.turns.len(), 1);
+    assert_eq!(running.turns[0].status, santi_core::TurnStatus::Running);
+    assert_eq!(count_messages(&running, "first request"), 1);
+    assert_eq!(count_messages(&running, "second request"), 0);
+    assert_eq!(provider.requests.lock().unwrap().len(), 1);
+
+    provider.release_first_request();
+    let runtime = wait_for_completed_turn_count(&service, &strand.id, 2).await;
+    let requests = provider.requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        2,
+        "one queued real request should drive exactly one follow-on provider call"
+    );
+    assert!(
+        provider_messages(&requests[0]).contains(&("user", "first request")),
+        "first provider call should contain the original request"
+    );
+    assert!(
+        !provider_messages(&requests[0]).contains(&("user", "second request")),
+        "coalesced request must not leak into the already-built first provider input"
+    );
+    let second_input = provider_messages(&requests[1]);
+    assert!(
+        second_input.contains(&("user", "first request")),
+        "follow-on provider call should replay the prior request"
+    );
+    assert!(
+        second_input.contains(&("assistant", "provider response 1")),
+        "follow-on provider call should replay the first assistant response"
+    );
+    assert!(
+        second_input.contains(&("user", "second request")),
+        "follow-on provider call should include the coalesced real request"
+    );
+    drop(requests);
+
+    assert_eq!(runtime.turns.len(), 2);
+    assert!(
+        runtime
+            .turns
+            .iter()
+            .all(|turn| turn.status == santi_core::TurnStatus::Completed)
+    );
+    assert_eq!(count_messages(&runtime, "first request"), 1);
+    assert_eq!(count_messages(&runtime, "second request"), 1);
+    assert_eq!(count_messages(&runtime, "provider response 1"), 1);
+    assert_eq!(count_messages(&runtime, "provider response 2"), 1);
+}
+
+#[tokio::test]
 async fn completed_turn_emits_turn_completed_event() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FakeProvider::default());
@@ -717,6 +890,49 @@ async fn wait_for_any_completed_turn(
         sleep(Duration::from_millis(20)).await;
     }
     panic!("no turn completed");
+}
+
+async fn wait_for_completed_turn_count(
+    service: &SantiService,
+    strand_id: &str,
+    count: usize,
+) -> santi_core::StrandRuntimeSnapshot {
+    for _ in 0..50 {
+        let runtime = service
+            .runtime_snapshot(strand_id)
+            .expect("runtime snapshot")
+            .expect("strand runtime");
+        if runtime
+            .turns
+            .iter()
+            .filter(|turn| turn.status == santi_core::TurnStatus::Completed)
+            .count()
+            >= count
+        {
+            return runtime;
+        }
+        sleep(Duration::from_millis(20)).await;
+    }
+    panic!("{count} turns did not complete");
+}
+
+fn count_messages(runtime: &santi_core::StrandRuntimeSnapshot, text: &str) -> usize {
+    runtime
+        .messages
+        .iter()
+        .filter(|message| message.content_text == text)
+        .count()
+}
+
+fn provider_messages(request: &ProviderRequest) -> Vec<(&str, &str)> {
+    request
+        .input
+        .iter()
+        .filter_map(|item| match item {
+            ProviderItem::Message { role, content } => Some((role.as_str(), content.as_str())),
+            _ => None,
+        })
+        .collect()
 }
 
 async fn wait_for_completed_turn(

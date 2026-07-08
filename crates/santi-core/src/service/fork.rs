@@ -13,7 +13,12 @@ impl SantiService {
         let fork_point = parent.next_seq - 1;
         let child = self.store.fork_strand(&parent.id, fork_point)?;
         if let Err(error) = self.sync_fork_workspace(&parent.id, &child.id) {
-            let _ = fs::remove_dir_all(self.strand_memory_dir(&child.id));
+            let child_memory_dir = self.strand_memory_dir(&child.id);
+            if let Some(child_root) = child_memory_dir.parent() {
+                let _ = fs::remove_dir_all(child_root);
+            } else {
+                let _ = fs::remove_dir_all(&child_memory_dir);
+            }
             let _ = self.store.delete_fork_child_strand(&child.id);
             return Err(format!("fork workspace sync failed: {error}"));
         }

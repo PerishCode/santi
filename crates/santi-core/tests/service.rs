@@ -1,11 +1,13 @@
 use async_trait::async_trait;
 use futures_util::stream;
+#[cfg(unix)]
 use rusqlite::{Connection, params};
+#[cfg(unix)]
+use santi_core::{ActorType, MessageState};
 use santi_core::{
-    ActorType, CreateSoulRequest, MaterialKind, MaterialRequest, MessageContent, MessageIntake,
-    MessageKind, MessagePart, MessageState, ObjectBucket, ObjectUri, SOUL_WORKSPACE_URI,
-    STRAND_WORKSPACE_URI, SantiService, SantiServiceConfig, SantiStore, SendStrandRequest,
-    soul_memory_uri, strand_memory_uri,
+    CreateSoulRequest, MaterialKind, MaterialRequest, MessageContent, MessageIntake, MessageKind,
+    MessagePart, ObjectBucket, ObjectUri, SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, SantiService,
+    SantiServiceConfig, SantiStore, SendStrandRequest, soul_memory_uri, strand_memory_uri,
 };
 use santi_provider::{
     ProviderClient, ProviderEvent, ProviderFunctionCall, ProviderItem, ProviderMetadata,
@@ -783,8 +785,8 @@ fn fork_strand_syncs_workspace_snapshot() {
     );
 }
 
-#[test]
 #[cfg(unix)]
+#[test]
 fn fork_strand_rejects_symlink_workspace_and_rolls_back_child() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");

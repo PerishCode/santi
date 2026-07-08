@@ -6,8 +6,9 @@ use std::{
 use rusqlite::{Connection, params};
 
 use crate::{
-    ActorType, IngestOutcome, MessageContent, MessageIntake, MessageKind, MessageState, Strand,
-    StrandMessage, StrandSelector, StrandTargetType, Turn, prefixed_id, timestamp_now,
+    ActorType, InboxSource, IngestOutcome, MessageContent, MessageIntake, MessageKind,
+    MessageState, Strand, StrandMessage, StrandSelector, StrandTargetType, Turn, prefixed_id,
+    timestamp_now,
 };
 
 mod assembly;
@@ -23,11 +24,12 @@ use db::*;
 use rows::{actor_type_db, collect_rows, map_webhook_row, message_state_db};
 use schema::SCHEMA;
 
-/// The schema version this binary expects. On open, a DB at any other version
-/// is wiped + rebuilt (beta: no back-compat migrations yet — see PHASE-07 crux #5).
+/// The schema version this binary expects. On open, recognized runtime-schema
+/// migrations run in place; an unrecognized mismatch still falls back to the
+/// beta wipe + rebuild policy (see PHASE-07 crux #5 / PHASE-09 tier work).
 /// Public so ops paths (`santi doctor`) can compare a DB's `user_version` to it
 /// WITHOUT opening the store (which would migrate/wipe).
-pub const SCHEMA_VERSION: u32 = 21;
+pub const SCHEMA_VERSION: u32 = 22;
 /// The default soul's id. Public so offline ops (doctor/seed) can address it
 /// without a running service.
 pub const DEFAULT_SOUL_ID: &str = "soul_default";
@@ -91,6 +93,39 @@ pub fn soul_memory_file(runtime_root: impl AsRef<Path>, soul_id: &str) -> std::p
         .join(crate::workspace_uri::MEMORY_FILE)
 }
 
+fn migrate_schema_21_to_22(conn: &Connection) -> Result<(), String> {
+    // v22 adds enqueue provenance to the inbox. These fields are nullable by
+    // design so existing v21 rows keep their original content/created_at
+    // semantics while new ingress can attach bounded source metadata.
+    add_column_if_missing(conn, "strand_inbox", "source_type", "TEXT")?;
+    add_column_if_missing(conn, "strand_inbox", "source_ref", "TEXT")?;
+    add_column_if_missing(conn, "strand_inbox", "source_metadata", "TEXT")?;
+    Ok(())
+}
+
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), String> {
+    let count: i64 = conn
+        .query_row(
+            &format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1"),
+            params![column],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if count == 0 {
+        conn.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 impl SantiStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, String> {
         if let Some(parent) = path.as_ref().parent() {
@@ -114,11 +149,16 @@ impl SantiStore {
         let version = conn
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .map_err(|error| error.to_string())?;
-        if version != SCHEMA_VERSION {
-            // Tier boundary (PHASE-09 decision #2, thin form): every table below is
-            // EPHEMERAL-tier (rooms / timeline / provider replay material) — a schema
-            // bump may drop-recreate them. A future DURABLE tier (attention / effects
-            // / checkpoints ledger) must instead be MIGRATED, never listed here.
+        if version == 21 && SCHEMA_VERSION == 22 {
+            // v21 -> v22 is additive: PR #47 only adds bounded inbox-source
+            // provenance columns. Migrate it in place so live ingress topology
+            // (notably `webhooks` / the secretary subscription) cannot be
+            // silently severed by this schema bump.
+            migrate_schema_21_to_22(&conn)?;
+        } else if version != SCHEMA_VERSION {
+            // Fallback beta policy for unrecognized schema jumps: drop the
+            // current runtime workspace and rebuild it. This must keep shrinking
+            // as more runtime topology/evidence graduates into migrated tiers.
             conn.execute_batch(
                 r#"
                 DROP TABLE IF EXISTS provider_replay_material;
@@ -242,6 +282,7 @@ impl SantiStore {
         };
         Ok(Some(crate::StrandRuntimeSnapshot {
             messages: strand_messages(&conn, strand_id)?,
+            message_events: message_events_for_strand(&conn, strand_id)?,
             turns: turns_for_strand(&conn, &strand.id)?,
             thinking_spans: soul_thinking_spans(&conn, &strand.id)?,
             tool_calls: soul_tool_calls(&conn, &strand.id)?,
@@ -393,6 +434,16 @@ impl SantiStore {
         message_kind: MessageKind,
         content: MessageContent,
     ) -> Result<IngestOutcome, String> {
+        self.enqueue_inbox_with_source(strand_id, message_kind, content, None)
+    }
+
+    pub fn enqueue_inbox_with_source(
+        &self,
+        strand_id: &str,
+        message_kind: MessageKind,
+        content: MessageContent,
+        source: Option<InboxSource>,
+    ) -> Result<IngestOutcome, String> {
         let conn = self.conn.lock().unwrap();
         let pending: i64 = conn
             .query_row(
@@ -411,16 +462,31 @@ impl SantiStore {
         let inbox_id = prefixed_id("inbox");
         let now = timestamp_now();
         let content_json = serde_json::to_string(&content).map_err(|error| error.to_string())?;
+        let source_type = source.as_ref().map(|source| source.source_type.as_str());
+        let source_ref = source
+            .as_ref()
+            .and_then(|source| source.source_ref.as_deref());
+        let source_metadata = source
+            .as_ref()
+            .and_then(|source| source.metadata.as_ref())
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| error.to_string())?;
         conn.execute(
             r#"
-            INSERT INTO strand_inbox (id, strand_id, message_kind, content, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5)
+            INSERT INTO strand_inbox (
+              id, strand_id, message_kind, content, source_type, source_ref, source_metadata, created_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             "#,
             params![
                 inbox_id,
                 strand_id,
                 rows::message_kind_db(&message_kind),
                 content_json,
+                source_type,
+                source_ref,
+                source_metadata,
                 now
             ],
         )

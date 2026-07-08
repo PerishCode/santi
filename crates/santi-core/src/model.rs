@@ -353,6 +353,36 @@ pub enum IngestOutcome {
     Rejected { reason: String },
 }
 
+/// Bounded provenance for an inbound item at the moment it is enqueued. This is
+/// runtime evidence, not model-visible message content: provider assembly reads
+/// `messages`, while this metadata is carried only into drain/audit diagnostics.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InboxSource {
+    pub source_type: String,
+    pub source_ref: Option<String>,
+    pub metadata: Option<Value>,
+}
+
+impl InboxSource {
+    pub fn new(source_type: impl Into<String>) -> Self {
+        Self {
+            source_type: source_type.into(),
+            source_ref: None,
+            metadata: None,
+        }
+    }
+
+    pub fn with_ref(mut self, source_ref: impl Into<String>) -> Self {
+        self.source_ref = Some(source_ref.into());
+        self
+    }
+
+    pub fn with_metadata(mut self, metadata: Value) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
+}
+
 /// The external-label prefix that marks a strand as an IM conversation. The IM
 /// layer builds `im:<participant_id>` labels; the reply-routing correlation
 /// strips this back to the participant. Shared by the IM store, the API send
@@ -483,6 +513,7 @@ pub enum SantiStreamPayload {
 pub struct StrandRuntimeSnapshot {
     pub strand: Strand,
     pub messages: Vec<StrandMessage>,
+    pub message_events: Vec<MessageEvent>,
     pub turns: Vec<Turn>,
     pub thinking_spans: Vec<ThinkingSpan>,
     pub tool_calls: Vec<ToolCall>,

@@ -19,11 +19,12 @@ use futures_core::Stream;
 use santi_core::{
     CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSoulRequest,
     CreateStrandResponse, CreateWebhookRequest, ErrorResponse, ForkStrandResponse, HealthResponse,
-    ImInboxEntry, ImSendRequest, ImSendResponse, IngestOutcome, MaterialRequest, SantiService,
-    SantiServiceConfig, SantiStreamEvent, SantiStreamPayload, SendStrandAcceptedResponse,
-    SendStrandRequest, Soul, Strand, StrandDetail, StrandMaterial, StrandRuntimeSnapshot,
-    WebhookSubscription, prefixed_id, timestamp_now,
+    ImInboxEntry, ImSendRequest, ImSendResponse, InboxSource, IngestOutcome, MaterialRequest,
+    SantiService, SantiServiceConfig, SantiStreamEvent, SantiStreamPayload,
+    SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand, StrandDetail, StrandMaterial,
+    StrandRuntimeSnapshot, WebhookSubscription, prefixed_id, timestamp_now,
 };
+use serde_json::json;
 use tower_http::{
     cors::{Any, CorsLayer},
     trace::TraceLayer,
@@ -354,13 +355,28 @@ async fn ingest_webhook(
     let label = if subscription.strand_strategy == "single" {
         format!("{}:{}", subscription.adaptor, name)
     } else {
-        event.label
+        event.label.clone()
     };
+    let source = InboxSource::new("webhook")
+        .with_ref(format!("{}:{name}", subscription.adaptor))
+        .with_metadata(json!({
+            "subscription": name,
+            "adaptor": subscription.adaptor,
+            "strand_strategy": subscription.strand_strategy,
+            "event_label": event.label,
+            "materialized_label": label,
+            "event": event.source_metadata,
+        }));
     // Rejection handling is the adaptor's own policy: a webhook silently drops
     // + logs (the sender has no way to retry a specific event) rather than
     // surfacing the inbox gate as an error.
     match service
-        .ingest_external_event(&subscription.soul_id, &label, event.santi_system_text)
+        .ingest_external_event_with_source(
+            &subscription.soul_id,
+            &label,
+            event.santi_system_text,
+            Some(source),
+        )
         .map_err(ApiError::from_service)?
     {
         IngestOutcome::Accepted { .. } => {}

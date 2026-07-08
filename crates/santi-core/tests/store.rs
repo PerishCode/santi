@@ -395,6 +395,70 @@ fn drain_commits_all_pending_inbox_entries_to_one_turn() {
 }
 
 #[test]
+fn inbox_drain_records_enqueue_and_commit_provenance() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let db = temp.path().join("santi.sqlite");
+    let store = SantiStore::open(&db).expect("open store");
+    let strand = store.create_strand().expect("create strand");
+
+    store
+        .enqueue_inbox_with_source(
+            &strand.id,
+            MessageKind::Text,
+            MessageContent::text("needs provenance"),
+            Some(
+                santi_core::InboxSource::new("test")
+                    .with_ref("caller-1")
+                    .with_metadata(serde_json::json!({ "adaptor": "fake" })),
+            ),
+        )
+        .expect("enqueue with source");
+
+    let conn = Connection::open(&db).expect("open sqlite");
+    let (inbox_id, enqueued_at): (String, String) = conn
+        .query_row(
+            "SELECT id, created_at FROM strand_inbox WHERE strand_id = ?1",
+            [&strand.id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("inbox row");
+    drop(conn);
+
+    let started = store
+        .try_start_turn(&strand.id, "strand_send", None)
+        .expect("try")
+        .expect("turn started");
+    assert_eq!(started.drained_messages.len(), 1);
+    let drained = &started.drained_messages[0];
+
+    let runtime = store
+        .runtime_snapshot(&strand.id)
+        .expect("runtime snapshot")
+        .expect("strand runtime");
+    assert_eq!(runtime.message_events.len(), 1);
+    let event = &runtime.message_events[0];
+    assert_eq!(event.action, "insert");
+    assert_eq!(event.message_id, drained.message.id);
+    assert_eq!(event.created_at, drained.message.created_at);
+
+    let payload = &event.payload;
+    assert_eq!(payload["kind"], "inbox_drain");
+    assert_eq!(payload["inbox_id"], inbox_id);
+    assert_eq!(payload["enqueued_at"], enqueued_at);
+    assert_eq!(payload["drained_at"], drained.message.created_at);
+    assert_eq!(payload["committing_turn_id"], started.turn.id);
+    assert_eq!(payload["message_id"], drained.message.id);
+    assert_eq!(payload["strand_seq"], drained.relation.strand_seq);
+    assert_eq!(payload["source"]["type"], "test");
+    assert_eq!(payload["source"]["ref"], "caller-1");
+    assert_eq!(payload["source"]["metadata"]["adaptor"], "fake");
+
+    let input = store.assembly_input(&strand.id).expect("assembly input");
+    assert_eq!(input.len(), 1);
+    assert_text(&input[0], "user", "needs provenance");
+}
+
+#[test]
 fn inbox_gate_rejects_past_threshold() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
@@ -549,6 +613,96 @@ fn read_schema_version_none_when_db_absent() {
         santi_core::read_schema_version(&missing).expect("read"),
         None
     );
+}
+
+#[test]
+fn schema_21_to_22_migrates_in_place_and_preserves_webhooks() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let db = temp.path().join("santi.sqlite");
+    {
+        let conn = Connection::open(&db).expect("open sqlite");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE souls (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE webhooks (
+                name TEXT PRIMARY KEY,
+                adaptor TEXT NOT NULL,
+                soul_id TEXT NOT NULL,
+                strand_strategy TEXT NOT NULL,
+                secret_env TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE strand_inbox (
+                id TEXT PRIMARY KEY,
+                strand_id TEXT NOT NULL,
+                message_kind TEXT NOT NULL CHECK (message_kind IN ('text', 'santi_system')),
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            INSERT INTO souls (id, created_at, updated_at)
+            VALUES ('soul_default', '2026-07-08T00:00:00Z', '2026-07-08T00:00:00Z');
+            INSERT INTO webhooks (
+                name, adaptor, soul_id, strand_strategy, secret_env, created_at, updated_at
+            ) VALUES (
+                'secretary', 'github', 'soul_default', 'per_thread',
+                'SANTI_WEBHOOK_GITHUB_SECRET', '2026-07-08T00:00:01Z', '2026-07-08T00:00:01Z'
+            );
+            INSERT INTO strand_inbox (id, strand_id, message_kind, content, created_at)
+            VALUES ('inbox_old', 'ss_existing', 'text', '{"parts":[]}', '2026-07-08T00:00:02Z');
+            PRAGMA user_version = 21;
+            "#,
+        )
+        .expect("seed v21 db");
+    }
+
+    let store = SantiStore::open(&db).expect("open migrates v21 to v22");
+    assert_eq!(
+        santi_core::read_schema_version(&db).expect("read version"),
+        Some(santi_core::SCHEMA_VERSION)
+    );
+    let webhooks = store.list_webhooks().expect("list webhooks");
+    assert_eq!(webhooks.len(), 1);
+    let webhook = &webhooks[0];
+    assert_eq!(webhook.name, "secretary");
+    assert_eq!(webhook.adaptor, "github");
+    assert_eq!(webhook.soul_id, "soul_default");
+    assert_eq!(webhook.strand_strategy, "per_thread");
+    assert_eq!(webhook.secret_env, "SANTI_WEBHOOK_GITHUB_SECRET");
+    assert!(store.soul("soul_default").expect("soul").is_some());
+    drop(store);
+
+    let conn = Connection::open(&db).expect("open sqlite");
+    for column in ["source_type", "source_ref", "source_metadata"] {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('strand_inbox') WHERE name = ?1",
+                [column],
+                |row| row.get(0),
+            )
+            .expect("column lookup");
+        assert_eq!(exists, 1, "missing migrated column {column}");
+    }
+    let pending_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM strand_inbox WHERE id = 'inbox_old'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("pending row count");
+    assert_eq!(pending_count, 1, "v21 pending inbox row was wiped");
+    let webhook_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM webhooks WHERE name = 'secretary'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("webhook count");
+    assert_eq!(webhook_count, 1, "webhook subscription was wiped");
 }
 
 #[test]

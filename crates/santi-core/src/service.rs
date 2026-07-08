@@ -24,11 +24,11 @@ use crate::assembly::input::provider_input;
 use crate::service_prompt::provider_tools;
 use crate::{
     CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSoulRequest,
-    CreateStrandResponse, CreateWebhookRequest, IngestOutcome, MaterialKind, MessageContent,
-    MessageKind, SantiStore, SantiStreamEvent, SantiStreamPayload, SendStrandAcceptedResponse,
-    SendStrandRequest, Soul, Strand, StrandDetail, StrandMaterial, StrandMessage,
-    StrandRuntimeSnapshot, StrandSelector, ThinkingCompletionReason, ThinkingSpan, Turn,
-    TurnActivityState, WebhookSubscription, prefixed_id, timestamp_now,
+    CreateStrandResponse, CreateWebhookRequest, InboxSource, IngestOutcome, MaterialKind,
+    MessageContent, MessageKind, SantiStore, SantiStreamEvent, SantiStreamPayload,
+    SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand, StrandDetail, StrandMaterial,
+    StrandMessage, StrandRuntimeSnapshot, StrandSelector, ThinkingCompletionReason, ThinkingSpan,
+    Turn, TurnActivityState, WebhookSubscription, prefixed_id, timestamp_now,
 };
 use failure::ProviderTurnFailure;
 use runtime_notice::{ProviderInputObservation, RuntimeNoticeBus};
@@ -233,8 +233,19 @@ impl SantiService {
         kind: MessageKind,
         trigger_type: &str,
     ) -> Result<IngestOutcome, String> {
+        self.ingest_with_source(selector, content, kind, trigger_type, None)
+    }
+
+    pub fn ingest_with_source(
+        &self,
+        selector: StrandSelector,
+        content: MessageContent,
+        kind: MessageKind,
+        trigger_type: &str,
+        source: Option<InboxSource>,
+    ) -> Result<IngestOutcome, String> {
         let strand = self.store.resolve_strand_selector(&selector)?;
-        let (outcome, _driven) = self.ingest_into(&strand, content, kind, trigger_type)?;
+        let (outcome, _driven) = self.ingest_into(&strand, content, kind, trigger_type, source)?;
         Ok(outcome)
     }
 
@@ -251,8 +262,11 @@ impl SantiService {
         content: MessageContent,
         kind: MessageKind,
         trigger_type: &str,
+        source: Option<InboxSource>,
     ) -> Result<(IngestOutcome, DrivenTurn), String> {
-        let outcome = self.store.enqueue_inbox(&strand.id, kind, content)?;
+        let outcome = self
+            .store
+            .enqueue_inbox_with_source(&strand.id, kind, content, source)?;
         let driven = match outcome {
             IngestOutcome::Accepted { .. } => self.poke(&strand.id, trigger_type),
             IngestOutcome::Rejected { .. } => None,
@@ -271,6 +285,16 @@ impl SantiService {
         label: &str,
         system_text: String,
     ) -> Result<IngestOutcome, String> {
+        self.ingest_external_event_with_source(soul_id, label, system_text, None)
+    }
+
+    pub fn ingest_external_event_with_source(
+        &self,
+        soul_id: &str,
+        label: &str,
+        system_text: String,
+        source: Option<InboxSource>,
+    ) -> Result<IngestOutcome, String> {
         let strand = self
             .store
             .resolve_strand_selector(&StrandSelector::ByLabel {
@@ -282,6 +306,7 @@ impl SantiService {
             MessageContent::text(system_text),
             MessageKind::SantiSystem,
             "system",
+            source,
         )?;
         Ok(outcome)
     }
@@ -367,6 +392,7 @@ impl SantiService {
             },
             MessageKind::Text,
             "strand_send",
+            Some(InboxSource::new("strand_send").with_ref(strand.id.clone())),
         )?;
         if let IngestOutcome::Rejected { reason } = outcome {
             return Err(reason);

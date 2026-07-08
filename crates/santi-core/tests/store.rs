@@ -395,6 +395,70 @@ fn drain_commits_all_pending_inbox_entries_to_one_turn() {
 }
 
 #[test]
+fn inbox_drain_records_enqueue_and_commit_provenance() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let db = temp.path().join("santi.sqlite");
+    let store = SantiStore::open(&db).expect("open store");
+    let strand = store.create_strand().expect("create strand");
+
+    store
+        .enqueue_inbox_with_source(
+            &strand.id,
+            MessageKind::Text,
+            MessageContent::text("needs provenance"),
+            Some(
+                santi_core::InboxSource::new("test")
+                    .with_ref("caller-1")
+                    .with_metadata(serde_json::json!({ "adaptor": "fake" })),
+            ),
+        )
+        .expect("enqueue with source");
+
+    let conn = Connection::open(&db).expect("open sqlite");
+    let (inbox_id, enqueued_at): (String, String) = conn
+        .query_row(
+            "SELECT id, created_at FROM strand_inbox WHERE strand_id = ?1",
+            [&strand.id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("inbox row");
+    drop(conn);
+
+    let started = store
+        .try_start_turn(&strand.id, "strand_send", None)
+        .expect("try")
+        .expect("turn started");
+    assert_eq!(started.drained_messages.len(), 1);
+    let drained = &started.drained_messages[0];
+
+    let runtime = store
+        .runtime_snapshot(&strand.id)
+        .expect("runtime snapshot")
+        .expect("strand runtime");
+    assert_eq!(runtime.message_events.len(), 1);
+    let event = &runtime.message_events[0];
+    assert_eq!(event.action, "insert");
+    assert_eq!(event.message_id, drained.message.id);
+    assert_eq!(event.created_at, drained.message.created_at);
+
+    let payload = &event.payload;
+    assert_eq!(payload["kind"], "inbox_drain");
+    assert_eq!(payload["inbox_id"], inbox_id);
+    assert_eq!(payload["enqueued_at"], enqueued_at);
+    assert_eq!(payload["drained_at"], drained.message.created_at);
+    assert_eq!(payload["committing_turn_id"], started.turn.id);
+    assert_eq!(payload["message_id"], drained.message.id);
+    assert_eq!(payload["strand_seq"], drained.relation.strand_seq);
+    assert_eq!(payload["source"]["type"], "test");
+    assert_eq!(payload["source"]["ref"], "caller-1");
+    assert_eq!(payload["source"]["metadata"]["adaptor"], "fake");
+
+    let input = store.assembly_input(&strand.id).expect("assembly input");
+    assert_eq!(input.len(), 1);
+    assert_text(&input[0], "user", "needs provenance");
+}
+
+#[test]
 fn inbox_gate_rejects_past_threshold() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");

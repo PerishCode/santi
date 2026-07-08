@@ -1,11 +1,13 @@
 //! IM layer service methods — the thin seam between the plain IM and the runtime.
 //! The IM is conceptually ORTHOGONAL to the runtime (PHASE-08 CONVERGED MODEL v4):
 //! inbound reuses the source-less runtime primitive `ingest`, addressing the soul
-//! by an `im:<participant>` conversation label; the participant address lives only
-//! in the IM envelope (the label + the IM store), never in the runtime.
+//! by an `im:<participant>` conversation label. Reply-routing authority lives in
+//! the IM envelope (the label + the IM store); the runtime receives only bounded
+//! diagnostic provenance for incident review, not a reply capability.
 
 use crate::{
-    IM_LABEL_PREFIX, ImInboxEntry, IngestOutcome, MessageContent, MessageKind, StrandSelector,
+    IM_LABEL_PREFIX, ImInboxEntry, InboxSource, IngestOutcome, MessageContent, MessageKind,
+    StrandSelector,
 };
 
 use super::SantiService;
@@ -23,7 +25,7 @@ impl SantiService {
     ) -> Result<IngestOutcome, String> {
         self.store.ensure_im_participant(participant_id, "human")?;
         let label = format!("{IM_LABEL_PREFIX}{participant_id}");
-        self.ingest(
+        self.ingest_with_source(
             StrandSelector::ByLabel {
                 soul_id: soul_id.to_string(),
                 label,
@@ -31,6 +33,7 @@ impl SantiService {
             MessageContent::text(content.to_string()),
             MessageKind::Text,
             "strand_send",
+            Some(InboxSource::new("im").with_ref(participant_id.to_string())),
         )
     }
 

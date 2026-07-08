@@ -1,11 +1,12 @@
 mod timeline;
 
 use rusqlite::{Connection, OptionalExtension, params};
+use serde_json::{Value, json};
 
 use crate::{
-    ActorType, Compact, MessageKind, Soul, Strand, StrandEffect, StrandEntry, StrandMessage,
-    StrandTargetType, ThinkingSpan, ToolCall, ToolResult, Turn, WebhookSubscription, prefixed_id,
-    timestamp_now,
+    ActorType, Compact, MessageEvent, MessageKind, Soul, Strand, StrandEffect, StrandEntry,
+    StrandMessage, StrandTargetType, ThinkingSpan, ToolCall, ToolResult, Turn, WebhookSubscription,
+    prefixed_id, timestamp_now,
 };
 
 use super::rows::*;
@@ -63,11 +64,13 @@ pub(super) fn append_entry_in_tx(
 pub(super) fn drain_inbox_in_tx(
     conn: &Connection,
     strand_id: &str,
+    committing_turn_id: &str,
 ) -> Result<Vec<StrandMessage>, String> {
     let mut stmt = conn
         .prepare(
             r#"
-            SELECT id, message_kind, content FROM strand_inbox
+            SELECT id, message_kind, content, source_type, source_ref, source_metadata, created_at
+            FROM strand_inbox
             WHERE strand_id = ?1
             ORDER BY rowid ASC
             "#,
@@ -75,11 +78,15 @@ pub(super) fn drain_inbox_in_tx(
         .map_err(|error| error.to_string())?;
     let pending = stmt
         .query_map(params![strand_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
+            Ok(PendingInboxEntry {
+                id: row.get(0)?,
+                message_kind: row.get(1)?,
+                content: row.get(2)?,
+                source_type: row.get(3)?,
+                source_ref: row.get(4)?,
+                source_metadata: row.get(5)?,
+                enqueued_at: row.get(6)?,
+            })
         })
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
@@ -88,7 +95,7 @@ pub(super) fn drain_inbox_in_tx(
 
     let now = timestamp_now();
     let mut drained = Vec::with_capacity(pending.len());
-    for (inbox_id, message_kind_db, content_json) in pending {
+    for pending_entry in pending {
         let message_id = prefixed_id("msg");
         conn.execute(
             r#"
@@ -101,21 +108,108 @@ pub(super) fn drain_inbox_in_tx(
             params![
                 message_id,
                 super::SANTI_SYSTEM_ACTOR_ID,
-                message_kind_db,
-                content_json,
+                pending_entry.message_kind.as_str(),
+                pending_entry.content.as_str(),
                 now
             ],
         )
         .map_err(|error| error.to_string())?;
-        append_entry_in_tx(conn, strand_id, StrandTargetType::Message, &message_id)?;
-        conn.execute("DELETE FROM strand_inbox WHERE id = ?1", params![inbox_id])
-            .map_err(|error| error.to_string())?;
+        let relation = append_entry_in_tx(conn, strand_id, StrandTargetType::Message, &message_id)?;
+        insert_inbox_drain_event_in_tx(
+            conn,
+            &pending_entry,
+            &message_id,
+            relation.strand_seq,
+            committing_turn_id,
+            &now,
+        )?;
+        conn.execute(
+            "DELETE FROM strand_inbox WHERE id = ?1",
+            params![pending_entry.id],
+        )
+        .map_err(|error| error.to_string())?;
         drained.push(
             message_by_id(conn, &message_id)?
                 .ok_or_else(|| "drained message missing".to_string())?,
         );
     }
     Ok(drained)
+}
+
+struct PendingInboxEntry {
+    id: String,
+    message_kind: String,
+    content: String,
+    source_type: Option<String>,
+    source_ref: Option<String>,
+    source_metadata: Option<String>,
+    enqueued_at: String,
+}
+
+fn insert_inbox_drain_event_in_tx(
+    conn: &Connection,
+    pending: &PendingInboxEntry,
+    message_id: &str,
+    strand_seq: i64,
+    turn_id: &str,
+    drained_at: &str,
+) -> Result<(), String> {
+    let source_metadata = pending.source_metadata.as_deref().map(|raw| {
+        serde_json::from_str::<Value>(raw).unwrap_or_else(|_| json!({ "invalid_json": true }))
+    });
+    let payload = json!({
+        "kind": "inbox_drain",
+        "inbox_id": pending.id.as_str(),
+        "enqueued_at": pending.enqueued_at.as_str(),
+        "drained_at": drained_at,
+        "committing_turn_id": turn_id,
+        "message_id": message_id,
+        "strand_seq": strand_seq,
+        "source": {
+            "type": pending.source_type.as_deref(),
+            "ref": pending.source_ref.as_deref(),
+            "metadata": source_metadata,
+        }
+    });
+    conn.execute(
+        r#"
+        INSERT INTO message_events (
+          id, message_id, action, actor_type, actor_id, base_version, payload, created_at
+        )
+        VALUES (?1, ?2, 'insert', 'system', ?3, 1, ?4, ?5)
+        "#,
+        params![
+            prefixed_id("mev"),
+            message_id,
+            super::SANTI_SYSTEM_ACTOR_ID,
+            payload.to_string(),
+            drained_at
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub(super) fn message_events_for_strand(
+    conn: &Connection,
+    strand_id: &str,
+) -> Result<Vec<MessageEvent>, String> {
+    let mut stmt = conn
+        .prepare(
+            r#"
+            SELECT e.id, e.message_id, e.action, e.actor_type, e.actor_id,
+                   e.base_version, e.payload, e.created_at
+            FROM message_events e
+            JOIN r_strand_entries r ON r.target_type = 'message' AND r.target_id = e.message_id
+            WHERE r.strand_id = ?1
+            ORDER BY r.strand_seq ASC, e.created_at ASC, e.id ASC
+            "#,
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map(params![strand_id], map_message_event_row)
+        .map_err(|error| error.to_string())?;
+    collect_rows(rows)
 }
 
 pub(super) fn soul_by_id(conn: &Connection, soul_id: &str) -> Result<Option<Soul>, String> {

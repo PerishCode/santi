@@ -28,6 +28,9 @@ pub(crate) struct NormalizedEvent {
     pub santi_system_text: String,
     /// The opaque external label that anchors the strand (per-thread identity).
     pub label: String,
+    /// Bounded adaptor-owned provenance for runtime diagnostics. This is NOT
+    /// appended to message content; it is carried only into drain evidence.
+    pub source_metadata: Option<Value>,
     /// Whether this event type is in scope for santi. Out-of-scope events (a
     /// GitHub `ping`, an unhandled action) verify fine but produce no turn.
     pub in_scope: bool,
@@ -168,6 +171,7 @@ impl WebhookAdaptor for GithubAdaptor {
             return Ok(WebhookOutcome::Event(NormalizedEvent {
                 santi_system_text: String::new(),
                 label: format!("github:{webhook_name}:{event_type}"),
+                source_metadata: None,
                 in_scope: false,
                 self_authored: false,
             }));
@@ -222,9 +226,22 @@ impl WebhookAdaptor for GithubAdaptor {
         // subscriptions never share a thread.
         let label = format!("github:{webhook_name}:issue:{repo}#{number}");
 
+        let source_metadata = json!({
+            "adaptor": "github",
+            "webhook_name": webhook_name,
+            "event_type": event_type,
+            "action": action,
+            "delivery": delivery,
+            "repo": repo,
+            "issue_number": number,
+            "url": url,
+            "label": label,
+        });
+
         Ok(WebhookOutcome::Event(NormalizedEvent {
             santi_system_text,
             label,
+            source_metadata: Some(source_metadata),
             in_scope,
             self_authored,
         }))
@@ -404,6 +421,7 @@ fn feishu_normalize(
         return Ok(WebhookOutcome::Event(NormalizedEvent {
             santi_system_text: String::new(),
             label: format!("feishu:{webhook_name}:{event_type}"),
+            source_metadata: None,
             in_scope: false,
             self_authored: false,
         }));
@@ -435,9 +453,22 @@ fn feishu_normalize(
     // One strand per feishu chat, scoped by subscription name.
     let label = format!("feishu:{webhook_name}:chat:{chat_id}");
 
+    let source_metadata = json!({
+        "adaptor": "feishu",
+        "webhook_name": webhook_name,
+        "event_type": event_type,
+        "event_id": event_id,
+        "chat_id": chat_id,
+        "chat_type": chat_type,
+        "message_id": message_id,
+        "sender_type": sender_type,
+        "label": label,
+    });
+
     Ok(WebhookOutcome::Event(NormalizedEvent {
         santi_system_text,
         label,
+        source_metadata: Some(source_metadata),
         in_scope,
         self_authored: false,
     }))

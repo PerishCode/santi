@@ -128,10 +128,11 @@ fn inbox_seed_existing_strand(
     strand_id: &str,
     text: &str,
 ) -> Result<SeedReport, String> {
-    let outcome = store.enqueue_inbox(
+    let outcome = store.enqueue_inbox_with_source(
         strand_id,
         santi_core::MessageKind::SantiSystem,
         santi_core::MessageContent::text(text),
+        Some(santi_core::InboxSource::new("offline_inbox_seed")),
     )?;
     Ok(match outcome {
         santi_core::IngestOutcome::Accepted { strand_id } => SeedReport {

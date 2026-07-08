@@ -2,10 +2,10 @@ use rusqlite::Row;
 use serde_json::Value;
 
 use crate::{
-    ActorType, Compact, Message, MessageContent, MessageKind, MessageState, Soul, Strand,
-    StrandEffect, StrandMessage, StrandMessageRef, StrandTargetType, ThinkingCompletionReason,
-    ThinkingSpan, ThinkingSpanState, ToolCall, ToolResult, Turn, TurnStatus, TurnTriggerType,
-    WebhookSubscription,
+    ActorType, Compact, Message, MessageContent, MessageEvent, MessageKind, MessageState, Soul,
+    Strand, StrandEffect, StrandMessage, StrandMessageRef, StrandTargetType,
+    ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState, ToolCall, ToolResult, Turn,
+    TurnStatus, TurnTriggerType, WebhookSubscription,
 };
 
 pub(super) fn map_soul_row(row: &Row<'_>) -> rusqlite::Result<Soul> {
@@ -61,6 +61,23 @@ pub(super) fn map_message_row(row: &Row<'_>) -> rusqlite::Result<Message> {
         deleted_at: row.get(7)?,
         created_at: row.get(8)?,
         updated_at: row.get(9)?,
+    })
+}
+
+pub(super) fn map_message_event_row(row: &Row<'_>) -> rusqlite::Result<MessageEvent> {
+    let payload_json: String = row.get(6)?;
+    let payload = serde_json::from_str::<Value>(&payload_json).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(error))
+    })?;
+    Ok(MessageEvent {
+        id: row.get(0)?,
+        message_id: row.get(1)?,
+        action: row.get(2)?,
+        actor_type: actor_type_from_db(row.get::<_, String>(3)?.as_str()),
+        actor_id: row.get(4)?,
+        base_version: row.get(5)?,
+        payload,
+        created_at: row.get(7)?,
     })
 }
 

@@ -6,8 +6,9 @@ use std::{
 use rusqlite::{Connection, params};
 
 use crate::{
-    ActorType, IngestOutcome, MessageContent, MessageIntake, MessageKind, MessageState, Strand,
-    StrandMessage, StrandSelector, StrandTargetType, Turn, prefixed_id, timestamp_now,
+    ActorType, InboxSource, IngestOutcome, MessageContent, MessageIntake, MessageKind,
+    MessageState, Strand, StrandMessage, StrandSelector, StrandTargetType, Turn, prefixed_id,
+    timestamp_now,
 };
 
 mod assembly;
@@ -27,7 +28,7 @@ use schema::SCHEMA;
 /// is wiped + rebuilt (beta: no back-compat migrations yet — see PHASE-07 crux #5).
 /// Public so ops paths (`santi doctor`) can compare a DB's `user_version` to it
 /// WITHOUT opening the store (which would migrate/wipe).
-pub const SCHEMA_VERSION: u32 = 21;
+pub const SCHEMA_VERSION: u32 = 22;
 /// The default soul's id. Public so offline ops (doctor/seed) can address it
 /// without a running service.
 pub const DEFAULT_SOUL_ID: &str = "soul_default";
@@ -242,6 +243,7 @@ impl SantiStore {
         };
         Ok(Some(crate::StrandRuntimeSnapshot {
             messages: strand_messages(&conn, strand_id)?,
+            message_events: message_events_for_strand(&conn, strand_id)?,
             turns: turns_for_strand(&conn, &strand.id)?,
             thinking_spans: soul_thinking_spans(&conn, &strand.id)?,
             tool_calls: soul_tool_calls(&conn, &strand.id)?,
@@ -393,6 +395,16 @@ impl SantiStore {
         message_kind: MessageKind,
         content: MessageContent,
     ) -> Result<IngestOutcome, String> {
+        self.enqueue_inbox_with_source(strand_id, message_kind, content, None)
+    }
+
+    pub fn enqueue_inbox_with_source(
+        &self,
+        strand_id: &str,
+        message_kind: MessageKind,
+        content: MessageContent,
+        source: Option<InboxSource>,
+    ) -> Result<IngestOutcome, String> {
         let conn = self.conn.lock().unwrap();
         let pending: i64 = conn
             .query_row(
@@ -411,16 +423,31 @@ impl SantiStore {
         let inbox_id = prefixed_id("inbox");
         let now = timestamp_now();
         let content_json = serde_json::to_string(&content).map_err(|error| error.to_string())?;
+        let source_type = source.as_ref().map(|source| source.source_type.as_str());
+        let source_ref = source
+            .as_ref()
+            .and_then(|source| source.source_ref.as_deref());
+        let source_metadata = source
+            .as_ref()
+            .and_then(|source| source.metadata.as_ref())
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| error.to_string())?;
         conn.execute(
             r#"
-            INSERT INTO strand_inbox (id, strand_id, message_kind, content, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5)
+            INSERT INTO strand_inbox (
+              id, strand_id, message_kind, content, source_type, source_ref, source_metadata, created_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             "#,
             params![
                 inbox_id,
                 strand_id,
                 rows::message_kind_db(&message_kind),
                 content_json,
+                source_type,
+                source_ref,
+                source_metadata,
                 now
             ],
         )

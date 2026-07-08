@@ -165,6 +165,9 @@ CREATE TABLE IF NOT EXISTS strand_inbox (
     strand_id TEXT NOT NULL,
     message_kind TEXT NOT NULL CHECK (message_kind IN ('text', 'santi_system')),
     content TEXT NOT NULL,
+    source_type TEXT,
+    source_ref TEXT,
+    source_metadata TEXT,
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_strand_inbox_strand_created_at ON strand_inbox (strand_id, created_at);
@@ -199,8 +202,10 @@ CREATE INDEX IF NOT EXISTS idx_r_strand_entries_seq ON r_strand_entries (strand_
 -- ORTHOGONAL to the runtime (souls/strands/turns). These tables are the IM's own
 -- store — the runtime never reads them. A participant is a persistent messaging
 -- endpoint (a human/CLI peer with a passive inbox; a soul participant's "inbox" is
--- its strand and is NOT stored here). `source` addressing lives entirely here, in
--- the IM's envelope — never in the runtime primitive or `strand_inbox`.
+-- its strand and is NOT stored here). Reply-routing authority lives entirely
+-- here, in the IM's envelope. The runtime inbox may carry bounded diagnostic
+-- source provenance, but that is not a reply capability or provider-visible
+-- message content.
 CREATE TABLE IF NOT EXISTS im_participants (
     id TEXT PRIMARY KEY,
     kind TEXT NOT NULL CHECK (kind IN ('human', 'soul')),

@@ -270,11 +270,11 @@ impl SantiStore {
         if running.is_some() {
             return Ok(None);
         }
-        let drained_messages = drain_inbox_in_tx(&tx, strand_id)?;
+        let turn_id = prefixed_id("turn");
+        let drained_messages = drain_inbox_in_tx(&tx, strand_id, &turn_id)?;
         if drained_messages.is_empty() {
             return Ok(None);
         }
-        let turn_id = prefixed_id("turn");
         let now = timestamp_now();
         tx.execute(
             r#"

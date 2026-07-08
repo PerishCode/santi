@@ -628,13 +628,18 @@ async fn compact_reminder_after_completed_turn_does_not_drive_duplicate_turn() {
         "compact reminder completion path must not call the provider again"
     );
     assert_eq!(
+        runtime.turns.len(),
+        1,
+        "compact reminder completion path must not create any duplicate turn row"
+    );
+    assert_eq!(
         runtime
             .turns
             .iter()
             .filter(|turn| turn.status == santi_core::TurnStatus::Completed)
             .count(),
         1,
-        "compact reminder completion path must not create a duplicate turn"
+        "compact reminder completion path must leave exactly one completed turn"
     );
     assert_eq!(
         runtime

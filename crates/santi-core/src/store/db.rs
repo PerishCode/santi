@@ -69,7 +69,7 @@ pub(super) fn drain_inbox_in_tx(
             r#"
             SELECT id, message_kind, content FROM strand_inbox
             WHERE strand_id = ?1
-            ORDER BY created_at ASC, id ASC
+            ORDER BY rowid ASC
             "#,
         )
         .map_err(|error| error.to_string())?;

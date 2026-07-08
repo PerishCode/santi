@@ -61,6 +61,9 @@ pub(crate) fn render_system_prompt(request: SystemPromptRequest<'_>) -> Result<S
         render_system_message_description(),
         render_meta(&request),
     ];
+    if let Some(fork_topology) = render_fork_topology(&request) {
+        sections.push(fork_topology);
+    }
     // Reply-capability meta: only for an IM conversation strand, and only here
     // (not a runtime concept). Announces the ambient egress; the address is the
     // conversation itself (this strand) — never body-text the soul must copy.
@@ -132,6 +135,19 @@ fn render_meta(request: &SystemPromptRequest<'_>) -> String {
         format!("strand_id: {}", request.strand_id),
     ]
     .join("\n")
+}
+
+fn render_fork_topology(request: &SystemPromptRequest<'_>) -> Option<String> {
+    let parent_strand_id = request.strand.parent_strand_id.as_deref()?;
+    let fork_point = request.strand.fork_point?;
+    Some(
+        [
+            "[santi-fork]".to_string(),
+            format!("parent_strand_id: {parent_strand_id}"),
+            format!("fork_point: {fork_point}"),
+        ]
+        .join("\n"),
+    )
 }
 
 fn render_memory_section(name: &str, source: &str, memory: &MemoryMaterial) -> String {

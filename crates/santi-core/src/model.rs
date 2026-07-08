@@ -296,6 +296,11 @@ pub struct CreateStrandResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ForkStrandResponse {
+    pub strand: Strand,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct StrandDetail {
     pub strand: Strand,
     pub messages: Vec<StrandMessage>,

@@ -36,10 +36,10 @@ pub(in crate::store) fn soul_tool_calls(
         .prepare(
             r#"
             SELECT c.id, c.turn_id, c.tool_name, c.arguments, c.created_at
-            FROM tool_calls c
-            JOIN turns t ON t.id = c.turn_id
-            WHERE t.strand_id = ?1
-            ORDER BY c.created_at ASC
+            FROM r_strand_entries e
+            JOIN tool_calls c ON c.id = e.target_id
+            WHERE e.strand_id = ?1 AND e.target_type = 'tool_call'
+            ORDER BY e.strand_seq ASC
             "#,
         )
         .map_err(|error| error.to_string())?;
@@ -74,10 +74,10 @@ pub(in crate::store) fn soul_thinking_spans(
             SELECT s.id, s.turn_id, s.provider_response_id, s.state, s.summary,
                    s.completion_reason, s.error_text, s.created_at, s.updated_at,
                    s.finished_at
-            FROM thinking_spans s
-            JOIN turns t ON t.id = s.turn_id
-            WHERE t.strand_id = ?1
-            ORDER BY s.created_at ASC
+            FROM r_strand_entries e
+            JOIN thinking_spans s ON s.id = e.target_id
+            WHERE e.strand_id = ?1 AND e.target_type = 'thinking'
+            ORDER BY e.strand_seq ASC
             "#,
         )
         .map_err(|error| error.to_string())?;
@@ -116,11 +116,10 @@ pub(in crate::store) fn soul_tool_results(
         .prepare(
             r#"
             SELECT r.id, r.tool_call_id, r.output, r.error_text, r.created_at
-            FROM tool_results r
-            JOIN tool_calls c ON c.id = r.tool_call_id
-            JOIN turns t ON t.id = c.turn_id
-            WHERE t.strand_id = ?1
-            ORDER BY r.created_at ASC
+            FROM r_strand_entries e
+            JOIN tool_results r ON r.id = e.target_id
+            WHERE e.strand_id = ?1 AND e.target_type = 'tool_result'
+            ORDER BY e.strand_seq ASC
             "#,
         )
         .map_err(|error| error.to_string())?;

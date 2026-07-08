@@ -18,8 +18,8 @@ use axum::{
 use futures_core::Stream;
 use santi_core::{
     CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSoulRequest,
-    CreateStrandResponse, CreateWebhookRequest, ErrorResponse, HealthResponse, ImInboxEntry,
-    ImSendRequest, ImSendResponse, IngestOutcome, MaterialRequest, SantiService,
+    CreateStrandResponse, CreateWebhookRequest, ErrorResponse, ForkStrandResponse, HealthResponse,
+    ImInboxEntry, ImSendRequest, ImSendResponse, IngestOutcome, MaterialRequest, SantiService,
     SantiServiceConfig, SantiStreamEvent, SantiStreamPayload, SendStrandAcceptedResponse,
     SendStrandRequest, Soul, Strand, StrandDetail, StrandMaterial, StrandRuntimeSnapshot,
     WebhookSubscription, prefixed_id, timestamp_now,
@@ -149,6 +149,7 @@ fn router(service: SantiService) -> Router {
         )
         .route("/api/v1/strands/{strand_id}/events", get(strand_events))
         .route("/api/v1/strands/{strand_id}/send", post(send_strand))
+        .route("/api/v1/strands/{strand_id}/fork", post(fork_strand))
         .route("/api/v1/strands/{strand_id}/compact", post(compact_exec))
         .route("/api/v1/compacts/{compact_id}", get(compact_query))
         .route("/api/v1/strands/{strand_id}/runtime", get(runtime_snapshot))
@@ -491,6 +492,26 @@ async fn send_strand(
 
 #[utoipa::path(
     post,
+    path = "/api/v1/strands/{strand_id}/fork",
+    params(("strand_id" = String, Path)),
+    responses(
+        (status = 200, body = ForkStrandResponse),
+        (status = 404, body = ErrorResponse),
+        (status = 500, body = ErrorResponse)
+    )
+)]
+async fn fork_strand(
+    State(service): State<SantiService>,
+    Path(strand_id): Path<String>,
+) -> Result<Json<ForkStrandResponse>, ApiError> {
+    service
+        .fork_strand(&strand_id)
+        .map(Json)
+        .map_err(ApiError::from_service)
+}
+
+#[utoipa::path(
+    post,
     path = "/api/v1/strands/{strand_id}/compact",
     params(("strand_id" = String, Path)),
     request_body = CompactExecRequest,
@@ -728,6 +749,8 @@ impl ApiError {
             || text.contains("must not be empty")
             || text.contains("must contain text")
             || text.starts_with("strand_strategy must be")
+            || text.starts_with("fork_point")
+            || text.contains(" is past parent end ")
             || text.contains("object key")
             || text.contains("object uri")
             || text.contains("path segment")
@@ -770,6 +793,7 @@ impl IntoResponse for ApiError {
         list_messages,
         strand_material,
         send_strand,
+        fork_strand,
         compact_exec,
         compact_query,
         runtime_snapshot,
@@ -779,6 +803,7 @@ impl IntoResponse for ApiError {
     ),
     components(schemas(
         CreateStrandResponse,
+        ForkStrandResponse,
         CreateSoulRequest,
         CreateWebhookRequest,
         WebhookSubscription,

@@ -44,27 +44,30 @@ by default; drive one turn and stop when it lands:
 
 ```sh
 santi service serve &                                   # reads ./santi.toml
-SID=$(santi session create | jq -r .session.session.id)
-SANTI_SESSION_ID=$SID santi session send 'Reply with exactly: OK' --watch
+SID=$(santi strand create | jq -r .strand.id)
+SANTI_STRAND_ID=$SID santi strand send 'Reply with exactly: OK' --watch
 ```
 
-`--watch` follows the SSE stream and exits when the soul_session goes idle
-(after the turn completes), so it doubles as the wait — no sleep/poll dance.
-It stays robust when sends coalesce: a completed turn that spawns a follow-on
-is still awaited to full idle.
+`--watch` follows the SSE stream and exits when the strand goes idle (after the
+turn completes), so it doubles as the wait — no sleep/poll dance. It stays
+robust when sends coalesce: a completed turn that spawns a follow-on is still
+awaited to full idle. By default, watch output is filtered human-readable
+milestones for interactive use.
 
-`--watch` relays raw SSE frames (one JSON object per line), same shape as
-`session events`. Distill the reply with jq:
+For raw/debug automation, pass `--watch-format raw`; it relays event JSON (one
+object per line, same payload shape as `strand events`). Distill the reply with
+jq:
 
 ```sh
-… send '…' --watch | jq -rc 'select(.payload.type=="message_completed")
-                             | .payload.message.content_text'
+… strand send '…' --watch --watch-format raw \
+  | jq -rc 'select(.payload.type=="message_completed")
+            | .payload.message.content_text'
 ```
 
-`--session`/`SANTI_SESSION_ID` set a default session id; `--soul`/`SANTI_SOUL_ID`
-pick a non-default soul (empty → the runtime's default soul; an unknown soul
-is rejected, not silently created). To address a soul ad hoc without a
-default: `santi --soul <id> session send <sid> '…'`.
+`--strand`/`SANTI_STRAND_ID` set a default strand id; `--soul`/`SANTI_SOUL_ID`
+pick a non-default soul (empty → the runtime's default soul; an unknown soul is
+rejected, not silently created). To address a soul ad hoc without a default:
+`santi --soul <id> strand send <strand_id> '…'`.
 
 ## Conventions
 

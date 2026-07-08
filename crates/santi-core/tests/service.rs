@@ -43,6 +43,12 @@ impl ProviderClient for FakeProvider {
             requests.len()
         };
         if self.request_tool && index == 1 {
+            let command = probe_command();
+            let arguments = json!({
+                "command": command,
+                "cwd": STRAND_WORKSPACE_URI
+            });
+            let arguments_raw = arguments.to_string();
             return Ok(Box::pin(stream::iter(vec![
                 Ok(ProviderEvent::FunctionCallRequested(ProviderFunctionCall {
                     response_id: "resp_tool".to_string(),
@@ -52,15 +58,12 @@ impl ProviderClient for FakeProvider {
                         "id": "item_tool",
                         "call_id": "call_shell",
                         "name": "shell",
-                        "arguments": r#"{"command":"pwd && printf \"\\n$SANTI_STRAND_MEMORY_DIR\\n$SANTI_SOUL_ID\\n$SANTI_STRAND_ID\"","cwd":"strand://"}"#,
+                        "arguments": arguments_raw,
                     }),
                     call_id: "call_shell".to_string(),
                     name: "shell".to_string(),
-                    arguments_raw: r#"{"command":"pwd && printf \"\\n$SANTI_STRAND_MEMORY_DIR\\n$SANTI_SOUL_ID\\n$SANTI_STRAND_ID\"","cwd":"strand://"}"#.to_string(),
-                    arguments: json!({
-                        "command": "pwd && printf \"\\n$SANTI_STRAND_MEMORY_DIR\\n$SANTI_SOUL_ID\\n$SANTI_STRAND_ID\"",
-                        "cwd": STRAND_WORKSPACE_URI
-                    }),
+                    arguments_raw,
+                    arguments,
                 })),
                 Ok(ProviderEvent::Completed {
                     provider_response_id: Some("resp_tool".to_string()),
@@ -73,6 +76,14 @@ impl ProviderClient for FakeProvider {
                 provider_response_id: Some("fake-response-id".to_string()),
             }),
         ])))
+    }
+}
+
+fn probe_command() -> &'static str {
+    if cfg!(windows) {
+        "[Console]::Out.WriteLine((Get-Location).Path); [Console]::Out.WriteLine($env:SANTI_STRAND_MEMORY_DIR); [Console]::Out.WriteLine($env:SANTI_SOUL_ID); [Console]::Out.WriteLine($env:SANTI_STRAND_ID)"
+    } else {
+        "pwd && printf \"\\n$SANTI_STRAND_MEMORY_DIR\\n$SANTI_SOUL_ID\\n$SANTI_STRAND_ID\""
     }
 }
 

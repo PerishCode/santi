@@ -580,6 +580,74 @@ async fn send_strand_targets_the_strands_own_soul() {
 }
 
 #[tokio::test]
+async fn compact_reminder_after_completed_turn_does_not_drive_duplicate_turn() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let provider = Arc::new(FakeProvider::default());
+    let service = SantiService::open(
+        SantiServiceConfig {
+            database_path: temp.path().join("santi.sqlite").display().to_string(),
+            runtime_root: temp.path().join("runtime").display().to_string(),
+            execution_root: temp.path().join("execution").display().to_string(),
+            bind_addr: Some("127.0.0.1:0".to_string()),
+        },
+        provider.clone(),
+    )
+    .expect("open service");
+
+    let strand = service.create_strand().expect("create strand").strand;
+    let response = service
+        .send_strand(
+            &strand.id,
+            SendStrandRequest {
+                content: vec![MessagePart::Text {
+                    text: "x".repeat(128 * 1024),
+                }],
+            },
+        )
+        .await
+        .expect("send strand");
+
+    let _runtime = wait_for_completed_turn(&service, &strand.id, &response.turn.id).await;
+
+    // The provider-input observation is drained only after completion. Wait for
+    // the compact reminder Record to materialize, then give the completion
+    // re-poke a chance to run. That re-poke must not start a second turn: the
+    // reminder is a Record, not a new inbox Request.
+    let _runtime =
+        wait_for_message_containing(&service, &strand.id, "kind: compact_reminder").await;
+    sleep(Duration::from_millis(100)).await;
+    let runtime = service
+        .runtime_snapshot(&strand.id)
+        .expect("runtime snapshot")
+        .expect("strand runtime");
+
+    let requests = provider.requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        1,
+        "compact reminder completion path must not call the provider again"
+    );
+    assert_eq!(
+        runtime
+            .turns
+            .iter()
+            .filter(|turn| turn.status == santi_core::TurnStatus::Completed)
+            .count(),
+        1,
+        "compact reminder completion path must not create a duplicate turn"
+    );
+    assert_eq!(
+        runtime
+            .messages
+            .iter()
+            .filter(|message| message.content_text.contains("kind: compact_reminder"))
+            .count(),
+        1,
+        "large input should materialize exactly one compact reminder Record"
+    );
+}
+
+#[tokio::test]
 async fn completed_turn_emits_turn_completed_event() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FakeProvider::default());
@@ -666,6 +734,28 @@ async fn wait_for_completed_turn(
         sleep(Duration::from_millis(20)).await;
     }
     panic!("turn did not complete");
+}
+
+async fn wait_for_message_containing(
+    service: &SantiService,
+    strand_id: &str,
+    needle: &str,
+) -> santi_core::StrandRuntimeSnapshot {
+    for _ in 0..50 {
+        let runtime = service
+            .runtime_snapshot(strand_id)
+            .expect("runtime snapshot")
+            .expect("strand runtime");
+        if runtime
+            .messages
+            .iter()
+            .any(|message| message.content_text.contains(needle))
+        {
+            return runtime;
+        }
+        sleep(Duration::from_millis(20)).await;
+    }
+    panic!("message containing {needle:?} did not appear");
 }
 
 #[tokio::test]

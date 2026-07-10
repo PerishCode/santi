@@ -2,8 +2,8 @@ use serde_json::json;
 
 use crate::context_budget::estimate_provider_parts;
 use crate::service_prompt::provider_tools;
-use crate::store::budget::{ContextAdmission, ContextBlockInput};
-use crate::{ContextBudget, ContextEstimate};
+use crate::store::budget::{ContextAdmission, ContextIncidentInput};
+use crate::{ContextBudget, ContextEstimate, SantiError};
 
 use super::super::SantiService;
 
@@ -53,13 +53,13 @@ impl SantiService {
         }))
     }
 
-    pub(in crate::service) fn block_over_budget_request(
+    pub(in crate::service) fn open_over_budget_incident(
         &self,
         strand_id: &str,
         turn_id: &str,
         request: &santi_provider::ProviderRequest,
         estimate: &ContextEstimate,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Option<SantiError>, String> {
         let Some(budget) = self.context_budget() else {
             return Ok(None);
         };
@@ -72,13 +72,14 @@ impl SantiService {
             .strand(strand_id)?
             .ok_or_else(|| "strand not found".to_string())?;
         let reason = over_budget_reason(estimate.total_bytes, budget.input_budget_bytes);
-        self.store.upsert_context_block(
+        let error = self.store.open_context_incident(
             strand_id,
-            ContextBlockInput {
+            ContextIncidentInput {
                 reason_code: REASON_PROVIDER,
                 reason_text: &reason,
-                provider: metadata.provider.as_ref(),
-                model: &request.model,
+                operation: "provider_preflight",
+                provider: Some(metadata.provider.as_ref()),
+                model: Some(&request.model),
                 budget_source: Some(&budget.source),
                 budget_bytes: Some(budget.input_budget_bytes),
                 estimate,
@@ -90,15 +91,16 @@ impl SantiService {
                 })),
             },
         )?;
-        Ok(Some(reason))
+        self.dispatch_error_events();
+        Ok(Some(error))
     }
 
-    pub(in crate::service) fn clear_context_block(
+    pub(in crate::service) fn clear_context_incident(
         &self,
         strand_id: &str,
         cleared_by: &str,
     ) -> Result<bool, String> {
-        if self.store.active_context_block(strand_id)?.is_none() {
+        if self.store.active_context_incident(strand_id)?.is_none() {
             return Ok(false);
         }
         let Some(budget) = self.context_budget() else {
@@ -108,8 +110,11 @@ impl SantiService {
         if estimate.total_bytes > budget.input_budget_bytes {
             return Ok(false);
         }
-        self.store
-            .clear_active_context_block(strand_id, cleared_by, &estimate)
+        let resolved = self
+            .store
+            .resolve_context_incident(strand_id, cleared_by, &estimate)?;
+        self.dispatch_error_events();
+        Ok(resolved)
     }
 }
 

@@ -1,0 +1,11 @@
+[package]
+name = "santi-error"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+utoipa.workspace = true
+uuid.workspace = true

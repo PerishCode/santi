@@ -83,7 +83,7 @@ pub fn doctor_configured_at(
             input_budget_bytes: None,
             budget_source: None,
             ok: false,
-            error: Some(error),
+            error: Some(error.to_string()),
         },
     };
     doctor_report_at(paths, Some(provider))
@@ -132,7 +132,7 @@ pub struct SeedReport {
     /// Durably enqueued (false ⟺ the inbox gate rejected it — the strand is far
     /// behind; the caller should treat this as a failure).
     pub accepted: bool,
-    pub reason: Option<String>,
+    pub error: Option<santi_core::SantiError>,
 }
 
 /// Enqueue one `santi_system` record into a strand's durable inbox WITHOUT a
@@ -146,7 +146,7 @@ pub struct SeedReport {
 /// turn into a turn, so we reject instead of writing an orphan.
 ///
 /// This is intentionally an offline producer, not live external ingress: it
-/// respects active strand blocks, but candidate budget admission happens when
+/// respects active incidents, but candidate budget admission happens when
 /// the service later resumes/drives the pending inbox.
 pub fn inbox_seed(strand_id: &str, text: &str) -> Result<SeedReport, String> {
     inbox_seed_at(&config::resolve_runtime_paths(), strand_id, text)
@@ -194,12 +194,12 @@ fn inbox_seed_existing_strand(
         santi_core::IngestOutcome::Accepted { strand_id } => SeedReport {
             strand_id,
             accepted: true,
-            reason: None,
+            error: None,
         },
-        santi_core::IngestOutcome::Rejected { reason } => SeedReport {
+        santi_core::IngestOutcome::Rejected { error } => SeedReport {
             strand_id: strand_id.to_string(),
             accepted: false,
-            reason: Some(reason),
+            error: Some(*error),
         },
     })
 }

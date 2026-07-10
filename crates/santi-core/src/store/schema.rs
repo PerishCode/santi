@@ -162,53 +162,51 @@ CREATE TABLE IF NOT EXISTS compacts (
 );
 CREATE INDEX IF NOT EXISTS idx_compacts_strand ON compacts (strand_id);
 
-CREATE TABLE IF NOT EXISTS strand_blocks (
+CREATE TABLE IF NOT EXISTS error_incidents (
     id TEXT PRIMARY KEY,
-    strand_id TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('context_over_budget')),
-    status TEXT NOT NULL CHECK (status IN ('active', 'cleared')),
-    reason_code TEXT NOT NULL,
-    reason_text TEXT NOT NULL,
-    provider TEXT,
-    model TEXT,
-    budget_source TEXT,
-    budget_bytes INTEGER,
-    input_items INTEGER,
-    input_bytes INTEGER,
-    instructions_bytes INTEGER,
-    tools_bytes INTEGER,
-    total_bytes INTEGER,
-    observed_turn_id TEXT,
-    observed_at_seq INTEGER,
-    metadata TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    cleared_at TEXT,
-    cleared_by TEXT
+    incident_key TEXT NOT NULL,
+    code TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active', 'resolved')),
+    category TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    retry TEXT NOT NULL,
+    exposure TEXT NOT NULL,
+    scope_kind TEXT NOT NULL,
+    scope_id TEXT NOT NULL,
+    source_component TEXT NOT NULL,
+    source_operation TEXT NOT NULL,
+    latest_source_component TEXT NOT NULL,
+    latest_source_operation TEXT NOT NULL,
+    message TEXT NOT NULL,
+    latest_message TEXT NOT NULL,
+    context TEXT NOT NULL,
+    latest_context TEXT NOT NULL,
+    occurrence_count INTEGER NOT NULL CHECK (occurrence_count > 0),
+    revision INTEGER NOT NULL CHECK (revision > 0),
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    resolved_at TEXT,
+    resolved_by TEXT
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_strand_blocks_active_context
-ON strand_blocks(strand_id, kind)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_error_incidents_active_key
+ON error_incidents(incident_key)
 WHERE status = 'active';
-CREATE INDEX IF NOT EXISTS idx_strand_blocks_strand_created_at
-ON strand_blocks(strand_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_error_incidents_scope_time
+ON error_incidents(scope_kind, scope_id, first_seen_at);
 
-CREATE TABLE IF NOT EXISTS rejected_deliveries (
+CREATE TABLE IF NOT EXISTS error_transitions (
     id TEXT PRIMARY KEY,
-    strand_id TEXT,
-    block_id TEXT,
-    source_type TEXT,
-    source_ref TEXT,
-    source_metadata TEXT,
-    message_kind TEXT,
-    content_sha256 TEXT NOT NULL,
-    content_bytes INTEGER NOT NULL,
-    content_excerpt TEXT NOT NULL,
-    reason_code TEXT NOT NULL,
-    reason_text TEXT NOT NULL,
-    received_at TEXT NOT NULL
+    incident_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('opened', 'resolved')),
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    delivered_at TEXT,
+    UNIQUE (incident_id, revision)
 );
-CREATE INDEX IF NOT EXISTS idx_rejected_deliveries_strand_time
-ON rejected_deliveries(strand_id, received_at);
+CREATE INDEX IF NOT EXISTS idx_error_transitions_pending
+ON error_transitions(created_at, id)
+WHERE delivered_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS strand_inbox (
     id TEXT PRIMARY KEY,

@@ -266,5 +266,5 @@ async fn send_targets_soul() {
         )
         .await
         .expect_err("unknown strand should error");
-    assert!(error.contains("strand not found"), "got: {error}");
+    assert!(error.message.contains("strand not found"), "got: {error}");
 }

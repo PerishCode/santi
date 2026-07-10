@@ -21,6 +21,10 @@ function usage(): void {
   console.log("when stdin is a terminal. Use --tty to force TTY allocation for a remote command.");
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
 const args = [...Deno.args];
 if (args.length === 0) {
   usage();
@@ -53,7 +57,13 @@ let code: number;
 if (rest.length === 0) {
   code = await run("ssh", [...ttyArgs, "-F", SSH_CONFIG, host], { cwd: root });
 } else if (rest[0] === "--") {
-  code = await run("ssh", [...ttyArgs, "-F", SSH_CONFIG, host, ...rest.slice(1)], { cwd: root });
+  const command = rest.slice(1);
+  if (command.length === 0) {
+    console.error(":ssh: missing remote command after --");
+    Deno.exit(2);
+  }
+  const remote = command.length === 1 ? command[0] : command.map(shellQuote).join(" ");
+  code = await run("ssh", [...ttyArgs, "-F", SSH_CONFIG, host, remote], { cwd: root });
 } else {
   console.error(":ssh: remote command must be separated with --");
   Deno.exit(2);

@@ -2,9 +2,10 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::{
-    ActorType, Compact, MaterialUpdated, MessageEvent, RejectedDelivery, Strand, StrandBlock,
-    StrandEffect, StrandMessage, ThinkingSpan, Timestamp, ToolCall, ToolResult, Turn,
+    ActorType, Compact, MaterialUpdated, MessageEvent, Strand, StrandEffect, StrandMessage,
+    ThinkingSpan, Timestamp, ToolCall, ToolResult, Turn,
 };
+use crate::{ErrorIncident, ErrorTransition};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SantiStreamEvent {
@@ -79,6 +80,9 @@ pub enum SantiStreamPayload {
         turn_id: String,
         error: String,
     },
+    ErrorTransition {
+        transition: Box<ErrorTransition>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -92,6 +96,5 @@ pub struct StrandRuntimeSnapshot {
     pub tool_results: Vec<ToolResult>,
     pub compacts: Vec<Compact>,
     pub effects: Vec<StrandEffect>,
-    pub blocks: Vec<StrandBlock>,
-    pub rejected_deliveries: Vec<RejectedDelivery>,
+    pub errors: Vec<ErrorIncident>,
 }

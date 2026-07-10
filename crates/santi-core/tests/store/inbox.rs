@@ -174,8 +174,9 @@ fn inbox_gate_rejects() {
             .expect("enqueue")
         {
             IngestOutcome::Accepted { .. } => {}
-            IngestOutcome::Rejected { reason } => {
-                assert!(reason.contains("inbox is full"), "got: {reason}");
+            IngestOutcome::Rejected { error } => {
+                assert_eq!(error.code, "runtime.inbox.capacity_exceeded");
+                assert!(error.message.contains("inbox is full"), "got: {error}");
                 rejected = true;
                 break;
             }

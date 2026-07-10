@@ -71,6 +71,18 @@ fn parses_fork() {
 }
 
 #[test]
+fn errors_replaces_rejections() {
+    let parsed =
+        Cli::try_parse_from(["santi", "strand", "errors", "ss_1", "--limit", "12"]).unwrap();
+    let Command::Strand(StrandCommand::Errors { id, limit }) = parsed.command else {
+        panic!("expected strand errors command");
+    };
+    assert_eq!(id.as_deref(), Some("ss_1"));
+    assert_eq!(limit, 12);
+    assert!(Cli::try_parse_from(["santi", "strand", "rejections", "ss_1"]).is_err());
+}
+
+#[test]
 fn parses_watch_flags() {
     let parsed = Cli::try_parse_from(["santi", "strand", "send", "--watch", "hello"]).unwrap();
     let Command::Strand(StrandCommand::Send {

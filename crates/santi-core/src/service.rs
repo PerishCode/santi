@@ -21,10 +21,10 @@ use std::{
 use tokio::sync::broadcast;
 
 use crate::{
-    CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, MaterialKind, RejectedDelivery,
-    SantiStore, SantiStreamEvent, SantiStreamPayload, Soul, Strand, StrandBudgetSnapshot,
-    StrandDetail, StrandMaterial, StrandMessage, StrandRuntimeSnapshot, Turn, WebhookSubscription,
-    prefixed_id, timestamp_now,
+    CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, ErrorEventSink, ErrorIncident,
+    ErrorTransition, MaterialKind, SantiStore, SantiStreamEvent, SantiStreamPayload, Soul, Strand,
+    StrandBudgetSnapshot, StrandDetail, StrandMaterial, StrandMessage, StrandRuntimeSnapshot, Turn,
+    WebhookSubscription, engine, prefixed_id, timestamp_now,
 };
 use runtime_notice::RuntimeNoticeBus;
 
@@ -48,6 +48,29 @@ type MaterialCacheKey = (String, MaterialKind);
 /// the timeline to reach it — `None` when nothing was pending, or the drive
 /// coalesced into an already-running turn instead of starting a fresh one.
 type DrivenTurn = Option<(Turn, Vec<StrandMessage>)>;
+
+const NO_ERROR_EVENT_SUBSCRIBERS: &str = "error event bus has no subscribers";
+
+struct StreamErrorSink<'a> {
+    service: &'a SantiService,
+}
+
+impl ErrorEventSink for StreamErrorSink<'_> {
+    fn publish_error_transition(&self, transition: &ErrorTransition) -> Result<(), String> {
+        if transition.incident.scope.kind == "strand" {
+            return self
+                .service
+                .send_stream(
+                    &transition.incident.scope.id,
+                    SantiStreamPayload::ErrorTransition {
+                        transition: Box::new(transition.clone()),
+                    },
+                )
+                .map_err(|_| NO_ERROR_EVENT_SUBSCRIBERS.to_string());
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct SantiServiceConfig {
@@ -122,6 +145,7 @@ impl SantiService {
     /// attempted/failed turns. Call once at server startup (inside the tokio
     /// runtime).
     pub fn resume_pending(&self) {
+        self.dispatch_error_events();
         match self.store.strands_with_pending_requests() {
             Ok(pending) => {
                 for strand_id in pending {
@@ -133,7 +157,9 @@ impl SantiService {
     }
 
     pub fn subscribe_stream(&self) -> broadcast::Receiver<SantiStreamEvent> {
-        self.stream_events.subscribe()
+        let receiver = self.stream_events.subscribe();
+        self.dispatch_error_events();
+        receiver
     }
 
     pub fn create_strand(&self) -> Result<CreateStrandResponse, String> {
@@ -240,27 +266,45 @@ impl SantiService {
             strand_id: strand.id.clone(),
             estimate: self.current_context_estimate(&strand.id)?,
             budget: self.context_budget(),
-            active_block: self.store.active_context_block(&strand.id)?,
+            active_incident: self.store.active_context_incident(&strand.id)?,
         }))
     }
 
-    pub fn strand_rejections(
+    pub fn strand_errors(
         &self,
         strand_id: &str,
         limit: i64,
-    ) -> Result<Option<Vec<RejectedDelivery>>, String> {
+    ) -> Result<Option<Vec<ErrorIncident>>, String> {
         let Some(strand) = self.store.strand(strand_id)? else {
             return Ok(None);
         };
-        self.store.rejected_deliveries(&strand.id, limit).map(Some)
+        self.store
+            .error_incidents_for_strand(&strand.id, limit)
+            .map(Some)
     }
 
     pub(crate) fn publish_stream(&self, strand_id: &str, payload: SantiStreamPayload) {
-        let _ = self.stream_events.send(SantiStreamEvent {
-            event_id: prefixed_id("stream"),
-            strand_id: strand_id.to_string(),
-            created_at: timestamp_now(),
-            payload,
-        });
+        let _ = self.send_stream(strand_id, payload);
+    }
+
+    fn send_stream(&self, strand_id: &str, payload: SantiStreamPayload) -> Result<(), ()> {
+        self.stream_events
+            .send(SantiStreamEvent {
+                event_id: prefixed_id("stream"),
+                strand_id: strand_id.to_string(),
+                created_at: timestamp_now(),
+                payload,
+            })
+            .map(|_| ())
+            .map_err(|_| ())
+    }
+
+    pub(in crate::service) fn dispatch_error_events(&self) {
+        let sink = StreamErrorSink { service: self };
+        if let Err(error) = engine().dispatch_outbox(&self.store, &sink, 256)
+            && error != NO_ERROR_EVENT_SUBSCRIBERS
+        {
+            eprintln!("santi: error outbox dispatch failed: {error}");
+        }
     }
 }

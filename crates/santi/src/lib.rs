@@ -72,7 +72,13 @@ fn run_inbox(command: InboxCommand, default_strand: Option<String>) -> Result<()
                 .map_err(|error| anyhow::anyhow!(error))?;
             println!("{}", serde_json::to_string_pretty(&report)?);
             if !report.accepted {
-                anyhow::bail!("inbox seed rejected: {}", report.reason.unwrap_or_default());
+                anyhow::bail!(
+                    "inbox seed rejected: {}",
+                    report
+                        .error
+                        .map(|error| error.to_string())
+                        .unwrap_or_default()
+                );
             }
             Ok(())
         }

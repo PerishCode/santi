@@ -3,6 +3,7 @@ members = [
   "crates/santi",
   "crates/santi-api",
   "crates/santi-core",
+  "crates/santi-error",
   "crates/santi-provider",
 ]
 resolver = "2"
@@ -32,6 +33,7 @@ reqwest = { version = "0.13.4", default-features = false, features = ["json", "r
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 santi-api = { path = "crates/santi-api" }
 santi-core = { path = "crates/santi-core" }
+santi-error = { path = "crates/santi-error" }
 santi-provider = { path = "crates/santi-provider" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"

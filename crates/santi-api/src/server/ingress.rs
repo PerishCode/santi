@@ -7,7 +7,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-use santi_core::{ErrorResponse, InboxSource, IngestOutcome, SantiService};
+use santi_core::{InboxSource, IngestOutcome, SantiError, SantiService};
 use serde_json::json;
 
 use crate::webhook::{WebhookOutcome, adaptor_for};
@@ -24,9 +24,10 @@ use super::ApiError;
     request_body(content_type = "application/json", description = "Raw provider event payload"),
     responses(
         (status = 200, description = "Event accepted (turn may or may not be triggered)"),
-        (status = 401, body = ErrorResponse),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse)
+        (status = 401, body = SantiError),
+        (status = 423, body = SantiError),
+        (status = 404, body = SantiError),
+        (status = 500, body = SantiError)
     )
 )]
 pub(super) async fn ingest_webhook(
@@ -86,9 +87,6 @@ pub(super) async fn ingest_webhook(
             "materialized_label": label,
             "event": event.source_metadata,
         }));
-    // Rejection handling is the adaptor's own policy: a webhook silently drops
-    // + logs (the sender has no way to retry a specific event) rather than
-    // surfacing the inbox gate as an error.
     match service
         .ingest_external_source(
             &subscription.soul_id,
@@ -99,9 +97,7 @@ pub(super) async fn ingest_webhook(
         .map_err(ApiError::from_service)?
     {
         IngestOutcome::Accepted { .. } => {}
-        IngestOutcome::Rejected { reason } => {
-            eprintln!("santi: webhook ingest rejected for {name}: {reason}");
-        }
+        IngestOutcome::Rejected { error } => return Err(ApiError::from_santi(*error)),
     }
     Ok(StatusCode::OK.into_response())
 }

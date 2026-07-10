@@ -49,11 +49,11 @@ pub(crate) async fn run_client(
             let id = defaults.resolve_strand(id)?;
             get(&client, &format!("{base}/api/v1/strands/{id}/budget")).await
         }
-        Command::Strand(StrandCommand::Rejections { id, limit }) => {
+        Command::Strand(StrandCommand::Errors { id, limit }) => {
             let id = defaults.resolve_strand(id)?;
             get(
                 &client,
-                &format!("{base}/api/v1/strands/{id}/rejections?limit={limit}"),
+                &format!("{base}/api/v1/strands/{id}/errors?limit={limit}"),
             )
             .await
         }

@@ -1,3 +1,4 @@
+use santi_error::SantiError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
@@ -17,12 +18,6 @@ pub use stream::*;
 pub struct HealthResponse {
     pub ok: bool,
     pub service: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct ErrorResponse {
-    pub code: String,
-    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq, Hash)]
@@ -298,13 +293,12 @@ pub enum StrandSelector {
 /// The result of `ingest` — the one inbound path (a send, a webhook event).
 /// `Accepted` confirms durable enqueue only, not that a turn/message now
 /// exists (the driver may still be draining a running turn's inbox later).
-/// `Rejected` is a normal outcome (the inbox gate, a scale safety valve), not
-/// an error — handling it is the adaptor's own policy (surface it, or
-/// silently drop + log).
+/// `Rejected` is a quick-fail boundary result. The canonical error carries the
+/// incident identity when durable operator intervention is required.
 #[derive(Debug, Clone)]
 pub enum IngestOutcome {
     Accepted { strand_id: String },
-    Rejected { reason: String },
+    Rejected { error: Box<SantiError> },
 }
 
 /// Bounded provenance for an inbound item at the moment it is enqueued. This is
@@ -357,10 +351,8 @@ pub struct ImSendRequest {
 /// mid-turn). Poll `GET /api/v1/im/inbox/{participant_id}` for the reply.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ImSendResponse {
-    pub accepted: bool,
     pub participant_id: String,
-    pub strand_id: Option<String>,
-    pub reason: Option<String>,
+    pub strand_id: String,
 }
 
 /// A persistent IM participant — a messaging endpoint in the plain IM integrated

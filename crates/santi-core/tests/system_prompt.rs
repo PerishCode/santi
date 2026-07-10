@@ -89,7 +89,7 @@ fn leaves_frontmatter_plain() {
 }
 
 #[test]
-fn constitution_file_overrides_encoded_default() {
+fn constitution_override() {
     let harness = PromptHarness::open();
     harness.write_constitution("my own physics, hot-edited");
 
@@ -101,7 +101,7 @@ fn constitution_file_overrides_encoded_default() {
 }
 
 #[test]
-fn default_soul_empty_memory_reads_through_to_encoded_default() {
+fn default_memory_fallback() {
     // No soul memory written: the DEFAULT soul falls back (read-through, per
     // turn — no write) to the encoded default soul memory in [santi-soul].
     let harness = PromptHarness::open();
@@ -111,6 +111,47 @@ fn default_soul_empty_memory_reads_through_to_encoded_default() {
     assert!(text.contains("Your memory is still empty. You are a soul"));
     // And it is role-NEUTRAL — no product/role vocabulary baked into core.
     assert!(!text.to_lowercase().contains("secretary"));
+}
+
+#[tokio::test]
+async fn im_capability_scope() {
+    let harness = PromptHarness::open();
+    let im = harness
+        .service
+        .ingest_external_event(
+            santi_core::DEFAULT_SOUL_ID,
+            "im:operator",
+            "hello".to_string(),
+        )
+        .expect("im strand");
+    let webhook = harness
+        .service
+        .ingest_external_event(
+            santi_core::DEFAULT_SOUL_ID,
+            "github:ops:issue:PerishCode/santi#1",
+            "hello".to_string(),
+        )
+        .expect("webhook strand");
+    let santi_core::IngestOutcome::Accepted { strand_id: im_id } = im else {
+        panic!("im ingest rejected");
+    };
+    let santi_core::IngestOutcome::Accepted {
+        strand_id: webhook_id,
+    } = webhook
+    else {
+        panic!("webhook ingest rejected");
+    };
+
+    let im_text = harness.system_prompt_for(&im_id).text;
+    assert!(im_text.contains("[santi-im]"));
+    assert!(im_text.contains("santi im reply"));
+    assert!(
+        !harness
+            .system_prompt_for(&webhook_id)
+            .text
+            .contains("[santi-im]")
+    );
+    assert!(!harness.system_prompt().text.contains("[santi-im]"));
 }
 
 struct PromptHarness {
@@ -171,9 +212,13 @@ impl PromptHarness {
     }
 
     fn system_prompt(&self) -> StrandMaterial {
+        self.system_prompt_for(&self.strand_id)
+    }
+
+    fn system_prompt_for(&self, strand_id: &str) -> StrandMaterial {
         self.service
             .strand_material(
-                &self.strand_id,
+                strand_id,
                 MaterialRequest {
                     kind: MaterialKind::SystemPrompt,
                 },

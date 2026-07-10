@@ -5,12 +5,12 @@ use crate::service_prompt::provider_tools;
 use crate::store::budget::{ContextAdmission, ContextBlockInput};
 use crate::{ContextBudget, ContextEstimate};
 
-use super::SantiService;
+use super::super::SantiService;
 
 const REASON_PROVIDER: &str = "provider_request_exceeds_budget";
 
 impl SantiService {
-    pub(super) fn context_budget(&self) -> Option<ContextBudget> {
+    pub(in crate::service) fn context_budget(&self) -> Option<ContextBudget> {
         self.provider
             .metadata()
             .context_budget
@@ -20,7 +20,7 @@ impl SantiService {
             })
     }
 
-    pub(super) fn current_context_estimate(
+    pub(in crate::service) fn current_context_estimate(
         &self,
         strand_id: &str,
     ) -> Result<ContextEstimate, String> {
@@ -35,7 +35,7 @@ impl SantiService {
         ))
     }
 
-    pub(super) fn context_admission(
+    pub(in crate::service) fn context_admission(
         &self,
         strand_id: &str,
     ) -> Result<Option<ContextAdmission>, String> {
@@ -53,7 +53,7 @@ impl SantiService {
         }))
     }
 
-    pub(super) fn block_over_budget_request(
+    pub(in crate::service) fn block_over_budget_request(
         &self,
         strand_id: &str,
         turn_id: &str,
@@ -93,7 +93,7 @@ impl SantiService {
         Ok(Some(reason))
     }
 
-    pub(super) fn clear_context_block(
+    pub(in crate::service) fn clear_context_block(
         &self,
         strand_id: &str,
         cleared_by: &str,

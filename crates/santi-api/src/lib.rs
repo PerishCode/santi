@@ -5,7 +5,6 @@ pub mod upgrade;
 
 mod bucket;
 mod server;
-mod webhook;
+pub mod webhook;
 
-pub(crate) use server::ApiError;
-pub use server::{export_openapi_json, serve};
+pub use server::{ApiError, export_openapi_json, send_strand as send_strand_handler, serve};

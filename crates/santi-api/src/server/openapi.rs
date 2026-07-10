@@ -1,0 +1,92 @@
+use santi_core::{
+    CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, ErrorResponse,
+    ForkStrandResponse, HealthResponse, MaterialRequest, SendStrandAcceptedResponse,
+    SendStrandRequest, Soul, Strand, StrandDetail, StrandMaterial, StrandRuntimeSnapshot,
+    WebhookSubscription,
+};
+use utoipa::OpenApi;
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        super::routes::health,
+        super::routes::create_strand,
+        super::routes::list_strands,
+        super::routes::create_soul,
+        super::routes::list_souls,
+        super::routes::get_soul,
+        super::routes::create_webhook,
+        super::routes::list_webhooks,
+        super::ingress::ingest_webhook,
+        super::routes::get_strand,
+        super::routes::list_messages,
+        super::routes::strand_material,
+        super::routes::send_strand,
+        super::routes::fork_strand,
+        super::routes::compact_exec,
+        super::routes::compact_query,
+        super::routes::strand_budget,
+        super::routes::strand_rejections,
+        super::routes::runtime_snapshot,
+        super::routes::send_im,
+        super::routes::poll_im,
+        crate::bucket::get_bucket_object
+    ),
+    components(schemas(
+        CreateStrandResponse,
+        ForkStrandResponse,
+        CreateSoulRequest,
+        CreateWebhookRequest,
+        WebhookSubscription,
+        ErrorResponse,
+        HealthResponse,
+        MaterialRequest,
+        SendStrandRequest,
+        SendStrandAcceptedResponse,
+        santi_core::ImSendRequest,
+        santi_core::ImSendResponse,
+        santi_core::ImInboxEntry,
+        santi_core::ImParticipant,
+        StrandDetail,
+        StrandMaterial,
+        StrandRuntimeSnapshot,
+        Soul,
+        Strand,
+        santi_core::ActorType,
+        santi_core::Compact,
+        santi_core::CompactCapsuleOptions,
+        santi_core::CompactExecRequest,
+        santi_core::CompactExecResponse,
+        santi_core::CompactQueryEntry,
+        santi_core::CompactQueryResponse,
+        santi_core::ContextBudget,
+        santi_core::ContextEstimate,
+        santi_core::RejectedDelivery,
+        santi_core::StrandBlock,
+        santi_core::StrandBudgetSnapshot,
+        santi_core::StrandTargetType,
+        santi_core::Message,
+        santi_core::MessageContent,
+        santi_core::MessagePart,
+        santi_core::MessageState,
+        santi_core::MaterialKind,
+        santi_core::MaterialUpdated,
+        santi_core::StrandEffect,
+        santi_core::StrandMessage,
+        santi_core::StrandMessageRef,
+        santi_core::ThinkingSpan,
+        santi_core::ThinkingSpanState,
+        santi_core::ToolCall,
+        santi_core::ToolResult,
+        santi_core::Turn,
+        santi_core::TurnActivity,
+        santi_core::TurnActivityState,
+        santi_core::TurnStatus,
+        santi_core::TurnTriggerType
+    ))
+)]
+struct ApiDoc;
+
+pub(super) fn document() -> utoipa::openapi::OpenApi {
+    ApiDoc::openapi()
+}

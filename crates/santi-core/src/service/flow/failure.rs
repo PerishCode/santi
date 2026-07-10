@@ -1,6 +1,6 @@
 use crate::{ActorType, MessageContent, MessageIntake, MessageState, SantiStreamPayload};
 
-use super::SantiService;
+use super::super::SantiService;
 
 #[derive(Debug)]
 pub(super) struct ProviderTurnFailure {

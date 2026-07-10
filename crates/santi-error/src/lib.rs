@@ -48,6 +48,14 @@ pub mod catalog {
         exposure: ErrorExposure::OPERATOR_ONLY,
     };
 
+    pub const PROVIDER_TURN_FAILED: ErrorDescriptor = ErrorDescriptor {
+        code: "provider.turn.failed",
+        category: ErrorCategory::Unavailable,
+        severity: ErrorSeverity::Error,
+        retry: ErrorRetry::Later,
+        exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    };
+
     pub const INVALID_ARGUMENT: ErrorDescriptor = ErrorDescriptor {
         code: "request.invalid_argument",
         category: ErrorCategory::InvalidInput,
@@ -89,6 +97,7 @@ pub enum ErrorCategory {
     NotFound,
     ResourceExhausted,
     Unauthorized,
+    Unavailable,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]

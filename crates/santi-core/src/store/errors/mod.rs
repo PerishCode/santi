@@ -285,6 +285,7 @@ pub(super) fn category_db(value: ErrorCategory) -> &'static str {
         ErrorCategory::NotFound => "not_found",
         ErrorCategory::ResourceExhausted => "resource_exhausted",
         ErrorCategory::Unauthorized => "unauthorized",
+        ErrorCategory::Unavailable => "unavailable",
     }
 }
 
@@ -294,6 +295,7 @@ fn category_from_db(value: &str) -> ErrorCategory {
         "not_found" => ErrorCategory::NotFound,
         "resource_exhausted" => ErrorCategory::ResourceExhausted,
         "unauthorized" => ErrorCategory::Unauthorized,
+        "unavailable" => ErrorCategory::Unavailable,
         _ => ErrorCategory::Internal,
     }
 }

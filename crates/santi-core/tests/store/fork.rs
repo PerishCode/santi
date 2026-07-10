@@ -225,6 +225,7 @@ fn fork_drops_external_state() {
             &turn.id,
             None,
             "fake-provider",
+            "fake-model",
             Some("resp_parent".to_string()),
         )
         .expect("complete turn");

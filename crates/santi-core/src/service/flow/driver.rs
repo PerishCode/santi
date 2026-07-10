@@ -14,19 +14,13 @@ use super::super::{
     text_delta::TextDeltaUpdate,
     timing::{ProviderTurnTiming, provider_event_name},
 };
-use super::failure::ProviderTurnFailure;
+use super::failure::{ProviderFailureStage, ProviderTurnFailure};
 
 impl SantiService {
     pub(super) async fn complete_provider_turn(&self, strand_id: String, turn_id: String) {
         match self.run_provider_turn(&strand_id, &turn_id).await {
             Err(failure) => {
-                self.fail_background_turn(
-                    &strand_id,
-                    &turn_id,
-                    failure.error,
-                    failure.partial_assistant_text,
-                    failure.record_failure_message,
-                );
+                self.fail_background_turn(&strand_id, &turn_id, failure);
             }
             Ok((last_soul_message, provider_response_id)) => {
                 self.finalize_turn(
@@ -67,19 +61,28 @@ impl SantiService {
             );
             seq
         });
+        let metadata = self.provider.metadata();
         match self.store.complete_turn(
             turn_id,
             assistant_seq,
-            &self.provider.metadata().provider,
+            &metadata.provider,
+            &metadata.model,
             provider_response_id,
         ) {
-            Ok(_) => self.publish_stream(
+            Ok(_) => {
+                self.dispatch_error_events();
+                self.publish_stream(
+                    strand_id,
+                    SantiStreamPayload::TurnCompleted {
+                        turn_id: turn_id.to_string(),
+                    },
+                );
+            }
+            Err(error) => self.fail_background_turn(
                 strand_id,
-                SantiStreamPayload::TurnCompleted {
-                    turn_id: turn_id.to_string(),
-                },
+                turn_id,
+                ProviderTurnFailure::runtime(error, ""),
             ),
-            Err(error) => self.fail_background_turn(strand_id, turn_id, error, String::new(), true),
         }
     }
 
@@ -96,7 +99,7 @@ impl SantiService {
             ($expr:expr) => {
                 match $expr {
                     Ok(value) => value,
-                    Err(error) => return Err(ProviderTurnFailure::new(error, &assistant_text)),
+                    Err(error) => return Err(ProviderTurnFailure::runtime(error, &assistant_text)),
                 }
             };
         }
@@ -121,7 +124,7 @@ impl SantiService {
                 self.open_over_budget_incident(strand_id, turn_id, &request, &estimate)
             ) {
                 timing.failed(round, "context_budget", &error.to_string());
-                return Err(ProviderTurnFailure::context_budget(error.to_string()));
+                return Err(ProviderTurnFailure::context_budget(error));
             }
             timing.request_built(
                 round,
@@ -138,6 +141,7 @@ impl SantiService {
                 instructions: request.instructions.as_deref(),
             });
             self.publish_turn_activity(strand_id, turn_id, TurnActivityState::Requesting, None);
+            let request_model = request.model.clone();
             let mut stream = match self.provider.stream_response(request).await {
                 Ok(stream) => {
                     timing.http_response_started(round);
@@ -145,7 +149,14 @@ impl SantiService {
                 }
                 Err(error) => {
                     timing.failed(round, "http_response", &error);
-                    return Err(ProviderTurnFailure::new(error, &assistant_text));
+                    return Err(ProviderTurnFailure::provider(
+                        error,
+                        &assistant_text,
+                        &provider_family,
+                        &request_model,
+                        ProviderFailureStage::Request,
+                        round,
+                    ));
                 }
             };
             let mut calls = Vec::new();
@@ -167,7 +178,14 @@ impl SantiService {
                             &mut current_thinking_span,
                             error.clone(),
                         ));
-                        return Err(ProviderTurnFailure::new(error, &assistant_text));
+                        return Err(ProviderTurnFailure::provider(
+                            error,
+                            &assistant_text,
+                            &provider_family,
+                            &request_model,
+                            ProviderFailureStage::Stream,
+                            round,
+                        ));
                     }
                 };
                 if let ProviderEvent::StreamTrace(trace) = event {
@@ -259,12 +277,20 @@ impl SantiService {
                         break;
                     }
                     ProviderEvent::Failed(error) => {
+                        timing.failed(round, "provider_response", &error);
                         provider_try!(self.fail_current_thinking_span(
                             strand_id,
                             &mut current_thinking_span,
                             error.clone(),
                         ));
-                        return Err(ProviderTurnFailure::new(error, &assistant_text));
+                        return Err(ProviderTurnFailure::provider(
+                            error,
+                            &assistant_text,
+                            &provider_family,
+                            &request_model,
+                            ProviderFailureStage::Response,
+                            round,
+                        ));
                     }
                 }
             }

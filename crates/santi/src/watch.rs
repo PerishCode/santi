@@ -182,14 +182,53 @@ pub fn render_watch_event(event: &str, data: &str) -> Option<String> {
         "turn_completed" => {
             json_field(data, &["payload", "turn_id"]).map(|id| format!("turn completed {id}"))
         }
-        "turn_failed" => {
-            let id = json_field(data, &["payload", "turn_id"]).unwrap_or_else(|| "unknown".into());
-            let error =
-                json_field(data, &["payload", "error"]).unwrap_or_else(|| "unknown error".into());
-            Some(format!("turn failed {id}: {}", snippet(&error, 240)))
-        }
+        "turn_failed" => render_turn_failure(value.get("payload")?),
+        "error_transition" => render_error_transition(value.get("payload")?),
         _ => Some(format!("{event}: {}", snippet(data, 240))),
     }
+}
+
+fn render_turn_failure(payload: &serde_json::Value) -> Option<String> {
+    let id = payload
+        .get("turn_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    let error = payload.get("error")?;
+    let code = error
+        .get("code")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    let message = error
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown error");
+    let incident = error
+        .get("incident_id")
+        .and_then(serde_json::Value::as_str)
+        .map(|id| format!(" (incident {id})"))
+        .unwrap_or_default();
+    Some(format!(
+        "turn failed {id}: {}",
+        snippet(&format!("{code}: {message}{incident}"), 240)
+    ))
+}
+
+fn render_error_transition(payload: &serde_json::Value) -> Option<String> {
+    let transition = payload.get("transition")?;
+    let kind = transition
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("changed");
+    let incident = transition.get("incident")?;
+    let id = incident
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    let code = incident
+        .get("code")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    Some(format!("error {kind} {code} ({id})"))
 }
 
 fn thinking_line(value: &serde_json::Value, label: &str) -> Option<String> {

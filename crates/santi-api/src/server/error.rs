@@ -72,6 +72,7 @@ impl ApiError {
                 ErrorCategory::NotFound => StatusCode::NOT_FOUND,
                 ErrorCategory::ResourceExhausted => StatusCode::TOO_MANY_REQUESTS,
                 ErrorCategory::Unauthorized => StatusCode::UNAUTHORIZED,
+                ErrorCategory::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
             }
         };
         Self { status, error }

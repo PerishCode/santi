@@ -22,9 +22,10 @@ use tokio::sync::broadcast;
 
 use crate::{
     CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, ErrorEventSink, ErrorIncident,
-    ErrorScope, ErrorTransition, MaterialKind, SantiStore, SantiStreamEvent, SantiStreamPayload,
-    Soul, Strand, StrandBudgetSnapshot, StrandDetail, StrandMaterial, StrandMessage,
-    StrandRuntimeSnapshot, Turn, WebhookSubscription, engine, prefixed_id, timestamp_now,
+    ErrorScope, ErrorTransition, MaterialKind, SantiError, SantiStore, SantiStreamEvent,
+    SantiStreamPayload, Soul, Strand, StrandBudgetSnapshot, StrandDetail, StrandMaterial,
+    StrandMessage, StrandRuntimeSnapshot, Turn, WebhookSubscription, engine, prefixed_id,
+    timestamp_now,
 };
 use runtime_notice::RuntimeNoticeBus;
 
@@ -42,13 +43,21 @@ pub struct SantiService {
     /// (the inbox is an MQ — we stop consuming, never producing). The in-flight
     /// turn is left to finish; `drain_running_turns` waits it out.
     shutting_down: Arc<AtomicBool>,
+    drive_degraded: Arc<AtomicBool>,
 }
 
 type MaterialCacheKey = (String, MaterialKind);
-/// A turn `poke`/`ingest_into` actually just drove, with what it drained into
-/// the timeline to reach it — `None` when nothing was pending, or the drive
-/// coalesced into an already-running turn instead of starting a fresh one.
-type DrivenTurn = Option<(Turn, Vec<StrandMessage>)>;
+/// The complete result of one driver poke, including normal no-start states and
+/// canonical holds/failures that transports must surface without losing the
+/// durable enqueue truth.
+pub(crate) enum DriveOutcome {
+    Started(Turn, Vec<StrandMessage>),
+    Running(Turn),
+    Idle,
+    Held(SantiError),
+    Paused,
+    Failed(SantiError),
+}
 
 const NO_ERROR_EVENT_SUBSCRIBERS: &str = "error event bus has no subscribers";
 
@@ -96,6 +105,7 @@ impl SantiService {
         // sees the truth and its strand is idle again. Re-driving stranded
         // requests is liveness; call `resume_pending` once inside the runtime.
         store.reconcile_orphaned_turns()?;
+        let drive_degraded = store.active_drive_incident_count()? > 0;
         Ok(Self {
             store,
             provider,
@@ -105,6 +115,7 @@ impl SantiService {
             error_events: broadcast::channel(1024).0,
             runtime_notices: RuntimeNoticeBus::new(),
             shutting_down: Arc::new(AtomicBool::new(false)),
+            drive_degraded: Arc::new(AtomicBool::new(drive_degraded)),
         })
     }
 
@@ -150,15 +161,38 @@ impl SantiService {
     /// content nobody ever drained). Liveness only — no retry of
     /// attempted/failed turns. Call once at server startup (inside the tokio
     /// runtime).
-    pub fn resume_pending(&self) {
+    pub fn resume_pending(&self) -> Result<(), String> {
         self.dispatch_error_events();
-        match self.store.strands_with_pending_requests() {
-            Ok(pending) => {
-                for strand_id in pending {
-                    self.poke(&strand_id, "strand_send");
-                }
+        let pending = self.store.strands_with_pending_requests()?;
+        for strand_id in pending {
+            let outcome = self.poke(&strand_id, "strand_send", None, "cold_start_resume");
+            if let DriveOutcome::Failed(error) = outcome
+                && error.code == crate::catalog::ERROR_ENGINE_PERSISTENCE_FAILED.code
+            {
+                return Err(format!(
+                    "cold-start recovery could not persist driver truth for strand {strand_id}: {}",
+                    error.message
+                ));
             }
-            Err(error) => eprintln!("santi: resume_pending scan failed: {error}"),
+        }
+        Ok(())
+    }
+
+    pub fn is_drive_degraded(&self) -> bool {
+        self.drive_degraded.load(Ordering::SeqCst)
+    }
+
+    pub(in crate::service) fn mark_drive_degraded(&self) {
+        self.drive_degraded.store(true, Ordering::SeqCst);
+    }
+
+    pub(in crate::service) fn refresh_drive_health(&self) {
+        match self.store.active_drive_incident_count() {
+            Ok(count) => self.drive_degraded.store(count > 0, Ordering::SeqCst),
+            Err(error) => {
+                self.drive_degraded.store(true, Ordering::SeqCst);
+                eprintln!("santi: drive health refresh failed: {error}");
+            }
         }
     }
 

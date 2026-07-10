@@ -1,6 +1,6 @@
 mod state;
 
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 use santi_error::{
     ErrorIncident, ErrorScope, ErrorSource, IncidentDraft, SantiError, catalog, engine,
 };
@@ -8,14 +8,14 @@ use santi_provider::{ProviderItem, ProviderTool};
 use serde_json::{Value, json};
 
 use super::{
-    STRAND_INBOX_GATE, SantiStore, StartedTurn,
+    STRAND_INBOX_GATE, SantiStore, StartTurnOutcome, StartedTurn,
     assembly::assembly_input_in_conn,
     db::{drain_inbox_in_tx, turn_by_id},
     rows::message_kind_db,
 };
 use crate::{
-    ContextEstimate, InboxSource, IngestOutcome, MessageContent, MessageKind, prefixed_id,
-    timestamp_now,
+    ContextEstimate, InboxSource, IngestOutcome, IngestReceipt, MessageContent, MessageKind,
+    prefixed_id, timestamp_now,
 };
 
 use state::{current_strand_seq, open_context_incident, pending_items, repeat_context_incident};
@@ -91,6 +91,15 @@ impl SantiStore {
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
+
+        if let Some(error) =
+            super::drive::repeat_active_in_conn(&tx, strand_id, "ingest_active_guard")?
+        {
+            tx.commit().map_err(|error| error.to_string())?;
+            return Ok(IngestOutcome::Rejected {
+                error: Box::new(error),
+            });
+        }
 
         if crate::store::errors::active_in_conn(&tx, &context_incident_key(strand_id))?.is_some() {
             let error = repeat_context_incident(&tx, strand_id, "ingest_active_guard")?;
@@ -195,7 +204,11 @@ impl SantiStore {
         .map_err(|error| error.to_string())?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(IngestOutcome::Accepted {
-            strand_id: strand_id.to_string(),
+            receipt: IngestReceipt {
+                strand_id: strand_id.to_string(),
+                inbox_id,
+                warning: None,
+            },
         })
     }
 
@@ -205,31 +218,34 @@ impl SantiStore {
         trigger_type: &str,
         trigger_ref: Option<&str>,
         admission: Option<&ContextAdmission>,
-    ) -> Result<Option<StartedTurn>, String> {
+    ) -> Result<StartTurnOutcome, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
-        let running: Option<i64> = tx
+        let running_id: Option<String> = tx
             .query_row(
-                "SELECT 1 FROM turns WHERE strand_id = ?1 AND status = 'running' LIMIT 1",
+                "SELECT id FROM turns WHERE strand_id = ?1 AND status = 'running' LIMIT 1",
                 params![strand_id],
                 |row| row.get(0),
             )
-            .ok();
-        if running.is_some() {
-            return Ok(None);
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if let Some(turn_id) = running_id {
+            let turn =
+                turn_by_id(&tx, &turn_id)?.ok_or_else(|| "running turn missing".to_string())?;
+            return Ok(StartTurnOutcome::Running(turn));
         }
 
         let pending = pending_items(&tx, strand_id)?;
         if pending.is_empty() {
-            return Ok(None);
+            return Ok(StartTurnOutcome::Idle);
         }
 
         if crate::store::errors::active_in_conn(&tx, &context_incident_key(strand_id))?.is_some() {
-            repeat_context_incident(&tx, strand_id, "pending_active_guard")?;
+            let error = repeat_context_incident(&tx, strand_id, "pending_active_guard")?;
             tx.commit().map_err(|error| error.to_string())?;
-            return Ok(None);
+            return Ok(StartTurnOutcome::Held(error));
         }
 
         if let Some(admission) = admission {
@@ -243,7 +259,7 @@ impl SantiStore {
             if estimate.total_bytes > admission.budget_bytes {
                 let reason = over_budget_reason(estimate.total_bytes, admission.budget_bytes);
                 let observed_at_seq = current_strand_seq(&tx, strand_id)?;
-                open_context_incident(
+                let error = open_context_incident(
                     &tx,
                     strand_id,
                     ContextIncidentInput {
@@ -261,14 +277,14 @@ impl SantiStore {
                     },
                 )?;
                 tx.commit().map_err(|error| error.to_string())?;
-                return Ok(None);
+                return Ok(StartTurnOutcome::Held(error));
             }
         }
 
         let turn_id = prefixed_id("turn");
         let drained_messages = drain_inbox_in_tx(&tx, strand_id, &turn_id)?;
         if drained_messages.is_empty() {
-            return Ok(None);
+            return Ok(StartTurnOutcome::Idle);
         }
         let now = timestamp_now();
         tx.execute(
@@ -284,8 +300,9 @@ impl SantiStore {
             params![turn_id, strand_id, trigger_type, trigger_ref, now],
         )
         .map_err(|error| error.to_string())?;
+        super::drive::resolve_in_conn(&tx, strand_id, &turn_id, drained_messages.len())?;
         tx.commit().map_err(|error| error.to_string())?;
-        Ok(Some(StartedTurn {
+        Ok(StartTurnOutcome::Started(StartedTurn {
             turn: turn_by_id(&conn, &turn_id)?.ok_or_else(|| "created turn missing".to_string())?,
             drained_messages,
         }))

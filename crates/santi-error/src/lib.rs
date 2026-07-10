@@ -56,6 +56,14 @@ pub mod catalog {
         exposure: ErrorExposure::CALLER_AND_OPERATOR,
     };
 
+    pub const STRAND_DRIVE_FAILED: ErrorDescriptor = ErrorDescriptor {
+        code: "runtime.strand.drive_failed",
+        category: ErrorCategory::Unavailable,
+        severity: ErrorSeverity::Error,
+        retry: ErrorRetry::AfterResolution,
+        exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    };
+
     pub const INVALID_ARGUMENT: ErrorDescriptor = ErrorDescriptor {
         code: "request.invalid_argument",
         category: ErrorCategory::InvalidInput,

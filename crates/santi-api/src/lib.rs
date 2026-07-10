@@ -7,4 +7,7 @@ mod bucket;
 mod server;
 pub mod webhook;
 
-pub use server::{ApiError, export_openapi_json, send_strand as send_strand_handler, serve};
+pub use server::{
+    ApiError, drive_strand as drive_strand_handler, export_openapi_json, health as health_handler,
+    send_strand as send_strand_handler, serve,
+};

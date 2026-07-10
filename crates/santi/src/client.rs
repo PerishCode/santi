@@ -72,6 +72,10 @@ pub(crate) async fn run_client(
             let id = defaults.resolve_strand(id)?;
             post(&client, &format!("{base}/api/v1/strands/{id}/fork"), None).await
         }
+        Command::Strand(StrandCommand::Drive { id }) => {
+            let id = defaults.resolve_strand(id)?;
+            post(&client, &format!("{base}/api/v1/strands/{id}/drive"), None).await
+        }
         Command::Strand(StrandCommand::Send {
             args,
             watch,
@@ -366,10 +370,22 @@ async fn im_send(
         println!("{text}");
         anyhow::bail!("im send failed with status {status}");
     }
+    let accepted = serde_json::from_str::<serde_json::Value>(&text).ok();
+    if let Some(warning) = accepted_warning(accepted.as_ref()) {
+        println!(
+            "{}",
+            accepted
+                .as_ref()
+                .map(serde_json::to_string_pretty)
+                .transpose()?
+                .unwrap_or(text)
+        );
+        return Err(accepted_warning_error(warning));
+    }
     if !reply {
-        match serde_json::from_str::<serde_json::Value>(&text) {
-            Ok(value) => println!("{}", serde_json::to_string_pretty(&value)?),
-            Err(_) => println!("{text}"),
+        match accepted {
+            Some(value) => println!("{}", serde_json::to_string_pretty(&value)?),
+            None => println!("{text}"),
         }
         return Ok(());
     }
@@ -465,6 +481,15 @@ pub async fn send(
         }
         anyhow::bail!("request failed with status {status}");
     }
+    if let Some(warning) = accepted_warning(accepted.as_ref()) {
+        if watch {
+            match &accepted {
+                Some(value) => println!("{}", serde_json::to_string_pretty(value)?),
+                None => println!("{text}"),
+            }
+        }
+        return Err(accepted_warning_error(warning));
+    }
     if !watch {
         return Ok(());
     }
@@ -478,4 +503,27 @@ pub async fn send(
         .and_then(serde_json::Value::as_str)
         .map(str::to_string);
     watch_until_idle(client, base, strand_id, seed_turn, watch_format).await
+}
+
+fn accepted_warning(value: Option<&serde_json::Value>) -> Option<&serde_json::Value> {
+    value?
+        .pointer("/receipt/warning")
+        .filter(|warning| !warning.is_null())
+}
+
+fn accepted_warning_error(warning: &serde_json::Value) -> anyhow::Error {
+    if let Some(command) = warning
+        .pointer("/context/recovery/command")
+        .and_then(serde_json::Value::as_str)
+    {
+        anyhow::anyhow!("message was accepted but not driven; do not resend it; run `{command}`")
+    } else {
+        let code = warning
+            .get("code")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown warning");
+        anyhow::anyhow!(
+            "message was accepted but not driven; do not resend it; inspect and resolve `{code}`"
+        )
+    }
 }

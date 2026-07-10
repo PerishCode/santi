@@ -11,7 +11,7 @@ use crate::{config, provider};
 use santi_core::{SantiService, SantiServiceConfig};
 
 pub use error::ApiError;
-pub use routes::send_strand;
+pub use routes::{drive_strand, health, send_strand};
 
 pub fn export_openapi_json() -> Result<String, String> {
     serde_json::to_string_pretty(&openapi::document()).map_err(|error| error.to_string())
@@ -48,7 +48,7 @@ pub async fn serve(config: config::ConfigService) -> Result<(), String> {
     // 127.0.0.1 directly). The only in-process gate is webhook signature
     // verification (per subscription), which is independent of this and untouched.
     // Liveness: re-drive any requests stranded by a previous crash.
-    service.resume_pending();
+    service.resume_pending()?;
     println!("santi-api listening on http://{address}");
     // Graceful shutdown (PHASE-07): on SIGTERM/Ctrl-C, latch the service so no
     // new turns start (inbox consumption pauses; ingest still enqueues durably),

@@ -76,7 +76,7 @@ pub fn finalize_at(
     let mut errors = Vec::new();
 
     match &request.terminal {
-        UpgradeTerminal::Upgraded => {
+        UpgradeTerminal::Upgraded { readiness } => {
             store
                 .resolve_error_incident(
                     UPGRADE_INCIDENT_KEY,
@@ -84,7 +84,12 @@ pub fn finalize_at(
                     json!({
                         "attempt_id": request.attempt_id,
                         "artifact": bounded_detail(&request.deb),
-                        "terminal": "upgraded",
+                        "terminal": if matches!(readiness, super::UpgradeReadiness::Degraded) {
+                            "upgraded_degraded"
+                        } else {
+                            "upgraded"
+                        },
+                        "readiness": readiness,
                     }),
                 )
                 .map_err(|error| {

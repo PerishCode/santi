@@ -23,11 +23,13 @@ use super::ApiError;
     params(("name" = String, Path)),
     request_body(content_type = "application/json", description = "Raw provider event payload"),
     responses(
-        (status = 200, description = "Event accepted (turn may or may not be triggered)"),
+        (status = 200, description = "Control response or ignored event"),
+        (status = 202, body = santi_core::IngestReceipt),
         (status = 401, body = SantiError),
         (status = 423, body = SantiError),
         (status = 404, body = SantiError),
-        (status = 500, body = SantiError)
+        (status = 500, body = SantiError),
+        (status = 503, body = SantiError)
     )
 )]
 pub(super) async fn ingest_webhook(
@@ -96,8 +98,9 @@ pub(super) async fn ingest_webhook(
         )
         .map_err(ApiError::from_service)?
     {
-        IngestOutcome::Accepted { .. } => {}
-        IngestOutcome::Rejected { error } => return Err(ApiError::from_santi(*error)),
+        IngestOutcome::Accepted { receipt } => {
+            Ok((StatusCode::ACCEPTED, Json(receipt)).into_response())
+        }
+        IngestOutcome::Rejected { error } => Err(ApiError::from_santi(*error)),
     }
-    Ok(StatusCode::OK.into_response())
 }

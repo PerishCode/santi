@@ -1,14 +1,16 @@
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
+    http::StatusCode,
+    response::IntoResponse,
     routing::{get, post},
 };
 use santi_core::{
     CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSoulRequest,
-    CreateStrandResponse, CreateWebhookRequest, ForkStrandResponse, HealthResponse, ImInboxEntry,
-    ImSendRequest, ImSendResponse, IngestOutcome, MaterialRequest, SantiError, SantiService,
-    SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand, StrandBudgetSnapshot,
-    StrandDetail, StrandMaterial, StrandRuntimeSnapshot, WebhookSubscription,
+    CreateStrandResponse, CreateWebhookRequest, DriveStrandResponse, ForkStrandResponse,
+    HealthResponse, ImInboxEntry, ImSendRequest, ImSendResponse, IngestOutcome, MaterialRequest,
+    SantiError, SantiService, SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand,
+    StrandBudgetSnapshot, StrandDetail, StrandMaterial, StrandRuntimeSnapshot, WebhookSubscription,
 };
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -37,6 +39,7 @@ pub(super) fn router(service: SantiService) -> Router {
         )
         .route("/api/v1/strands/{strand_id}/events", get(strand_events))
         .route("/api/v1/strands/{strand_id}/send", post(send_strand))
+        .route("/api/v1/strands/{strand_id}/drive", post(drive_strand))
         .route("/api/v1/strands/{strand_id}/fork", post(fork_strand))
         .route("/api/v1/strands/{strand_id}/compact", post(compact_exec))
         .route("/api/v1/strands/{strand_id}/budget", get(strand_budget))
@@ -71,13 +74,26 @@ pub(super) fn router(service: SantiService) -> Router {
 #[utoipa::path(
     get,
     path = "/api/v1/health",
-    responses((status = 200, body = HealthResponse))
+    responses(
+        (status = 200, body = HealthResponse),
+        (status = 503, body = HealthResponse)
+    )
 )]
-pub(super) async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse {
-        ok: true,
-        service: "santi-api".to_string(),
-    })
+pub async fn health(State(service): State<SantiService>) -> impl IntoResponse {
+    let degraded = service.is_drive_degraded();
+    let status = if degraded {
+        StatusCode::SERVICE_UNAVAILABLE
+    } else {
+        StatusCode::OK
+    };
+    (
+        status,
+        Json(HealthResponse {
+            ok: !degraded,
+            degraded,
+            service: "santi-api".to_string(),
+        }),
+    )
 }
 
 #[utoipa::path(
@@ -261,7 +277,8 @@ pub(super) async fn strand_material(
         (status = 200, body = SendStrandAcceptedResponse),
         (status = 423, body = SantiError),
         (status = 404, body = SantiError),
-        (status = 500, body = SantiError)
+        (status = 500, body = SantiError),
+        (status = 503, body = SantiError)
     )
 )]
 pub async fn send_strand(
@@ -274,6 +291,28 @@ pub async fn send_strand(
         .await
         .map(Json)
         .map_err(ApiError::from_santi)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/strands/{strand_id}/drive",
+    params(("strand_id" = String, Path)),
+    responses(
+        (status = 200, body = DriveStrandResponse),
+        (status = 404, body = SantiError),
+        (status = 423, body = SantiError),
+        (status = 500, body = SantiError),
+        (status = 503, body = SantiError)
+    )
+)]
+pub async fn drive_strand(
+    State(service): State<SantiService>,
+    Path(strand_id): Path<String>,
+) -> Result<Json<DriveStrandResponse>, ApiError> {
+    service
+        .drive_strand(&strand_id)
+        .map(Json)
+        .map_err(|error| ApiError::from_santi(*error))
 }
 
 #[utoipa::path(
@@ -425,9 +464,9 @@ pub(super) async fn send_im(
         .im_send(&request.soul_id, &request.participant_id, &request.content)
         .map_err(ApiError::from_service)?;
     match outcome {
-        IngestOutcome::Accepted { strand_id } => Ok(Json(ImSendResponse {
+        IngestOutcome::Accepted { receipt } => Ok(Json(ImSendResponse {
             participant_id: request.participant_id,
-            strand_id,
+            receipt,
         })),
         IngestOutcome::Rejected { error } => Err(ApiError::from_santi(*error)),
     }

@@ -31,12 +31,16 @@ async fn sends_with_runtime() {
     assert_eq!(
         response
             .user_message
+            .as_ref()
             .expect("driven synchronously")
             .content_text,
         "hello provider"
     );
-    assert_eq!(response.turn.status, santi_core::TurnStatus::Running);
-    let runtime = wait_for_completed_turn(&service, &strand.id, &response.turn.id).await;
+    assert_eq!(
+        accepted_turn(&response).status,
+        santi_core::TurnStatus::Running
+    );
+    let runtime = wait_for_completed_turn(&service, &strand.id, &accepted_turn(&response).id).await;
     assert!(
         runtime
             .messages

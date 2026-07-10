@@ -2,14 +2,14 @@ use std::time::Duration;
 
 use santi_api::upgrade::{
     Outcome, RollbackCause, SeedOutcome, UpgradeFinalizeReport, UpgradeFinalizeRequest,
-    UpgradeHost, UpgradeReport, UpgradeTerminal, compose_record, run_upgrade,
+    UpgradeHost, UpgradeReadiness, UpgradeReport, UpgradeTerminal, compose_record, run_upgrade,
 };
 use santi_core::{ErrorScope, ErrorSource, IncidentDraft, SantiError, catalog, engine};
 
 struct FakeHost {
     calls: Vec<String>,
     install_result: Result<(), String>,
-    probe_result: Result<bool, String>,
+    probe_result: Result<UpgradeReadiness, String>,
     seed_result: Result<SeedOutcome, String>,
     graceful_stop_result: Result<(), String>,
     snapshot_result: Result<(), String>,
@@ -25,7 +25,7 @@ impl Default for FakeHost {
         Self {
             calls: Vec::new(),
             install_result: Ok(()),
-            probe_result: Ok(true),
+            probe_result: Ok(UpgradeReadiness::Ready),
             seed_result: Ok(fake_seed()),
             graceful_stop_result: Ok(()),
             snapshot_result: Ok(()),
@@ -54,7 +54,7 @@ impl UpgradeHost for FakeHost {
         self.install_result.clone()
     }
 
-    fn trial_probe(&mut self) -> Result<bool, String> {
+    fn trial_probe(&mut self) -> Result<UpgradeReadiness, String> {
         self.calls.push("trial_probe".into());
         self.probe_result.clone()
     }
@@ -73,7 +73,7 @@ impl UpgradeHost for FakeHost {
         self.finalize_result.clone()?;
 
         let mut errors = match &request.terminal {
-            UpgradeTerminal::Upgraded => Vec::new(),
+            UpgradeTerminal::Upgraded { .. } => Vec::new(),
             UpgradeTerminal::RolledBack { failure } | UpgradeTerminal::Failed { failure } => {
                 vec![fake_error(
                     catalog::UPGRADE_FAILED,
@@ -173,10 +173,37 @@ fn success_orders_steps() {
             "start"
         ]
     );
-    assert_eq!(report.outcome, Outcome::Upgraded);
+    assert_eq!(
+        report.outcome,
+        Outcome::Upgraded {
+            readiness: UpgradeReadiness::Ready
+        }
+    );
     assert!(report.seeded);
     assert!(report.errors.is_empty());
     assert!(host.seeded_text.unwrap().contains(&report.attempt_id));
+}
+
+#[test]
+fn degraded_upgrade_does_not_roll_back() {
+    let mut host = FakeHost {
+        probe_result: Ok(UpgradeReadiness::Degraded),
+        ..Default::default()
+    };
+    let report = run(&mut host);
+    assert_eq!(
+        report.outcome,
+        Outcome::Upgraded {
+            readiness: UpgradeReadiness::Degraded
+        }
+    );
+    assert!(!host.calls.contains(&"rollback".to_string()));
+    assert!(matches!(
+        host.finalizations[0].terminal,
+        UpgradeTerminal::Upgraded {
+            readiness: UpgradeReadiness::Degraded
+        }
+    ));
 }
 
 #[test]
@@ -207,16 +234,16 @@ fn install_failure_rolls_back() {
 }
 
 #[test]
-fn unhealthy_rolls_back() {
+fn unavailable_rolls_back() {
     let mut host = FakeHost {
-        probe_result: Ok(false),
+        probe_result: Err("health probe returned unavailable".into()),
         ..Default::default()
     };
     let report = run(&mut host);
     assert_eq!(
         report.outcome,
         Outcome::RolledBack(RollbackCause::DidNotComeUp(
-            "health probe returned unhealthy".into()
+            "health probe returned unavailable".into()
         ))
     );
     assert!(host.calls.contains(&"rollback".to_string()));
@@ -243,7 +270,12 @@ fn seed_failure_is_reported() {
         ..Default::default()
     };
     let report = run(&mut host);
-    assert_eq!(report.outcome, Outcome::Upgraded);
+    assert_eq!(
+        report.outcome,
+        Outcome::Upgraded {
+            readiness: UpgradeReadiness::Ready
+        }
+    );
     assert!(!report.seeded);
     assert_eq!(report.errors.len(), 1);
     assert_eq!(report.errors[0].code, "runtime.upgrade.handover_failed");

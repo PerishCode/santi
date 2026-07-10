@@ -277,6 +277,8 @@ pub enum StrandCommand {
     },
     /// POST /api/v1/strands/{id}/fork (id falls back to --strand)
     Fork { id: Option<String> },
+    /// POST /api/v1/strands/{id}/drive (id falls back to --strand)
+    Drive { id: Option<String> },
     /// POST /api/v1/strands/{id}/send.
     ///
     /// Positional forms: `send <id> <text>` or `send <text>` (id then falls

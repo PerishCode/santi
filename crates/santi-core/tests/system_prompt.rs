@@ -132,15 +132,20 @@ async fn im_capability_scope() {
             "hello".to_string(),
         )
         .expect("webhook strand");
-    let santi_core::IngestOutcome::Accepted { strand_id: im_id } = im else {
+    let santi_core::IngestOutcome::Accepted {
+        receipt: im_receipt,
+    } = im
+    else {
         panic!("im ingest rejected");
     };
     let santi_core::IngestOutcome::Accepted {
-        strand_id: webhook_id,
+        receipt: webhook_receipt,
     } = webhook
     else {
         panic!("webhook ingest rejected");
     };
+    let im_id = im_receipt.strand_id;
+    let webhook_id = webhook_receipt.strand_id;
 
     let im_text = harness.system_prompt_for(&im_id).text;
     assert!(im_text.contains("[santi-im]"));

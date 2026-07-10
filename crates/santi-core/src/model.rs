@@ -18,6 +18,7 @@ pub use stream::*;
 pub struct HealthResponse {
     pub ok: bool,
     pub service: String,
+    pub degraded: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq, Hash)]
@@ -272,12 +273,36 @@ impl SendStrandRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SendStrandAcceptedResponse {
     pub strand: Strand,
-    pub turn: Turn,
+    pub receipt: IngestReceipt,
+    pub turn: Option<Turn>,
     /// The content this send just enqueued, once the driver has actually
     /// committed it to the timeline. Absent when this send coalesced into an
     /// already-running turn — durably enqueued, but the driver has not drained
     /// it yet (it will, when that turn completes and re-pokes).
     pub user_message: Option<StrandMessage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct IngestReceipt {
+    pub strand_id: String,
+    pub inbox_id: String,
+    pub warning: Option<Box<SantiError>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DriveStrandState {
+    Started,
+    Running,
+    Idle,
+    Paused,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DriveStrandResponse {
+    pub strand_id: String,
+    pub state: DriveStrandState,
+    pub turn: Option<Turn>,
 }
 
 /// How an ingest adaptor addresses a strand. Resolution is atomic (see
@@ -297,7 +322,7 @@ pub enum StrandSelector {
 /// incident identity when durable operator intervention is required.
 #[derive(Debug, Clone)]
 pub enum IngestOutcome {
-    Accepted { strand_id: String },
+    Accepted { receipt: IngestReceipt },
     Rejected { error: Box<SantiError> },
 }
 
@@ -352,7 +377,7 @@ pub struct ImSendRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ImSendResponse {
     pub participant_id: String,
-    pub strand_id: String,
+    pub receipt: IngestReceipt,
 }
 
 /// A persistent IM participant — a messaging endpoint in the plain IM integrated

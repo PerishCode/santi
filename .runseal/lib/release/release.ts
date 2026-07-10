@@ -18,7 +18,20 @@ import { accept, checksums, pkg, verifyMembers } from "@/lib/release/artifacts.t
 import { publish, verifyPublish } from "@/lib/release/publish.ts";
 import { smoke } from "@/lib/release/smoke.ts";
 
+const STEPS = [
+  "access-check",
+  "metadata",
+  "package",
+  "publish",
+  "verify-publish",
+  "smoke",
+] as const;
+
 export async function release(argv: string[]): Promise<number> {
+  if (argv.includes("-h") || argv.includes("--help")) {
+    usage();
+    return 0;
+  }
   const step = argv[0];
   const repo = repoRoot();
   switch (step) {
@@ -43,12 +56,29 @@ export async function release(argv: string[]): Promise<number> {
       await smoke(repo);
       return 0;
     default:
-      fail(
-        `unknown step: ${
-          step ?? "<none>"
-        } (expected access-check|metadata|package|publish|verify-publish|smoke)`,
-      );
+      fail(`unknown step: ${step ?? "<none>"} (expected ${STEPS.join("|")})`);
   }
+}
+
+function usage(): void {
+  console.log("Usage: runseal :release <step>");
+  console.log("");
+  console.log("Run one internal step of the CI release pipeline.");
+  console.log("This wrapper does not dispatch a release workflow by itself.");
+  console.log("");
+  console.log("Steps:");
+  console.log("  access-check    Probe release storage credentials for the selected channel");
+  console.log("  metadata        Resolve the next release version and write GITHUB_OUTPUT");
+  console.log("  package         Build and archive santi for TARGET");
+  console.log("  publish         Build checksums, verify members, and publish artifacts");
+  console.log("  verify-publish  Re-fetch metadata and verify every published artifact URL");
+  console.log("  smoke           Install from the public channel, probe health, and uninstall");
+  console.log("");
+  console.log("Environment:");
+  console.log("  RELEASE_CHANNEL=beta|stable is required where the selected step uses it.");
+  console.log("  Step-specific release variables and credentials are supplied by CI.");
+  console.log("");
+  console.log("Warning: access-check and publish can write to release storage.");
 }
 
 function channel(): Channel {

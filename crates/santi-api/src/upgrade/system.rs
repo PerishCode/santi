@@ -167,6 +167,7 @@ fn record_failure(
                 recovery: RecoveryStatus::Unknown,
             },
         },
+        readiness: UpgradeReadiness::Ready,
         wake: false,
         soul_id: santi_core::DEFAULT_SOUL_ID.to_string(),
         configured_strand_id: None,

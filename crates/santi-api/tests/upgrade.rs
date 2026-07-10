@@ -73,7 +73,7 @@ impl UpgradeHost for FakeHost {
         self.finalize_result.clone()?;
 
         let mut errors = match &request.terminal {
-            UpgradeTerminal::Upgraded { .. } => Vec::new(),
+            UpgradeTerminal::Upgraded => Vec::new(),
             UpgradeTerminal::RolledBack { failure } | UpgradeTerminal::Failed { failure } => {
                 vec![fake_error(
                     catalog::UPGRADE_FAILED,
@@ -200,10 +200,9 @@ fn degraded_skips_rollback() {
     assert!(!host.calls.contains(&"rollback".to_string()));
     assert!(matches!(
         host.finalizations[0].terminal,
-        UpgradeTerminal::Upgraded {
-            readiness: UpgradeReadiness::Degraded
-        }
+        UpgradeTerminal::Upgraded
     ));
+    assert_eq!(host.finalizations[0].readiness, UpgradeReadiness::Degraded);
 }
 
 #[test]

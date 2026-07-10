@@ -76,8 +76,8 @@ pub fn finalize_at(
     let mut errors = Vec::new();
 
     match &request.terminal {
-        UpgradeTerminal::Upgraded { readiness } => {
-            resolve_upgrade(&store, &request, *readiness)?;
+        UpgradeTerminal::Upgraded => {
+            resolve_upgrade(&store, &request, request.readiness)?;
         }
         UpgradeTerminal::RolledBack { failure } | UpgradeTerminal::Failed { failure } => {
             let terminal = if matches!(request.terminal, UpgradeTerminal::RolledBack { .. }) {

@@ -12,7 +12,6 @@ mod assembly;
 pub(crate) mod budget;
 mod compact;
 mod db;
-pub(crate) mod drive;
 mod errors;
 mod fork;
 mod im;
@@ -23,6 +22,7 @@ mod turns;
 
 use db::*;
 pub use db::{read_schema_version, soul_memory_file};
+pub(crate) use errors::drive::DriveFailureInput;
 use rows::{actor_type_db, collect_rows, map_webhook_row, message_state_db};
 
 /// The schema version this binary expects. On open, recognized runtime-schema

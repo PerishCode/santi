@@ -194,7 +194,7 @@ async fn posts_once_watch_error() {
 }
 
 #[tokio::test]
-async fn accepted_warning_does_not_watch_or_resend() {
+async fn warning_stops_watch() {
     let server = spawn_server(FakeEventsResponse::AcceptedWarning).await;
     let client = reqwest::Client::new();
 

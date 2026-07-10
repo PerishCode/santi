@@ -8,9 +8,9 @@ use axum::{
 use santi_core::{
     CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSoulRequest,
     CreateStrandResponse, CreateWebhookRequest, DriveStrandResponse, ForkStrandResponse,
-    HealthResponse, ImInboxEntry, ImSendRequest, ImSendResponse, IngestOutcome, MaterialRequest,
-    SantiError, SantiService, SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand,
-    StrandBudgetSnapshot, StrandDetail, StrandMaterial, StrandRuntimeSnapshot, WebhookSubscription,
+    HealthResponse, MaterialRequest, SantiError, SantiService, SendStrandAcceptedResponse,
+    SendStrandRequest, Soul, Strand, StrandBudgetSnapshot, StrandDetail, StrandMaterial,
+    StrandRuntimeSnapshot, WebhookSubscription,
 };
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -50,8 +50,8 @@ pub(super) fn router(service: SantiService) -> Router {
         .route("/api/v1/strands/{strand_id}/runtime", get(runtime_snapshot))
         // IM layer (orthogonal to the runtime; shares the server for cold-start):
         // send into a soul's IM conversation, poll a participant's passive inbox.
-        .route("/api/v1/im/send", post(send_im))
-        .route("/api/v1/im/inbox/{participant_id}", get(poll_im))
+        .route("/api/v1/im/send", post(super::im::send_im))
+        .route("/api/v1/im/inbox/{participant_id}", get(super::im::poll_im))
         .route(
             "/api/v1/bucket/{soul_id}/{strand_id}/{*key}",
             get(crate::bucket::get_bucket_object),
@@ -437,67 +437,6 @@ pub(super) async fn strand_budget(
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("strand not found"))
-}
-
-// ── IM layer routes ─────────────────────────────────────────────────────────
-// The plain IM integrated into santi. `strand send`/the runtime stay source-less;
-// the participant address is IM envelope only. Inbound reuses the runtime primitive
-// (Text into an `im:<participant>` conversation strand). The reply comes back into
-// the participant's passive inbox (written by the soul's offline `im reply` egress).
-
-#[utoipa::path(
-    post,
-    path = "/api/v1/im/send",
-    request_body = ImSendRequest,
-    responses(
-        (status = 200, body = ImSendResponse),
-        (status = 423, body = SantiError),
-        (status = 404, body = SantiError),
-        (status = 500, body = SantiError)
-    )
-)]
-pub(super) async fn send_im(
-    State(service): State<SantiService>,
-    Json(request): Json<ImSendRequest>,
-) -> Result<Json<ImSendResponse>, ApiError> {
-    let outcome = service
-        .im_send(&request.soul_id, &request.participant_id, &request.content)
-        .map_err(ApiError::from_service)?;
-    match outcome {
-        IngestOutcome::Accepted { receipt } => Ok(Json(ImSendResponse {
-            participant_id: request.participant_id,
-            receipt,
-        })),
-        IngestOutcome::Rejected { error } => Err(ApiError::from_santi(*error)),
-    }
-}
-
-#[utoipa::path(
-    get,
-    path = "/api/v1/im/inbox/{participant_id}",
-    params(
-        ("participant_id" = String, Path),
-        ("since" = Option<i64>, Query)
-    ),
-    responses(
-        (status = 200, body = Vec<ImInboxEntry>),
-        (status = 500, body = SantiError)
-    )
-)]
-pub(super) async fn poll_im(
-    State(service): State<SantiService>,
-    Path(participant_id): Path<String>,
-    Query(params): Query<ImPollParams>,
-) -> Result<Json<Vec<ImInboxEntry>>, ApiError> {
-    service
-        .im_poll(&participant_id, params.since.unwrap_or(0))
-        .map(Json)
-        .map_err(ApiError::from_service)
-}
-
-#[derive(serde::Deserialize)]
-pub(super) struct ImPollParams {
-    since: Option<i64>,
 }
 
 pub(super) async fn openapi() -> Json<utoipa::openapi::OpenApi> {

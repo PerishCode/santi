@@ -1,9 +1,9 @@
 //! `runseal :guard` — the local validation suite the pre-commit hook runs.
 //!
-//! Mirrors the CI `smoke (ubuntu-latest)` job (cargo fmt/clippy/test, all
-//! `--locked` like CI) so "green locally" means "green in CI", plus the Deno
-//! checks for the `.runseal/` wrappers that CI does not cover. Runnable on
-//! demand as well as from the hook.
+//! Mirrors the CI repo + Rust checks (flavor and cargo, all `--locked` like CI)
+//! so "green locally" means "green in CI", plus the Deno checks for the
+//! `.runseal/` wrappers that CI does not cover. Runnable on demand as well as
+//! from the hook.
 
 import { run } from "@/lib/std/cmd.ts";
 import { join } from "@/lib/std/fs.ts";
@@ -21,6 +21,11 @@ export async function guard(): Promise<number> {
   const config = ".runseal/deno.json";
 
   const steps: Step[] = [
+    {
+      title: "flavor check",
+      command: "flavor",
+      args: ["check", "--root", ".", "--config", "flavor.toml"],
+    },
     { title: "cargo fmt", command: "cargo", args: ["fmt", "--all", "--check"] },
     {
       title: "cargo clippy",

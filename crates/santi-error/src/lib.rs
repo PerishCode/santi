@@ -24,6 +24,30 @@ pub mod catalog {
         exposure: ErrorExposure::CALLER_AND_OPERATOR,
     };
 
+    pub const UPGRADE_FAILED: ErrorDescriptor = ErrorDescriptor {
+        code: "runtime.upgrade.failed",
+        category: ErrorCategory::Internal,
+        severity: ErrorSeverity::Error,
+        retry: ErrorRetry::AfterChange,
+        exposure: ErrorExposure::OPERATOR_ONLY,
+    };
+
+    pub const UPGRADE_HANDOVER_FAILED: ErrorDescriptor = ErrorDescriptor {
+        code: "runtime.upgrade.handover_failed",
+        category: ErrorCategory::Internal,
+        severity: ErrorSeverity::Error,
+        retry: ErrorRetry::AfterChange,
+        exposure: ErrorExposure::OPERATOR_ONLY,
+    };
+
+    pub const ERROR_ENGINE_PERSISTENCE_FAILED: ErrorDescriptor = ErrorDescriptor {
+        code: "runtime.error_engine.persistence_failed",
+        category: ErrorCategory::Internal,
+        severity: ErrorSeverity::Error,
+        retry: ErrorRetry::Later,
+        exposure: ErrorExposure::OPERATOR_ONLY,
+    };
+
     pub const INVALID_ARGUMENT: ErrorDescriptor = ErrorDescriptor {
         code: "request.invalid_argument",
         category: ErrorCategory::InvalidInput,

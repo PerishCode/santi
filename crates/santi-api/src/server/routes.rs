@@ -5,17 +5,22 @@ use axum::{
 };
 use santi_core::{
     CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSoulRequest,
-    CreateStrandResponse, CreateWebhookRequest, ErrorIncident, ForkStrandResponse, HealthResponse,
-    ImInboxEntry, ImSendRequest, ImSendResponse, IngestOutcome, MaterialRequest, SantiError,
-    SantiService, SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand,
-    StrandBudgetSnapshot, StrandDetail, StrandMaterial, StrandRuntimeSnapshot, WebhookSubscription,
+    CreateStrandResponse, CreateWebhookRequest, ForkStrandResponse, HealthResponse, ImInboxEntry,
+    ImSendRequest, ImSendResponse, IngestOutcome, MaterialRequest, SantiError, SantiService,
+    SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand, StrandBudgetSnapshot,
+    StrandDetail, StrandMaterial, StrandRuntimeSnapshot, WebhookSubscription,
 };
 use tower_http::{
     cors::{Any, CorsLayer},
     trace::TraceLayer,
 };
 
-use super::{ApiError, ingress::ingest_webhook, sse::strand_events};
+use super::{
+    ApiError,
+    errors::{errors, strand_errors},
+    ingress::ingest_webhook,
+    sse::{error_events, strand_events},
+};
 
 pub(super) fn router(service: SantiService) -> Router {
     let api = Router::new()
@@ -36,6 +41,8 @@ pub(super) fn router(service: SantiService) -> Router {
         .route("/api/v1/strands/{strand_id}/compact", post(compact_exec))
         .route("/api/v1/strands/{strand_id}/budget", get(strand_budget))
         .route("/api/v1/strands/{strand_id}/errors", get(strand_errors))
+        .route("/api/v1/errors/events", get(error_events))
+        .route("/api/v1/errors/{scope_kind}/{scope_id}", get(errors))
         .route("/api/v1/compacts/{compact_id}", get(compact_query))
         .route("/api/v1/strands/{strand_id}/runtime", get(runtime_snapshot))
         // IM layer (orthogonal to the runtime; shares the server for cold-start):
@@ -391,36 +398,6 @@ pub(super) async fn strand_budget(
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("strand not found"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/api/v1/strands/{strand_id}/errors",
-    params(
-        ("strand_id" = String, Path),
-        ("limit" = Option<i64>, Query)
-    ),
-    responses(
-        (status = 200, body = Vec<ErrorIncident>),
-        (status = 404, body = SantiError),
-        (status = 500, body = SantiError)
-    )
-)]
-pub(super) async fn strand_errors(
-    State(service): State<SantiService>,
-    Path(strand_id): Path<String>,
-    Query(params): Query<ErrorQueryParams>,
-) -> Result<Json<Vec<ErrorIncident>>, ApiError> {
-    service
-        .strand_errors(&strand_id, params.limit.unwrap_or(50))
-        .map_err(ApiError::from_service)?
-        .map(Json)
-        .ok_or_else(|| ApiError::not_found("strand not found"))
-}
-
-#[derive(serde::Deserialize)]
-pub(super) struct ErrorQueryParams {
-    limit: Option<i64>,
 }
 
 // ── IM layer routes ─────────────────────────────────────────────────────────

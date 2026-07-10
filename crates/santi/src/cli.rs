@@ -73,9 +73,21 @@ pub enum Command {
         /// Run the orchestration in-process instead of launching the unit.
         #[arg(long)]
         run: bool,
+        /// Internal final-version handover invoked by the upgrade runner.
+        #[arg(long, hide = true, conflicts_with = "run")]
+        finalize: bool,
     },
     /// GET /api/v1/health
     Health,
+    /// Query canonical incidents by error scope.
+    Errors {
+        #[arg(long, default_value = "runtime")]
+        scope_kind: String,
+        #[arg(long, default_value = "default")]
+        scope_id: String,
+        #[arg(long, default_value_t = 50)]
+        limit: i64,
+    },
     /// Strand resources under /api/v1/strands
     #[command(subcommand)]
     Strand(StrandCommand),

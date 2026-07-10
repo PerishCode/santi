@@ -1,19 +1,23 @@
-use std::{path::Path, time::Duration};
+use std::time::Duration;
 
-use santi_api::{
-    config::RuntimePaths,
-    upgrade::{
-        Outcome, RollbackCause, SeedOutcome, UpgradeHost, UpgradeReport, run_upgrade,
-        seed_come_look_at,
-    },
+use santi_api::upgrade::{
+    Outcome, RollbackCause, SeedOutcome, UpgradeFinalizeReport, UpgradeFinalizeRequest,
+    UpgradeHost, UpgradeReport, UpgradeTerminal, compose_record, run_upgrade,
 };
+use santi_core::{ErrorScope, ErrorSource, IncidentDraft, SantiError, catalog, engine};
 
 struct FakeHost {
     calls: Vec<String>,
     install_result: Result<(), String>,
     probe_result: Result<bool, String>,
     seed_result: Result<SeedOutcome, String>,
+    graceful_stop_result: Result<(), String>,
+    snapshot_result: Result<(), String>,
+    rollback_result: Result<(), String>,
+    start_result: Result<(), String>,
+    finalize_result: Result<(), String>,
     seeded_text: Option<String>,
+    finalizations: Vec<UpgradeFinalizeRequest>,
 }
 
 impl Default for FakeHost {
@@ -23,7 +27,13 @@ impl Default for FakeHost {
             install_result: Ok(()),
             probe_result: Ok(true),
             seed_result: Ok(fake_seed()),
+            graceful_stop_result: Ok(()),
+            snapshot_result: Ok(()),
+            rollback_result: Ok(()),
+            start_result: Ok(()),
+            finalize_result: Ok(()),
             seeded_text: None,
+            finalizations: Vec::new(),
         }
     }
 }
@@ -31,12 +41,12 @@ impl Default for FakeHost {
 impl UpgradeHost for FakeHost {
     fn graceful_stop(&mut self, _grace: Duration) -> Result<(), String> {
         self.calls.push("graceful_stop".into());
-        Ok(())
+        self.graceful_stop_result.clone()
     }
 
     fn snapshot(&mut self) -> Result<(), String> {
         self.calls.push("snapshot".into());
-        Ok(())
+        self.snapshot_result.clone()
     }
 
     fn install(&mut self, _deb: &str) -> Result<(), String> {
@@ -51,19 +61,90 @@ impl UpgradeHost for FakeHost {
 
     fn rollback(&mut self) -> Result<(), String> {
         self.calls.push("rollback".into());
-        Ok(())
+        self.rollback_result.clone()
     }
 
-    fn seed(&mut self, text: &str) -> Result<SeedOutcome, String> {
-        self.calls.push("seed".into());
-        self.seeded_text = Some(text.to_string());
-        self.seed_result.clone()
+    fn finalize(
+        &mut self,
+        request: &UpgradeFinalizeRequest,
+    ) -> Result<UpgradeFinalizeReport, String> {
+        self.calls.push("finalize".into());
+        self.finalizations.push(request.clone());
+        self.finalize_result.clone()?;
+
+        let mut errors = match &request.terminal {
+            UpgradeTerminal::Upgraded => Vec::new(),
+            UpgradeTerminal::RolledBack { failure } | UpgradeTerminal::Failed { failure } => {
+                vec![fake_error(
+                    catalog::UPGRADE_FAILED,
+                    failure.stage.operation(),
+                    &failure.detail,
+                )]
+            }
+        };
+        if !request.wake {
+            return Ok(UpgradeFinalizeReport {
+                errors,
+                record: None,
+                seeded: false,
+                seeded_strand_id: None,
+            });
+        }
+
+        let record = compose_record(&request.attempt_id);
+        self.seeded_text = Some(record.clone());
+        let (seeded, seeded_strand_id) = match self.seed_result.clone() {
+            Ok(seed) if seed.warnings.is_empty() => (true, Some(seed.strand_id)),
+            Ok(seed) => {
+                errors.push(fake_error(
+                    catalog::UPGRADE_HANDOVER_FAILED,
+                    "upgrade.handover",
+                    &seed.warnings.join("; "),
+                ));
+                (true, Some(seed.strand_id))
+            }
+            Err(error) => {
+                errors.push(fake_error(
+                    catalog::UPGRADE_HANDOVER_FAILED,
+                    "upgrade.handover",
+                    &error,
+                ));
+                (false, None)
+            }
+        };
+        Ok(UpgradeFinalizeReport {
+            errors,
+            record: Some(record),
+            seeded,
+            seeded_strand_id,
+        })
     }
 
     fn start(&mut self) -> Result<(), String> {
         self.calls.push("start".into());
-        Ok(())
+        self.start_result.clone()
     }
+}
+
+fn fake_error(
+    descriptor: santi_core::ErrorDescriptor,
+    operation: &str,
+    detail: &str,
+) -> SantiError {
+    engine()
+        .open_incident(
+            None,
+            IncidentDraft {
+                incident_key: format!("{}:runtime:default", descriptor.code),
+                descriptor,
+                scope: ErrorScope::new("runtime", "default"),
+                source: ErrorSource::new("santi-api", operation),
+                message: detail.to_string(),
+                context: serde_json::json!({"detail": detail}),
+            },
+            "test",
+        )
+        .error
 }
 
 fn fake_seed() -> SeedOutcome {
@@ -88,13 +169,14 @@ fn success_orders_steps() {
             "snapshot",
             "install",
             "trial_probe",
-            "seed",
+            "finalize",
             "start"
         ]
     );
     assert_eq!(report.outcome, Outcome::Upgraded);
     assert!(report.seeded);
-    assert!(host.seeded_text.unwrap().contains("came back up"));
+    assert!(report.errors.is_empty());
+    assert!(host.seeded_text.unwrap().contains(&report.attempt_id));
 }
 
 #[test]
@@ -115,11 +197,13 @@ fn install_failure_rolls_back() {
             "snapshot",
             "install",
             "rollback",
-            "seed",
+            "finalize",
             "start"
         ]
     );
-    assert!(host.seeded_text.unwrap().contains("bad package signature"));
+    assert_eq!(report.errors.len(), 1);
+    assert_eq!(report.errors[0].code, "runtime.upgrade.failed");
+    assert!(!host.seeded_text.unwrap().contains("bad package signature"));
 }
 
 #[test]
@@ -131,7 +215,9 @@ fn unhealthy_rolls_back() {
     let report = run(&mut host);
     assert_eq!(
         report.outcome,
-        Outcome::RolledBack(RollbackCause::DidNotComeUp)
+        Outcome::RolledBack(RollbackCause::DidNotComeUp(
+            "health probe returned unhealthy".into()
+        ))
     );
     assert!(host.calls.contains(&"rollback".to_string()));
 }
@@ -145,8 +231,9 @@ fn probe_error_rolls_back() {
     let report = run(&mut host);
     assert_eq!(
         report.outcome,
-        Outcome::RolledBack(RollbackCause::DidNotComeUp)
+        Outcome::RolledBack(RollbackCause::DidNotComeUp("probe timed out".into()))
     );
+    assert_eq!(report.errors[0].context["detail"], "probe timed out");
 }
 
 #[test]
@@ -158,45 +245,82 @@ fn seed_failure_is_reported() {
     let report = run(&mut host);
     assert_eq!(report.outcome, Outcome::Upgraded);
     assert!(!report.seeded);
-    assert_eq!(
-        report.warnings,
-        vec!["come-look seed failed: no self-strand configured".to_string()]
-    );
+    assert_eq!(report.errors.len(), 1);
+    assert_eq!(report.errors[0].code, "runtime.upgrade.handover_failed");
     assert_eq!(host.calls.last().map(String::as_str), Some("start"));
 }
 
 #[test]
-fn stable_label_seeds() {
-    let temp = tempfile::tempdir().expect("temp dir");
-    let paths = paths_under(temp.path());
-    santi_core::SantiStore::open(&paths.database_path).expect("open");
-
-    let outcome = seed_come_look_at(
-        &paths,
-        santi_core::DEFAULT_SOUL_ID,
-        Some("ss_stale"),
-        "come look",
-    )
-    .expect("seed via stable label");
-    assert!(outcome.warnings.is_empty());
-
-    let store = santi_core::SantiStore::open(&paths.database_path).expect("reopen");
-    let strand = store.strand(&outcome.strand_id).unwrap().expect("strand");
+fn snapshot_failure_recovers() {
+    let mut host = FakeHost {
+        snapshot_result: Err("snapshot disk full".into()),
+        ..Default::default()
+    };
+    let error = run_upgrade(&mut host, "santi_beta.deb", Duration::from_secs(1))
+        .expect_err("snapshot must fail");
+    assert_eq!(error.code, "runtime.upgrade.failed");
     assert_eq!(
-        strand.external_label.as_deref(),
-        Some("soul:soul_default:ops")
+        host.calls,
+        ["graceful_stop", "snapshot", "start", "finalize"]
     );
-    let started = store
-        .try_start_turn(&outcome.strand_id, "strand_send", None)
-        .unwrap()
-        .expect("turn starts");
-    assert_eq!(started.drained_messages[0].content_text, "come look");
+    let UpgradeTerminal::Failed { failure } = &host.finalizations[0].terminal else {
+        panic!("expected failed terminal");
+    };
+    assert_eq!(
+        failure.recovery,
+        santi_api::upgrade::RecoveryStatus::PreviousVersionRestarted
+    );
 }
 
-fn paths_under(root: &Path) -> RuntimePaths {
-    RuntimePaths {
-        database_path: root.join("runtime").join("db"),
-        runtime_root: root.join("runtime"),
-        execution_root: root.join("execution"),
-    }
+#[test]
+fn rollback_failure_stays_stopped() {
+    let mut host = FakeHost {
+        install_result: Err("bad package".into()),
+        rollback_result: Err("restore failed".into()),
+        ..Default::default()
+    };
+    let error = run_upgrade(&mut host, "santi_beta.deb", Duration::from_secs(1))
+        .expect_err("rollback must fail");
+    assert_eq!(error.code, "runtime.upgrade.failed");
+    assert_eq!(
+        host.calls,
+        [
+            "graceful_stop",
+            "snapshot",
+            "install",
+            "rollback",
+            "finalize"
+        ]
+    );
+}
+
+#[test]
+fn start_failure_is_recorded() {
+    let mut host = FakeHost {
+        start_result: Err("unit failed".into()),
+        ..Default::default()
+    };
+    let error = run_upgrade(&mut host, "santi_beta.deb", Duration::from_secs(1))
+        .expect_err("start must fail");
+    assert_eq!(error.code, "runtime.upgrade.failed");
+    assert_eq!(
+        host.calls.iter().filter(|call| *call == "finalize").count(),
+        2
+    );
+    assert!(matches!(
+        host.finalizations[1].terminal,
+        UpgradeTerminal::Failed { .. }
+    ));
+}
+
+#[test]
+fn finalizer_failure_is_loud() {
+    let mut host = FakeHost {
+        finalize_result: Err("store unavailable".into()),
+        ..Default::default()
+    };
+    let error = run_upgrade(&mut host, "santi_beta.deb", Duration::from_secs(1))
+        .expect_err("finalizer must fail");
+    assert_eq!(error.code, "runtime.error_engine.persistence_failed");
+    assert_eq!(host.calls.last().map(String::as_str), Some("start"));
 }

@@ -1,4 +1,5 @@
 mod error;
+mod errors;
 mod ingress;
 mod openapi;
 mod routes;

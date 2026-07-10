@@ -59,6 +59,13 @@ fn classifies_errors() {
     );
 }
 
+#[test]
+fn openapi_lists_error_surfaces() {
+    let document = santi_api::export_openapi_json().expect("export openapi");
+    assert!(document.contains("/api/v1/errors/{scope_kind}/{scope_id}"));
+    assert!(document.contains("/api/v1/errors/events"));
+}
+
 #[tokio::test]
 async fn send_rejection_locks() {
     let temp = tempfile::tempdir().expect("temp dir");

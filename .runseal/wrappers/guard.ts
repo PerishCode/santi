@@ -3,4 +3,4 @@
 
 import { guard } from "@/lib/guard/guard.ts";
 
-Deno.exit(await guard());
+Deno.exit(await guard(Deno.args));

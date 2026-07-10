@@ -1,5 +1,5 @@
 use std::io::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use std::{env, fs, thread};
@@ -18,6 +18,22 @@ use crate::config::{self, RuntimePaths};
 const SANTI_SERVICE: &str = "santi.service";
 const UPGRADE_SERVICE: &str = "santi-upgrade.service";
 const UPGRADE_REQUEST_VERSION: u32 = 1;
+const DEFAULT_FINAL_VERSION_BINARY: &str = "/usr/bin/santi";
+
+// dpkg replaces the runner's inode, so current_exe() may resolve to a deleted
+// path after install. Probes and finalization must execute the installed binary.
+fn final_version_binary() -> PathBuf {
+    let configured = env::var("SANTI_UPGRADE_FINALIZER_BIN").ok();
+    resolve_final_version_binary(configured.as_deref())
+}
+
+fn resolve_final_version_binary(configured: Option<&str>) -> PathBuf {
+    configured
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_FINAL_VERSION_BINARY))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UpgradeLaunchRequest {
@@ -248,11 +264,12 @@ impl UpgradeHost for SystemHost {
         self.systemctl("start")?;
         let deadline = Instant::now() + upgrade_timeout();
         let mut last_detail = "service health was not reachable".to_string();
+        let binary = final_version_binary();
         let readiness = loop {
             if let Ok(report) = crate::ops::doctor_at(&self.paths)
                 && report.ok
             {
-                match probe_runtime_readiness() {
+                match probe_runtime_readiness(&binary) {
                     Ok(Some(readiness)) => break Ok(readiness),
                     Ok(None) => {}
                     Err(error) => last_detail = error,
@@ -302,18 +319,14 @@ impl UpgradeHost for SystemHost {
         &mut self,
         request: &UpgradeFinalizeRequest,
     ) -> Result<UpgradeFinalizeReport, String> {
-        let binary = env::var("SANTI_UPGRADE_FINALIZER_BIN")
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| "/usr/bin/santi".to_string());
+        let binary = final_version_binary();
         let mut child = Command::new(&binary)
             .args(["upgrade", "--finalize"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|error| format!("spawn final-version binary {binary}: {error}"))?;
+            .map_err(|error| format!("spawn final-version binary {}: {error}", binary.display()))?;
         let mut request = request.clone();
         request.soul_id = env::var("SANTI_SOUL_ID")
             .ok()
@@ -351,8 +364,7 @@ impl UpgradeHost for SystemHost {
     }
 }
 
-fn probe_runtime_readiness() -> Result<Option<UpgradeReadiness>, String> {
-    let binary = env::current_exe().map_err(|error| format!("resolve current binary: {error}"))?;
+fn probe_runtime_readiness(binary: &Path) -> Result<Option<UpgradeReadiness>, String> {
     let port = env::var("SANTI_PORT")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())

@@ -1,12 +1,11 @@
 use axum::{Json, http::StatusCode, response::IntoResponse};
-use santi_core::ErrorResponse;
+use santi_core::{ErrorCategory, ErrorSource, SantiError, catalog, engine};
 
 use crate::webhook::WebhookError;
 
 pub struct ApiError {
     status: StatusCode,
-    code: &'static str,
-    message: String,
+    error: SantiError,
 }
 
 impl ApiError {
@@ -14,52 +13,68 @@ impl ApiError {
         self.status
     }
 
-    pub fn code(&self) -> &'static str {
-        self.code
+    pub fn code(&self) -> &str {
+        &self.error.code
     }
 
     pub fn message(&self) -> &str {
-        &self.message
+        &self.error.message
     }
 
     pub fn internal(message: String) -> Self {
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "internal",
-            message,
-        }
+        eprintln!("santi-api: internal error: {message}");
+        Self::from_santi(engine().transient(
+            catalog::INTERNAL,
+            ErrorSource::new("santi-api", "http_boundary"),
+            None,
+            "internal error",
+            serde_json::Value::Null,
+        ))
     }
 
     pub fn not_found(message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::NOT_FOUND,
-            code: "not-found",
-            message: message.into(),
-        }
+        Self::from_santi(engine().transient(
+            catalog::NOT_FOUND,
+            ErrorSource::new("santi-api", "http_boundary"),
+            None,
+            message,
+            serde_json::Value::Null,
+        ))
     }
 
     pub fn bad_request(message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::BAD_REQUEST,
-            code: "bad-request",
-            message: message.into(),
-        }
+        Self::from_santi(engine().transient(
+            catalog::INVALID_ARGUMENT,
+            ErrorSource::new("santi-api", "http_boundary"),
+            None,
+            message,
+            serde_json::Value::Null,
+        ))
     }
 
     pub fn unauthorized(message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::UNAUTHORIZED,
-            code: "unauthorized",
-            message: message.into(),
-        }
+        Self::from_santi(engine().transient(
+            catalog::UNAUTHORIZED,
+            ErrorSource::new("santi-api", "http_boundary"),
+            None,
+            message,
+            serde_json::Value::Null,
+        ))
     }
 
-    pub fn locked(message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::LOCKED,
-            code: "strand-blocked",
-            message: message.into(),
-        }
+    pub fn from_santi(error: SantiError) -> Self {
+        let status = if error.code == catalog::CONTEXT_BUDGET_EXCEEDED.code {
+            StatusCode::LOCKED
+        } else {
+            match error.category {
+                ErrorCategory::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+                ErrorCategory::InvalidInput => StatusCode::BAD_REQUEST,
+                ErrorCategory::NotFound => StatusCode::NOT_FOUND,
+                ErrorCategory::ResourceExhausted => StatusCode::TOO_MANY_REQUESTS,
+                ErrorCategory::Unauthorized => StatusCode::UNAUTHORIZED,
+            }
+        };
+        Self { status, error }
     }
 
     pub fn from_webhook(error: WebhookError) -> Self {
@@ -69,18 +84,10 @@ impl ApiError {
         }
     }
 
-    /// Classify a `santi-core` service error (a plain message) into an HTTP
-    /// status. Referenced-but-absent resources are 404; rejected input is 400;
-    /// broken invariants ("… disappeared") stay 500. Unrecognized messages
-    /// degrade to 500, so routing any service error through here is safe.
     pub fn from_service(message: String) -> Self {
         let text = message.as_str();
         if text == "strand not found" || text == "soul not found" || text.ends_with("not found") {
             Self::not_found(message)
-        } else if text.starts_with("strand is blocked: context_over_budget")
-            || text.starts_with("strand context is over budget")
-        {
-            Self::locked(message)
         } else if text.starts_with("unknown soul")
             || text.contains("must not be empty")
             || text.contains("must contain text")
@@ -91,7 +98,6 @@ impl ApiError {
             || text.contains("object uri")
             || text.contains("path segment")
             || text.contains("path separators")
-            || text.starts_with("strand inbox is full")
         {
             Self::bad_request(message)
         } else {
@@ -102,13 +108,6 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {
-        (
-            self.status,
-            Json(ErrorResponse {
-                code: self.code.to_string(),
-                message: self.message,
-            }),
-        )
-            .into_response()
+        (self.status, Json(self.error)).into_response()
     }
 }

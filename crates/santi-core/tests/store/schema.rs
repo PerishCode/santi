@@ -20,6 +20,8 @@ fn schema_matches_runtime() {
         "tool_results",
         "thinking_spans",
         "compacts",
+        "error_incidents",
+        "error_transitions",
         "r_strand_entries",
     ] {
         let exists: i64 = conn
@@ -41,6 +43,8 @@ fn schema_matches_runtime() {
         "session_profiles",
         "r_session_messages",
         "session_effects",
+        "strand_blocks",
+        "rejected_deliveries",
     ] {
         let exists: i64 = conn
             .query_row(
@@ -186,7 +190,7 @@ fn schema_migration_preserves_webhooks() {
             .expect("compact column lookup");
         assert_eq!(exists, 1, "missing migrated compact column {column}");
     }
-    for table in ["strand_blocks", "rejected_deliveries"] {
+    for table in ["error_incidents", "error_transitions"] {
         let exists: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -195,6 +199,16 @@ fn schema_migration_preserves_webhooks() {
             )
             .expect("table lookup");
         assert_eq!(exists, 1, "missing migrated table {table}");
+    }
+    for table in ["strand_blocks", "rejected_deliveries"] {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .expect("table lookup");
+        assert_eq!(exists, 0, "replaced table {table} still present");
     }
     let pending_count: i64 = conn
         .query_row(
@@ -315,7 +329,7 @@ fn schema_migrates_live_shape() {
     assert_eq!(compact.0, "old compact");
     assert!(compact.1.is_none());
     assert!(compact.2.is_none());
-    for table in ["strand_blocks", "rejected_deliveries"] {
+    for table in ["error_incidents", "error_transitions"] {
         let exists: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -324,6 +338,121 @@ fn schema_migrates_live_shape() {
             )
             .expect("table lookup");
         assert_eq!(exists, 1, "missing migrated table {table}");
+    }
+    for table in ["strand_blocks", "rejected_deliveries"] {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .expect("table lookup");
+        assert_eq!(exists, 0, "replaced table {table} still present");
+    }
+}
+
+#[test]
+fn v23_aggregates_incident() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let db = temp.path().join("santi.sqlite");
+    {
+        let conn = Connection::open(&db).expect("open sqlite");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE strand_blocks (
+                id TEXT PRIMARY KEY,
+                strand_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL,
+                reason_code TEXT NOT NULL,
+                reason_text TEXT NOT NULL,
+                provider TEXT,
+                model TEXT,
+                budget_source TEXT,
+                budget_bytes INTEGER,
+                input_items INTEGER,
+                input_bytes INTEGER,
+                instructions_bytes INTEGER,
+                tools_bytes INTEGER,
+                total_bytes INTEGER,
+                observed_turn_id TEXT,
+                observed_at_seq INTEGER,
+                metadata TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                cleared_at TEXT,
+                cleared_by TEXT
+            );
+            CREATE TABLE rejected_deliveries (
+                id TEXT PRIMARY KEY,
+                strand_id TEXT,
+                block_id TEXT,
+                source_type TEXT,
+                source_ref TEXT,
+                source_metadata TEXT,
+                message_kind TEXT,
+                content_sha256 TEXT NOT NULL,
+                content_bytes INTEGER NOT NULL,
+                content_excerpt TEXT NOT NULL,
+                reason_code TEXT NOT NULL,
+                reason_text TEXT NOT NULL,
+                received_at TEXT NOT NULL
+            );
+            INSERT INTO strand_blocks (
+                id, strand_id, kind, status, reason_code, reason_text, provider,
+                model, budget_source, budget_bytes, input_items, input_bytes,
+                instructions_bytes, tools_bytes, total_bytes, observed_turn_id,
+                observed_at_seq, metadata, created_at, updated_at, cleared_at, cleared_by
+            ) VALUES (
+                'blk_abc', 'ss_1', 'context_over_budget', 'active',
+                'candidate_input_exceeds_budget', 'over budget', 'openai', 'gpt',
+                'config', 100, 2, 120, 10, 5, 135, NULL, 4,
+                '{"phase":"ingest_admission"}', 't1', 't2', NULL, NULL
+            );
+            INSERT INTO rejected_deliveries (
+                id, strand_id, block_id, content_sha256, content_bytes,
+                content_excerpt, reason_code, reason_text, received_at
+            ) VALUES
+                ('reject_1', 'ss_1', 'blk_abc', 'a', 10, 'first', 'x', 'over budget', 't1'),
+                ('reject_2', 'ss_1', 'blk_abc', 'b', 20, 'second', 'x', 'over budget', 't2');
+            PRAGMA user_version = 23;
+            "#,
+        )
+        .expect("seed v23 db");
+    }
+
+    let store = SantiStore::open(&db).expect("open migrates v23 to v24");
+    drop(store);
+    let conn = Connection::open(&db).expect("open sqlite");
+    let incident: (String, String, i64, i64) = conn
+        .query_row(
+            "SELECT id, status, occurrence_count, revision FROM error_incidents",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("migrated incident");
+    assert_eq!(
+        incident,
+        ("inc_abc".to_string(), "active".to_string(), 2, 1)
+    );
+    let transitions: i64 = conn
+        .query_row("SELECT COUNT(*) FROM error_transitions", [], |row| {
+            row.get(0)
+        })
+        .expect("transition count");
+    assert_eq!(
+        transitions, 0,
+        "migration must not replay historical lifecycle"
+    );
+    for table in ["strand_blocks", "rejected_deliveries"] {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .expect("table lookup");
+        assert_eq!(exists, 0, "replaced table {table} still present");
     }
 }
 

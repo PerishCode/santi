@@ -257,8 +257,8 @@ pub enum StrandCommand {
     Runtime { id: Option<String> },
     /// GET /api/v1/strands/{id}/budget (id falls back to --strand)
     Budget { id: Option<String> },
-    /// GET /api/v1/strands/{id}/rejections (id falls back to --strand)
-    Rejections {
+    /// GET /api/v1/strands/{id}/errors (id falls back to --strand)
+    Errors {
         id: Option<String>,
         #[arg(long, default_value_t = 50)]
         limit: i64,

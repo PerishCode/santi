@@ -4,7 +4,7 @@ use axum::{
     http::{StatusCode, header},
     response::Response,
 };
-use santi_core::{ErrorResponse, SantiService};
+use santi_core::{SantiError, SantiService};
 
 use crate::ApiError;
 
@@ -18,9 +18,9 @@ use crate::ApiError;
     ),
     responses(
         (status = 200, description = "Bucket object bytes", content_type = "application/octet-stream"),
-        (status = 400, body = ErrorResponse),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse)
+        (status = 400, body = SantiError),
+        (status = 404, body = SantiError),
+        (status = 500, body = SantiError)
     )
 )]
 pub(crate) async fn get_bucket_object(

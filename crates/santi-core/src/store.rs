@@ -12,6 +12,7 @@ mod assembly;
 pub(crate) mod budget;
 mod compact;
 mod db;
+mod errors;
 mod fork;
 mod im;
 mod rows;
@@ -28,7 +29,7 @@ use rows::{actor_type_db, collect_rows, map_webhook_row, message_state_db};
 /// beta wipe + rebuild policy (see PHASE-07 crux #5 / PHASE-09 tier work).
 /// Public so ops paths (`santi doctor`) can compare a DB's `user_version` to it
 /// WITHOUT opening the store (which would migrate/wipe).
-pub const SCHEMA_VERSION: u32 = 23;
+pub const SCHEMA_VERSION: u32 = 24;
 /// The default soul's id. Public so offline ops (doctor/seed) can address it
 /// without a running service.
 pub const DEFAULT_SOUL_ID: &str = "soul_default";
@@ -131,8 +132,7 @@ impl SantiStore {
             tool_results: soul_tool_results(&conn, &strand.id)?,
             compacts: compacts_for_strand(&conn, &strand.id)?,
             effects: strand_effects(&conn, strand_id)?,
-            blocks: budget::strand_blocks_for_strand(&conn, strand_id)?,
-            rejected_deliveries: budget::rejected_deliveries_for_strand(&conn, strand_id, 100)?,
+            errors: errors::list_in_conn(&conn, "strand", strand_id, 100)?,
             strand,
         }))
     }

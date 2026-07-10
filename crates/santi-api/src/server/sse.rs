@@ -66,5 +66,6 @@ fn sse_event_name(payload: &SantiStreamPayload) -> &'static str {
         SantiStreamPayload::TurnActivity { .. } => "turn_activity",
         SantiStreamPayload::TurnCompleted { .. } => "turn_completed",
         SantiStreamPayload::TurnFailed { .. } => "turn_failed",
+        SantiStreamPayload::ErrorTransition { .. } => "error_transition",
     }
 }

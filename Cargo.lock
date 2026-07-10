@@ -1597,12 +1597,23 @@ dependencies = [
  "hex",
  "jiff",
  "rusqlite",
+ "santi-error",
  "santi-provider",
  "serde",
  "serde_json",
  "sha2",
  "tempfile",
  "tokio",
+ "utoipa",
+ "uuid",
+]
+
+[[package]]
+name = "santi-error"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
  "utoipa",
  "uuid",
 ]

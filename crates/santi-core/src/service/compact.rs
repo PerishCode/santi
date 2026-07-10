@@ -113,7 +113,11 @@ impl SantiService {
             self.store
                 .update_compact_metadata(&response.compact_id, metadata)?;
         }
-        response.active_block_cleared = self.clear_context_block(&strand.id, "compact_exec")?;
+        response.active_incident_resolved =
+            self.clear_context_incident(&strand.id, "compact_exec")?;
+        if response.active_incident_resolved {
+            self.poke(&strand.id, "strand_send");
+        }
         response.pre_estimate = Some(pre_estimate);
         response.post_estimate = Some(post_estimate);
         response.compression_ratio = compression_ratio;

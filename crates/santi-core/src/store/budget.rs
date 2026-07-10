@@ -1,8 +1,11 @@
 mod state;
 
 use rusqlite::params;
+use santi_error::{
+    ErrorIncident, ErrorScope, ErrorSource, IncidentDraft, SantiError, catalog, engine,
+};
 use santi_provider::{ProviderItem, ProviderTool};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::{
     STRAND_INBOX_GATE, SantiStore, StartedTurn,
@@ -11,31 +14,59 @@ use super::{
     rows::message_kind_db,
 };
 use crate::{
-    ContextEstimate, InboxSource, IngestOutcome, MessageContent, MessageKind, RejectedDelivery,
-    StrandBlock, prefixed_id, timestamp_now,
+    ContextEstimate, InboxSource, IngestOutcome, MessageContent, MessageKind, prefixed_id,
+    timestamp_now,
 };
 
-use state::{
-    active_block, blocked_reason, current_strand_seq, insert_rejection, pending_items,
-    reject_pending_inbox, upsert_block,
-};
+use state::{current_strand_seq, open_context_incident, pending_items, repeat_context_incident};
 
-pub(super) use state::{rejected_deliveries_for_strand, strand_blocks_for_strand};
-
-const REASON_ACTIVE_BLOCK: &str = "context_over_budget_active";
 const REASON_PENDING: &str = "pending_drain_would_exceed_budget";
 
-pub(crate) struct ContextBlockInput<'a> {
+pub(crate) fn context_incident_key(strand_id: &str) -> String {
+    format!(
+        "{}:strand:{strand_id}",
+        catalog::CONTEXT_BUDGET_EXCEEDED.code
+    )
+}
+
+pub(crate) struct ContextIncidentInput<'a> {
     pub reason_code: &'a str,
     pub reason_text: &'a str,
-    pub provider: &'a str,
-    pub model: &'a str,
+    pub operation: &'a str,
+    pub provider: Option<&'a str>,
+    pub model: Option<&'a str>,
     pub budget_source: Option<&'a str>,
     pub budget_bytes: Option<i64>,
     pub estimate: &'a ContextEstimate,
     pub observed_turn_id: Option<&'a str>,
     pub observed_at_seq: Option<i64>,
     pub metadata: Option<Value>,
+}
+
+impl ContextIncidentInput<'_> {
+    fn into_draft(self, strand_id: &str) -> IncidentDraft {
+        IncidentDraft {
+            incident_key: context_incident_key(strand_id),
+            descriptor: catalog::CONTEXT_BUDGET_EXCEEDED,
+            scope: ErrorScope::new("strand", strand_id),
+            source: ErrorSource::new("santi-core", self.operation),
+            message: self.reason_text.to_string(),
+            context: json!({
+                "schema": "santi.error.context_budget.v1",
+                "reason": self.reason_code,
+                "provider": self.provider,
+                "model": self.model,
+                "budget": {
+                    "source": self.budget_source,
+                    "input_bytes": self.budget_bytes,
+                },
+                "estimate": self.estimate,
+                "observed_turn_id": self.observed_turn_id,
+                "observed_at_seq": self.observed_at_seq,
+                "details": self.metadata,
+            }),
+        }
+    }
 }
 
 pub(crate) struct ContextAdmission {
@@ -57,22 +88,16 @@ impl SantiStore {
         admission: Option<&ContextAdmission>,
     ) -> Result<IngestOutcome, String> {
         let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction().map_err(|error| error.to_string())?;
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
 
-        if let Some(block) = active_block(&tx, strand_id)? {
-            let reason = blocked_reason(&block.id, &block.reason_text);
-            insert_rejection(
-                &tx,
-                Some(strand_id),
-                Some(&block.id),
-                source.as_ref(),
-                Some(&message_kind),
-                &content,
-                "context_over_budget_active",
-                &reason,
-            )?;
+        if crate::store::errors::active_in_conn(&tx, &context_incident_key(strand_id))?.is_some() {
+            let error = repeat_context_incident(&tx, strand_id, "ingest_active_guard")?;
             tx.commit().map_err(|error| error.to_string())?;
-            return Ok(IngestOutcome::Rejected { reason });
+            return Ok(IngestOutcome::Rejected {
+                error: Box::new(error),
+            });
         }
 
         if let Some(admission) = admission {
@@ -89,41 +114,29 @@ impl SantiStore {
                 Some(admission.tools.as_slice()),
             );
             if estimate.total_bytes > admission.budget_bytes {
-                let reason = format!(
-                    "strand context is over budget ({} estimated bytes, budget {})",
-                    estimate.total_bytes, admission.budget_bytes
-                );
-                let block = upsert_block(
+                let reason = over_budget_reason(estimate.total_bytes, admission.budget_bytes);
+                let observed_at_seq = current_strand_seq(&tx, strand_id)?;
+                let error = open_context_incident(
                     &tx,
                     strand_id,
-                    ContextBlockInput {
+                    ContextIncidentInput {
                         reason_code: "candidate_input_exceeds_budget",
                         reason_text: &reason,
-                        provider: &admission.provider,
-                        model: &admission.model,
+                        operation: "ingest_admission",
+                        provider: Some(&admission.provider),
+                        model: Some(&admission.model),
                         budget_source: Some(&admission.budget_source),
                         budget_bytes: Some(admission.budget_bytes),
                         estimate: &estimate,
                         observed_turn_id: None,
-                        observed_at_seq: current_strand_seq(&tx, strand_id)?,
-                        metadata: Some(serde_json::json!({
-                            "phase": "ingest_admission",
-                            "estimator": estimate.estimator,
-                        })),
+                        observed_at_seq,
+                        metadata: Some(json!({"estimator": estimate.estimator})),
                     },
                 )?;
-                insert_rejection(
-                    &tx,
-                    Some(strand_id),
-                    Some(&block.id),
-                    source.as_ref(),
-                    Some(&message_kind),
-                    &content,
-                    "candidate_input_exceeds_budget",
-                    &reason,
-                )?;
                 tx.commit().map_err(|error| error.to_string())?;
-                return Ok(IngestOutcome::Rejected { reason });
+                return Ok(IngestOutcome::Rejected {
+                    error: Box::new(error),
+                });
             }
         }
 
@@ -135,20 +148,18 @@ impl SantiStore {
             )
             .map_err(|error| error.to_string())?;
         if pending >= STRAND_INBOX_GATE {
-            let reason =
+            let message =
                 format!("strand inbox is full ({pending} pending, gate {STRAND_INBOX_GATE})");
-            insert_rejection(
-                &tx,
-                Some(strand_id),
-                None,
-                source.as_ref(),
-                Some(&message_kind),
-                &content,
-                "strand_inbox_full",
-                &reason,
-            )?;
-            tx.commit().map_err(|error| error.to_string())?;
-            return Ok(IngestOutcome::Rejected { reason });
+            let error = engine().transient(
+                catalog::INBOX_CAPACITY_EXCEEDED,
+                ErrorSource::new("santi-core", "ingest_admission"),
+                Some(ErrorScope::new("strand", strand_id)),
+                message,
+                json!({"pending": pending, "gate": STRAND_INBOX_GATE}),
+            );
+            return Ok(IngestOutcome::Rejected {
+                error: Box::new(error),
+            });
         }
 
         let inbox_id = prefixed_id("inbox");
@@ -168,8 +179,7 @@ impl SantiStore {
             r#"
             INSERT INTO strand_inbox (
               id, strand_id, message_kind, content, source_type, source_ref, source_metadata, created_at
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             "#,
             params![
                 inbox_id,
@@ -197,7 +207,9 @@ impl SantiStore {
         admission: Option<&ContextAdmission>,
     ) -> Result<Option<StartedTurn>, String> {
         let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction().map_err(|error| error.to_string())?;
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
         let running: Option<i64> = tx
             .query_row(
                 "SELECT 1 FROM turns WHERE strand_id = ?1 AND status = 'running' LIMIT 1",
@@ -209,15 +221,14 @@ impl SantiStore {
             return Ok(None);
         }
 
-        if let Some(block) = active_block(&tx, strand_id)? {
-            let reason = blocked_reason(&block.id, &block.reason_text);
-            reject_pending_inbox(&tx, strand_id, &block.id, REASON_ACTIVE_BLOCK, &reason)?;
-            tx.commit().map_err(|error| error.to_string())?;
+        let pending = pending_items(&tx, strand_id)?;
+        if pending.is_empty() {
             return Ok(None);
         }
 
-        let pending = pending_items(&tx, strand_id)?;
-        if pending.is_empty() {
+        if crate::store::errors::active_in_conn(&tx, &context_incident_key(strand_id))?.is_some() {
+            repeat_context_incident(&tx, strand_id, "pending_active_guard")?;
+            tx.commit().map_err(|error| error.to_string())?;
             return Ok(None);
         }
 
@@ -230,30 +241,25 @@ impl SantiStore {
                 Some(admission.tools.as_slice()),
             );
             if estimate.total_bytes > admission.budget_bytes {
-                let reason = format!(
-                    "strand context is over budget ({} estimated bytes, budget {})",
-                    estimate.total_bytes, admission.budget_bytes
-                );
-                let block = upsert_block(
+                let reason = over_budget_reason(estimate.total_bytes, admission.budget_bytes);
+                let observed_at_seq = current_strand_seq(&tx, strand_id)?;
+                open_context_incident(
                     &tx,
                     strand_id,
-                    ContextBlockInput {
+                    ContextIncidentInput {
                         reason_code: REASON_PENDING,
                         reason_text: &reason,
-                        provider: &admission.provider,
-                        model: &admission.model,
+                        operation: "pending_drain_admission",
+                        provider: Some(&admission.provider),
+                        model: Some(&admission.model),
                         budget_source: Some(&admission.budget_source),
                         budget_bytes: Some(admission.budget_bytes),
                         estimate: &estimate,
                         observed_turn_id: None,
-                        observed_at_seq: current_strand_seq(&tx, strand_id)?,
-                        metadata: Some(serde_json::json!({
-                            "phase": "pending_drain_admission",
-                            "estimator": estimate.estimator,
-                        })),
+                        observed_at_seq,
+                        metadata: Some(json!({"estimator": estimate.estimator})),
                     },
                 )?;
-                reject_pending_inbox(&tx, strand_id, &block.id, REASON_PENDING, &reason)?;
                 tx.commit().map_err(|error| error.to_string())?;
                 return Ok(None);
             }
@@ -285,23 +291,6 @@ impl SantiStore {
         }))
     }
 
-    pub(crate) fn active_context_block(
-        &self,
-        strand_id: &str,
-    ) -> Result<Option<StrandBlock>, String> {
-        let conn = self.conn.lock().unwrap();
-        active_block(&conn, strand_id)
-    }
-
-    pub(crate) fn rejected_deliveries(
-        &self,
-        strand_id: &str,
-        limit: i64,
-    ) -> Result<Vec<RejectedDelivery>, String> {
-        let conn = self.conn.lock().unwrap();
-        rejected_deliveries_for_strand(&conn, strand_id, limit)
-    }
-
     pub(crate) fn pending_provider_items(
         &self,
         strand_id: &str,
@@ -310,48 +299,52 @@ impl SantiStore {
         pending_items(&conn, strand_id)
     }
 
-    pub(crate) fn upsert_context_block(
+    pub(crate) fn open_context_incident(
         &self,
         strand_id: &str,
-        input: ContextBlockInput<'_>,
-    ) -> Result<StrandBlock, String> {
+        input: ContextIncidentInput<'_>,
+    ) -> Result<SantiError, String> {
         let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction().map_err(|error| error.to_string())?;
-        upsert_block(&tx, strand_id, input)?;
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
+        let error = open_context_incident(&tx, strand_id, input)?;
         tx.commit().map_err(|error| error.to_string())?;
-        drop(conn);
-        self.active_context_block(strand_id)?
-            .ok_or_else(|| "context block missing after upsert".to_string())
+        Ok(error)
     }
 
-    pub(crate) fn clear_active_context_block(
+    pub(crate) fn active_context_incident(
         &self,
         strand_id: &str,
-        cleared_by: &str,
+    ) -> Result<Option<ErrorIncident>, String> {
+        self.active_error_incident(&context_incident_key(strand_id))
+    }
+
+    pub(crate) fn resolve_context_incident(
+        &self,
+        strand_id: &str,
+        resolved_by: &str,
         estimate: &ContextEstimate,
     ) -> Result<bool, String> {
-        let conn = self.conn.lock().unwrap();
-        let Some(block) = active_block(&conn, strand_id)? else {
-            return Ok(false);
-        };
-        let now = timestamp_now();
-        let metadata = serde_json::to_string(&serde_json::json!({
-            "schema": "santi.context_block_clear.v1",
-            "cleared_by": cleared_by,
-            "clear_estimate": estimate,
-            "previous_metadata": block.metadata,
-        }))
-        .map_err(|error| error.to_string())?;
-        conn.execute(
-            r#"
-            UPDATE strand_blocks
-            SET status = 'cleared', updated_at = ?2, cleared_at = ?2,
-                cleared_by = ?3, metadata = ?4
-            WHERE id = ?1 AND status = 'active'
-            "#,
-            params![block.id, now, cleared_by, metadata],
-        )
-        .map_err(|error| error.to_string())?;
-        Ok(true)
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
+        let resolved = crate::store::errors::resolve_in_conn(
+            &tx,
+            &context_incident_key(strand_id),
+            resolved_by,
+            json!({
+                "schema": "santi.error.context_budget.resolution.v1",
+                "resolved_by": resolved_by,
+                "estimate": estimate,
+            }),
+        )?;
+        tx.commit().map_err(|error| error.to_string())?;
+        Ok(resolved)
     }
+}
+
+fn over_budget_reason(total_bytes: i64, budget_bytes: i64) -> String {
+    format!("strand context is over budget ({total_bytes} estimated bytes, budget {budget_bytes})")
 }

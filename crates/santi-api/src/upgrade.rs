@@ -236,7 +236,10 @@ pub fn seed_come_look_at(
             text,
             format!(
                 "stable self-strand label {label} rejected the come-look seed: {}",
-                report.reason.unwrap_or_else(|| "seed rejected".to_string())
+                report
+                    .error
+                    .map(|error| error.to_string())
+                    .unwrap_or_else(|| "seed rejected".to_string())
             ),
         ),
         Err(error) => seed_via_configured_strand(
@@ -269,7 +272,10 @@ fn seed_via_configured_strand(
         }),
         Ok(report) => Err(format!(
             "{stable_label_error}; configured SANTI_STRAND_ID {strand_id} also rejected the come-look seed: {}",
-            report.reason.unwrap_or_else(|| "seed rejected".to_string())
+            report
+                .error
+                .map(|error| error.to_string())
+                .unwrap_or_else(|| "seed rejected".to_string())
         )),
         Err(error) => Err(format!(
             "{stable_label_error}; configured SANTI_STRAND_ID {strand_id} also could not receive the come-look seed: {error}"

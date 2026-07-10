@@ -117,11 +117,11 @@ impl SantiService {
                 previous_response_id: None,
             };
             let estimate = estimate_provider_request(&request);
-            if let Some(reason) = provider_try!(
-                self.block_over_budget_request(strand_id, turn_id, &request, &estimate)
+            if let Some(error) = provider_try!(
+                self.open_over_budget_incident(strand_id, turn_id, &request, &estimate)
             ) {
-                timing.failed(round, "context_budget", &reason);
-                return Err(ProviderTurnFailure::context_budget(reason));
+                timing.failed(round, "context_budget", &error.to_string());
+                return Err(ProviderTurnFailure::context_budget(error.to_string()));
             }
             timing.request_built(
                 round,

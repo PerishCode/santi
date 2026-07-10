@@ -1,6 +1,7 @@
 use crate::{
-    InboxSource, IngestOutcome, MessageContent, MessageKind, SantiStreamPayload,
-    SendStrandAcceptedResponse, SendStrandRequest, Strand, StrandSelector,
+    ErrorScope, ErrorSource, InboxSource, IngestOutcome, MessageContent, MessageKind, SantiError,
+    SantiStreamPayload, SendStrandAcceptedResponse, SendStrandRequest, Strand, StrandSelector,
+    catalog, engine,
 };
 
 use super::super::{DrivenTurn, SantiService};
@@ -51,6 +52,17 @@ impl SantiService {
         trigger_type: &str,
         source: Option<InboxSource>,
     ) -> Result<(IngestOutcome, DrivenTurn), String> {
+        let audit_source_type = source
+            .as_ref()
+            .map(|source| source.source_type.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let audit_source_ref = source
+            .as_ref()
+            .and_then(|source| source.source_ref.as_deref())
+            .unwrap_or("-")
+            .to_string();
+        let audit_content_bytes = content.content_text().len();
         let admission = self.context_admission(&strand.id)?;
         let outcome = self.store.enqueue_inbox_with_context(
             &strand.id,
@@ -59,6 +71,18 @@ impl SantiService {
             source,
             admission.as_ref(),
         )?;
+        self.dispatch_error_events();
+        if let IngestOutcome::Rejected { error } = &outcome {
+            eprintln!(
+                "santi: ingest rejected code={} incident_id={} strand_id={} source_type={} source_ref={} content_bytes={}",
+                error.code,
+                error.incident_id.as_deref().unwrap_or("-"),
+                strand.id,
+                audit_source_type,
+                audit_source_ref,
+                audit_content_bytes,
+            );
+        }
         let driven = match outcome {
             IngestOutcome::Accepted { .. } => self.poke(&strand.id, trigger_type),
             IngestOutcome::Rejected { .. } => None,
@@ -106,38 +130,58 @@ impl SantiService {
         &self,
         strand_id: &str,
         request: SendStrandRequest,
-    ) -> Result<SendStrandAcceptedResponse, String> {
+    ) -> Result<SendStrandAcceptedResponse, SantiError> {
         let text = request.text();
         if text.trim().is_empty() {
-            return Err("send content must contain text".to_string());
+            return Err(send_error(
+                catalog::INVALID_ARGUMENT,
+                strand_id,
+                "send content must contain text".to_string(),
+            ));
         }
         let strand = self
             .store
-            .strand(strand_id)?
-            .ok_or_else(|| "strand not found".to_string())?;
+            .strand(strand_id)
+            .map_err(|message| send_error(catalog::INTERNAL, strand_id, message))?
+            .ok_or_else(|| {
+                send_error(
+                    catalog::NOT_FOUND,
+                    strand_id,
+                    "strand not found".to_string(),
+                )
+            })?;
 
         // ingest_into is decoupled from drive: enqueue into the inbox, then try
         // to drive a turn. If one is already running for this strand, this send
         // simply joins the thread (coalesced) and the running turn (or its
         // completion re-check) will drain it later — no second concurrent turn.
-        let (outcome, driven) = self.ingest_into(
-            &strand,
-            MessageContent {
-                parts: request.content,
-            },
-            MessageKind::Text,
-            "strand_send",
-            Some(InboxSource::new("strand_send").with_ref(strand.id.clone())),
-        )?;
-        if let IngestOutcome::Rejected { reason } = outcome {
-            return Err(reason);
+        let (outcome, driven) = self
+            .ingest_into(
+                &strand,
+                MessageContent {
+                    parts: request.content,
+                },
+                MessageKind::Text,
+                "strand_send",
+                Some(InboxSource::new("strand_send").with_ref(strand.id.clone())),
+            )
+            .map_err(|message| send_error(catalog::INTERNAL, strand_id, message))?;
+        if let IngestOutcome::Rejected { error } = outcome {
+            return Err(*error);
         }
         let (turn, user_message) = match driven {
             Some((turn, mut drained)) => (turn, drained.pop()),
             None => (
                 self.store
-                    .latest_turn(&strand.id)?
-                    .ok_or_else(|| "no active turn after send".to_string())?,
+                    .latest_turn(&strand.id)
+                    .map_err(|message| send_error(catalog::INTERNAL, strand_id, message))?
+                    .ok_or_else(|| {
+                        send_error(
+                            catalog::INTERNAL,
+                            strand_id,
+                            "no active turn after send".to_string(),
+                        )
+                    })?,
                 None,
             ),
         };
@@ -169,10 +213,11 @@ impl SantiService {
                 return None;
             }
         };
-        match self
-            .store
-            .start_turn_with_budget(strand_id, trigger_type, None, admission.as_ref())
-        {
+        let started =
+            self.store
+                .start_turn_with_budget(strand_id, trigger_type, None, admission.as_ref());
+        self.dispatch_error_events();
+        match started {
             Ok(Some(started)) => {
                 for message in started.drained_messages.iter().cloned() {
                     self.publish_stream(strand_id, SantiStreamPayload::MessageCreated { message });
@@ -200,4 +245,18 @@ impl SantiService {
             }
         }
     }
+}
+
+fn send_error(
+    descriptor: santi_error::ErrorDescriptor,
+    strand_id: &str,
+    message: String,
+) -> SantiError {
+    engine().transient(
+        descriptor,
+        ErrorSource::new("santi-core", "strand_send"),
+        Some(ErrorScope::new("strand", strand_id)),
+        message,
+        serde_json::Value::Null,
+    )
 }

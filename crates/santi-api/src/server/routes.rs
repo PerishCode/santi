@@ -5,8 +5,8 @@ use axum::{
 };
 use santi_core::{
     CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSoulRequest,
-    CreateStrandResponse, CreateWebhookRequest, ErrorResponse, ForkStrandResponse, HealthResponse,
-    ImInboxEntry, ImSendRequest, ImSendResponse, IngestOutcome, MaterialRequest, RejectedDelivery,
+    CreateStrandResponse, CreateWebhookRequest, ErrorIncident, ForkStrandResponse, HealthResponse,
+    ImInboxEntry, ImSendRequest, ImSendResponse, IngestOutcome, MaterialRequest, SantiError,
     SantiService, SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand,
     StrandBudgetSnapshot, StrandDetail, StrandMaterial, StrandRuntimeSnapshot, WebhookSubscription,
 };
@@ -35,10 +35,7 @@ pub(super) fn router(service: SantiService) -> Router {
         .route("/api/v1/strands/{strand_id}/fork", post(fork_strand))
         .route("/api/v1/strands/{strand_id}/compact", post(compact_exec))
         .route("/api/v1/strands/{strand_id}/budget", get(strand_budget))
-        .route(
-            "/api/v1/strands/{strand_id}/rejections",
-            get(strand_rejections),
-        )
+        .route("/api/v1/strands/{strand_id}/errors", get(strand_errors))
         .route("/api/v1/compacts/{compact_id}", get(compact_query))
         .route("/api/v1/strands/{strand_id}/runtime", get(runtime_snapshot))
         // IM layer (orthogonal to the runtime; shares the server for cold-start):
@@ -79,7 +76,7 @@ pub(super) async fn health() -> Json<HealthResponse> {
 #[utoipa::path(
     post,
     path = "/api/v1/strands",
-    responses((status = 200, body = CreateStrandResponse), (status = 500, body = ErrorResponse))
+    responses((status = 200, body = CreateStrandResponse), (status = 500, body = SantiError))
 )]
 pub(super) async fn create_strand(
     State(service): State<SantiService>,
@@ -93,7 +90,7 @@ pub(super) async fn create_strand(
 #[utoipa::path(
     get,
     path = "/api/v1/strands",
-    responses((status = 200, body = [Strand]), (status = 500, body = ErrorResponse))
+    responses((status = 200, body = [Strand]), (status = 500, body = SantiError))
 )]
 pub(super) async fn list_strands(
     State(service): State<SantiService>,
@@ -108,7 +105,7 @@ pub(super) async fn list_strands(
     post,
     path = "/api/v1/souls",
     request_body = CreateSoulRequest,
-    responses((status = 200, body = Soul), (status = 500, body = ErrorResponse))
+    responses((status = 200, body = Soul), (status = 500, body = SantiError))
 )]
 pub(super) async fn create_soul(
     State(service): State<SantiService>,
@@ -123,7 +120,7 @@ pub(super) async fn create_soul(
 #[utoipa::path(
     get,
     path = "/api/v1/souls",
-    responses((status = 200, body = [Soul]), (status = 500, body = ErrorResponse))
+    responses((status = 200, body = [Soul]), (status = 500, body = SantiError))
 )]
 pub(super) async fn list_souls(
     State(service): State<SantiService>,
@@ -140,8 +137,8 @@ pub(super) async fn list_souls(
     params(("soul_id" = String, Path)),
     responses(
         (status = 200, body = Soul),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse)
+        (status = 404, body = SantiError),
+        (status = 500, body = SantiError)
     )
 )]
 pub(super) async fn get_soul(
@@ -158,7 +155,7 @@ pub(super) async fn get_soul(
     post,
     path = "/api/v1/webhooks",
     request_body = CreateWebhookRequest,
-    responses((status = 200, body = WebhookSubscription), (status = 500, body = ErrorResponse))
+    responses((status = 200, body = WebhookSubscription), (status = 500, body = SantiError))
 )]
 pub(super) async fn create_webhook(
     State(service): State<SantiService>,
@@ -173,7 +170,7 @@ pub(super) async fn create_webhook(
 #[utoipa::path(
     get,
     path = "/api/v1/webhooks",
-    responses((status = 200, body = [WebhookSubscription]), (status = 500, body = ErrorResponse))
+    responses((status = 200, body = [WebhookSubscription]), (status = 500, body = SantiError))
 )]
 pub(super) async fn list_webhooks(
     State(service): State<SantiService>,
@@ -190,8 +187,8 @@ pub(super) async fn list_webhooks(
     params(("strand_id" = String, Path)),
     responses(
         (status = 200, body = StrandDetail),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse)
+        (status = 404, body = SantiError),
+        (status = 500, body = SantiError)
     )
 )]
 pub(super) async fn get_strand(
@@ -211,8 +208,8 @@ pub(super) async fn get_strand(
     params(("strand_id" = String, Path)),
     responses(
         (status = 200, body = [santi_core::StrandMessage]),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse)
+        (status = 404, body = SantiError),
+        (status = 500, body = SantiError)
     )
 )]
 pub(super) async fn list_messages(
@@ -233,8 +230,8 @@ pub(super) async fn list_messages(
     request_body = MaterialRequest,
     responses(
         (status = 200, body = StrandMaterial),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse)
+        (status = 404, body = SantiError),
+        (status = 500, body = SantiError)
     )
 )]
 pub(super) async fn strand_material(
@@ -255,8 +252,9 @@ pub(super) async fn strand_material(
     request_body = SendStrandRequest,
     responses(
         (status = 200, body = SendStrandAcceptedResponse),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse)
+        (status = 423, body = SantiError),
+        (status = 404, body = SantiError),
+        (status = 500, body = SantiError)
     )
 )]
 pub async fn send_strand(
@@ -268,7 +266,7 @@ pub async fn send_strand(
         .send_strand(&strand_id, request)
         .await
         .map(Json)
-        .map_err(ApiError::from_service)
+        .map_err(ApiError::from_santi)
 }
 
 #[utoipa::path(
@@ -277,8 +275,8 @@ pub async fn send_strand(
     params(("strand_id" = String, Path)),
     responses(
         (status = 200, body = ForkStrandResponse),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse)
+        (status = 404, body = SantiError),
+        (status = 500, body = SantiError)
     )
 )]
 pub(super) async fn fork_strand(
@@ -298,9 +296,9 @@ pub(super) async fn fork_strand(
     request_body = CompactExecRequest,
     responses(
         (status = 200, body = CompactExecResponse),
-        (status = 400, body = ErrorResponse),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse)
+        (status = 400, body = SantiError),
+        (status = 404, body = SantiError),
+        (status = 500, body = SantiError)
     )
 )]
 pub(super) async fn compact_exec(
@@ -325,8 +323,8 @@ pub(super) async fn compact_exec(
     ),
     responses(
         (status = 200, body = CompactQueryResponse),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse)
+        (status = 404, body = SantiError),
+        (status = 500, body = SantiError)
     )
 )]
 pub(super) async fn compact_query(
@@ -359,8 +357,8 @@ pub(super) struct CompactQueryParams {
     params(("strand_id" = String, Path)),
     responses(
         (status = 200, body = StrandRuntimeSnapshot),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse)
+        (status = 404, body = SantiError),
+        (status = 500, body = SantiError)
     )
 )]
 pub(super) async fn runtime_snapshot(
@@ -380,8 +378,8 @@ pub(super) async fn runtime_snapshot(
     params(("strand_id" = String, Path)),
     responses(
         (status = 200, body = StrandBudgetSnapshot),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse)
+        (status = 404, body = SantiError),
+        (status = 500, body = SantiError)
     )
 )]
 pub(super) async fn strand_budget(
@@ -397,31 +395,31 @@ pub(super) async fn strand_budget(
 
 #[utoipa::path(
     get,
-    path = "/api/v1/strands/{strand_id}/rejections",
+    path = "/api/v1/strands/{strand_id}/errors",
     params(
         ("strand_id" = String, Path),
         ("limit" = Option<i64>, Query)
     ),
     responses(
-        (status = 200, body = Vec<RejectedDelivery>),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse)
+        (status = 200, body = Vec<ErrorIncident>),
+        (status = 404, body = SantiError),
+        (status = 500, body = SantiError)
     )
 )]
-pub(super) async fn strand_rejections(
+pub(super) async fn strand_errors(
     State(service): State<SantiService>,
     Path(strand_id): Path<String>,
-    Query(params): Query<RejectionQueryParams>,
-) -> Result<Json<Vec<RejectedDelivery>>, ApiError> {
+    Query(params): Query<ErrorQueryParams>,
+) -> Result<Json<Vec<ErrorIncident>>, ApiError> {
     service
-        .strand_rejections(&strand_id, params.limit.unwrap_or(50))
+        .strand_errors(&strand_id, params.limit.unwrap_or(50))
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("strand not found"))
 }
 
 #[derive(serde::Deserialize)]
-pub(super) struct RejectionQueryParams {
+pub(super) struct ErrorQueryParams {
     limit: Option<i64>,
 }
 
@@ -437,8 +435,9 @@ pub(super) struct RejectionQueryParams {
     request_body = ImSendRequest,
     responses(
         (status = 200, body = ImSendResponse),
-        (status = 404, body = ErrorResponse),
-        (status = 500, body = ErrorResponse)
+        (status = 423, body = SantiError),
+        (status = 404, body = SantiError),
+        (status = 500, body = SantiError)
     )
 )]
 pub(super) async fn send_im(
@@ -448,21 +447,13 @@ pub(super) async fn send_im(
     let outcome = service
         .im_send(&request.soul_id, &request.participant_id, &request.content)
         .map_err(ApiError::from_service)?;
-    let response = match outcome {
-        IngestOutcome::Accepted { strand_id } => ImSendResponse {
-            accepted: true,
+    match outcome {
+        IngestOutcome::Accepted { strand_id } => Ok(Json(ImSendResponse {
             participant_id: request.participant_id,
-            strand_id: Some(strand_id),
-            reason: None,
-        },
-        IngestOutcome::Rejected { reason } => ImSendResponse {
-            accepted: false,
-            participant_id: request.participant_id,
-            strand_id: None,
-            reason: Some(reason),
-        },
-    };
-    Ok(Json(response))
+            strand_id,
+        })),
+        IngestOutcome::Rejected { error } => Err(ApiError::from_santi(*error)),
+    }
 }
 
 #[utoipa::path(
@@ -474,7 +465,7 @@ pub(super) async fn send_im(
     ),
     responses(
         (status = 200, body = Vec<ImInboxEntry>),
-        (status = 500, body = ErrorResponse)
+        (status = 500, body = SantiError)
     )
 )]
 pub(super) async fn poll_im(

@@ -8,6 +8,7 @@ are consumed as running services, so nothing here depends on the infra repo.
 ## Wrappers
 
 - `runseal :ssh <host> [-- <cmd>...]` — reach a santi-operated host.
+- `runseal :scp <source> <destination>` — copy through the same declared-host SSH boundary.
 - `runseal :santi <args...>` — the santi HTTP client against the live edge.
 - `runseal :deploy [<version>]` — fetch the latest (or given) beta `.deb` on the box and run
   `santi upgrade`, then verify schema + soul-memory continuity + health. (Cut the release first:

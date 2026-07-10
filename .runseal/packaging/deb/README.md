@@ -26,6 +26,9 @@ The binary is installed to `/usr/bin/santi`.
   `SANTI_UPGRADE_TIMEOUT_SECS` (600).
 - **Runtime data is sacred.** No maintainer script ever deletes `/home/santi/.santi` — the soul's
   memory is the one thing that must survive.
+- **Rollback requires both artifacts.** The runner refuses to begin without a readable previous
+  `.deb`; `runseal :deploy` fetches and validates it from the installed package version so a
+  rollback restores package truth and the runtime snapshot together.
 - **Upgrade unit runs as santi + sudo**, so every file it writes stays santi-owned; the privileged
   dpkg/systemctl calls use santi's passwordless sudo (a SystemHost detail tuned on-box in STEP 6).
 

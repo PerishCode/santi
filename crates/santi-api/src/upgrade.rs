@@ -54,9 +54,10 @@ pub enum Outcome {
     RolledBack(RollbackCause),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UpgradeReadiness {
+    #[default]
     Ready,
     Degraded,
 }
@@ -108,7 +109,7 @@ pub struct UpgradeFailure {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "terminal")]
 pub enum UpgradeTerminal {
-    Upgraded { readiness: UpgradeReadiness },
+    Upgraded,
     RolledBack { failure: UpgradeFailure },
     Failed { failure: UpgradeFailure },
 }
@@ -119,6 +120,8 @@ pub struct UpgradeFinalizeRequest {
     pub attempt_id: String,
     pub deb: String,
     pub terminal: UpgradeTerminal,
+    #[serde(default)]
+    pub readiness: UpgradeReadiness,
     pub wake: bool,
     pub soul_id: String,
     pub configured_strand_id: Option<String>,
@@ -263,12 +266,13 @@ pub(super) fn run_upgrade_attempt<H: UpgradeHost>(
         return Err(record_fatal(host, &attempt_id, deb, failure));
     }
 
-    let terminal = terminal_from_outcome(&outcome);
+    let (terminal, readiness) = terminal_from_outcome(&outcome);
     let finalize_result = host.finalize(&UpgradeFinalizeRequest {
         protocol_version: FINALIZE_PROTOCOL_VERSION,
         attempt_id: attempt_id.clone(),
         deb: deb.to_string(),
         terminal,
+        readiness,
         wake: true,
         soul_id: santi_core::DEFAULT_SOUL_ID.to_string(),
         configured_strand_id: None,
@@ -319,25 +323,26 @@ pub fn compose_record(attempt_id: &str) -> String {
     )
 }
 
-fn terminal_from_outcome(outcome: &Outcome) -> UpgradeTerminal {
+fn terminal_from_outcome(outcome: &Outcome) -> (UpgradeTerminal, UpgradeReadiness) {
     match outcome {
-        Outcome::Upgraded { readiness } => UpgradeTerminal::Upgraded {
-            readiness: *readiness,
-        },
-        Outcome::RolledBack(cause) => UpgradeTerminal::RolledBack {
-            failure: match cause {
-                RollbackCause::InstallFailed(detail) => UpgradeFailure {
-                    stage: UpgradeStage::Install,
-                    detail: detail.clone(),
-                    recovery: RecoveryStatus::PreviousVersionRestored,
-                },
-                RollbackCause::DidNotComeUp(detail) => UpgradeFailure {
-                    stage: UpgradeStage::TrialProbe,
-                    detail: detail.clone(),
-                    recovery: RecoveryStatus::PreviousVersionRestored,
+        Outcome::Upgraded { readiness } => (UpgradeTerminal::Upgraded, *readiness),
+        Outcome::RolledBack(cause) => (
+            UpgradeTerminal::RolledBack {
+                failure: match cause {
+                    RollbackCause::InstallFailed(detail) => UpgradeFailure {
+                        stage: UpgradeStage::Install,
+                        detail: detail.clone(),
+                        recovery: RecoveryStatus::PreviousVersionRestored,
+                    },
+                    RollbackCause::DidNotComeUp(detail) => UpgradeFailure {
+                        stage: UpgradeStage::TrialProbe,
+                        detail: detail.clone(),
+                        recovery: RecoveryStatus::PreviousVersionRestored,
+                    },
                 },
             },
-        },
+            UpgradeReadiness::Ready,
+        ),
     }
 }
 
@@ -353,6 +358,7 @@ fn record_fatal<H: UpgradeHost>(
         attempt_id: attempt_id.to_string(),
         deb: deb.to_string(),
         terminal: UpgradeTerminal::Failed { failure },
+        readiness: UpgradeReadiness::Ready,
         wake: false,
         soul_id: santi_core::DEFAULT_SOUL_ID.to_string(),
         configured_strand_id: None,

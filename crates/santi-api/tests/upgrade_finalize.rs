@@ -10,6 +10,22 @@ use santi_api::{
 use santi_core::{ErrorScope, IncidentStatus, SantiStore};
 
 #[test]
+fn old_request_defaults() {
+    let request: UpgradeFinalizeRequest = serde_json::from_value(serde_json::json!({
+        "protocol_version": 1,
+        "attempt_id": "upgrade_old_runner",
+        "deb": "/tmp/santi.deb",
+        "terminal": {"terminal": "upgraded"},
+        "wake": true,
+        "soul_id": "soul_default",
+        "configured_strand_id": null,
+    }))
+    .expect("decode old runner request");
+    assert_eq!(request.readiness, UpgradeReadiness::Ready);
+    assert!(matches!(request.terminal, UpgradeTerminal::Upgraded));
+}
+
+#[test]
 fn stable_label_seeds() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
@@ -83,13 +99,8 @@ fn success_resolves_incident() {
         }),
     )
     .expect("finalize rollback");
-    let recovered = finalize_at(
-        &paths,
-        request(UpgradeTerminal::Upgraded {
-            readiness: UpgradeReadiness::Ready,
-        }),
-    )
-    .expect("finalize success");
+    let recovered =
+        finalize_at(&paths, request(UpgradeTerminal::Upgraded)).expect("finalize success");
     assert!(recovered.errors.is_empty());
 
     let store = SantiStore::open(&paths.database_path).expect("open store");
@@ -167,6 +178,7 @@ fn request(terminal: UpgradeTerminal) -> UpgradeFinalizeRequest {
         attempt_id: "upgrade_test".to_string(),
         deb: "/tmp/santi.deb".to_string(),
         terminal,
+        readiness: UpgradeReadiness::Ready,
         wake: true,
         soul_id: santi_core::DEFAULT_SOUL_ID.to_string(),
         configured_strand_id: None,

@@ -22,6 +22,7 @@ async fn maps_chat_body() {
         thinking: Some("disabled".to_string()),
         reasoning_effort: Some("high".to_string()),
         max_tokens: Some(512),
+        input_budget_bytes: None,
     })
     .await;
 
@@ -224,6 +225,7 @@ async fn capture_with_items(items: Vec<ProviderItem>) -> Value {
         thinking: None,
         reasoning_effort: None,
         max_tokens: None,
+        input_budget_bytes: None,
     };
     let (tx, rx) = mpsc::channel();
     let server = response_server(
@@ -272,6 +274,7 @@ async fn capture_all_events(lines: Vec<&'static str>) -> Vec<ProviderEvent> {
         thinking: None,
         reasoning_effort: None,
         max_tokens: None,
+        input_budget_bytes: None,
     };
     let (tx, rx) = mpsc::channel();
     let server = response_server(listener, tx, lines);

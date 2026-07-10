@@ -1,4 +1,5 @@
 mod assembly;
+mod context_budget;
 mod model;
 mod object_store;
 mod service;

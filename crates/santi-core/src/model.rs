@@ -177,15 +177,107 @@ pub struct Compact {
     pub summary: String,
     pub start_message_id: String,
     pub end_message_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<Timestamp>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct ContextEstimate {
+    pub estimator: String,
+    pub input_items: i64,
+    pub input_bytes: i64,
+    pub instructions_bytes: i64,
+    pub tools_bytes: i64,
+    pub total_bytes: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct ContextBudget {
+    pub input_budget_bytes: i64,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct StrandBlock {
+    pub id: String,
+    pub strand_id: String,
+    pub kind: String,
+    pub status: String,
+    pub reason_code: String,
+    pub reason_text: String,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub budget_source: Option<String>,
+    pub budget_bytes: Option<i64>,
+    pub input_items: Option<i64>,
+    pub input_bytes: Option<i64>,
+    pub instructions_bytes: Option<i64>,
+    pub tools_bytes: Option<i64>,
+    pub total_bytes: Option<i64>,
+    pub observed_turn_id: Option<String>,
+    pub observed_at_seq: Option<i64>,
+    pub metadata: Option<Value>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+    pub cleared_at: Option<Timestamp>,
+    pub cleared_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RejectedDelivery {
+    pub id: String,
+    pub strand_id: Option<String>,
+    pub block_id: Option<String>,
+    pub source_type: Option<String>,
+    pub source_ref: Option<String>,
+    pub source_metadata: Option<Value>,
+    pub message_kind: Option<String>,
+    pub content_sha256: String,
+    pub content_bytes: i64,
+    pub content_excerpt: String,
+    pub reason_code: String,
+    pub reason_text: String,
+    pub received_at: Timestamp,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct StrandBudgetSnapshot {
+    pub strand_id: String,
+    pub estimate: ContextEstimate,
+    pub budget: Option<ContextBudget>,
+    pub active_block: Option<StrandBlock>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CompactExecRequest {
     /// Range boundaries — must be FIXED user/assistant messages in this
     /// strand's spine. Everything between (messages/tools/reasoning) collapses.
-    pub from_message_id: String,
-    pub to_message_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_message_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_message_id: Option<String>,
+    /// Alternative range boundaries by strand seq. The addressed seqs must
+    /// resolve to fixed user/assistant messages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_seq: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_seq: Option<i64>,
     pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capsule: Option<CompactCapsuleOptions>,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CompactCapsuleOptions {
+    pub source: String,
+    pub reason: String,
+    pub risk: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queryability: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -193,10 +285,22 @@ pub struct CompactExecResponse {
     pub compact_id: String,
     pub start_message_id: String,
     pub end_message_id: String,
+    pub start_seq: i64,
+    pub end_seq: i64,
     /// Compacts fully covered by this range, dropped and replaced by the new one.
     pub absorbed: Vec<String>,
     /// Spine entries the new compact collapses out of the assembled view.
     pub collapsed_count: i64,
+    #[serde(default)]
+    pub dry_run: bool,
+    #[serde(default)]
+    pub active_block_cleared: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_estimate: Option<ContextEstimate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_estimate: Option<ContextEstimate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compression_ratio: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -520,6 +624,8 @@ pub struct StrandRuntimeSnapshot {
     pub tool_results: Vec<ToolResult>,
     pub compacts: Vec<Compact>,
     pub effects: Vec<StrandEffect>,
+    pub blocks: Vec<StrandBlock>,
+    pub rejected_deliveries: Vec<RejectedDelivery>,
 }
 
 pub fn timestamp_now() -> Timestamp {

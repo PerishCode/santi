@@ -616,7 +616,7 @@ fn read_schema_version_none_when_db_absent() {
 }
 
 #[test]
-fn schema_21_to_22_migrates_in_place_and_preserves_webhooks() {
+fn schema_migration_preserves_webhooks() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     {
@@ -660,7 +660,7 @@ fn schema_21_to_22_migrates_in_place_and_preserves_webhooks() {
         .expect("seed v21 db");
     }
 
-    let store = SantiStore::open(&db).expect("open migrates v21 to v22");
+    let store = SantiStore::open(&db).expect("open migrates v21 to current schema");
     assert_eq!(
         santi_core::read_schema_version(&db).expect("read version"),
         Some(santi_core::SCHEMA_VERSION)
@@ -687,6 +687,26 @@ fn schema_21_to_22_migrates_in_place_and_preserves_webhooks() {
             .expect("column lookup");
         assert_eq!(exists, 1, "missing migrated column {column}");
     }
+    for column in ["created_at", "metadata"] {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('compacts') WHERE name = ?1",
+                [column],
+                |row| row.get(0),
+            )
+            .expect("compact column lookup");
+        assert_eq!(exists, 1, "missing migrated compact column {column}");
+    }
+    for table in ["strand_blocks", "rejected_deliveries"] {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .expect("table lookup");
+        assert_eq!(exists, 1, "missing migrated table {table}");
+    }
     let pending_count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM strand_inbox WHERE id = 'inbox_old'",
@@ -703,6 +723,119 @@ fn schema_21_to_22_migrates_in_place_and_preserves_webhooks() {
         )
         .expect("webhook count");
     assert_eq!(webhook_count, 1, "webhook subscription was wiped");
+}
+
+#[test]
+fn schema_migrates_live_shape() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let db = temp.path().join("santi.sqlite");
+    {
+        let conn = Connection::open(&db).expect("open sqlite");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE souls (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE webhooks (
+                name TEXT PRIMARY KEY,
+                adaptor TEXT NOT NULL,
+                soul_id TEXT NOT NULL,
+                strand_strategy TEXT NOT NULL,
+                secret_env TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE strand_inbox (
+                id TEXT PRIMARY KEY,
+                strand_id TEXT NOT NULL,
+                message_kind TEXT NOT NULL CHECK (message_kind IN ('text', 'santi_system')),
+                content TEXT NOT NULL,
+                source_type TEXT,
+                source_ref TEXT,
+                source_metadata TEXT,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE compacts (
+                id TEXT PRIMARY KEY,
+                strand_id TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                start_message_id TEXT NOT NULL,
+                end_message_id TEXT NOT NULL
+            );
+            INSERT INTO souls (id, created_at, updated_at)
+            VALUES ('soul_default', '2026-07-08T00:00:00Z', '2026-07-08T00:00:00Z');
+            INSERT INTO webhooks (
+                name, adaptor, soul_id, strand_strategy, secret_env, created_at, updated_at
+            ) VALUES (
+                'secretary', 'github', 'soul_default', 'per_thread',
+                'SANTI_WEBHOOK_GITHUB_SECRET', '2026-07-08T00:00:01Z', '2026-07-08T00:00:01Z'
+            );
+            INSERT INTO strand_inbox (
+                id, strand_id, message_kind, content, source_type, source_ref, source_metadata, created_at
+            ) VALUES (
+                'inbox_v22', 'ss_existing', 'text', '{"parts":[]}',
+                'webhook', 'github:secretary:issue:1', '{"delivery":"abc"}',
+                '2026-07-08T00:00:02Z'
+            );
+            INSERT INTO compacts (id, strand_id, summary, start_message_id, end_message_id)
+            VALUES ('cmp_v22', 'ss_existing', 'old compact', 'msg_a', 'msg_b');
+            PRAGMA user_version = 22;
+            "#,
+        )
+        .expect("seed v22 db");
+    }
+
+    let store = SantiStore::open(&db).expect("open migrates v22 to current schema");
+    assert_eq!(
+        santi_core::read_schema_version(&db).expect("read version"),
+        Some(santi_core::SCHEMA_VERSION)
+    );
+    let webhooks = store.list_webhooks().expect("list webhooks");
+    assert_eq!(webhooks.len(), 1);
+    assert_eq!(webhooks[0].name, "secretary");
+    drop(store);
+
+    let conn = Connection::open(&db).expect("open sqlite");
+    let pending: (String, String, String) = conn
+        .query_row(
+            r#"
+            SELECT source_type, source_ref, source_metadata
+            FROM strand_inbox
+            WHERE id = 'inbox_v22'
+            "#,
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("pending inbox row");
+    assert_eq!(pending.0, "webhook");
+    assert_eq!(pending.1, "github:secretary:issue:1");
+    assert!(pending.2.contains("delivery"));
+    let compact: (String, Option<String>, Option<String>) = conn
+        .query_row(
+            r#"
+            SELECT summary, created_at, metadata
+            FROM compacts
+            WHERE id = 'cmp_v22'
+            "#,
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("compact row");
+    assert_eq!(compact.0, "old compact");
+    assert!(compact.1.is_none());
+    assert!(compact.2.is_none());
+    for table in ["strand_blocks", "rejected_deliveries"] {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .expect("table lookup");
+        assert_eq!(exists, 1, "missing migrated table {table}");
+    }
 }
 
 #[test]
@@ -806,7 +939,7 @@ fn fork_strand_copies_prefix_relations_and_reuses_raw_messages() {
 }
 
 #[test]
-fn fork_strand_copies_only_compacts_fully_inside_prefix() {
+fn fork_copies_inner_compacts() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let parent = store.create_strand().expect("create parent");
@@ -861,14 +994,18 @@ fn fork_strand_copies_only_compacts_fully_inside_prefix() {
 
     let input = store.assembly_input(&child.id).expect("child input");
     assert_eq!(input.len(), 2);
-    assert_text(
-        &input[0],
-        "system",
-        &format!(
-            "[compact {} | {} | {}]\ninside",
-            snapshot.compacts[0].id, inside.start_message_id, inside.end_message_id
-        ),
-    );
+    let ProviderItem::Message { role, content } = &input[0] else {
+        panic!("expected compact projection message");
+    };
+    assert_eq!(role, "system");
+    assert!(content.contains("[compact projection]"));
+    assert!(content.contains("\"operation\": \"compact_projection\""));
+    assert!(content.contains("\"declared_source\": \"not_declared\""));
+    assert!(content.contains("\"compact_id\""));
+    assert!(content.contains(&snapshot.compacts[0].id));
+    assert!(content.contains(&inside.start_message_id));
+    assert!(content.contains(&inside.end_message_id));
+    assert!(content.contains("<compact_summary>\ninside\n</compact_summary>"));
     assert_text(&input[1], "user", "three");
 }
 

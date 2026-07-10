@@ -20,6 +20,7 @@ pub struct OpenAIProviderConfig {
     pub reasoning_effort: Option<String>,
     pub reasoning_summary: Option<String>,
     pub max_output_tokens: Option<u32>,
+    pub input_budget_bytes: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +44,12 @@ impl ProviderClient for OpenAIProvider {
         ProviderMetadata {
             provider: Arc::from("openai"),
             model: self.config.model.clone(),
+            context_budget: self.config.input_budget_bytes.map(|input_budget_bytes| {
+                crate::ProviderContextBudget {
+                    input_budget_bytes,
+                    source: "provider_config".to_string(),
+                }
+            }),
         }
     }
 

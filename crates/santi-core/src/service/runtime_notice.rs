@@ -282,6 +282,7 @@ mod tests {
             ProviderMetadata {
                 provider: Arc::from("test"),
                 model: "test-model".to_string(),
+                context_budget: None,
             }
         }
 

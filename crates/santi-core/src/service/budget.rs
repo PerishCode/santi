@@ -1,0 +1,118 @@
+use serde_json::json;
+
+use crate::context_budget::estimate_provider_parts;
+use crate::service_prompt::provider_tools;
+use crate::store::budget::{ContextAdmission, ContextBlockInput};
+use crate::{ContextBudget, ContextEstimate};
+
+use super::SantiService;
+
+const REASON_PROVIDER: &str = "provider_request_exceeds_budget";
+
+impl SantiService {
+    pub(super) fn context_budget(&self) -> Option<ContextBudget> {
+        self.provider
+            .metadata()
+            .context_budget
+            .map(|budget| ContextBudget {
+                input_budget_bytes: budget.input_budget_bytes as i64,
+                source: budget.source,
+            })
+    }
+
+    pub(super) fn current_context_estimate(
+        &self,
+        strand_id: &str,
+    ) -> Result<ContextEstimate, String> {
+        let mut input = self.store.assembly_input(strand_id)?;
+        input.extend(self.store.pending_provider_items(strand_id)?);
+        let instructions = self.system_prompt_text(strand_id)?;
+        let tools = provider_tools();
+        Ok(estimate_provider_parts(
+            &input,
+            Some(&instructions),
+            Some(&tools),
+        ))
+    }
+
+    pub(super) fn context_admission(
+        &self,
+        strand_id: &str,
+    ) -> Result<Option<ContextAdmission>, String> {
+        let Some(budget) = self.context_budget() else {
+            return Ok(None);
+        };
+        let metadata = self.provider.metadata();
+        Ok(Some(ContextAdmission {
+            provider: metadata.provider.to_string(),
+            model: metadata.model,
+            budget_source: budget.source,
+            budget_bytes: budget.input_budget_bytes,
+            instructions: Some(self.system_prompt_text(strand_id)?),
+            tools: provider_tools(),
+        }))
+    }
+
+    pub(super) fn block_over_budget_request(
+        &self,
+        strand_id: &str,
+        turn_id: &str,
+        request: &santi_provider::ProviderRequest,
+        estimate: &ContextEstimate,
+    ) -> Result<Option<String>, String> {
+        let Some(budget) = self.context_budget() else {
+            return Ok(None);
+        };
+        if estimate.total_bytes <= budget.input_budget_bytes {
+            return Ok(None);
+        }
+        let metadata = self.provider.metadata();
+        let strand = self
+            .store
+            .strand(strand_id)?
+            .ok_or_else(|| "strand not found".to_string())?;
+        let reason = over_budget_reason(estimate.total_bytes, budget.input_budget_bytes);
+        self.store.upsert_context_block(
+            strand_id,
+            ContextBlockInput {
+                reason_code: REASON_PROVIDER,
+                reason_text: &reason,
+                provider: metadata.provider.as_ref(),
+                model: &request.model,
+                budget_source: Some(&budget.source),
+                budget_bytes: Some(budget.input_budget_bytes),
+                estimate,
+                observed_turn_id: Some(turn_id),
+                observed_at_seq: Some(strand.next_seq - 1),
+                metadata: Some(json!({
+                    "phase": "provider_preflight",
+                    "estimator": estimate.estimator,
+                })),
+            },
+        )?;
+        Ok(Some(reason))
+    }
+
+    pub(super) fn clear_context_block(
+        &self,
+        strand_id: &str,
+        cleared_by: &str,
+    ) -> Result<bool, String> {
+        if self.store.active_context_block(strand_id)?.is_none() {
+            return Ok(false);
+        }
+        let Some(budget) = self.context_budget() else {
+            return Ok(false);
+        };
+        let estimate = self.current_context_estimate(strand_id)?;
+        if estimate.total_bytes > budget.input_budget_bytes {
+            return Ok(false);
+        }
+        self.store
+            .clear_active_context_block(strand_id, cleared_by, &estimate)
+    }
+}
+
+fn over_budget_reason(total_bytes: i64, budget_bytes: i64) -> String {
+    format!("strand context is over budget ({total_bytes} estimated bytes, budget {budget_bytes})")
+}

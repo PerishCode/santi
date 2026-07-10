@@ -12,6 +12,7 @@ use crate::{
 };
 
 mod assembly;
+pub(crate) mod budget;
 mod compact;
 mod db;
 mod fork;
@@ -29,7 +30,7 @@ use schema::SCHEMA;
 /// beta wipe + rebuild policy (see PHASE-07 crux #5 / PHASE-09 tier work).
 /// Public so ops paths (`santi doctor`) can compare a DB's `user_version` to it
 /// WITHOUT opening the store (which would migrate/wipe).
-pub const SCHEMA_VERSION: u32 = 22;
+pub const SCHEMA_VERSION: u32 = 23;
 /// The default soul's id. Public so offline ops (doctor/seed) can address it
 /// without a running service.
 pub const DEFAULT_SOUL_ID: &str = "soul_default";
@@ -103,6 +104,77 @@ fn migrate_schema_21_to_22(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+fn migrate_schema_22_to_23(conn: &Connection) -> Result<(), String> {
+    if table_exists(conn, "compacts")? {
+        add_column_if_missing(conn, "compacts", "created_at", "TEXT")?;
+        add_column_if_missing(conn, "compacts", "metadata", "TEXT")?;
+    }
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS strand_blocks (
+            id TEXT PRIMARY KEY,
+            strand_id TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('context_over_budget')),
+            status TEXT NOT NULL CHECK (status IN ('active', 'cleared')),
+            reason_code TEXT NOT NULL,
+            reason_text TEXT NOT NULL,
+            provider TEXT,
+            model TEXT,
+            budget_source TEXT,
+            budget_bytes INTEGER,
+            input_items INTEGER,
+            input_bytes INTEGER,
+            instructions_bytes INTEGER,
+            tools_bytes INTEGER,
+            total_bytes INTEGER,
+            observed_turn_id TEXT,
+            observed_at_seq INTEGER,
+            metadata TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            cleared_at TEXT,
+            cleared_by TEXT
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_strand_blocks_active_context
+        ON strand_blocks(strand_id, kind)
+        WHERE status = 'active';
+        CREATE INDEX IF NOT EXISTS idx_strand_blocks_strand_created_at
+        ON strand_blocks(strand_id, created_at);
+
+        CREATE TABLE IF NOT EXISTS rejected_deliveries (
+            id TEXT PRIMARY KEY,
+            strand_id TEXT,
+            block_id TEXT,
+            source_type TEXT,
+            source_ref TEXT,
+            source_metadata TEXT,
+            message_kind TEXT,
+            content_sha256 TEXT NOT NULL,
+            content_bytes INTEGER NOT NULL,
+            content_excerpt TEXT NOT NULL,
+            reason_code TEXT NOT NULL,
+            reason_text TEXT NOT NULL,
+            received_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_rejected_deliveries_strand_time
+        ON rejected_deliveries(strand_id, received_at);
+        "#,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            params![table],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(count > 0)
+}
+
 fn add_column_if_missing(
     conn: &Connection,
     table: &str,
@@ -149,12 +221,15 @@ impl SantiStore {
         let version = conn
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .map_err(|error| error.to_string())?;
-        if version == 21 && SCHEMA_VERSION == 22 {
+        if version == 21 && SCHEMA_VERSION == 23 {
             // v21 -> v22 is additive: PR #47 only adds bounded inbox-source
             // provenance columns. Migrate it in place so live ingress topology
             // (notably `webhooks` / the secretary subscription) cannot be
             // silently severed by this schema bump.
             migrate_schema_21_to_22(&conn)?;
+            migrate_schema_22_to_23(&conn)?;
+        } else if version == 22 && SCHEMA_VERSION == 23 {
+            migrate_schema_22_to_23(&conn)?;
         } else if version != SCHEMA_VERSION {
             // Fallback beta policy for unrecognized schema jumps: drop the
             // current runtime workspace and rebuild it. This must keep shrinking
@@ -171,6 +246,8 @@ impl SantiStore {
                 DROP TABLE IF EXISTS im_inbox;
                 DROP TABLE IF EXISTS im_participants;
                 DROP TABLE IF EXISTS compacts;
+                DROP TABLE IF EXISTS strand_blocks;
+                DROP TABLE IF EXISTS rejected_deliveries;
                 DROP TABLE IF EXISTS thinking_spans;
                 DROP TABLE IF EXISTS tool_results;
                 DROP TABLE IF EXISTS tool_calls;
@@ -289,6 +366,8 @@ impl SantiStore {
             tool_results: soul_tool_results(&conn, &strand.id)?,
             compacts: compacts_for_strand(&conn, &strand.id)?,
             effects: strand_effects(&conn, strand_id)?,
+            blocks: budget::strand_blocks_for_strand(&conn, strand_id)?,
+            rejected_deliveries: budget::rejected_deliveries_for_strand(&conn, strand_id, 100)?,
             strand,
         }))
     }
@@ -444,56 +523,7 @@ impl SantiStore {
         content: MessageContent,
         source: Option<InboxSource>,
     ) -> Result<IngestOutcome, String> {
-        let conn = self.conn.lock().unwrap();
-        let pending: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM strand_inbox WHERE strand_id = ?1",
-                params![strand_id],
-                |row| row.get(0),
-            )
-            .map_err(|error| error.to_string())?;
-        if pending >= STRAND_INBOX_GATE {
-            return Ok(IngestOutcome::Rejected {
-                reason: format!(
-                    "strand inbox is full ({pending} pending, gate {STRAND_INBOX_GATE})"
-                ),
-            });
-        }
-        let inbox_id = prefixed_id("inbox");
-        let now = timestamp_now();
-        let content_json = serde_json::to_string(&content).map_err(|error| error.to_string())?;
-        let source_type = source.as_ref().map(|source| source.source_type.as_str());
-        let source_ref = source
-            .as_ref()
-            .and_then(|source| source.source_ref.as_deref());
-        let source_metadata = source
-            .as_ref()
-            .and_then(|source| source.metadata.as_ref())
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(|error| error.to_string())?;
-        conn.execute(
-            r#"
-            INSERT INTO strand_inbox (
-              id, strand_id, message_kind, content, source_type, source_ref, source_metadata, created_at
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-            "#,
-            params![
-                inbox_id,
-                strand_id,
-                rows::message_kind_db(&message_kind),
-                content_json,
-                source_type,
-                source_ref,
-                source_metadata,
-                now
-            ],
-        )
-        .map_err(|error| error.to_string())?;
-        Ok(IngestOutcome::Accepted {
-            strand_id: strand_id.to_string(),
-        })
+        self.enqueue_inbox_with_context(strand_id, message_kind, content, source, None)
     }
 
     /// Register a webhook subscription (API-managed). The secret itself is never

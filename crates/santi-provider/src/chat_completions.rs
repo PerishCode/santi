@@ -21,6 +21,7 @@ pub struct ChatCompletionsProviderConfig {
     pub thinking: Option<String>,
     pub reasoning_effort: Option<String>,
     pub max_tokens: Option<u32>,
+    pub input_budget_bytes: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -44,6 +45,12 @@ impl ProviderClient for ChatCompletionsProvider {
         ProviderMetadata {
             provider: Arc::from(self.config.provider.clone()),
             model: self.config.model.clone(),
+            context_budget: self.config.input_budget_bytes.map(|input_budget_bytes| {
+                crate::ProviderContextBudget {
+                    input_budget_bytes,
+                    source: "provider_config".to_string(),
+                }
+            }),
         }
     }
 

@@ -40,10 +40,7 @@ impl ConfigService {
     pub fn provider_config(&self) -> Result<ProviderConfig, String> {
         let config_path = self.config_path();
         let config = AppConfigFile::read(&config_path)?;
-        let provider = trim_optional_string(&self.cli.provider)
-            .or_else(|| trim_optional_string(&config.provider))
-            .or_else(|| optional_env("SANTI_PROVIDER"))
-            .unwrap_or_else(|| "openai".to_string());
+        let provider = self.selected_provider(&config);
         let profile = config
             .providers
             .get(&provider)
@@ -51,10 +48,22 @@ impl ConfigService {
         resolve_provider_config(&provider, profile)
     }
 
+    pub fn provider_name(&self) -> Result<String, String> {
+        let config = AppConfigFile::read(&self.config_path())?;
+        Ok(self.selected_provider(&config))
+    }
+
     fn config_path(&self) -> String {
         trim_optional_string(&self.cli.config)
             .or_else(|| optional_env("SANTI_CONFIG"))
             .unwrap_or_else(|| santi_home().join(APP_CONFIG_PATH).display().to_string())
+    }
+
+    fn selected_provider(&self, config: &AppConfigFile) -> String {
+        trim_optional_string(&self.cli.provider)
+            .or_else(|| trim_optional_string(&config.provider))
+            .or_else(|| optional_env("SANTI_PROVIDER"))
+            .unwrap_or_else(|| "openai".to_string())
     }
 }
 
@@ -82,6 +91,29 @@ pub enum ProviderConfig {
     ChatCompletions(ChatCompletionsConfig),
 }
 
+impl ProviderConfig {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::OpenAiResponses(_) => "openai_responses",
+            Self::ChatCompletions(_) => "chat_completions",
+        }
+    }
+
+    pub fn model(&self) -> &str {
+        match self {
+            Self::OpenAiResponses(config) => &config.model,
+            Self::ChatCompletions(config) => &config.model,
+        }
+    }
+
+    pub fn input_budget_bytes(&self) -> usize {
+        match self {
+            Self::OpenAiResponses(config) => config.input_budget_bytes,
+            Self::ChatCompletions(config) => config.input_budget_bytes,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenAiResponsesConfig {
     pub api_key: String,
@@ -90,6 +122,7 @@ pub struct OpenAiResponsesConfig {
     pub reasoning_effort: Option<String>,
     pub reasoning_summary: Option<String>,
     pub max_output_tokens: Option<u32>,
+    pub input_budget_bytes: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,6 +134,7 @@ pub struct ChatCompletionsConfig {
     pub thinking: Option<String>,
     pub reasoning_effort: Option<String>,
     pub max_tokens: Option<u32>,
+    pub input_budget_bytes: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -135,6 +169,8 @@ enum RawProviderProfile {
         reasoning_summary: Option<String>,
         #[serde(default)]
         max_output_tokens: Option<u32>,
+        #[serde(default)]
+        input_budget_bytes: Option<usize>,
     },
     ChatCompletions {
         #[serde(default)]
@@ -149,6 +185,8 @@ enum RawProviderProfile {
         reasoning_effort: Option<String>,
         #[serde(default)]
         max_tokens: Option<u32>,
+        #[serde(default)]
+        input_budget_bytes: Option<usize>,
     },
 }
 
@@ -170,6 +208,7 @@ fn resolve_openai(provider: &str, profile: &RawProviderProfile) -> Result<Provid
         reasoning_effort,
         reasoning_summary,
         max_output_tokens,
+        input_budget_bytes,
     } = profile
     else {
         unreachable!("openai profile")
@@ -186,6 +225,11 @@ fn resolve_openai(provider: &str, profile: &RawProviderProfile) -> Result<Provid
             "reasoning_summary",
         )?,
         max_output_tokens: *max_output_tokens,
+        input_budget_bytes: required_positive_usize(
+            *input_budget_bytes,
+            provider,
+            "input_budget_bytes",
+        )?,
     }))
 }
 
@@ -200,6 +244,7 @@ fn resolve_chat_completions(
         thinking,
         reasoning_effort,
         max_tokens,
+        input_budget_bytes,
     } = profile
     else {
         unreachable!("chat completions profile")
@@ -212,6 +257,11 @@ fn resolve_chat_completions(
         thinking: optional_profile_string(thinking, provider, "thinking")?,
         reasoning_effort: optional_profile_string(reasoning_effort, provider, "reasoning_effort")?,
         max_tokens: *max_tokens,
+        input_budget_bytes: required_positive_usize(
+            *input_budget_bytes,
+            provider,
+            "input_budget_bytes",
+        )?,
     }))
 }
 
@@ -222,6 +272,20 @@ fn required_profile_string(
 ) -> Result<String, String> {
     optional_profile_string(value, provider, field)?
         .ok_or_else(|| format!("provider {provider} field {field} is required"))
+}
+
+fn required_positive_usize(
+    value: Option<usize>,
+    provider: &str,
+    field: &str,
+) -> Result<usize, String> {
+    let value = value.ok_or_else(|| format!("provider {provider} field {field} is required"))?;
+    if value == 0 {
+        return Err(format!(
+            "provider {provider} field {field} must be greater than zero"
+        ));
+    }
+    Ok(value)
 }
 
 fn optional_profile_string(

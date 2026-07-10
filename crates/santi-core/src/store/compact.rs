@@ -1,9 +1,9 @@
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 
 use crate::{
     ActorType, CompactExecResponse, CompactQueryEntry, CompactQueryResponse, MessageKind,
-    MessageState, StrandTargetType, prefixed_id,
+    MessageState, StrandTargetType, prefixed_id, timestamp_now,
 };
 
 use super::{
@@ -13,6 +13,13 @@ use super::{
         thinking_span_by_id, tool_call_by_id, tool_result_by_id,
     },
 };
+
+struct CompactPlan {
+    start_seq: i64,
+    end_seq: i64,
+    absorbed: Vec<String>,
+    collapsed_count: i64,
+}
 
 impl SantiStore {
     /// Create a compact over `[from_message_id, to_message_id]` in a strand's
@@ -27,84 +34,47 @@ impl SantiStore {
         to_message_id: &str,
         summary: &str,
     ) -> Result<CompactExecResponse, String> {
+        self.create_compact_with_metadata(strand_id, from_message_id, to_message_id, summary, None)
+    }
+
+    pub(crate) fn create_compact_with_metadata(
+        &self,
+        strand_id: &str,
+        from_message_id: &str,
+        to_message_id: &str,
+        summary: &str,
+        metadata: Option<Value>,
+    ) -> Result<CompactExecResponse, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
+        let plan = plan_compact_in_tx(&tx, strand_id, from_message_id, to_message_id)?;
 
-        // Endpoints must be fixed user/assistant messages (no in-turn sensing:
-        // the current turn's working items are not fixed / lie past `to`).
-        for (label, id) in [("from", from_message_id), ("to", to_message_id)] {
-            let message = message_record_by_id(&tx, id)?
-                .ok_or_else(|| format!("compact {label} message not found"))?;
-            // A boundary must be genuine conversational content: the soul's own
-            // speech, or world-inbound text. A runtime-authored santi_system
-            // notice (actor System, kind SantiSystem) is not user/assistant
-            // speech and can't anchor a compact range.
-            let is_conversational = message.actor_type == ActorType::Soul
-                || (message.actor_type == ActorType::System
-                    && message.message_kind == MessageKind::Text);
-            if !is_conversational || message.state != MessageState::Fixed {
-                return Err(format!(
-                    "compact {label} boundary must be a fixed user/assistant message"
-                ));
-            }
-        }
-
-        // Resolve to the one axis compaction lives on: strand_seq.
-        let from_seq = message_seq_in_strand(&tx, strand_id, from_message_id)?
-            .ok_or_else(|| "compact from message not in this strand".to_string())?;
-        let to_seq = message_seq_in_strand(&tx, strand_id, to_message_id)?
-            .ok_or_else(|| "compact to message not in this strand".to_string())?;
-        if from_seq > to_seq {
-            return Err("compact from must not be after to".to_string());
-        }
-
-        // Overlap policy: disjoint OR full-cover only. Fully-covered compacts are
-        // absorbed (dropped, replaced by the new one). Partial overlap → quick fail.
-        let mut absorbed = Vec::new();
-        for existing in compacts_for_strand(&tx, strand_id)? {
-            let (Some(es), Some(ee)) = (
-                message_seq_in_strand(&tx, strand_id, &existing.start_message_id)?,
-                message_seq_in_strand(&tx, strand_id, &existing.end_message_id)?,
-            ) else {
-                continue;
-            };
-            if ee < from_seq || es > to_seq {
-                continue; // disjoint
-            }
-            if from_seq <= es && ee <= to_seq {
-                absorbed.push(existing.id);
-                continue; // fully covered
-            }
-            return Err("compact range partially overlaps an existing compact".to_string());
-        }
-
-        let collapsed_count: i64 = tx
-            .query_row(
-                r#"
-                SELECT COUNT(*) FROM r_strand_entries
-                WHERE strand_id = ?1 AND strand_seq BETWEEN ?2 AND ?3
-                "#,
-                params![strand_id, from_seq, to_seq],
-                |row| row.get(0),
-            )
-            .map_err(|error| error.to_string())?;
-
-        for id in &absorbed {
+        for id in &plan.absorbed {
             tx.execute("DELETE FROM compacts WHERE id = ?1", params![id])
                 .map_err(|error| error.to_string())?;
         }
         let compact_id = prefixed_id("cmp");
+        let now = timestamp_now();
+        let metadata_json = metadata
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| error.to_string())?;
         tx.execute(
             r#"
-            INSERT INTO compacts (id, strand_id, summary, start_message_id, end_message_id)
-            VALUES (?1, ?2, ?3, ?4, ?5)
+            INSERT INTO compacts (
+              id, strand_id, summary, start_message_id, end_message_id, created_at, metadata
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
             "#,
             params![
                 compact_id,
                 strand_id,
                 summary,
                 from_message_id,
-                to_message_id
+                to_message_id,
+                now,
+                metadata_json
             ],
         )
         .map_err(|error| error.to_string())?;
@@ -114,9 +84,64 @@ impl SantiStore {
             compact_id,
             start_message_id: from_message_id.to_string(),
             end_message_id: to_message_id.to_string(),
-            absorbed,
-            collapsed_count,
+            start_seq: plan.start_seq,
+            end_seq: plan.end_seq,
+            absorbed: plan.absorbed,
+            collapsed_count: plan.collapsed_count,
+            dry_run: false,
+            active_block_cleared: false,
+            pre_estimate: None,
+            post_estimate: None,
+            compression_ratio: None,
         })
+    }
+
+    pub(crate) fn preview_compact(
+        &self,
+        strand_id: &str,
+        from_message_id: &str,
+        to_message_id: &str,
+    ) -> Result<CompactExecResponse, String> {
+        let conn = self.conn.lock().unwrap();
+        let plan = plan_compact_in_tx(&conn, strand_id, from_message_id, to_message_id)?;
+        Ok(CompactExecResponse {
+            compact_id: prefixed_id("cmp_preview"),
+            start_message_id: from_message_id.to_string(),
+            end_message_id: to_message_id.to_string(),
+            start_seq: plan.start_seq,
+            end_seq: plan.end_seq,
+            absorbed: plan.absorbed,
+            collapsed_count: plan.collapsed_count,
+            dry_run: true,
+            active_block_cleared: false,
+            pre_estimate: None,
+            post_estimate: None,
+            compression_ratio: None,
+        })
+    }
+
+    pub(crate) fn message_id_at_seq(
+        &self,
+        strand_id: &str,
+        seq: i64,
+    ) -> Result<Option<String>, String> {
+        let conn = self.conn.lock().unwrap();
+        message_id_at_seq(&conn, strand_id, seq)
+    }
+
+    pub(crate) fn update_compact_metadata(
+        &self,
+        compact_id: &str,
+        metadata: Value,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        let metadata_json = serde_json::to_string(&metadata).map_err(|error| error.to_string())?;
+        conn.execute(
+            "UPDATE compacts SET metadata = ?2 WHERE id = ?1",
+            params![compact_id, metadata_json],
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(())
     }
 
     /// Expand a compact: read the PRISTINE spine over its `[start, end]` range and
@@ -192,6 +217,98 @@ impl SantiStore {
             entries,
         }))
     }
+}
+
+fn plan_compact_in_tx(
+    conn: &Connection,
+    strand_id: &str,
+    from_message_id: &str,
+    to_message_id: &str,
+) -> Result<CompactPlan, String> {
+    // Endpoints must be fixed user/assistant messages (no in-turn sensing:
+    // the current turn's working items are not fixed / lie past `to`).
+    for (label, id) in [("from", from_message_id), ("to", to_message_id)] {
+        let message = message_record_by_id(conn, id)?
+            .ok_or_else(|| format!("compact {label} message not found"))?;
+        // A boundary must be genuine conversational content: the soul's own
+        // speech, or world-inbound text. A runtime-authored santi_system
+        // notice (actor System, kind SantiSystem) is not user/assistant
+        // speech and can't anchor a compact range.
+        let is_conversational = message.actor_type == ActorType::Soul
+            || (message.actor_type == ActorType::System
+                && message.message_kind == MessageKind::Text);
+        if !is_conversational || message.state != MessageState::Fixed {
+            return Err(format!(
+                "compact {label} boundary must be a fixed user/assistant message"
+            ));
+        }
+    }
+
+    // Resolve to the one axis compaction lives on: strand_seq.
+    let start_seq = message_seq_in_strand(conn, strand_id, from_message_id)?
+        .ok_or_else(|| "compact from message not in this strand".to_string())?;
+    let end_seq = message_seq_in_strand(conn, strand_id, to_message_id)?
+        .ok_or_else(|| "compact to message not in this strand".to_string())?;
+    if start_seq > end_seq {
+        return Err("compact from must not be after to".to_string());
+    }
+
+    // Overlap policy: disjoint OR full-cover only. Fully-covered compacts are
+    // absorbed (dropped, replaced by the new one). Partial overlap → quick fail.
+    let mut absorbed = Vec::new();
+    for existing in compacts_for_strand(conn, strand_id)? {
+        let (Some(es), Some(ee)) = (
+            message_seq_in_strand(conn, strand_id, &existing.start_message_id)?,
+            message_seq_in_strand(conn, strand_id, &existing.end_message_id)?,
+        ) else {
+            continue;
+        };
+        if ee < start_seq || es > end_seq {
+            continue; // disjoint
+        }
+        if start_seq <= es && ee <= end_seq {
+            absorbed.push(existing.id);
+            continue; // fully covered
+        }
+        return Err("compact range partially overlaps an existing compact".to_string());
+    }
+
+    let collapsed_count: i64 = conn
+        .query_row(
+            r#"
+            SELECT COUNT(*) FROM r_strand_entries
+            WHERE strand_id = ?1 AND strand_seq BETWEEN ?2 AND ?3
+            "#,
+            params![strand_id, start_seq, end_seq],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+
+    Ok(CompactPlan {
+        start_seq,
+        end_seq,
+        absorbed,
+        collapsed_count,
+    })
+}
+
+fn message_id_at_seq(
+    conn: &Connection,
+    strand_id: &str,
+    seq: i64,
+) -> Result<Option<String>, String> {
+    conn.query_row(
+        r#"
+        SELECT target_id
+        FROM r_strand_entries
+        WHERE strand_id = ?1 AND strand_seq = ?2 AND target_type = 'message'
+        LIMIT 1
+        "#,
+        params![strand_id, seq],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|error| error.to_string())
 }
 
 /// Render a spine entry to a plain-text view for `compact query`.

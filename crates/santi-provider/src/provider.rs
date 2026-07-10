@@ -80,6 +80,13 @@ pub enum ProviderStreamTrace {
 pub struct ProviderMetadata {
     pub provider: Arc<str>,
     pub model: String,
+    pub context_budget: Option<ProviderContextBudget>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderContextBudget {
+    pub input_budget_bytes: usize,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]

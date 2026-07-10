@@ -1,3 +1,4 @@
+mod budget;
 mod failure;
 mod fork;
 mod im;
@@ -10,6 +11,7 @@ mod tools;
 
 use futures_util::StreamExt;
 use santi_provider::{ProviderClient, ProviderEvent, ProviderRequest};
+use serde_json::json;
 use std::{
     collections::HashMap,
     sync::{
@@ -21,12 +23,14 @@ use std::{
 use tokio::sync::broadcast;
 
 use crate::assembly::input::provider_input;
+use crate::context_budget::{estimate_provider_parts, estimate_provider_request};
 use crate::service_prompt::provider_tools;
 use crate::{
-    CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSoulRequest,
-    CreateStrandResponse, CreateWebhookRequest, InboxSource, IngestOutcome, MaterialKind,
-    MessageContent, MessageKind, SantiStore, SantiStreamEvent, SantiStreamPayload,
-    SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand, StrandDetail, StrandMaterial,
+    CompactCapsuleOptions, CompactExecRequest, CompactExecResponse, CompactQueryResponse,
+    ContextBudget, ContextEstimate, CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest,
+    InboxSource, IngestOutcome, MaterialKind, MessageContent, MessageKind, RejectedDelivery,
+    SantiStore, SantiStreamEvent, SantiStreamPayload, SendStrandAcceptedResponse,
+    SendStrandRequest, Soul, Strand, StrandBudgetSnapshot, StrandDetail, StrandMaterial,
     StrandMessage, StrandRuntimeSnapshot, StrandSelector, ThinkingCompletionReason, ThinkingSpan,
     Turn, TurnActivityState, WebhookSubscription, prefixed_id, timestamp_now,
 };
@@ -264,9 +268,14 @@ impl SantiService {
         trigger_type: &str,
         source: Option<InboxSource>,
     ) -> Result<(IngestOutcome, DrivenTurn), String> {
-        let outcome = self
-            .store
-            .enqueue_inbox_with_source(&strand.id, kind, content, source)?;
+        let admission = self.context_admission(&strand.id)?;
+        let outcome = self.store.enqueue_inbox_with_context(
+            &strand.id,
+            kind,
+            content,
+            source,
+            admission.as_ref(),
+        )?;
         let driven = match outcome {
             IngestOutcome::Accepted { .. } => self.poke(&strand.id, trigger_type),
             IngestOutcome::Rejected { .. } => None,
@@ -319,12 +328,7 @@ impl SantiService {
         strand_id: &str,
         request: CompactExecRequest,
     ) -> Result<CompactExecResponse, String> {
-        let from = request.from_message_id.trim();
-        let to = request.to_message_id.trim();
         let summary = request.summary.trim();
-        if from.is_empty() || to.is_empty() {
-            return Err("compact requires from_message_id and to_message_id".to_string());
-        }
         if summary.is_empty() {
             return Err("compact summary must not be empty".to_string());
         }
@@ -332,7 +336,152 @@ impl SantiService {
             .store
             .strand(strand_id)?
             .ok_or_else(|| "strand not found".to_string())?;
-        self.store.create_compact(&strand.id, from, to, summary)
+        let (from, to) = self.resolve_compact_boundaries(&strand.id, &request)?;
+        let pre_estimate = self.current_context_estimate(&strand.id)?;
+        if request.dry_run {
+            let mut response = self.store.preview_compact(&strand.id, &from, &to)?;
+            response.pre_estimate = Some(pre_estimate);
+            if let Some(capsule) = request.capsule.as_ref() {
+                let metadata = compact_capsule_metadata(CompactCapsuleMetadataInput {
+                    compact_id: Some(&response.compact_id),
+                    capsule,
+                    response: Some(&response),
+                    pre_estimate: response.pre_estimate.as_ref(),
+                    post_estimate: None,
+                    budget: self.context_budget().as_ref(),
+                    compression_ratio: None,
+                });
+                let post_estimate =
+                    self.estimate_preview_compact(&strand.id, &response, summary, metadata)?;
+                let compression_ratio = compact_compression_ratio(
+                    response.pre_estimate.as_ref().unwrap(),
+                    &post_estimate,
+                );
+                let metadata = compact_capsule_metadata(CompactCapsuleMetadataInput {
+                    compact_id: Some(&response.compact_id),
+                    capsule,
+                    response: Some(&response),
+                    pre_estimate: response.pre_estimate.as_ref(),
+                    post_estimate: Some(&post_estimate),
+                    budget: self.context_budget().as_ref(),
+                    compression_ratio,
+                });
+                let post_estimate =
+                    self.estimate_preview_compact(&strand.id, &response, summary, metadata)?;
+                response.compression_ratio = compact_compression_ratio(
+                    response.pre_estimate.as_ref().unwrap(),
+                    &post_estimate,
+                );
+                response.post_estimate = Some(post_estimate);
+            }
+            return Ok(response);
+        }
+
+        let initial_metadata = request.capsule.as_ref().map(|capsule| {
+            compact_capsule_metadata(CompactCapsuleMetadataInput {
+                compact_id: None,
+                capsule,
+                response: None,
+                pre_estimate: Some(&pre_estimate),
+                post_estimate: None,
+                budget: self.context_budget().as_ref(),
+                compression_ratio: None,
+            })
+        });
+        let mut response = self.store.create_compact_with_metadata(
+            &strand.id,
+            &from,
+            &to,
+            summary,
+            initial_metadata,
+        )?;
+        let mut post_estimate = self.current_context_estimate(&strand.id)?;
+        let mut compression_ratio = compact_compression_ratio(&pre_estimate, &post_estimate);
+        if let Some(capsule) = request.capsule.as_ref() {
+            let metadata = compact_capsule_metadata(CompactCapsuleMetadataInput {
+                compact_id: Some(&response.compact_id),
+                capsule,
+                response: Some(&response),
+                pre_estimate: Some(&pre_estimate),
+                post_estimate: Some(&post_estimate),
+                budget: self.context_budget().as_ref(),
+                compression_ratio,
+            });
+            self.store
+                .update_compact_metadata(&response.compact_id, metadata)?;
+            post_estimate = self.current_context_estimate(&strand.id)?;
+            compression_ratio = compact_compression_ratio(&pre_estimate, &post_estimate);
+            let metadata = compact_capsule_metadata(CompactCapsuleMetadataInput {
+                compact_id: Some(&response.compact_id),
+                capsule,
+                response: Some(&response),
+                pre_estimate: Some(&pre_estimate),
+                post_estimate: Some(&post_estimate),
+                budget: self.context_budget().as_ref(),
+                compression_ratio,
+            });
+            self.store
+                .update_compact_metadata(&response.compact_id, metadata)?;
+        }
+        response.active_block_cleared = self.clear_context_block(&strand.id, "compact_exec")?;
+        response.pre_estimate = Some(pre_estimate);
+        response.post_estimate = Some(post_estimate);
+        response.compression_ratio = compression_ratio;
+        Ok(response)
+    }
+
+    fn resolve_compact_boundaries(
+        &self,
+        strand_id: &str,
+        request: &CompactExecRequest,
+    ) -> Result<(String, String), String> {
+        let from_id = request
+            .from_message_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let to_id = request
+            .to_message_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        match (from_id, to_id, request.from_seq, request.to_seq) {
+            (Some(from), Some(to), None, None) => Ok((from.to_string(), to.to_string())),
+            (None, None, Some(from_seq), Some(to_seq)) => {
+                let from = self
+                    .store
+                    .message_id_at_seq(strand_id, from_seq)?
+                    .ok_or_else(|| format!("compact from_seq {from_seq} is not a message"))?;
+                let to = self
+                    .store
+                    .message_id_at_seq(strand_id, to_seq)?
+                    .ok_or_else(|| format!("compact to_seq {to_seq} is not a message"))?;
+                Ok((from, to))
+            }
+            _ => Err(
+                "compact requires either from_message_id/to_message_id or from_seq/to_seq"
+                    .to_string(),
+            ),
+        }
+    }
+
+    fn estimate_preview_compact(
+        &self,
+        strand_id: &str,
+        response: &CompactExecResponse,
+        summary: &str,
+        metadata: serde_json::Value,
+    ) -> Result<ContextEstimate, String> {
+        let input = self
+            .store
+            .assembly_input_preview(strand_id, response, summary, metadata)?;
+        let instructions = self.system_prompt_text(strand_id)?;
+        let tools = provider_tools();
+        Ok(estimate_provider_parts(
+            &input,
+            Some(&instructions),
+            Some(&tools),
+        ))
     }
 
     pub fn compact_query(
@@ -365,6 +514,29 @@ impl SantiService {
         strand_id: &str,
     ) -> Result<Option<StrandRuntimeSnapshot>, String> {
         self.store.runtime_snapshot(strand_id)
+    }
+
+    pub fn strand_budget(&self, strand_id: &str) -> Result<Option<StrandBudgetSnapshot>, String> {
+        let Some(strand) = self.store.strand(strand_id)? else {
+            return Ok(None);
+        };
+        Ok(Some(StrandBudgetSnapshot {
+            strand_id: strand.id.clone(),
+            estimate: self.current_context_estimate(&strand.id)?,
+            budget: self.context_budget(),
+            active_block: self.store.active_context_block(&strand.id)?,
+        }))
+    }
+
+    pub fn strand_rejections(
+        &self,
+        strand_id: &str,
+        limit: i64,
+    ) -> Result<Option<Vec<RejectedDelivery>>, String> {
+        let Some(strand) = self.store.strand(strand_id)? else {
+            return Ok(None);
+        };
+        self.store.rejected_deliveries(&strand.id, limit).map(Some)
     }
 
     pub async fn send_strand(
@@ -427,7 +599,17 @@ impl SantiService {
         if self.is_shutting_down() {
             return None;
         }
-        match self.store.try_start_turn(strand_id, trigger_type, None) {
+        let admission = match self.context_admission(strand_id) {
+            Ok(admission) => admission,
+            Err(error) => {
+                eprintln!("santi: pending context-budget gate failed for {strand_id}: {error}");
+                return None;
+            }
+        };
+        match self
+            .store
+            .start_turn_with_budget(strand_id, trigger_type, None, admission.as_ref())
+        {
             Ok(Some(started)) => {
                 for message in started.drained_messages.iter().cloned() {
                     self.publish_stream(strand_id, SantiStreamPayload::MessageCreated { message });
@@ -464,6 +646,7 @@ impl SantiService {
                     &turn_id,
                     failure.error,
                     failure.partial_assistant_text,
+                    failure.record_failure_message,
                 );
             }
             Ok((last_soul_message, provider_response_id)) => {
@@ -517,7 +700,7 @@ impl SantiService {
                     turn_id: turn_id.to_string(),
                 },
             ),
-            Err(error) => self.fail_background_turn(strand_id, turn_id, error, String::new()),
+            Err(error) => self.fail_background_turn(strand_id, turn_id, error, String::new(), true),
         }
     }
 
@@ -554,6 +737,13 @@ impl SantiService {
                 tools: Some(provider_tools()),
                 previous_response_id: None,
             };
+            let estimate = estimate_provider_request(&request);
+            if let Some(reason) = provider_try!(
+                self.block_over_budget_request(strand_id, turn_id, &request, &estimate)
+            ) {
+                timing.failed(round, "context_budget", &reason);
+                return Err(ProviderTurnFailure::context_budget(reason));
+            }
             timing.request_built(
                 round,
                 request.input.len(),
@@ -740,4 +930,76 @@ impl SantiService {
             payload,
         });
     }
+}
+
+struct CompactCapsuleMetadataInput<'a> {
+    compact_id: Option<&'a str>,
+    capsule: &'a CompactCapsuleOptions,
+    response: Option<&'a CompactExecResponse>,
+    pre_estimate: Option<&'a ContextEstimate>,
+    post_estimate: Option<&'a ContextEstimate>,
+    budget: Option<&'a ContextBudget>,
+    compression_ratio: Option<f64>,
+}
+
+const CAPSULE_SOURCE_BYTES: usize = 128;
+const CAPSULE_REASON_BYTES: usize = 512;
+const CAPSULE_RISK_BYTES: usize = 1024;
+const CAPSULE_QUERYABILITY_BYTES: usize = 512;
+
+fn compact_capsule_metadata(input: CompactCapsuleMetadataInput<'_>) -> serde_json::Value {
+    let originals_query = input
+        .compact_id
+        .map(|id| format!("santi compact query --compact-id {id}"));
+    let range = input.response.map(|response| {
+        json!({
+            "start_seq": response.start_seq,
+            "end_seq": response.end_seq,
+            "start_message_id": response.start_message_id,
+            "end_message_id": response.end_message_id,
+            "collapsed_count": response.collapsed_count,
+            "absorbed": response.absorbed,
+        })
+    });
+    json!({
+        "schema": "santi.compact_capsule.v1",
+        "operation": "manual_capsule",
+        "compact_id": input.compact_id,
+        "declared_source": cap_capsule_field(&input.capsule.source, CAPSULE_SOURCE_BYTES),
+        "source_trust": "caller_declared",
+        "reason": cap_capsule_field(&input.capsule.reason, CAPSULE_REASON_BYTES),
+        "risk": cap_capsule_field(&input.capsule.risk, CAPSULE_RISK_BYTES),
+        "queryability": input.capsule.queryability.as_ref().map(|value| {
+            cap_capsule_field(value, CAPSULE_QUERYABILITY_BYTES)
+        }),
+        "originals_query": originals_query,
+        "range": range,
+        "pre_estimate": input.pre_estimate,
+        "post_estimate": input.post_estimate,
+        "budget": input.budget,
+        "compression_ratio": input.compression_ratio,
+    })
+}
+
+fn compact_compression_ratio(
+    pre_estimate: &ContextEstimate,
+    post_estimate: &ContextEstimate,
+) -> Option<f64> {
+    if pre_estimate.total_bytes <= 0 {
+        return None;
+    }
+    Some(post_estimate.total_bytes as f64 / pre_estimate.total_bytes as f64)
+}
+
+fn cap_capsule_field(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_string();
+    }
+    let suffix = " [truncated]";
+    let suffix_bytes = suffix.len();
+    let mut end = max_bytes.saturating_sub(suffix_bytes).min(value.len());
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{}", &value[..end], suffix)
 }

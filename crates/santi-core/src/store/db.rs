@@ -370,7 +370,7 @@ pub(super) fn compact_by_id(
 ) -> Result<Option<Compact>, String> {
     conn.query_row(
         r#"
-        SELECT id, strand_id, summary, start_message_id, end_message_id
+        SELECT id, strand_id, summary, start_message_id, end_message_id, created_at, metadata
         FROM compacts WHERE id = ?1 LIMIT 1
         "#,
         params![compact_id],
@@ -504,7 +504,7 @@ pub(super) fn compacts_for_strand(
     let mut stmt = conn
         .prepare(
             r#"
-            SELECT id, strand_id, summary, start_message_id, end_message_id
+            SELECT id, strand_id, summary, start_message_id, end_message_id, created_at, metadata
             FROM compacts
             WHERE strand_id = ?1
             "#,

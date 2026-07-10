@@ -28,6 +28,7 @@ fn resolves_chat_completions_profile() {
         thinking = ""
         reasoning_effort = ""
         max_tokens = 2048
+        input_budget_bytes = 120000
         "#,
     );
 
@@ -51,6 +52,7 @@ fn resolves_chat_completions_profile() {
             thinking: None,
             reasoning_effort: None,
             max_tokens: Some(2048),
+            input_budget_bytes: 120000,
         })
     );
 
@@ -70,6 +72,7 @@ fn resolves_env_reference() {
         kind = "openai_responses"
         api_key = "env://SANTI_TEST_RESPONSES_KEY"
         model = "gpt-5.5"
+        input_budget_bytes = 120000
         "#,
     );
 
@@ -151,6 +154,65 @@ fn reports_missing_field() {
     assert_eq!(
         service.provider_config().expect_err("missing model"),
         "provider openai field model is required"
+    );
+
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn rejects_missing_input_budget() {
+    let path = write_config(
+        r#"
+        provider = "openai"
+
+        [providers.openai]
+        kind = "openai_responses"
+        api_key = "openai-key"
+        model = "gpt-5.5"
+        "#,
+    );
+
+    let service = ConfigService::from_args(args([
+        "santi-api",
+        "serve",
+        "--config",
+        path.to_str().expect("config path"),
+    ]))
+    .expect("config service");
+
+    assert_eq!(
+        service.provider_config().expect_err("missing budget"),
+        "provider openai field input_budget_bytes is required"
+    );
+
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn rejects_zero_input_budget() {
+    let path = write_config(
+        r#"
+        provider = "openai"
+
+        [providers.openai]
+        kind = "openai_responses"
+        api_key = "openai-key"
+        model = "gpt-5.5"
+        input_budget_bytes = 0
+        "#,
+    );
+
+    let service = ConfigService::from_args(args([
+        "santi-api",
+        "serve",
+        "--config",
+        path.to_str().expect("config path"),
+    ]))
+    .expect("config service");
+
+    assert_eq!(
+        service.provider_config().expect_err("zero budget"),
+        "provider openai field input_budget_bytes must be greater than zero"
     );
 
     let _ = fs::remove_file(path);

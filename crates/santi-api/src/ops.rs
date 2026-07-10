@@ -31,18 +31,68 @@ pub struct DoctorReport {
     pub memory_present: bool,
     pub memory_readable: bool,
     pub memory_bytes: u64,
+    /// Present for the operator-facing doctor command. Internal storage-only
+    /// upgrade checks omit this and retain their existing scope.
+    pub provider: Option<ProviderDoctorReport>,
     /// Overall gate: schema at the expected version AND (memory absent, which is
     /// a fresh soul that falls back to the encoded default, OR memory readable).
     pub ok: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderDoctorReport {
+    pub profile: Option<String>,
+    pub kind: Option<String>,
+    pub model: Option<String>,
+    pub input_budget_bytes: Option<usize>,
+    pub budget_source: Option<String>,
+    pub ok: bool,
+    pub error: Option<String>,
+}
+
 /// Run the offline pre-check against the runtime paths resolved from env.
 pub fn doctor() -> Result<DoctorReport, String> {
-    doctor_at(&config::resolve_runtime_paths())
+    let service = config::ConfigService::from_args(["santi", "serve"].map(str::to_string))?;
+    doctor_configured_at(&config::resolve_runtime_paths(), &service)
 }
 
 /// The pure pre-check over explicit paths (env-free, so it is unit-testable).
 pub fn doctor_at(paths: &RuntimePaths) -> Result<DoctorReport, String> {
+    doctor_report_at(paths, None)
+}
+
+pub fn doctor_configured_at(
+    paths: &RuntimePaths,
+    config: &config::ConfigService,
+) -> Result<DoctorReport, String> {
+    let profile = config.provider_name().ok();
+    let provider = match config.provider_config() {
+        Ok(provider) => ProviderDoctorReport {
+            profile,
+            kind: Some(provider.kind().to_string()),
+            model: Some(provider.model().to_string()),
+            input_budget_bytes: Some(provider.input_budget_bytes()),
+            budget_source: Some("provider_config".to_string()),
+            ok: true,
+            error: None,
+        },
+        Err(error) => ProviderDoctorReport {
+            profile,
+            kind: None,
+            model: None,
+            input_budget_bytes: None,
+            budget_source: None,
+            ok: false,
+            error: Some(error),
+        },
+    };
+    doctor_report_at(paths, Some(provider))
+}
+
+fn doctor_report_at(
+    paths: &RuntimePaths,
+    provider: Option<ProviderDoctorReport>,
+) -> Result<DoctorReport, String> {
     let database_exists = paths.database_path.exists();
     let schema_version = santi_core::read_schema_version(&paths.database_path)?;
     let schema_ok = schema_version == Some(santi_core::SCHEMA_VERSION);
@@ -57,6 +107,7 @@ pub fn doctor_at(paths: &RuntimePaths) -> Result<DoctorReport, String> {
     // Absent memory is fine (a fresh soul falls back to the encoded default);
     // present-but-unreadable is the failure — the soul's continuity would break.
     let memory_ok = !memory_present || memory_readable;
+    let provider_ok = provider.as_ref().is_none_or(|provider| provider.ok);
 
     Ok(DoctorReport {
         database_path: paths.database_path.display().to_string(),
@@ -69,7 +120,8 @@ pub fn doctor_at(paths: &RuntimePaths) -> Result<DoctorReport, String> {
         memory_present,
         memory_readable,
         memory_bytes,
-        ok: schema_ok && memory_ok,
+        provider,
+        ok: schema_ok && memory_ok && provider_ok,
     })
 }
 
@@ -92,6 +144,10 @@ pub struct SeedReport {
 /// seed with the FINAL version). The target strand MUST already exist: enqueuing
 /// into an unknown strand would leave an inbox row that boot recovery can never
 /// turn into a turn, so we reject instead of writing an orphan.
+///
+/// This is intentionally an offline producer, not live external ingress: it
+/// respects active strand blocks, but candidate budget admission happens when
+/// the service later resumes/drives the pending inbox.
 pub fn inbox_seed(strand_id: &str, text: &str) -> Result<SeedReport, String> {
     inbox_seed_at(&config::resolve_runtime_paths(), strand_id, text)
 }
@@ -258,6 +314,7 @@ mod tests {
         let report = doctor_at(&paths).expect("doctor");
         let json = serde_json::to_string(&report).expect("serialize");
         assert!(json.contains("\"schema_ok\""));
+        assert!(json.contains("\"provider\":null"));
         let _ = PathBuf::from(&report.database_path);
     }
 

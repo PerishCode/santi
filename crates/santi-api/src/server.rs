@@ -20,9 +20,10 @@ use santi_core::{
     CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSoulRequest,
     CreateStrandResponse, CreateWebhookRequest, ErrorResponse, ForkStrandResponse, HealthResponse,
     ImInboxEntry, ImSendRequest, ImSendResponse, InboxSource, IngestOutcome, MaterialRequest,
-    SantiService, SantiServiceConfig, SantiStreamEvent, SantiStreamPayload,
-    SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand, StrandDetail, StrandMaterial,
-    StrandRuntimeSnapshot, WebhookSubscription, prefixed_id, timestamp_now,
+    RejectedDelivery, SantiService, SantiServiceConfig, SantiStreamEvent, SantiStreamPayload,
+    SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand, StrandBudgetSnapshot,
+    StrandDetail, StrandMaterial, StrandRuntimeSnapshot, WebhookSubscription, prefixed_id,
+    timestamp_now,
 };
 use serde_json::json;
 use tower_http::{
@@ -152,6 +153,11 @@ fn router(service: SantiService) -> Router {
         .route("/api/v1/strands/{strand_id}/send", post(send_strand))
         .route("/api/v1/strands/{strand_id}/fork", post(fork_strand))
         .route("/api/v1/strands/{strand_id}/compact", post(compact_exec))
+        .route("/api/v1/strands/{strand_id}/budget", get(strand_budget))
+        .route(
+            "/api/v1/strands/{strand_id}/rejections",
+            get(strand_rejections),
+        )
         .route("/api/v1/compacts/{compact_id}", get(compact_query))
         .route("/api/v1/strands/{strand_id}/runtime", get(runtime_snapshot))
         // IM layer (orthogonal to the runtime; shares the server for cold-start):
@@ -609,6 +615,57 @@ async fn runtime_snapshot(
         .ok_or_else(|| ApiError::not_found("strand not found"))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/strands/{strand_id}/budget",
+    params(("strand_id" = String, Path)),
+    responses(
+        (status = 200, body = StrandBudgetSnapshot),
+        (status = 404, body = ErrorResponse),
+        (status = 500, body = ErrorResponse)
+    )
+)]
+async fn strand_budget(
+    State(service): State<SantiService>,
+    Path(strand_id): Path<String>,
+) -> Result<Json<StrandBudgetSnapshot>, ApiError> {
+    service
+        .strand_budget(&strand_id)
+        .map_err(ApiError::from_service)?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("strand not found"))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/strands/{strand_id}/rejections",
+    params(
+        ("strand_id" = String, Path),
+        ("limit" = Option<i64>, Query)
+    ),
+    responses(
+        (status = 200, body = Vec<RejectedDelivery>),
+        (status = 404, body = ErrorResponse),
+        (status = 500, body = ErrorResponse)
+    )
+)]
+async fn strand_rejections(
+    State(service): State<SantiService>,
+    Path(strand_id): Path<String>,
+    Query(params): Query<RejectionQueryParams>,
+) -> Result<Json<Vec<RejectedDelivery>>, ApiError> {
+    service
+        .strand_rejections(&strand_id, params.limit.unwrap_or(50))
+        .map_err(ApiError::from_service)?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("strand not found"))
+}
+
+#[derive(serde::Deserialize)]
+struct RejectionQueryParams {
+    limit: Option<i64>,
+}
+
 // ── IM layer routes ─────────────────────────────────────────────────────────
 // The plain IM integrated into santi. `strand send`/the runtime stay source-less;
 // the participant address is IM envelope only. Inbound reuses the runtime primitive
@@ -746,6 +803,14 @@ impl ApiError {
         }
     }
 
+    pub(crate) fn locked(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::LOCKED,
+            code: "strand-blocked",
+            message: message.into(),
+        }
+    }
+
     pub(crate) fn from_webhook(error: WebhookError) -> Self {
         match error {
             WebhookError::Unauthorized(message) => Self::unauthorized(message),
@@ -761,6 +826,10 @@ impl ApiError {
         let text = message.as_str();
         if text == "strand not found" || text == "soul not found" || text.ends_with("not found") {
             Self::not_found(message)
+        } else if text.starts_with("strand is blocked: context_over_budget")
+            || text.starts_with("strand context is over budget")
+        {
+            Self::locked(message)
         } else if text.starts_with("unknown soul")
             || text.contains("must not be empty")
             || text.contains("must contain text")
@@ -812,6 +881,8 @@ impl IntoResponse for ApiError {
         fork_strand,
         compact_exec,
         compact_query,
+        strand_budget,
+        strand_rejections,
         runtime_snapshot,
         send_im,
         poll_im,
@@ -839,10 +910,16 @@ impl IntoResponse for ApiError {
         Strand,
         santi_core::ActorType,
         santi_core::Compact,
+        santi_core::CompactCapsuleOptions,
         santi_core::CompactExecRequest,
         santi_core::CompactExecResponse,
         santi_core::CompactQueryEntry,
         santi_core::CompactQueryResponse,
+        santi_core::ContextBudget,
+        santi_core::ContextEstimate,
+        santi_core::RejectedDelivery,
+        santi_core::StrandBlock,
+        santi_core::StrandBudgetSnapshot,
         santi_core::StrandTargetType,
         santi_core::Message,
         santi_core::MessageContent,
@@ -868,8 +945,45 @@ struct ApiDoc;
 
 #[cfg(test)]
 mod tests {
-    use super::ApiError;
-    use axum::http::StatusCode;
+    use super::{ApiError, send_strand as send_strand_handler};
+    use async_trait::async_trait;
+    use axum::{
+        Json,
+        extract::{Path, State},
+        http::StatusCode,
+    };
+    use futures_util::stream;
+    use santi_core::{MessagePart, SantiService, SantiServiceConfig, SendStrandRequest};
+    use santi_provider::{
+        ProviderClient, ProviderContextBudget, ProviderEvent, ProviderMetadata, ProviderRequest,
+        ProviderStream,
+    };
+    use std::sync::Arc;
+
+    struct BudgetedProvider;
+
+    #[async_trait]
+    impl ProviderClient for BudgetedProvider {
+        fn metadata(&self) -> ProviderMetadata {
+            ProviderMetadata {
+                provider: Arc::from("budgeted-provider"),
+                model: "budgeted-model".to_string(),
+                context_budget: Some(ProviderContextBudget {
+                    input_budget_bytes: 1,
+                    source: "test".to_string(),
+                }),
+            }
+        }
+
+        async fn stream_response(
+            &self,
+            _request: ProviderRequest,
+        ) -> Result<ProviderStream, String> {
+            Ok(Box::pin(stream::iter(vec![Ok(ProviderEvent::Completed {
+                provider_response_id: None,
+            })])))
+        }
+    }
 
     fn status(message: &str) -> StatusCode {
         ApiError::from_service(message.to_string()).status
@@ -896,6 +1010,14 @@ mod tests {
             StatusCode::BAD_REQUEST
         );
         assert_eq!(status("strand inbox is full (…)"), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            status("strand is blocked: context_over_budget block_id=blk_x: x"),
+            StatusCode::LOCKED
+        );
+        assert_eq!(
+            status("strand context is over budget (10 estimated bytes, budget 1)"),
+            StatusCode::LOCKED
+        );
 
         // Broken invariants and unrecognized messages → 500.
         assert_eq!(
@@ -906,5 +1028,41 @@ mod tests {
             status("something unexpected"),
             StatusCode::INTERNAL_SERVER_ERROR
         );
+    }
+
+    #[tokio::test]
+    async fn send_rejection_returns_locked() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let service = SantiService::open(
+            SantiServiceConfig {
+                database_path: temp.path().join("santi.sqlite").display().to_string(),
+                runtime_root: temp.path().join("runtime").display().to_string(),
+                execution_root: temp.path().join("execution").display().to_string(),
+                bind_addr: Some("127.0.0.1:0".to_string()),
+            },
+            Arc::new(BudgetedProvider),
+        )
+        .expect("open service");
+        let strand = service.create_strand().expect("create strand").strand;
+
+        let result = send_strand_handler(
+            State(service),
+            Path(strand.id),
+            Json(SendStrandRequest {
+                content: vec![MessagePart::Text {
+                    text: "this exceeds the tiny budget".to_string(),
+                }],
+            }),
+        )
+        .await;
+
+        match result {
+            Err(error) => {
+                assert_eq!(error.status, StatusCode::LOCKED);
+                assert_eq!(error.code, "strand-blocked");
+                assert!(error.message.contains("over budget"));
+            }
+            Ok(_) => panic!("send should have been rejected"),
+        }
     }
 }

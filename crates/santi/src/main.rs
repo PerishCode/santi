@@ -86,7 +86,7 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Offline pre-check of the on-disk store + default soul memory (read-only).
+    /// Offline pre-check of the store, default soul memory, and provider budget.
     /// A local ops command (NOT an HTTP client): exits non-zero when unhealthy,
     /// so the upgrade flow can gate on it. See PHASE-07.
     Doctor,
@@ -185,6 +185,49 @@ enum CompactCommand {
         #[arg(long)]
         summary_file: Option<String>,
     },
+    /// Create a provider-visible compact capsule with provenance/risk metadata.
+    Capsule {
+        /// First message of the range (a fixed user/assistant message id).
+        #[arg(long, conflicts_with = "from_seq")]
+        from: Option<String>,
+        /// Last message of the range (a fixed user/assistant message id).
+        #[arg(long, conflicts_with = "to_seq")]
+        to: Option<String>,
+        /// First message seq of the range.
+        #[arg(long, conflicts_with = "from")]
+        from_seq: Option<i64>,
+        /// Last message seq of the range.
+        #[arg(long, conflicts_with = "to")]
+        to_seq: Option<i64>,
+        /// The summary text. Mutually exclusive with --summary-file.
+        #[arg(
+            long,
+            conflicts_with = "summary_file",
+            required_unless_present = "summary_file"
+        )]
+        summary: Option<String>,
+        /// Read the summary from a file (or `-` for stdin) instead of --summary.
+        #[arg(long)]
+        summary_file: Option<String>,
+        /// Who/what authored this capsule decision.
+        #[arg(long, default_value = "operator")]
+        source: String,
+        /// Why this range is being compressed.
+        #[arg(long)]
+        reason: String,
+        /// Known risk or lossiness in the summary.
+        #[arg(long)]
+        risk: String,
+        /// How to inspect the original covered range.
+        #[arg(
+            long,
+            default_value = "original entries remain queryable with compact query"
+        )]
+        queryability: String,
+        /// Validate and preview the capsule plan without writing a compact.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// GET /api/v1/compacts/{id} — expand a compact's covered range (paginated).
     Query {
         #[arg(long)]
@@ -241,6 +284,14 @@ enum StrandCommand {
     Messages { id: Option<String> },
     /// GET /api/v1/strands/{id}/runtime (id falls back to --strand)
     Runtime { id: Option<String> },
+    /// GET /api/v1/strands/{id}/budget (id falls back to --strand)
+    Budget { id: Option<String> },
+    /// GET /api/v1/strands/{id}/rejections (id falls back to --strand)
+    Rejections {
+        id: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        limit: i64,
+    },
     /// POST /api/v1/strands/{id}/fork (id falls back to --strand)
     Fork { id: Option<String> },
     /// POST /api/v1/strands/{id}/send.
@@ -454,6 +505,18 @@ async fn run_client(
             let id = defaults.resolve_strand(id)?;
             get(&client, &format!("{base}/api/v1/strands/{id}/runtime")).await
         }
+        Command::Strand(StrandCommand::Budget { id }) => {
+            let id = defaults.resolve_strand(id)?;
+            get(&client, &format!("{base}/api/v1/strands/{id}/budget")).await
+        }
+        Command::Strand(StrandCommand::Rejections { id, limit }) => {
+            let id = defaults.resolve_strand(id)?;
+            get(
+                &client,
+                &format!("{base}/api/v1/strands/{id}/rejections?limit={limit}"),
+            )
+            .await
+        }
         Command::Strand(StrandCommand::Fork { id }) => {
             let id = defaults.resolve_strand(id)?;
             post(&client, &format!("{base}/api/v1/strands/{id}/fork"), None).await
@@ -533,6 +596,41 @@ async fn run_client(
             )
             .await
         }
+        Command::Compact(CompactCommand::Capsule {
+            from,
+            to,
+            from_seq,
+            to_seq,
+            summary,
+            summary_file,
+            source,
+            reason,
+            risk,
+            queryability,
+            dry_run,
+        }) => {
+            let body = compact_capsule_body(
+                from,
+                to,
+                from_seq,
+                to_seq,
+                summary,
+                summary_file,
+                source,
+                reason,
+                risk,
+                queryability,
+                dry_run,
+                defaults.soul(),
+            )?;
+            let strand = defaults.resolve_strand(None)?;
+            post(
+                &client,
+                &format!("{base}/api/v1/strands/{strand}/compact"),
+                Some(body),
+            )
+            .await
+        }
         Command::Compact(CompactCommand::Query {
             compact_id,
             keyword,
@@ -548,6 +646,45 @@ async fn run_client(
             get(&client, &url).await
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compact_capsule_body(
+    from: Option<String>,
+    to: Option<String>,
+    from_seq: Option<i64>,
+    to_seq: Option<i64>,
+    summary: Option<String>,
+    summary_file: Option<String>,
+    source: String,
+    reason: String,
+    risk: String,
+    queryability: String,
+    dry_run: bool,
+    soul: Option<&str>,
+) -> Result<serde_json::Value> {
+    let summary = match summary_file {
+        Some(path) => read_summary_file(&path)?,
+        None => summary.expect("clap requires summary or summary_file"),
+    };
+    let mut body = serde_json::json!({
+        "from_message_id": from,
+        "to_message_id": to,
+        "from_seq": from_seq,
+        "to_seq": to_seq,
+        "summary": summary,
+        "capsule": {
+            "source": source,
+            "reason": reason,
+            "risk": risk,
+            "queryability": queryability,
+        },
+        "dry_run": dry_run,
+    });
+    if let Some(soul) = soul {
+        body["soul_id"] = serde_json::Value::from(soul);
+    }
+    Ok(body)
 }
 
 /// Resolve the soul's IM reply body from exactly one supported source.
@@ -1625,6 +1762,49 @@ mod tests {
             panic!("expected strand events command");
         };
         assert_eq!(format, WatchFormat::Filtered);
+    }
+
+    #[test]
+    fn parses_compact_capsule_command() {
+        let parsed = Cli::try_parse_from([
+            "santi",
+            "compact",
+            "capsule",
+            "--from-seq",
+            "1",
+            "--to-seq",
+            "9",
+            "--summary-file",
+            "summary.md",
+            "--source",
+            "operator",
+            "--reason",
+            "recover budget",
+            "--risk",
+            "summary may omit detail",
+            "--dry-run",
+        ])
+        .unwrap();
+        let Command::Compact(CompactCommand::Capsule {
+            from_seq,
+            to_seq,
+            summary_file,
+            source,
+            reason,
+            risk,
+            dry_run,
+            ..
+        }) = parsed.command
+        else {
+            panic!("expected compact capsule command");
+        };
+        assert_eq!(from_seq, Some(1));
+        assert_eq!(to_seq, Some(9));
+        assert_eq!(summary_file.as_deref(), Some("summary.md"));
+        assert_eq!(source, "operator");
+        assert_eq!(reason, "recover budget");
+        assert_eq!(risk, "summary may omit detail");
+        assert!(dry_run);
     }
 
     #[test]

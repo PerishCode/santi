@@ -2,10 +2,10 @@ use rusqlite::Row;
 use serde_json::Value;
 
 use crate::{
-    ActorType, Compact, Message, MessageContent, MessageEvent, MessageKind, MessageState, Soul,
-    Strand, StrandEffect, StrandMessage, StrandMessageRef, StrandTargetType,
-    ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState, ToolCall, ToolResult, Turn,
-    TurnStatus, TurnTriggerType, WebhookSubscription,
+    ActorType, Compact, Message, MessageContent, MessageEvent, MessageKind, MessageState,
+    RejectedDelivery, Soul, Strand, StrandBlock, StrandEffect, StrandMessage, StrandMessageRef,
+    StrandTargetType, ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState, ToolCall,
+    ToolResult, Turn, TurnStatus, TurnTriggerType, WebhookSubscription,
 };
 
 pub(super) fn map_soul_row(row: &Row<'_>) -> rusqlite::Result<Soul> {
@@ -174,12 +174,62 @@ pub(super) fn map_thinking_span_row(row: &Row<'_>) -> rusqlite::Result<ThinkingS
 }
 
 pub(super) fn map_compact_row(row: &Row<'_>) -> rusqlite::Result<Compact> {
+    let metadata_json: Option<String> = row.get(6)?;
     Ok(Compact {
         id: row.get(0)?,
         strand_id: row.get(1)?,
         summary: row.get(2)?,
         start_message_id: row.get(3)?,
         end_message_id: row.get(4)?,
+        created_at: row.get(5)?,
+        metadata: metadata_json.and_then(|value| serde_json::from_str(&value).ok()),
+    })
+}
+
+pub(super) fn map_strand_block_row(row: &Row<'_>) -> rusqlite::Result<StrandBlock> {
+    let metadata_json: Option<String> = row.get(17)?;
+    Ok(StrandBlock {
+        id: row.get(0)?,
+        strand_id: row.get(1)?,
+        kind: row.get(2)?,
+        status: row.get(3)?,
+        reason_code: row.get(4)?,
+        reason_text: row.get(5)?,
+        provider: row.get(6)?,
+        model: row.get(7)?,
+        budget_source: row.get(8)?,
+        budget_bytes: row.get(9)?,
+        input_items: row.get(10)?,
+        input_bytes: row.get(11)?,
+        instructions_bytes: row.get(12)?,
+        tools_bytes: row.get(13)?,
+        total_bytes: row.get(14)?,
+        observed_turn_id: row.get(15)?,
+        observed_at_seq: row.get(16)?,
+        metadata: metadata_json.and_then(|value| serde_json::from_str(&value).ok()),
+        created_at: row.get(18)?,
+        updated_at: row.get(19)?,
+        cleared_at: row.get(20)?,
+        cleared_by: row.get(21)?,
+    })
+}
+
+pub(super) fn map_rejected_delivery_row(row: &Row<'_>) -> rusqlite::Result<RejectedDelivery> {
+    let metadata_json: Option<String> = row.get(5)?;
+    Ok(RejectedDelivery {
+        id: row.get(0)?,
+        strand_id: row.get(1)?,
+        block_id: row.get(2)?,
+        source_type: row.get(3)?,
+        source_ref: row.get(4)?,
+        source_metadata: metadata_json.and_then(|value| serde_json::from_str(&value).ok()),
+        message_kind: row.get(6)?,
+        content_sha256: row.get(7)?,
+        content_bytes: row.get(8)?,
+        content_excerpt: row.get(9)?,
+        reason_code: row.get(10)?,
+        reason_text: row.get(11)?,
+        received_at: row.get(12)?,
     })
 }
 
@@ -238,7 +288,7 @@ pub(super) fn message_kind_db(value: &MessageKind) -> &'static str {
     }
 }
 
-fn message_kind_from_db(value: &str) -> MessageKind {
+pub(super) fn message_kind_from_db(value: &str) -> MessageKind {
     match value {
         "text" => MessageKind::Text,
         "santi_system" => MessageKind::SantiSystem,

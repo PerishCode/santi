@@ -151,10 +151,10 @@ pub enum CompactCommand {
     /// POST /api/v1/strands/{id}/compact — collapse [from,to] into a summary.
     /// Strand from --strand/SANTI_STRAND_ID; soul from --soul/SANTI_SOUL_ID.
     Exec {
-        /// First message of the range (a fixed user/assistant message id).
+        /// First message of the range (a fixed projected message id).
         #[arg(long)]
         from: String,
-        /// Last message of the range (a fixed user/assistant message id).
+        /// Last message of the range (a fixed projected message id).
         #[arg(long)]
         to: String,
         /// The summary text. Mutually exclusive with --summary-file.
@@ -170,10 +170,10 @@ pub enum CompactCommand {
     },
     /// Create a provider-visible compact capsule with provenance/risk metadata.
     Capsule {
-        /// First message of the range (a fixed user/assistant message id).
+        /// First message of the range (a fixed projected message id).
         #[arg(long, conflicts_with = "from_seq")]
         from: Option<String>,
-        /// Last message of the range (a fixed user/assistant message id).
+        /// Last message of the range (a fixed projected message id).
         #[arg(long, conflicts_with = "to_seq")]
         to: Option<String>,
         /// First message seq of the range.

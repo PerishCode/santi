@@ -225,21 +225,24 @@ fn plan_compact_in_tx(
     from_message_id: &str,
     to_message_id: &str,
 ) -> Result<CompactPlan, String> {
-    // Endpoints must be fixed user/assistant messages (no in-turn sensing:
-    // the current turn's working items are not fixed / lie past `to`).
+    // Endpoints must be fixed projected messages (no in-turn sensing: the
+    // current turn's working items are not fixed / lie past `to`).
     for (label, id) in [("from", from_message_id), ("to", to_message_id)] {
         let message = message_record_by_id(conn, id)?
             .ok_or_else(|| format!("compact {label} message not found"))?;
-        // A boundary must be genuine conversational content: the soul's own
-        // speech, or world-inbound text. A runtime-authored santi_system
-        // notice (actor System, kind SantiSystem) is not user/assistant
-        // speech and can't anchor a compact range.
-        let is_conversational = message.actor_type == ActorType::Soul
+        // Runtime-authored santi_system records are fixed provider-visible
+        // facts and can start operational turns, so they are valid boundaries.
+        // Tool and reasoning entries remain ineligible because they are not
+        // message records and may represent in-turn work.
+        let is_projected = message.actor_type == ActorType::Soul
             || (message.actor_type == ActorType::System
-                && message.message_kind == MessageKind::Text);
-        if !is_conversational || message.state != MessageState::Fixed {
+                && matches!(
+                    message.message_kind,
+                    MessageKind::Text | MessageKind::SantiSystem
+                ));
+        if !is_projected || message.state != MessageState::Fixed {
             return Err(format!(
-                "compact {label} boundary must be a fixed user/assistant message"
+                "compact {label} boundary must be a fixed projected message"
             ));
         }
     }

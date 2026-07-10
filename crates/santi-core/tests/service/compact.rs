@@ -118,6 +118,59 @@ fn capsule_dry_run_header() {
 }
 
 #[test]
+fn system_boundary_compacts() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let db = temp.path().join("santi.sqlite");
+    let service = SantiService::open(
+        SantiServiceConfig {
+            database_path: db.display().to_string(),
+            runtime_root: temp.path().join("runtime").display().to_string(),
+            execution_root: temp.path().join("execution").display().to_string(),
+            bind_addr: Some("127.0.0.1:0".to_string()),
+        },
+        Arc::new(FakeProvider::default()),
+    )
+    .expect("open service");
+    let strand = service.create_strand().expect("create strand").strand;
+    let store = SantiStore::open(&db).expect("open store directly");
+    store
+        .append_santi_system_message(
+            &strand.id,
+            MessageContent::text("upgrade handover"),
+            MessageIntake::Record,
+        )
+        .expect("append system record");
+    store
+        .append_message(
+            &strand.id,
+            ActorType::Soul,
+            store.default_soul_id(),
+            MessageContent::text("upgrade checked"),
+            MessageState::Fixed,
+            MessageIntake::Record,
+        )
+        .expect("append assistant record");
+
+    let preview = service
+        .compact_exec(
+            &strand.id,
+            santi_core::CompactExecRequest {
+                from_message_id: None,
+                to_message_id: None,
+                from_seq: Some(1),
+                to_seq: Some(2),
+                summary: "Upgrade completed and was inspected.".to_string(),
+                capsule: None,
+                dry_run: true,
+            },
+        )
+        .expect("system boundary should compact");
+    assert_eq!(preview.start_seq, 1);
+    assert_eq!(preview.end_seq, 2);
+    assert_eq!(preview.collapsed_count, 2);
+}
+
+#[test]
 fn capsule_seq_boundary() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");

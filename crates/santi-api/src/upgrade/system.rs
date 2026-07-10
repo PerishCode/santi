@@ -40,6 +40,8 @@ struct UpgradeLaunchRequest {
     protocol_version: u32,
     attempt_id: String,
     deb: String,
+    #[serde(default)]
+    previous_deb: Option<String>,
 }
 
 fn request_path(paths: &RuntimePaths) -> PathBuf {
@@ -47,13 +49,19 @@ fn request_path(paths: &RuntimePaths) -> PathBuf {
 }
 
 /// Record the request and kick the detached oneshot unit, then return fast.
-pub fn launch(deb: &str) -> Result<UpgradeStarted, Box<santi_core::SantiError>> {
+pub fn launch(
+    deb: &str,
+    previous_deb: Option<&str>,
+) -> Result<UpgradeStarted, Box<santi_core::SantiError>> {
     let paths = config::resolve_runtime_paths();
     let request_body = UpgradeLaunchRequest {
         protocol_version: UPGRADE_REQUEST_VERSION,
         attempt_id: format!("upgrade_{}", Uuid::new_v4().simple()),
         deb: deb.to_string(),
+        previous_deb: normalize_path(previous_deb),
     };
+    validate_previous_deb(&request_body)
+        .map_err(|detail| record_failure(&paths, &request_body, UpgradeStage::Launch, detail))?;
     let request = request_path(&paths);
     if let Some(parent) = request.parent() {
         fs::create_dir_all(parent).map_err(|error| {
@@ -109,16 +117,25 @@ pub fn launch(deb: &str) -> Result<UpgradeStarted, Box<santi_core::SantiError>> 
 }
 
 /// Resolve a direct artifact or detached request, then run the orchestration.
-pub fn run(deb: Option<String>) -> Result<UpgradeReport, Box<santi_core::SantiError>> {
+pub fn run(
+    deb: Option<String>,
+    previous_deb: Option<String>,
+) -> Result<UpgradeReport, Box<santi_core::SantiError>> {
     let paths = config::resolve_runtime_paths();
-    let request = match deb {
+    let mut request = match deb {
         Some(deb) => UpgradeLaunchRequest {
             protocol_version: UPGRADE_REQUEST_VERSION,
             attempt_id: format!("upgrade_{}", Uuid::new_v4().simple()),
             deb,
+            previous_deb: normalize_path(previous_deb.as_deref()),
         },
         None => read_request(&paths)?,
     };
+    request.previous_deb = request.previous_deb.or_else(|| {
+        env::var("SANTI_PREVIOUS_DEB")
+            .ok()
+            .and_then(|value| normalize_path(Some(&value)))
+    });
     if request.protocol_version != UPGRADE_REQUEST_VERSION || request.deb.trim().is_empty() {
         return Err(record_failure(
             &paths,
@@ -131,7 +148,12 @@ pub fn run(deb: Option<String>) -> Result<UpgradeReport, Box<santi_core::SantiEr
             ),
         ));
     }
-    let mut host = SystemHost::new(paths);
+    validate_previous_deb(&request)
+        .map_err(|detail| record_failure(&paths, &request, UpgradeStage::ResolveRequest, detail))?;
+    let mut host = SystemHost::new(
+        paths,
+        PathBuf::from(request.previous_deb.as_deref().unwrap()),
+    );
     run_upgrade_attempt(
         &mut host,
         &request.deb,
@@ -145,6 +167,7 @@ fn read_request(paths: &RuntimePaths) -> Result<UpgradeLaunchRequest, Box<santi_
         protocol_version: UPGRADE_REQUEST_VERSION,
         attempt_id: format!("upgrade_{}", Uuid::new_v4().simple()),
         deb: "<unresolved>".to_string(),
+        previous_deb: None,
     };
     let raw = fs::read(request_path(paths)).map_err(|error| {
         let request = unresolved();
@@ -164,6 +187,28 @@ fn read_request(paths: &RuntimePaths) -> Result<UpgradeLaunchRequest, Box<santi_
             format!("decode upgrade request: {error}"),
         )
     })
+}
+
+fn normalize_path(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn validate_previous_deb(request: &UpgradeLaunchRequest) -> Result<(), String> {
+    let previous_deb = request.previous_deb.as_deref().ok_or_else(|| {
+        "previous package artifact is required for truthful rollback; set --previous-deb or SANTI_PREVIOUS_DEB"
+            .to_string()
+    })?;
+    if !Path::new(previous_deb).is_file() {
+        return Err(format!(
+            "previous package artifact is not a readable file: {previous_deb}"
+        ));
+    }
+    fs::File::open(previous_deb)
+        .map(|_| ())
+        .map_err(|error| format!("previous package artifact is not readable: {error}"))
 }
 
 fn record_failure(
@@ -204,14 +249,19 @@ fn record_failure(
 struct SystemHost {
     paths: RuntimePaths,
     backup: PathBuf,
+    previous_deb: PathBuf,
 }
 
 impl SystemHost {
-    fn new(paths: RuntimePaths) -> Self {
+    fn new(paths: RuntimePaths, previous_deb: PathBuf) -> Self {
         let backup = paths
             .runtime_root
             .with_file_name("santi-runtime-backup.tar.gz");
-        Self { paths, backup }
+        Self {
+            paths,
+            backup,
+            previous_deb,
+        }
     }
 
     fn privileged(&self, args: &[&str]) -> Result<(), String> {
@@ -292,6 +342,20 @@ impl UpgradeHost for SystemHost {
     }
 
     fn rollback(&mut self) -> Result<(), String> {
+        if !self.previous_deb.is_file() {
+            return Err(format!(
+                "previous package artifact became unavailable before rollback: {}",
+                self.previous_deb.display()
+            ));
+        }
+        fs::File::open(&self.previous_deb).map_err(|error| {
+            format!("previous package artifact became unreadable before rollback: {error}")
+        })?;
+        let previous_deb = self
+            .previous_deb
+            .to_str()
+            .ok_or("previous package artifact path is not valid UTF-8")?
+            .to_string();
         let parent = self
             .paths
             .runtime_root
@@ -307,11 +371,7 @@ impl UpgradeHost for SystemHost {
         if !status.success() {
             return Err("runtime restore (tar) failed".to_string());
         }
-        if let Ok(prev) = env::var("SANTI_PREVIOUS_DEB").map(|value| value.trim().to_string())
-            && !prev.is_empty()
-        {
-            self.install(&prev)?;
-        }
+        self.install(&previous_deb)?;
         Ok(())
     }
 

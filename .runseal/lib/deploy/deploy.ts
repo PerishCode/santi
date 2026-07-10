@@ -21,8 +21,9 @@ export async function deploy(argv: string[]): Promise<number> {
     console.log("");
     console.log("Deploy the latest beta (or the given <version>, e.g. v0.1.0-beta.17) to santi's");
     console.log(
-      "live host via `santi upgrade`, then verify schema + memory + ready/degraded state.",
+      "live host via `santi upgrade`, preserving the installed beta for truthful rollback,",
     );
+    console.log("then verify schema + memory + ready/degraded state.");
     console.log("Cut a release first with `runseal :release` / the release-beta workflow.");
     return 0;
   }
@@ -34,6 +35,15 @@ export async function deploy(argv: string[]): Promise<number> {
   // oneshot to completion (graceful-stop can wait out an in-flight turn ≤600s).
   const remote = [
     "set -e",
+    'ROLLBACK_ENV_SET=""',
+    "cleanup() {",
+    '  if [ "$ROLLBACK_ENV_SET" = 1 ]; then systemctl unset-environment SANTI_PREVIOUS_DEB || true; fi',
+    "}",
+    "trap cleanup EXIT",
+    "INITIAL_UPGRADE_STATE=$(systemctl is-active santi-upgrade.service 2>/dev/null || true)",
+    '[ "$INITIAL_UPGRADE_STATE" != activating ] || { echo "upgrade already active"; exit 1; }',
+    "CURRENT_PACKAGE_VERSION=$(dpkg-query -W -f='${Version}' santi 2>/dev/null || true)",
+    '[ -n "$CURRENT_PACKAGE_VERSION" ] || { echo "installed santi package version is unavailable"; exit 1; }',
     `META="https://releases.santi.perish.uk/beta/${metaPath}/metadata.json"`,
     `DEB_URL=$(curl -fsSL "$META" | grep -A5 '"debX64"' | grep '"url"' | sed 's/.*"url": *"//;s/".*//')`,
     '[ -n "$DEB_URL" ] || { echo "no .deb url in $META"; exit 1; }',
@@ -42,8 +52,20 @@ export async function deploy(argv: string[]): Promise<number> {
     'echo ">> deploying $VER"',
     'echo ">> $DEB_URL"',
     'curl -fsSL "$DEB_URL" -o /tmp/santi-deploy.deb',
+    'PREVIOUS_META="https://releases.santi.perish.uk/beta/versions/v${CURRENT_PACKAGE_VERSION}/metadata.json"',
+    `PREVIOUS_DEB_URL=$(curl -fsSL "$PREVIOUS_META" | grep -A5 '"debX64"' | grep '"url"' | sed 's/.*"url": *"//;s/".*//')`,
+    '[ -n "$PREVIOUS_DEB_URL" ] || { echo "no rollback .deb url in $PREVIOUS_META"; exit 1; }',
+    'curl -fsSL "$PREVIOUS_DEB_URL" -o /tmp/santi-previous.deb',
+    "PREVIOUS_DEB_PACKAGE=$(dpkg-deb -f /tmp/santi-previous.deb Package)",
+    "PREVIOUS_DEB_VERSION=$(dpkg-deb -f /tmp/santi-previous.deb Version)",
+    '[ "$PREVIOUS_DEB_PACKAGE" = santi ] || { echo "rollback package mismatch: $PREVIOUS_DEB_PACKAGE"; exit 1; }',
+    '[ "$PREVIOUS_DEB_VERSION" = "$CURRENT_PACKAGE_VERSION" ] || { echo "rollback version mismatch: expected=$CURRENT_PACKAGE_VERSION actual=$PREVIOUS_DEB_VERSION"; exit 1; }',
+    "chmod 0644 /tmp/santi-previous.deb",
+    'echo ">> rollback package $PREVIOUS_DEB_VERSION"',
+    'ROLLBACK_ENV_SET="1"',
+    "systemctl set-environment SANTI_PREVIOUS_DEB=/tmp/santi-previous.deb",
     `BEFORE=$(md5sum ${MEMORY} 2>/dev/null | awk '{print $1}')`,
-    `sudo -u santi env SANTI_HOME=${SANTI_HOME} /usr/bin/santi upgrade /tmp/santi-deploy.deb`,
+    `sudo -u santi env SANTI_HOME=${SANTI_HOME} SANTI_PREVIOUS_DEB=/tmp/santi-previous.deb /usr/bin/santi upgrade /tmp/santi-deploy.deb`,
     "sleep 1",
     'UPGRADE_STATE=""',
     'INSTALLED_VERSION=""',

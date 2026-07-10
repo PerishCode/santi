@@ -1,8 +1,9 @@
 use std::time::Duration;
 
 use santi_api::upgrade::{
-    Outcome, RollbackCause, SeedOutcome, UpgradeFinalizeReport, UpgradeFinalizeRequest,
-    UpgradeHost, UpgradeReadiness, UpgradeReport, UpgradeTerminal, compose_record, run_upgrade,
+    Outcome, RecoveryStatus, RollbackCause, SeedOutcome, UpgradeFinalizeReport,
+    UpgradeFinalizeRequest, UpgradeHost, UpgradeReadiness, UpgradeReport, UpgradeTerminal,
+    compose_record, run_upgrade,
 };
 use santi_core::{ErrorScope, ErrorSource, IncidentDraft, SantiError, catalog, engine};
 
@@ -230,6 +231,10 @@ fn install_failure_rolls_back() {
     assert_eq!(report.errors.len(), 1);
     assert_eq!(report.errors[0].code, "runtime.upgrade.failed");
     assert!(!host.seeded_text.unwrap().contains("bad package signature"));
+    let UpgradeTerminal::RolledBack { failure } = &host.finalizations[0].terminal else {
+        panic!("expected rolled-back terminal");
+    };
+    assert_eq!(failure.recovery, RecoveryStatus::PreviousVersionRestored);
 }
 
 #[test]

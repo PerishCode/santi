@@ -88,6 +88,31 @@ fn parses_drive() {
 }
 
 #[test]
+fn parses_upgrade_rollback() {
+    let parsed = Cli::try_parse_from([
+        "santi",
+        "upgrade",
+        "/tmp/santi-new.deb",
+        "--previous-deb",
+        "/tmp/santi-old.deb",
+    ])
+    .unwrap();
+    let Command::Upgrade {
+        deb,
+        previous_deb,
+        run,
+        finalize,
+    } = parsed.command
+    else {
+        panic!("expected upgrade command");
+    };
+    assert_eq!(deb.as_deref(), Some("/tmp/santi-new.deb"));
+    assert_eq!(previous_deb.as_deref(), Some("/tmp/santi-old.deb"));
+    assert!(!run);
+    assert!(!finalize);
+}
+
+#[test]
 fn errors_replaces_rejections() {
     let parsed = Cli::try_parse_from([
         "santi",

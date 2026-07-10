@@ -27,6 +27,17 @@ pub(crate) async fn run_client(
         Command::Inbox(_) => unreachable!("inbox is handled before the client path"),
         Command::Upgrade { .. } => unreachable!("upgrade is handled before the client path"),
         Command::Health => get(&client, &format!("{base}/api/v1/health")).await,
+        Command::Errors {
+            scope_kind,
+            scope_id,
+            limit,
+        } => {
+            get(
+                &client,
+                &format!("{base}/api/v1/errors/{scope_kind}/{scope_id}?limit={limit}"),
+            )
+            .await
+        }
         Command::Strand(StrandCommand::Create) => {
             post(&client, &format!("{base}/api/v1/strands"), None).await
         }

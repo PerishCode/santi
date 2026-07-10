@@ -8,7 +8,9 @@ use axum::{
     },
 };
 use futures_core::Stream;
-use santi_core::{SantiService, SantiStreamEvent, SantiStreamPayload, prefixed_id, timestamp_now};
+use santi_core::{
+    ErrorTransition, SantiService, SantiStreamEvent, SantiStreamPayload, prefixed_id, timestamp_now,
+};
 
 use super::ApiError;
 
@@ -43,6 +45,35 @@ pub(super) async fn strand_events(
     };
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/errors/events",
+    responses((status = 200, description = "Canonical global error lifecycle stream"))
+)]
+pub(super) async fn error_events(
+    State(service): State<SantiService>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let mut receiver = service.subscribe_error_transitions();
+    let stream = async_stream::stream! {
+        loop {
+            match receiver.recv().await {
+                Ok(transition) => yield Ok(error_sse_event(transition)),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    };
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+fn error_sse_event(transition: ErrorTransition) -> Event {
+    Event::default()
+        .id(transition.id.clone())
+        .event("error_transition")
+        .data(serde_json::to_string(&transition).unwrap_or_else(|_| "{}".to_string()))
+}
+
 fn sse_event(event: SantiStreamEvent) -> Event {
     Event::default()
         .id(event.event_id.clone())

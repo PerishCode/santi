@@ -72,6 +72,29 @@ fn parses_fork() {
 
 #[test]
 fn errors_replaces_rejections() {
+    let parsed = Cli::try_parse_from([
+        "santi",
+        "errors",
+        "--scope-kind",
+        "runtime",
+        "--scope-id",
+        "default",
+        "--limit",
+        "12",
+    ])
+    .unwrap();
+    let Command::Errors {
+        scope_kind,
+        scope_id,
+        limit,
+    } = parsed.command
+    else {
+        panic!("expected global errors command");
+    };
+    assert_eq!(scope_kind, "runtime");
+    assert_eq!(scope_id, "default");
+    assert_eq!(limit, 12);
+
     let parsed =
         Cli::try_parse_from(["santi", "strand", "errors", "ss_1", "--limit", "12"]).unwrap();
     let Command::Strand(StrandCommand::Errors { id, limit }) = parsed.command else {

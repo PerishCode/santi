@@ -1,3 +1,5 @@
+#[path = "store/errors.rs"]
+mod errors;
 #[path = "store/fork.rs"]
 mod fork;
 #[path = "store/inbox.rs"]

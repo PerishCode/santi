@@ -78,6 +78,36 @@ pub(super) fn list_in_conn(
 }
 
 impl SantiStore {
+    pub fn open_error_incident(&self, draft: IncidentDraft) -> Result<SantiError, String> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction().map_err(|error| error.to_string())?;
+        let error = open_incident_in_conn(&tx, draft)?;
+        tx.commit().map_err(|error| error.to_string())?;
+        Ok(error)
+    }
+
+    pub fn resolve_error_incident(
+        &self,
+        incident_key: &str,
+        resolved_by: &str,
+        context: serde_json::Value,
+    ) -> Result<bool, String> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction().map_err(|error| error.to_string())?;
+        let resolved = resolve_in_conn(&tx, incident_key, resolved_by, context)?;
+        tx.commit().map_err(|error| error.to_string())?;
+        Ok(resolved)
+    }
+
+    pub fn error_incidents(
+        &self,
+        scope: &ErrorScope,
+        limit: i64,
+    ) -> Result<Vec<ErrorIncident>, String> {
+        let conn = self.conn.lock().unwrap();
+        list_in_conn(&conn, &scope.kind, &scope.id, limit)
+    }
+
     pub(crate) fn active_error_incident(
         &self,
         incident_key: &str,
@@ -91,8 +121,7 @@ impl SantiStore {
         strand_id: &str,
         limit: i64,
     ) -> Result<Vec<ErrorIncident>, String> {
-        let conn = self.conn.lock().unwrap();
-        list_in_conn(&conn, "strand", strand_id, limit)
+        self.error_incidents(&ErrorScope::new("strand", strand_id), limit)
     }
 }
 

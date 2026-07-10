@@ -22,9 +22,9 @@ use tokio::sync::broadcast;
 
 use crate::{
     CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, ErrorEventSink, ErrorIncident,
-    ErrorTransition, MaterialKind, SantiStore, SantiStreamEvent, SantiStreamPayload, Soul, Strand,
-    StrandBudgetSnapshot, StrandDetail, StrandMaterial, StrandMessage, StrandRuntimeSnapshot, Turn,
-    WebhookSubscription, engine, prefixed_id, timestamp_now,
+    ErrorScope, ErrorTransition, MaterialKind, SantiStore, SantiStreamEvent, SantiStreamPayload,
+    Soul, Strand, StrandBudgetSnapshot, StrandDetail, StrandMaterial, StrandMessage,
+    StrandRuntimeSnapshot, Turn, WebhookSubscription, engine, prefixed_id, timestamp_now,
 };
 use runtime_notice::RuntimeNoticeBus;
 
@@ -35,6 +35,7 @@ pub struct SantiService {
     pub(crate) config: SantiServiceConfig,
     material_cache: Arc<Mutex<HashMap<MaterialCacheKey, StrandMaterial>>>,
     stream_events: broadcast::Sender<SantiStreamEvent>,
+    error_events: broadcast::Sender<ErrorTransition>,
     runtime_notices: RuntimeNoticeBus,
     /// Graceful-shutdown latch (PHASE-07): once set, `poke` refuses to START new
     /// turns, so inbox CONSUMPTION pauses while ingest keeps durably enqueuing
@@ -57,8 +58,8 @@ struct StreamErrorSink<'a> {
 
 impl ErrorEventSink for StreamErrorSink<'_> {
     fn publish_error_transition(&self, transition: &ErrorTransition) -> Result<(), String> {
-        if transition.incident.scope.kind == "strand" {
-            return self
+        let strand_delivered = transition.incident.scope.kind == "strand"
+            && self
                 .service
                 .send_stream(
                     &transition.incident.scope.id,
@@ -66,9 +67,13 @@ impl ErrorEventSink for StreamErrorSink<'_> {
                         transition: Box::new(transition.clone()),
                     },
                 )
-                .map_err(|_| NO_ERROR_EVENT_SUBSCRIBERS.to_string());
+                .is_ok();
+        let global_delivered = self.service.error_events.send(transition.clone()).is_ok();
+        if strand_delivered || global_delivered {
+            Ok(())
+        } else {
+            Err(NO_ERROR_EVENT_SUBSCRIBERS.to_string())
         }
-        Ok(())
     }
 }
 
@@ -97,6 +102,7 @@ impl SantiService {
             config,
             material_cache: Arc::new(Mutex::new(HashMap::new())),
             stream_events: broadcast::channel(1024).0,
+            error_events: broadcast::channel(1024).0,
             runtime_notices: RuntimeNoticeBus::new(),
             shutting_down: Arc::new(AtomicBool::new(false)),
         })
@@ -158,6 +164,12 @@ impl SantiService {
 
     pub fn subscribe_stream(&self) -> broadcast::Receiver<SantiStreamEvent> {
         let receiver = self.stream_events.subscribe();
+        self.dispatch_error_events();
+        receiver
+    }
+
+    pub fn subscribe_error_transitions(&self) -> broadcast::Receiver<ErrorTransition> {
+        let receiver = self.error_events.subscribe();
         self.dispatch_error_events();
         receiver
     }
@@ -281,6 +293,10 @@ impl SantiService {
         self.store
             .error_incidents_for_strand(&strand.id, limit)
             .map(Some)
+    }
+
+    pub fn errors(&self, scope: &ErrorScope, limit: i64) -> Result<Vec<ErrorIncident>, String> {
+        self.store.error_incidents(scope, limit)
     }
 
     pub(crate) fn publish_stream(&self, strand_id: &str, payload: SantiStreamPayload) {

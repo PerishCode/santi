@@ -72,10 +72,10 @@ export async function land(argv: string[]): Promise<number> {
   }
 
   // 4. Wait for required checks — polled here, quietly, with a bounded timeout.
-  console.log(`waiting for required checks (timeout ${CHECK_TIMEOUT_MS / 1000}s) ...`);
+  console.log(`waiting for PR checks (timeout ${CHECK_TIMEOUT_MS / 1000}s) ...`);
   const outcome = await waitChecks(pr, repo);
   if (outcome !== "pass") {
-    return fail(`required checks ${outcome} — PR #${pr} left open`);
+    return fail(`PR checks ${outcome} — PR #${pr} left open`);
   }
 
   // 5. Squash merge.
@@ -126,8 +126,8 @@ async function openPr(branch: string, repo: string): Promise<number | null> {
 }
 
 /**
- * Poll the PR's required checks until they all pass, one fails, or the timeout
- * elapses. Parses `--json bucket` from stdout and ignores exit codes so pending
+ * Poll all PR checks until they pass, one fails, or the timeout elapses. Parses
+ * `--json bucket` from stdout and ignores exit codes so pending
  * states are handled uniformly; an empty set means checks have not registered
  * yet (just after creation).
  */
@@ -136,7 +136,7 @@ async function waitChecks(pr: number, repo: string): Promise<"pass" | "fail" | "
   while (Date.now() < deadline) {
     const result = await capture(
       "gh",
-      ["pr", "checks", String(pr), "--required", "--json", "bucket"],
+      ["pr", "checks", String(pr), "--json", "bucket"],
       { cwd: repo },
     );
     let buckets: string[] = [];

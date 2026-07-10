@@ -30,8 +30,8 @@ use utoipa::OpenApi;
         super::errors::errors,
         super::sse::error_events,
         super::routes::runtime_snapshot,
-        super::routes::send_im,
-        super::routes::poll_im,
+        super::im::send_im,
+        super::im::poll_im,
         crate::bucket::get_bucket_object
     ),
     components(schemas(

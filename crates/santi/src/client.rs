@@ -8,7 +8,12 @@ use crate::cli::{
     ClientDefaults, Command, CompactCommand, ImCommand, StrandCommand, WatchFormat, split_send_args,
 };
 use crate::text_source::read_summary_file;
-use crate::watch::{next_sse_frame, render_watch_event, watch_until_idle};
+use crate::watch::{next_sse_frame, render_watch_event};
+
+mod send;
+
+pub use send::send;
+use send::{accepted_warning, accepted_warning_error};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -443,87 +448,4 @@ async fn im_inbox_high_water(
         .filter_map(|entry| entry.get("seq").and_then(serde_json::Value::as_i64))
         .max()
         .unwrap_or(0))
-}
-
-/// POST a send, then optionally `--watch` the stream until the strand is
-/// idle again. Without `--watch` this is the prior fire-and-return behavior.
-pub async fn send(
-    client: &reqwest::Client,
-    base: &str,
-    strand_id: &str,
-    body: serde_json::Value,
-    watch: bool,
-    watch_format: WatchFormat,
-) -> Result<()> {
-    let url = format!("{base}/api/v1/strands/{strand_id}/send");
-    // The send itself returns as soon as the message is enqueued (it does not
-    // wait for the turn), so it is an immediate request and gets the timeout;
-    // the optional `--watch` below follows the SSE stream, which does not.
-    let response = client
-        .post(&url)
-        .timeout(REQUEST_TIMEOUT)
-        .json(&body)
-        .send()
-        .await
-        .with_context(|| format!("POST {url}"))?;
-    let status = response.status();
-    let text = response.text().await.context("read response body")?;
-    let accepted = serde_json::from_str::<serde_json::Value>(&text).ok();
-    if !watch {
-        match &accepted {
-            Some(value) => println!("{}", serde_json::to_string_pretty(value)?),
-            None => println!("{text}"),
-        }
-    }
-    if !status.is_success() {
-        if watch {
-            println!("{text}");
-        }
-        anyhow::bail!("request failed with status {status}");
-    }
-    if let Some(warning) = accepted_warning(accepted.as_ref()) {
-        if watch {
-            match &accepted {
-                Some(value) => println!("{}", serde_json::to_string_pretty(value)?),
-                None => println!("{text}"),
-            }
-        }
-        return Err(accepted_warning_error(warning));
-    }
-    if !watch {
-        return Ok(());
-    }
-    // Seed the in-flight set with the turn this send landed on (a fresh turn, or
-    // the running one it coalesced into), so a follow-on that handles our message
-    // is still awaited even if its `turn_started` arrives after the seed's end.
-    let seed_turn = accepted
-        .as_ref()
-        .and_then(|value| value.get("turn"))
-        .and_then(|turn| turn.get("id"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string);
-    watch_until_idle(client, base, strand_id, seed_turn, watch_format).await
-}
-
-fn accepted_warning(value: Option<&serde_json::Value>) -> Option<&serde_json::Value> {
-    value?
-        .pointer("/receipt/warning")
-        .filter(|warning| !warning.is_null())
-}
-
-fn accepted_warning_error(warning: &serde_json::Value) -> anyhow::Error {
-    if let Some(command) = warning
-        .pointer("/context/recovery/command")
-        .and_then(serde_json::Value::as_str)
-    {
-        anyhow::anyhow!("message was accepted but not driven; do not resend it; run `{command}`")
-    } else {
-        let code = warning
-            .get("code")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("unknown warning");
-        anyhow::anyhow!(
-            "message was accepted but not driven; do not resend it; inspect and resolve `{code}`"
-        )
-    }
 }

@@ -144,7 +144,7 @@ async fn send_rejection_locks() {
 }
 
 #[tokio::test]
-async fn accepted_drive_failure_degrades_health_until_explicit_recovery() {
+async fn drive_failure_http_recovery() {
     let temp = tempfile::tempdir().expect("temp dir");
     let database_path = temp.path().join("santi.sqlite");
     let service = SantiService::open(

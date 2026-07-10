@@ -185,7 +185,7 @@ fn success_orders_steps() {
 }
 
 #[test]
-fn degraded_upgrade_does_not_roll_back() {
+fn degraded_skips_rollback() {
     let mut host = FakeHost {
         probe_result: Ok(UpgradeReadiness::Degraded),
         ..Default::default()

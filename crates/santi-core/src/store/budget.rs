@@ -93,7 +93,7 @@ impl SantiStore {
             .map_err(|error| error.to_string())?;
 
         if let Some(error) =
-            super::drive::repeat_active_in_conn(&tx, strand_id, "ingest_active_guard")?
+            super::errors::drive::repeat_active_in_conn(&tx, strand_id, "ingest_active_guard")?
         {
             tx.commit().map_err(|error| error.to_string())?;
             return Ok(IngestOutcome::Rejected {
@@ -300,7 +300,7 @@ impl SantiStore {
             params![turn_id, strand_id, trigger_type, trigger_ref, now],
         )
         .map_err(|error| error.to_string())?;
-        super::drive::resolve_in_conn(&tx, strand_id, &turn_id, drained_messages.len())?;
+        super::errors::drive::resolve_in_conn(&tx, strand_id, &turn_id, drained_messages.len())?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(StartTurnOutcome::Started(StartedTurn {
             turn: turn_by_id(&conn, &turn_id)?.ok_or_else(|| "created turn missing".to_string())?,

@@ -7,6 +7,8 @@ use santi_error::{
 use super::SantiStore;
 use crate::timestamp_now;
 
+pub(crate) mod drive;
+
 const INCIDENT_COLUMNS: &str = r#"
     id, incident_key, code, status, category, severity, retry, exposure,
     scope_kind, scope_id, source_component, source_operation,

@@ -1,7 +1,8 @@
 use rusqlite::{Connection, params};
 use serde_json::json;
 
-use super::{SantiStore, errors};
+use super::{active_in_conn, open_incident_in_conn, resolve_in_conn as resolve_error_in_conn};
+use crate::store::SantiStore;
 use crate::{ErrorScope, ErrorSource, IncidentDraft, SantiError, catalog};
 
 const DRIVE_DETAIL_BYTES: usize = 4096;
@@ -17,16 +18,16 @@ pub(crate) fn drive_incident_key(strand_id: &str) -> String {
     format!("{}:strand:{strand_id}", catalog::STRAND_DRIVE_FAILED.code)
 }
 
-pub(super) fn repeat_active_in_conn(
+pub(in crate::store) fn repeat_active_in_conn(
     conn: &Connection,
     strand_id: &str,
     operation: &str,
 ) -> Result<Option<SantiError>, String> {
-    if errors::active_in_conn(conn, &drive_incident_key(strand_id))?.is_none() {
+    if active_in_conn(conn, &drive_incident_key(strand_id))?.is_none() {
         return Ok(None);
     }
     let pending = pending_count(conn, strand_id)?;
-    errors::open_incident_in_conn(
+    open_incident_in_conn(
         conn,
         drive_draft(
             strand_id,
@@ -42,13 +43,13 @@ pub(super) fn repeat_active_in_conn(
     .map(Some)
 }
 
-pub(super) fn resolve_in_conn(
+pub(in crate::store) fn resolve_in_conn(
     conn: &Connection,
     strand_id: &str,
     turn_id: &str,
     drained_count: usize,
 ) -> Result<bool, String> {
-    errors::resolve_in_conn(
+    resolve_error_in_conn(
         conn,
         &drive_incident_key(strand_id),
         "strand.drive_started",
@@ -82,7 +83,7 @@ impl SantiStore {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let pending = pending_count(&tx, strand_id)?;
-        let error = errors::open_incident_in_conn(&tx, drive_draft(strand_id, input, pending))?;
+        let error = open_incident_in_conn(&tx, drive_draft(strand_id, input, pending))?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(error)
     }

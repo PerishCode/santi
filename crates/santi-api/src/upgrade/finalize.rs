@@ -77,29 +77,7 @@ pub fn finalize_at(
 
     match &request.terminal {
         UpgradeTerminal::Upgraded { readiness } => {
-            store
-                .resolve_error_incident(
-                    UPGRADE_INCIDENT_KEY,
-                    "upgrade.succeeded",
-                    json!({
-                        "attempt_id": request.attempt_id,
-                        "artifact": bounded_detail(&request.deb),
-                        "terminal": if matches!(readiness, super::UpgradeReadiness::Degraded) {
-                            "upgraded_degraded"
-                        } else {
-                            "upgraded"
-                        },
-                        "readiness": readiness,
-                    }),
-                )
-                .map_err(|error| {
-                    Box::new(persistence_error(
-                        &request.attempt_id,
-                        &request.deb,
-                        "upgrade.finalize.resolve_execution",
-                        error,
-                    ))
-                })?;
+            resolve_upgrade(&store, &request, *readiness)?;
         }
         UpgradeTerminal::RolledBack { failure } | UpgradeTerminal::Failed { failure } => {
             let terminal = if matches!(request.terminal, UpgradeTerminal::RolledBack { .. }) {
@@ -123,6 +101,37 @@ pub fn finalize_at(
     }
 
     finalize_handover(paths, &store, request, errors)
+}
+
+fn resolve_upgrade(
+    store: &santi_core::SantiStore,
+    request: &UpgradeFinalizeRequest,
+    readiness: super::UpgradeReadiness,
+) -> Result<(), Box<santi_core::SantiError>> {
+    store
+        .resolve_error_incident(
+            UPGRADE_INCIDENT_KEY,
+            "upgrade.succeeded",
+            json!({
+                "attempt_id": request.attempt_id,
+                "artifact": bounded_detail(&request.deb),
+                "terminal": if matches!(readiness, super::UpgradeReadiness::Degraded) {
+                    "upgraded_degraded"
+                } else {
+                    "upgraded"
+                },
+                "readiness": readiness,
+            }),
+        )
+        .map(|_| ())
+        .map_err(|error| {
+            Box::new(persistence_error(
+                &request.attempt_id,
+                &request.deb,
+                "upgrade.finalize.resolve_execution",
+                error,
+            ))
+        })
 }
 
 fn open_execution_failure(

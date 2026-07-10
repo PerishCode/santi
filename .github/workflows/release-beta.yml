@@ -67,6 +67,11 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
+      - name: Install flavor
+        run: |
+          curl -fsSL https://flavor.perish.uk/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/flavor" --version
       - name: Guard
         run: deno run --allow-all --config .runseal/deno.json .runseal/wrappers/guard.ts
 

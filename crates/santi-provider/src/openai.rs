@@ -20,6 +20,7 @@ pub struct OpenAIProviderConfig {
     pub reasoning_effort: Option<String>,
     pub reasoning_summary: Option<String>,
     pub max_output_tokens: Option<u32>,
+    pub input_budget_bytes: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +44,12 @@ impl ProviderClient for OpenAIProvider {
         ProviderMetadata {
             provider: Arc::from("openai"),
             model: self.config.model.clone(),
+            context_budget: self.config.input_budget_bytes.map(|input_budget_bytes| {
+                crate::ProviderContextBudget {
+                    input_budget_bytes,
+                    source: "provider_config".to_string(),
+                }
+            }),
         }
     }
 
@@ -488,90 +495,4 @@ struct OpenAIError {
     message: Option<String>,
     #[allow(dead_code)]
     raw: Option<Value>,
-}
-
-#[cfg(test)]
-mod slice0_replay_tests {
-    use super::*;
-    use crate::{ProviderItem, ProviderRequest};
-
-    fn req_with(item: Option<Value>) -> ProviderRequest {
-        ProviderRequest {
-            model: "m".into(),
-            instructions: None,
-            input: vec![ProviderItem::FunctionCall {
-                call_id: "call_1".into(),
-                name: "shell".into(),
-                arguments_raw: "{}".into(),
-                item,
-                item_id: None,
-            }],
-            tools: None,
-            previous_response_id: None,
-        }
-    }
-
-    fn function_call_item(input: &Value) -> Value {
-        input
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|it| it.get("type").and_then(Value::as_str) == Some("function_call"))
-            .expect("a function_call item")
-            .clone()
-    }
-
-    #[test]
-    fn poisoned_item_prefixed_id_is_regenerated_not_forwarded() {
-        // The exact SLICE-0 poison: an upstream `item_`-prefixed id the Responses
-        // API rejects on input. A strand whose timeline holds this must re-assemble
-        // WITHOUT forwarding the bad id — it is dropped + regenerated from canonical.
-        let poisoned = json!({
-            "type": "function_call", "call_id": "call_1",
-            "name": "shell", "arguments": "{}", "id": "item_deadbeef"
-        });
-        let fc = function_call_item(&response_input(&req_with(Some(poisoned))));
-        match fc.get("id").and_then(Value::as_str) {
-            None => {}
-            Some(id) => assert!(id.starts_with("fc"), "must not forward a non-fc id: {id}"),
-        }
-        assert_eq!(fc.get("call_id").and_then(Value::as_str), Some("call_1"));
-        assert_eq!(fc.get("name").and_then(Value::as_str), Some("shell"));
-    }
-
-    #[test]
-    fn valid_fc_id_is_replayed_verbatim() {
-        let good = json!({
-            "type": "function_call", "call_id": "call_1",
-            "name": "shell", "arguments": "{}", "id": "fc_ok"
-        });
-        let fc = function_call_item(&response_input(&req_with(Some(good))));
-        assert_eq!(
-            fc.get("id").and_then(Value::as_str),
-            Some("fc_ok"),
-            "a valid fc-id blob keeps item-fidelity"
-        );
-    }
-
-    #[test]
-    fn absent_material_synthesizes_from_canonical() {
-        let fc = function_call_item(&response_input(&req_with(None)));
-        assert!(fc.get("id").is_none());
-        assert_eq!(fc.get("call_id").and_then(Value::as_str), Some("call_1"));
-    }
-
-    #[test]
-    fn validator_gates_on_fc_prefix_and_shape() {
-        assert!(
-            validated_function_call_replay(&Some(json!({"type":"function_call","id":"fc_1"})))
-                .is_some()
-        );
-        assert!(validated_function_call_replay(&Some(json!({"type":"function_call"}))).is_some());
-        assert!(
-            validated_function_call_replay(&Some(json!({"type":"function_call","id":"item_1"})))
-                .is_none()
-        );
-        assert!(validated_function_call_replay(&Some(json!({"type":"message"}))).is_none());
-        assert!(validated_function_call_replay(&None).is_none());
-    }
 }

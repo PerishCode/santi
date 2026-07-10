@@ -1,4 +1,5 @@
-mod failure;
+mod compact;
+mod flow;
 mod fork;
 mod im;
 mod materials;
@@ -8,8 +9,7 @@ mod thinking;
 mod timing;
 mod tools;
 
-use futures_util::StreamExt;
-use santi_provider::{ProviderClient, ProviderEvent, ProviderRequest};
+use santi_provider::ProviderClient;
 use std::{
     collections::HashMap,
     sync::{
@@ -20,20 +20,13 @@ use std::{
 };
 use tokio::sync::broadcast;
 
-use crate::assembly::input::provider_input;
-use crate::service_prompt::provider_tools;
 use crate::{
-    CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSoulRequest,
-    CreateStrandResponse, CreateWebhookRequest, InboxSource, IngestOutcome, MaterialKind,
-    MessageContent, MessageKind, SantiStore, SantiStreamEvent, SantiStreamPayload,
-    SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand, StrandDetail, StrandMaterial,
-    StrandMessage, StrandRuntimeSnapshot, StrandSelector, ThinkingCompletionReason, ThinkingSpan,
-    Turn, TurnActivityState, WebhookSubscription, prefixed_id, timestamp_now,
+    CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, MaterialKind, RejectedDelivery,
+    SantiStore, SantiStreamEvent, SantiStreamPayload, Soul, Strand, StrandBudgetSnapshot,
+    StrandDetail, StrandMaterial, StrandMessage, StrandRuntimeSnapshot, Turn, WebhookSubscription,
+    prefixed_id, timestamp_now,
 };
-use failure::ProviderTurnFailure;
-use runtime_notice::{ProviderInputObservation, RuntimeNoticeBus};
-use text_delta::TextDeltaUpdate;
-use timing::{ProviderTurnTiming, provider_event_name};
+use runtime_notice::RuntimeNoticeBus;
 
 #[derive(Clone)]
 pub struct SantiService {
@@ -218,134 +211,6 @@ impl SantiService {
     pub fn webhook(&self, name: &str) -> Result<Option<WebhookSubscription>, String> {
         self.store.webhook(name)
     }
-
-    /// The one inbound path (see PHASE-06/STEP4): resolve `selector` to a
-    /// strand, enqueue `content` into its durable inbox, try to drive a turn.
-    /// `Accepted` only confirms durable enqueue, not that a message/turn now
-    /// exists yet — the driver may still be draining a running turn's inbox
-    /// later (see `ingest_into`). `Rejected` (the inbox gate — a scale safety
-    /// valve, not an error) is a normal outcome; handling it is the adaptor's
-    /// own policy (surface it, or silently drop + log).
-    pub fn ingest(
-        &self,
-        selector: StrandSelector,
-        content: MessageContent,
-        kind: MessageKind,
-        trigger_type: &str,
-    ) -> Result<IngestOutcome, String> {
-        self.ingest_with_source(selector, content, kind, trigger_type, None)
-    }
-
-    pub fn ingest_with_source(
-        &self,
-        selector: StrandSelector,
-        content: MessageContent,
-        kind: MessageKind,
-        trigger_type: &str,
-        source: Option<InboxSource>,
-    ) -> Result<IngestOutcome, String> {
-        let strand = self.store.resolve_strand_selector(&selector)?;
-        let (outcome, _driven) = self.ingest_into(&strand, content, kind, trigger_type, source)?;
-        Ok(outcome)
-    }
-
-    /// Shared ingest core (enqueue + drive) for both the generic `ingest` and
-    /// `send_strand` (which additionally wants the turn/message it may have
-    /// just driven, to shape its richer response). Returns `driven = Some` only
-    /// when THIS call's poke actually drained the inbox (a fresh turn started,
-    /// possibly covering other adaptors' concurrently-enqueued entries too) —
-    /// `None` when it coalesced into an already-running turn, whose own
-    /// completion re-check will drain this content later.
-    fn ingest_into(
-        &self,
-        strand: &Strand,
-        content: MessageContent,
-        kind: MessageKind,
-        trigger_type: &str,
-        source: Option<InboxSource>,
-    ) -> Result<(IngestOutcome, DrivenTurn), String> {
-        let outcome = self
-            .store
-            .enqueue_inbox_with_source(&strand.id, kind, content, source)?;
-        let driven = match outcome {
-            IngestOutcome::Accepted { .. } => self.poke(&strand.id, trigger_type),
-            IngestOutcome::Rejected { .. } => None,
-        };
-        Ok((outcome, driven))
-    }
-
-    /// Ingest an external event already normalized by an adaptor: a `santi-system`
-    /// message addressed to `soul_id`, anchored to the strand bound to `label`.
-    /// This is the webhook twin of `send_strand` — same `ingest_into` core, so
-    /// the same drive/coalesce/gate semantics. Core stays generic: the label and
-    /// the message text are opaque (the adaptor owns their meaning).
-    pub fn ingest_external_event(
-        &self,
-        soul_id: &str,
-        label: &str,
-        system_text: String,
-    ) -> Result<IngestOutcome, String> {
-        self.ingest_external_event_with_source(soul_id, label, system_text, None)
-    }
-
-    pub fn ingest_external_event_with_source(
-        &self,
-        soul_id: &str,
-        label: &str,
-        system_text: String,
-        source: Option<InboxSource>,
-    ) -> Result<IngestOutcome, String> {
-        let strand = self
-            .store
-            .resolve_strand_selector(&StrandSelector::ByLabel {
-                soul_id: soul_id.to_string(),
-                label: label.to_string(),
-            })?;
-        let (outcome, _driven) = self.ingest_into(
-            &strand,
-            MessageContent::text(system_text),
-            MessageKind::SantiSystem,
-            "system",
-            source,
-        )?;
-        Ok(outcome)
-    }
-
-    /// Compact a range of a strand's own timeline (self-involved: the soul
-    /// runs this on itself). Creates the projection overlay directly over the
-    /// addressed strand. The soul authors `summary`; the system only checks scale.
-    pub fn compact_exec(
-        &self,
-        strand_id: &str,
-        request: CompactExecRequest,
-    ) -> Result<CompactExecResponse, String> {
-        let from = request.from_message_id.trim();
-        let to = request.to_message_id.trim();
-        let summary = request.summary.trim();
-        if from.is_empty() || to.is_empty() {
-            return Err("compact requires from_message_id and to_message_id".to_string());
-        }
-        if summary.is_empty() {
-            return Err("compact summary must not be empty".to_string());
-        }
-        let strand = self
-            .store
-            .strand(strand_id)?
-            .ok_or_else(|| "strand not found".to_string())?;
-        self.store.create_compact(&strand.id, from, to, summary)
-    }
-
-    pub fn compact_query(
-        &self,
-        compact_id: &str,
-        keyword: Option<&str>,
-        page_index: i64,
-        page_size: i64,
-    ) -> Result<Option<CompactQueryResponse>, String> {
-        self.store
-            .compact_query(compact_id, keyword, page_index, page_size)
-    }
-
     pub fn list_strands(&self) -> Result<Vec<Strand>, String> {
         self.store.list_strands()
     }
@@ -367,369 +232,27 @@ impl SantiService {
         self.store.runtime_snapshot(strand_id)
     }
 
-    pub async fn send_strand(
-        &self,
-        strand_id: &str,
-        request: SendStrandRequest,
-    ) -> Result<SendStrandAcceptedResponse, String> {
-        let text = request.text();
-        if text.trim().is_empty() {
-            return Err("send content must contain text".to_string());
-        }
-        let strand = self
-            .store
-            .strand(strand_id)?
-            .ok_or_else(|| "strand not found".to_string())?;
-
-        // ingest_into is decoupled from drive: enqueue into the inbox, then try
-        // to drive a turn. If one is already running for this strand, this send
-        // simply joins the thread (coalesced) and the running turn (or its
-        // completion re-check) will drain it later — no second concurrent turn.
-        let (outcome, driven) = self.ingest_into(
-            &strand,
-            MessageContent {
-                parts: request.content,
-            },
-            MessageKind::Text,
-            "strand_send",
-            Some(InboxSource::new("strand_send").with_ref(strand.id.clone())),
-        )?;
-        if let IngestOutcome::Rejected { reason } = outcome {
-            return Err(reason);
-        }
-        let (turn, user_message) = match driven {
-            Some((turn, mut drained)) => (turn, drained.pop()),
-            None => (
-                self.store
-                    .latest_turn(&strand.id)?
-                    .ok_or_else(|| "no active turn after send".to_string())?,
-                None,
-            ),
+    pub fn strand_budget(&self, strand_id: &str) -> Result<Option<StrandBudgetSnapshot>, String> {
+        let Some(strand) = self.store.strand(strand_id)? else {
+            return Ok(None);
         };
-
-        Ok(SendStrandAcceptedResponse {
-            strand,
-            turn,
-            user_message,
-        })
+        Ok(Some(StrandBudgetSnapshot {
+            strand_id: strand.id.clone(),
+            estimate: self.current_context_estimate(&strand.id)?,
+            budget: self.context_budget(),
+            active_block: self.store.active_context_block(&strand.id)?,
+        }))
     }
 
-    /// Drive a turn if the strand is behind (its inbox is non-empty) and idle,
-    /// spawning the runner. Returns the started turn plus what it drained into
-    /// the timeline, or None when a turn is already running (this request
-    /// coalesces) or there is nothing pending. The atomic guard in
-    /// `try_start_turn` keeps "one present per thread of experience".
-    fn poke(&self, strand_id: &str, trigger_type: &str) -> DrivenTurn {
-        // Graceful shutdown: pause CONSUMPTION. The content stays durably in the
-        // inbox (ingest already enqueued it) and boot recovery drains it on the
-        // next start. This also stops the completion re-poke from spawning a
-        // follow-on turn, so an in-flight turn can finish and the strand quiesce.
-        if self.is_shutting_down() {
-            return None;
-        }
-        match self.store.try_start_turn(strand_id, trigger_type, None) {
-            Ok(Some(started)) => {
-                for message in started.drained_messages.iter().cloned() {
-                    self.publish_stream(strand_id, SantiStreamPayload::MessageCreated { message });
-                }
-                self.publish_stream(
-                    strand_id,
-                    SantiStreamPayload::TurnStarted {
-                        turn: started.turn.clone(),
-                    },
-                );
-                let background = self.clone();
-                let background_strand_id = strand_id.to_string();
-                let background_turn_id = started.turn.id.clone();
-                tokio::spawn(async move {
-                    background
-                        .complete_provider_turn(background_strand_id, background_turn_id)
-                        .await;
-                });
-                Some((started.turn, started.drained_messages))
-            }
-            Ok(None) => None,
-            Err(error) => {
-                eprintln!("santi: try_start_turn failed for {strand_id}: {error}");
-                None
-            }
-        }
-    }
-
-    async fn complete_provider_turn(&self, strand_id: String, turn_id: String) {
-        match self.run_provider_turn(&strand_id, &turn_id).await {
-            Err(failure) => {
-                self.fail_background_turn(
-                    &strand_id,
-                    &turn_id,
-                    failure.error,
-                    failure.partial_assistant_text,
-                );
-            }
-            Ok((last_soul_message, provider_response_id)) => {
-                self.finalize_turn(
-                    &strand_id,
-                    &turn_id,
-                    last_soul_message,
-                    provider_response_id,
-                );
-            }
-        }
-        self.drain_internal_runtime_notices_for_turn(&turn_id);
-        // Re-check: a turn is one thread "catching up"; requests that arrived
-        // during it (seq past this turn's start) make the strand behind
-        // again → drive the next turn now.
-        self.poke(&strand_id, "strand_send");
-    }
-
-    /// Finalize a completed provider turn. Speech is optional (N6): an empty
-    /// turn (no per-round text ever appended) is a valid silent completion, not
-    /// a failure. `last_soul_message` is the final per-round entry `run_provider_turn`
-    /// appended (if any) — already the operator-visible truth, so completion just
-    /// marks the turn done, it does not write anything new.
-    fn finalize_turn(
+    pub fn strand_rejections(
         &self,
         strand_id: &str,
-        turn_id: &str,
-        last_soul_message: Option<StrandMessage>,
-        provider_response_id: Option<String>,
-    ) {
-        let assistant_seq = last_soul_message.map(|message| {
-            let seq = message.relation.strand_seq;
-            self.publish_stream(
-                strand_id,
-                SantiStreamPayload::MessageCompleted {
-                    turn_id: turn_id.to_string(),
-                    message,
-                },
-            );
-            seq
-        });
-        match self.store.complete_turn(
-            turn_id,
-            assistant_seq,
-            &self.provider.metadata().provider,
-            provider_response_id,
-        ) {
-            Ok(_) => self.publish_stream(
-                strand_id,
-                SantiStreamPayload::TurnCompleted {
-                    turn_id: turn_id.to_string(),
-                },
-            ),
-            Err(error) => self.fail_background_turn(strand_id, turn_id, error, String::new()),
-        }
-    }
-
-    async fn run_provider_turn(
-        &self,
-        strand_id: &str,
-        turn_id: &str,
-    ) -> Result<(Option<StrandMessage>, Option<String>), ProviderTurnFailure> {
-        let mut assistant_text = String::new();
-        let mut last_soul_message: Option<StrandMessage> = None;
-        let mut timing = ProviderTurnTiming::new(turn_id);
-        let mut round = 0;
-        macro_rules! provider_try {
-            ($expr:expr) => {
-                match $expr {
-                    Ok(value) => value,
-                    Err(error) => return Err(ProviderTurnFailure::new(error, &assistant_text)),
-                }
-            };
-        }
-
-        let final_response_id = loop {
-            round += 1;
-            // The timeline is the single source of truth: each round re-derives
-            // input from it, including any tool calls/results just persisted by
-            // the previous round (no function_call_outputs side-channel).
-            let input = provider_try!(provider_input(&self.store, strand_id));
-            let metadata = self.provider.metadata();
-            let provider_family = metadata.provider.to_string();
-            let request = ProviderRequest {
-                model: metadata.model,
-                instructions: Some(provider_try!(self.system_prompt_text(strand_id))),
-                input,
-                tools: Some(provider_tools()),
-                previous_response_id: None,
-            };
-            timing.request_built(
-                round,
-                request.input.len(),
-                request.instructions.as_ref().map_or(0, |text| text.len()),
-            );
-            self.observe_provider_input_for_notices(ProviderInputObservation {
-                strand_id,
-                turn_id,
-                round,
-                provider: &provider_family,
-                model: &request.model,
-                input: &request.input,
-                instructions: request.instructions.as_deref(),
-            });
-            self.publish_turn_activity(strand_id, turn_id, TurnActivityState::Requesting, None);
-            let mut stream = match self.provider.stream_response(request).await {
-                Ok(stream) => {
-                    timing.http_response_started(round);
-                    stream
-                }
-                Err(error) => {
-                    timing.failed(round, "http_response", &error);
-                    return Err(ProviderTurnFailure::new(error, &assistant_text));
-                }
-            };
-            let mut calls = Vec::new();
-            let mut completed_response_id = None;
-            let mut active_provider_response_id = None;
-            let mut current_thinking_span: Option<ThinkingSpan> = None;
-            let mut summary_thinking_span: Option<ThinkingSpan> = None;
-            let mut reasoning_summary = String::new();
-            let mut round_assistant_text = String::new();
-            let mut saw_sse_event = false;
-
-            while let Some(event) = stream.next().await {
-                let event = match event {
-                    Ok(event) => event,
-                    Err(error) => {
-                        timing.failed(round, "sse_event", &error);
-                        provider_try!(self.fail_current_thinking_span(
-                            strand_id,
-                            &mut current_thinking_span,
-                            error.clone(),
-                        ));
-                        return Err(ProviderTurnFailure::new(error, &assistant_text));
-                    }
-                };
-                if let ProviderEvent::StreamTrace(trace) = event {
-                    timing.provider_trace(round, trace);
-                    continue;
-                }
-                if !saw_sse_event {
-                    saw_sse_event = true;
-                    timing.first_sse_event(round, provider_event_name(&event));
-                }
-                match event {
-                    ProviderEvent::StreamTrace(_) => {}
-                    ProviderEvent::ResponseStarted {
-                        provider_response_id,
-                    }
-                    | ProviderEvent::ResponseInProgress {
-                        provider_response_id,
-                    } => {
-                        active_provider_response_id = provider_response_id.clone();
-                        provider_try!(self.ensure_thinking_span(
-                            strand_id,
-                            turn_id,
-                            &mut current_thinking_span,
-                            &mut summary_thinking_span,
-                            provider_response_id.clone(),
-                        ));
-                        self.publish_turn_activity(
-                            strand_id,
-                            turn_id,
-                            TurnActivityState::Thinking,
-                            provider_response_id,
-                        );
-                    }
-                    ProviderEvent::ReasoningSummaryDelta(delta) => {
-                        reasoning_summary.push_str(&delta);
-                        provider_try!(self.update_thinking_span_summary(
-                            strand_id,
-                            &mut summary_thinking_span,
-                            reasoning_summary.clone(),
-                        ));
-                    }
-                    ProviderEvent::ReasoningSummaryDone(summary) => {
-                        reasoning_summary = summary;
-                        provider_try!(self.update_thinking_span_summary(
-                            strand_id,
-                            &mut summary_thinking_span,
-                            reasoning_summary.clone(),
-                        ));
-                    }
-                    ProviderEvent::TextDelta(delta) => {
-                        let update = TextDeltaUpdate {
-                            strand_id,
-                            turn_id,
-                            assistant_text: &mut assistant_text,
-                            round_assistant_text: &mut round_assistant_text,
-                            timing: &timing,
-                            round,
-                            current_thinking_span: &mut current_thinking_span,
-                            active_provider_response_id: &active_provider_response_id,
-                        };
-                        provider_try!(self.handle_text_delta(delta, update));
-                    }
-                    ProviderEvent::FunctionCallRequested(call) => {
-                        timing.function_call_requested(round, &call.name);
-                        provider_try!(self.complete_current_thinking_span(
-                            strand_id,
-                            &mut current_thinking_span,
-                            ThinkingCompletionReason::ToolCallRequested,
-                        ));
-                        self.publish_turn_activity(
-                            strand_id,
-                            turn_id,
-                            TurnActivityState::CallingTool,
-                            active_provider_response_id.clone(),
-                        );
-                        calls.push(call);
-                    }
-                    ProviderEvent::Completed {
-                        provider_response_id,
-                    } => {
-                        timing.completed(round);
-                        active_provider_response_id = provider_response_id.clone();
-                        provider_try!(self.complete_current_thinking_span(
-                            strand_id,
-                            &mut current_thinking_span,
-                            ThinkingCompletionReason::ProviderCompleted,
-                        ));
-                        completed_response_id = provider_response_id;
-                        break;
-                    }
-                    ProviderEvent::Failed(error) => {
-                        provider_try!(self.fail_current_thinking_span(
-                            strand_id,
-                            &mut current_thinking_span,
-                            error.clone(),
-                        ));
-                        return Err(ProviderTurnFailure::new(error, &assistant_text));
-                    }
-                }
-            }
-
-            // Persist this round's assistant text as a timeline item before its
-            // tool calls (or as the final item), so the replay timeline stays a
-            // faithful interleaved log (DC4b). The lumped strand-visible reply is
-            // stored once at turn end.
-            if !round_assistant_text.is_empty() {
-                last_soul_message = Some(provider_try!(
-                    self.store
-                        .append_soul_assistant_text(strand_id, &round_assistant_text)
-                ));
-            }
-
-            if calls.is_empty() {
-                break completed_response_id;
-            }
-
-            timing.tool_outputs_started(round, calls.len());
-            let call_count = calls.len();
-            for call in calls {
-                self.publish_turn_activity(
-                    strand_id,
-                    turn_id,
-                    TurnActivityState::RunningTool,
-                    active_provider_response_id.clone(),
-                );
-                provider_try!(self.handle_tool_call(strand_id, turn_id, call));
-            }
-            timing.tool_outputs_completed(round, call_count);
+        limit: i64,
+    ) -> Result<Option<Vec<RejectedDelivery>>, String> {
+        let Some(strand) = self.store.strand(strand_id)? else {
+            return Ok(None);
         };
-
-        Ok((last_soul_message, final_response_id))
+        self.store.rejected_deliveries(&strand.id, limit).map(Some)
     }
 
     pub(crate) fn publish_stream(&self, strand_id: &str, payload: SantiStreamPayload) {

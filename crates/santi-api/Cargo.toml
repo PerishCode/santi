@@ -26,5 +26,6 @@ tower-http.workspace = true
 utoipa.workspace = true
 
 [dev-dependencies]
+async-trait.workspace = true
 tempfile = "3.27.0"
 rusqlite.workspace = true

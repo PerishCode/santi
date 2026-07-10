@@ -21,6 +21,7 @@ async fn optional_params_sent() {
         reasoning_effort: Some("medium".to_string()),
         reasoning_summary: Some("auto".to_string()),
         max_output_tokens: Some(4096),
+        input_budget_bytes: None,
     })
     .await;
 
@@ -44,6 +45,7 @@ async fn optional_params_omitted() {
         reasoning_effort: None,
         reasoning_summary: None,
         max_output_tokens: None,
+        input_budget_bytes: None,
     })
     .await;
 
@@ -61,6 +63,7 @@ async fn plain_requests_unstored() {
         reasoning_effort: None,
         reasoning_summary: None,
         max_output_tokens: None,
+        input_budget_bytes: None,
     })
     .await;
 
@@ -148,6 +151,44 @@ async fn emits_stream_trace_events() {
                 && mapped_events == &vec!["response_started".to_string()]
         )
     }));
+}
+
+#[tokio::test]
+async fn poisoned_replay_regenerates() {
+    let item = serde_json::json!({
+        "type": "function_call",
+        "call_id": "call_1",
+        "name": "shell",
+        "arguments": "{}",
+        "id": "item_deadbeef"
+    });
+    let function_call = capture_replay(Some(item)).await;
+    match function_call.get("id").and_then(Value::as_str) {
+        None => {}
+        Some(id) => assert!(id.starts_with("fc"), "must not forward invalid id: {id}"),
+    }
+    assert_eq!(function_call["call_id"], "call_1");
+    assert_eq!(function_call["name"], "shell");
+}
+
+#[tokio::test]
+async fn valid_replay_survives() {
+    let item = serde_json::json!({
+        "type": "function_call",
+        "call_id": "call_1",
+        "name": "shell",
+        "arguments": "{}",
+        "id": "fc_ok"
+    });
+    let function_call = capture_replay(Some(item)).await;
+    assert_eq!(function_call["id"], "fc_ok");
+}
+
+#[tokio::test]
+async fn absent_replay_synthesizes() {
+    let function_call = capture_replay(None).await;
+    assert!(function_call.get("id").is_none());
+    assert_eq!(function_call["call_id"], "call_1");
 }
 
 async fn capture_body(mut config: OpenAIProviderConfig) -> Value {
@@ -242,6 +283,66 @@ async fn capture_body_without_tools(mut config: OpenAIProviderConfig) -> Value {
     serde_json::from_slice(&body).expect("json request")
 }
 
+async fn capture_replay(item: Option<Value>) -> Value {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+    let config = OpenAIProviderConfig {
+        api_key: "test-key".to_string(),
+        model: "gpt-5.5".to_string(),
+        base_url: format!("http://{}", listener.local_addr().expect("local address")),
+        reasoning_effort: None,
+        reasoning_summary: None,
+        max_output_tokens: None,
+        input_budget_bytes: None,
+    };
+    let (tx, rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept request");
+        tx.send(read_body(&mut stream)).expect("send request body");
+        let event = r#"data: {"type":"response.completed","response":{"id":"resp_test"}}"#;
+        let response_body = format!("{event}\n\n");
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\n\r\n{}",
+            response_body.len(),
+            response_body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("write response");
+    });
+
+    let provider = OpenAIProvider::new(config);
+    let mut stream = provider
+        .stream_response(ProviderRequest {
+            model: provider.metadata().model,
+            instructions: None,
+            input: vec![ProviderItem::FunctionCall {
+                call_id: "call_1".to_string(),
+                name: "shell".to_string(),
+                arguments_raw: "{}".to_string(),
+                item,
+                item_id: None,
+            }],
+            tools: None,
+            previous_response_id: None,
+        })
+        .await
+        .expect("stream response");
+    assert!(matches!(
+        next_business_event(&mut stream).await,
+        Some(ProviderEvent::Completed { .. })
+    ));
+
+    let body: Value = serde_json::from_slice(&rx.recv().expect("request body")).expect("json");
+    server.join().expect("server thread");
+    body["input"]
+        .as_array()
+        .expect("input array")
+        .iter()
+        .find(|item| item["type"] == "function_call")
+        .expect("function call")
+        .clone()
+}
+
 async fn capture_events(lines: Vec<&'static str>) -> Vec<ProviderEvent> {
     capture_all_events(lines)
         .await
@@ -259,6 +360,7 @@ async fn capture_all_events(lines: Vec<&'static str>) -> Vec<ProviderEvent> {
         reasoning_effort: None,
         reasoning_summary: None,
         max_output_tokens: None,
+        input_budget_bytes: None,
     };
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept request");

@@ -1,7 +1,4 @@
-use std::{
-    path::Path,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use rusqlite::{Connection, params};
 
@@ -12,6 +9,7 @@ use crate::{
 };
 
 mod assembly;
+pub(crate) mod budget;
 mod compact;
 mod db;
 mod fork;
@@ -19,17 +17,18 @@ mod im;
 mod rows;
 mod runtime;
 mod schema;
+mod turns;
 
 use db::*;
+pub use db::{read_schema_version, soul_memory_file};
 use rows::{actor_type_db, collect_rows, map_webhook_row, message_state_db};
-use schema::SCHEMA;
 
 /// The schema version this binary expects. On open, recognized runtime-schema
 /// migrations run in place; an unrecognized mismatch still falls back to the
 /// beta wipe + rebuild policy (see PHASE-07 crux #5 / PHASE-09 tier work).
 /// Public so ops paths (`santi doctor`) can compare a DB's `user_version` to it
 /// WITHOUT opening the store (which would migrate/wipe).
-pub const SCHEMA_VERSION: u32 = 22;
+pub const SCHEMA_VERSION: u32 = 23;
 /// The default soul's id. Public so offline ops (doctor/seed) can address it
 /// without a running service.
 pub const DEFAULT_SOUL_ID: &str = "soul_default";
@@ -62,164 +61,7 @@ pub struct StartedTurn {
     pub drained_messages: Vec<StrandMessage>,
 }
 
-/// Read a DB's `user_version` WITHOUT opening the store (which would migrate
-/// and, on a version mismatch, WIPE). `Ok(None)` when the file does not exist
-/// yet (a fresh instance). Read-only: safe to run against a live service (WAL)
-/// or a stopped one. Used by the offline pre-check `santi doctor`.
-pub fn read_schema_version(path: impl AsRef<Path>) -> Result<Option<u32>, String> {
-    if !path.as_ref().exists() {
-        return Ok(None);
-    }
-    let conn = Connection::open_with_flags(
-        path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-    )
-    .map_err(|error| error.to_string())?;
-    conn.query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
-        .map(Some)
-        .map_err(|error| error.to_string())
-}
-
-/// The default soul's memory file, given a runtime root:
-/// `<runtime_root>/souls/<soul_id>/memory/MEMORY.md`. A free function so offline
-/// ops can compute the path without a `SantiService`; the running service's
-/// `soul_memory_file` (service/tools.rs) delegates here to stay in lockstep.
-pub fn soul_memory_file(runtime_root: impl AsRef<Path>, soul_id: &str) -> std::path::PathBuf {
-    runtime_root
-        .as_ref()
-        .join("souls")
-        .join(soul_id)
-        .join("memory")
-        .join(crate::workspace_uri::MEMORY_FILE)
-}
-
-fn migrate_schema_21_to_22(conn: &Connection) -> Result<(), String> {
-    // v22 adds enqueue provenance to the inbox. These fields are nullable by
-    // design so existing v21 rows keep their original content/created_at
-    // semantics while new ingress can attach bounded source metadata.
-    add_column_if_missing(conn, "strand_inbox", "source_type", "TEXT")?;
-    add_column_if_missing(conn, "strand_inbox", "source_ref", "TEXT")?;
-    add_column_if_missing(conn, "strand_inbox", "source_metadata", "TEXT")?;
-    Ok(())
-}
-
-fn add_column_if_missing(
-    conn: &Connection,
-    table: &str,
-    column: &str,
-    definition: &str,
-) -> Result<(), String> {
-    let count: i64 = conn
-        .query_row(
-            &format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1"),
-            params![column],
-            |row| row.get(0),
-        )
-        .map_err(|error| error.to_string())?;
-    if count == 0 {
-        conn.execute(
-            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
-            [],
-        )
-        .map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
 impl SantiStore {
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, String> {
-        if let Some(parent) = path.as_ref().parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        let conn = Connection::open(path).map_err(|error| error.to_string())?;
-        // Wait (don't fail) when another connection holds the write lock — the
-        // offline `im reply` egress writes the same file while the server runs.
-        conn.busy_timeout(std::time::Duration::from_secs(5))
-            .map_err(|error| error.to_string())?;
-        let store = Self {
-            conn: Arc::new(Mutex::new(conn)),
-        };
-        store.migrate()?;
-        store.seed_defaults()?;
-        Ok(store)
-    }
-
-    fn migrate(&self) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
-        let version = conn
-            .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
-            .map_err(|error| error.to_string())?;
-        if version == 21 && SCHEMA_VERSION == 22 {
-            // v21 -> v22 is additive: PR #47 only adds bounded inbox-source
-            // provenance columns. Migrate it in place so live ingress topology
-            // (notably `webhooks` / the secretary subscription) cannot be
-            // silently severed by this schema bump.
-            migrate_schema_21_to_22(&conn)?;
-        } else if version != SCHEMA_VERSION {
-            // Fallback beta policy for unrecognized schema jumps: drop the
-            // current runtime workspace and rebuild it. This must keep shrinking
-            // as more runtime topology/evidence graduates into migrated tiers.
-            conn.execute_batch(
-                r#"
-                DROP TABLE IF EXISTS provider_replay_material;
-                DROP TABLE IF EXISTS response_stream_deltas;
-                DROP TABLE IF EXISTS response_runs;
-                DROP TABLE IF EXISTS message_text_contents;
-                DROP TABLE IF EXISTS conversations;
-                DROP TABLE IF EXISTS r_strand_entries;
-                DROP TABLE IF EXISTS strand_inbox;
-                DROP TABLE IF EXISTS im_inbox;
-                DROP TABLE IF EXISTS im_participants;
-                DROP TABLE IF EXISTS compacts;
-                DROP TABLE IF EXISTS thinking_spans;
-                DROP TABLE IF EXISTS tool_results;
-                DROP TABLE IF EXISTS tool_calls;
-                DROP TABLE IF EXISTS turns;
-                DROP TABLE IF EXISTS strands;
-                DROP TABLE IF EXISTS strand_effects;
-                DROP TABLE IF EXISTS message_events;
-                DROP TABLE IF EXISTS messages;
-                DROP TABLE IF EXISTS webhooks;
-                DROP TABLE IF EXISTS soul_profiles;
-                DROP TABLE IF EXISTS souls;
-                -- Historical (pre-strand-rename) table names, so a clean wipe
-                -- reaches a `session`-era DB (e.g. the live box before this
-                -- migration). Harmless no-ops on a fresh DB.
-                DROP TABLE IF EXISTS soul_sessions;
-                DROP TABLE IF EXISTS sessions;
-                DROP TABLE IF EXISTS session_profiles;
-                DROP TABLE IF EXISTS r_session_messages;
-                DROP TABLE IF EXISTS session_effects;
-                DROP TABLE IF EXISTS accounts;
-                "#,
-            )
-            .map_err(|error| error.to_string())?;
-        }
-        conn.execute_batch(SCHEMA)
-            .map_err(|error| error.to_string())?;
-        conn.pragma_update(None, "user_version", SCHEMA_VERSION)
-            .map_err(|error| error.to_string())?;
-        Ok(())
-    }
-
-    fn seed_defaults(&self) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
-        let now = timestamp_now();
-        // The default soul is id-only; its identity (the first soul = Liberte,
-        // the secretary) lives entirely in its memory FILE, which survives a DB
-        // wipe. Seeding the row is just "this soul exists". Seeding the initial
-        // memory of a fresh instance is config-exposed and lands in STEP 6.
-        conn.execute(
-            r#"
-            INSERT OR IGNORE INTO souls (id, created_at, updated_at)
-            VALUES (?1, ?2, ?2)
-            "#,
-            params![DEFAULT_SOUL_ID, now],
-        )
-        .map_err(|error| error.to_string())?;
-        Ok(())
-    }
-
     pub fn default_soul_id(&self) -> &'static str {
         DEFAULT_SOUL_ID
     }
@@ -289,6 +131,8 @@ impl SantiStore {
             tool_results: soul_tool_results(&conn, &strand.id)?,
             compacts: compacts_for_strand(&conn, &strand.id)?,
             effects: strand_effects(&conn, strand_id)?,
+            blocks: budget::strand_blocks_for_strand(&conn, strand_id)?,
+            rejected_deliveries: budget::rejected_deliveries_for_strand(&conn, strand_id, 100)?,
             strand,
         }))
     }
@@ -377,11 +221,7 @@ impl SantiStore {
     /// Find the strand anchored to an opaque external label (scoped to `soul_id`),
     /// or create one and bind it. The label is opaque to core (its meaning lives
     /// in the adaptor); uniqueness is per-soul, enforced by the partial index.
-    pub fn find_or_create_strand_by_label(
-        &self,
-        soul_id: &str,
-        label: &str,
-    ) -> Result<Strand, String> {
+    pub fn find_labeled_strand(&self, soul_id: &str, label: &str) -> Result<Strand, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         if soul_by_id(&tx, soul_id)?.is_none() {
@@ -417,9 +257,7 @@ impl SantiStore {
             StrandSelector::ById(strand_id) => self
                 .strand(strand_id)?
                 .ok_or_else(|| "strand not found".to_string()),
-            StrandSelector::ByLabel { soul_id, label } => {
-                self.find_or_create_strand_by_label(soul_id, label)
-            }
+            StrandSelector::ByLabel { soul_id, label } => self.find_labeled_strand(soul_id, label),
         }
     }
 
@@ -444,56 +282,7 @@ impl SantiStore {
         content: MessageContent,
         source: Option<InboxSource>,
     ) -> Result<IngestOutcome, String> {
-        let conn = self.conn.lock().unwrap();
-        let pending: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM strand_inbox WHERE strand_id = ?1",
-                params![strand_id],
-                |row| row.get(0),
-            )
-            .map_err(|error| error.to_string())?;
-        if pending >= STRAND_INBOX_GATE {
-            return Ok(IngestOutcome::Rejected {
-                reason: format!(
-                    "strand inbox is full ({pending} pending, gate {STRAND_INBOX_GATE})"
-                ),
-            });
-        }
-        let inbox_id = prefixed_id("inbox");
-        let now = timestamp_now();
-        let content_json = serde_json::to_string(&content).map_err(|error| error.to_string())?;
-        let source_type = source.as_ref().map(|source| source.source_type.as_str());
-        let source_ref = source
-            .as_ref()
-            .and_then(|source| source.source_ref.as_deref());
-        let source_metadata = source
-            .as_ref()
-            .and_then(|source| source.metadata.as_ref())
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(|error| error.to_string())?;
-        conn.execute(
-            r#"
-            INSERT INTO strand_inbox (
-              id, strand_id, message_kind, content, source_type, source_ref, source_metadata, created_at
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-            "#,
-            params![
-                inbox_id,
-                strand_id,
-                rows::message_kind_db(&message_kind),
-                content_json,
-                source_type,
-                source_ref,
-                source_metadata,
-                now
-            ],
-        )
-        .map_err(|error| error.to_string())?;
-        Ok(IngestOutcome::Accepted {
-            strand_id: strand_id.to_string(),
-        })
+        self.enqueue_inbox_with_context(strand_id, message_kind, content, source, None)
     }
 
     /// Register a webhook subscription (API-managed). The secret itself is never

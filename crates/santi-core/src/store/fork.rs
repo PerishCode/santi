@@ -97,8 +97,10 @@ impl SantiStore {
             if start_seq <= fork_point && end_seq <= fork_point {
                 tx.execute(
                     r#"
-                    INSERT INTO compacts (id, strand_id, summary, start_message_id, end_message_id)
-                    VALUES (?1, ?2, ?3, ?4, ?5)
+                    INSERT INTO compacts (
+                      id, strand_id, summary, start_message_id, end_message_id, created_at, metadata
+                    )
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                     "#,
                     params![
                         prefixed_id("cmp"),
@@ -106,6 +108,8 @@ impl SantiStore {
                         compact.summary,
                         compact.start_message_id,
                         compact.end_message_id,
+                        compact.created_at,
+                        compact.metadata.map(|value| value.to_string()),
                     ],
                 )
                 .map_err(|error| error.to_string())?;

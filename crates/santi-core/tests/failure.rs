@@ -30,6 +30,7 @@ impl ProviderClient for FailureProvider {
         ProviderMetadata {
             provider: Arc::from("fake-provider"),
             model: "fake-model".to_string(),
+            context_budget: None,
         }
     }
 

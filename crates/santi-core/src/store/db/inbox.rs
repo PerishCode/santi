@@ -1,0 +1,140 @@
+use rusqlite::{Connection, params};
+use serde_json::{Value, json};
+
+use super::{append_entry_in_tx, message_by_id};
+use crate::store::SANTI_SYSTEM_ACTOR_ID;
+use crate::{StrandMessage, StrandTargetType, prefixed_id, timestamp_now};
+
+/// Drain a strand's entire inbox into its timeline: each entry becomes a
+/// `messages` row (actor System, `is_request=1`, state fixed) referenced into
+/// `r_strand_entries` in arrival order, then the inbox row is removed. This is
+/// the ONE place inbound content is committed — ingest itself only durably
+/// enqueues. Returns the drained messages (empty ⟺ nothing was pending).
+pub(in crate::store) fn drain_inbox_in_tx(
+    conn: &Connection,
+    strand_id: &str,
+    committing_turn_id: &str,
+) -> Result<Vec<StrandMessage>, String> {
+    let mut stmt = conn
+        .prepare(
+            r#"
+            SELECT id, message_kind, content, source_type, source_ref, source_metadata, created_at
+            FROM strand_inbox
+            WHERE strand_id = ?1
+            ORDER BY rowid ASC
+            "#,
+        )
+        .map_err(|error| error.to_string())?;
+    let pending = stmt
+        .query_map(params![strand_id], |row| {
+            Ok(PendingInboxEntry {
+                id: row.get(0)?,
+                message_kind: row.get(1)?,
+                content: row.get(2)?,
+                source_type: row.get(3)?,
+                source_ref: row.get(4)?,
+                source_metadata: row.get(5)?,
+                enqueued_at: row.get(6)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    drop(stmt);
+
+    let now = timestamp_now();
+    let mut drained = Vec::with_capacity(pending.len());
+    for pending_entry in pending {
+        let message_id = prefixed_id("msg");
+        conn.execute(
+            r#"
+            INSERT INTO messages (
+              id, actor_type, actor_id, message_kind, content, state, version, is_request,
+              deleted_at, created_at, updated_at
+            )
+            VALUES (?1, 'system', ?2, ?3, ?4, 'fixed', 1, 1, NULL, ?5, ?5)
+            "#,
+            params![
+                message_id,
+                SANTI_SYSTEM_ACTOR_ID,
+                pending_entry.message_kind.as_str(),
+                pending_entry.content.as_str(),
+                now
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        let relation = append_entry_in_tx(conn, strand_id, StrandTargetType::Message, &message_id)?;
+        insert_drain_event(
+            conn,
+            &pending_entry,
+            &message_id,
+            relation.strand_seq,
+            committing_turn_id,
+            &now,
+        )?;
+        conn.execute(
+            "DELETE FROM strand_inbox WHERE id = ?1",
+            params![pending_entry.id],
+        )
+        .map_err(|error| error.to_string())?;
+        drained.push(
+            message_by_id(conn, &message_id)?
+                .ok_or_else(|| "drained message missing".to_string())?,
+        );
+    }
+    Ok(drained)
+}
+
+struct PendingInboxEntry {
+    id: String,
+    message_kind: String,
+    content: String,
+    source_type: Option<String>,
+    source_ref: Option<String>,
+    source_metadata: Option<String>,
+    enqueued_at: String,
+}
+
+fn insert_drain_event(
+    conn: &Connection,
+    pending: &PendingInboxEntry,
+    message_id: &str,
+    strand_seq: i64,
+    turn_id: &str,
+    drained_at: &str,
+) -> Result<(), String> {
+    let source_metadata = pending.source_metadata.as_deref().map(|raw| {
+        serde_json::from_str::<Value>(raw).unwrap_or_else(|_| json!({ "invalid_json": true }))
+    });
+    let payload = json!({
+        "kind": "inbox_drain",
+        "inbox_id": pending.id.as_str(),
+        "enqueued_at": pending.enqueued_at.as_str(),
+        "drained_at": drained_at,
+        "committing_turn_id": turn_id,
+        "message_id": message_id,
+        "strand_seq": strand_seq,
+        "source": {
+            "type": pending.source_type.as_deref(),
+            "ref": pending.source_ref.as_deref(),
+            "metadata": source_metadata,
+        }
+    });
+    conn.execute(
+        r#"
+        INSERT INTO message_events (
+          id, message_id, action, actor_type, actor_id, base_version, payload, created_at
+        )
+        VALUES (?1, ?2, 'insert', 'system', ?3, 1, ?4, ?5)
+        "#,
+        params![
+            prefixed_id("mev"),
+            message_id,
+            SANTI_SYSTEM_ACTOR_ID,
+            payload.to_string(),
+            drained_at
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}

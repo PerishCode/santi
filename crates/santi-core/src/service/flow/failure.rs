@@ -1,11 +1,12 @@
 use crate::{ActorType, MessageContent, MessageIntake, MessageState, SantiStreamPayload};
 
-use super::SantiService;
+use super::super::SantiService;
 
 #[derive(Debug)]
 pub(super) struct ProviderTurnFailure {
     pub(super) error: String,
     pub(super) partial_assistant_text: String,
+    pub(super) record_failure_message: bool,
 }
 
 impl ProviderTurnFailure {
@@ -13,6 +14,15 @@ impl ProviderTurnFailure {
         Self {
             error,
             partial_assistant_text: partial_assistant_text.to_string(),
+            record_failure_message: true,
+        }
+    }
+
+    pub(super) fn context_budget(error: String) -> Self {
+        Self {
+            error,
+            partial_assistant_text: String::new(),
+            record_failure_message: false,
         }
     }
 }
@@ -24,6 +34,7 @@ impl SantiService {
         turn_id: &str,
         error: String,
         partial_assistant_text: String,
+        record_failure_message: bool,
     ) {
         let mut last_seen_strand_seq = None;
         if let Ok(turn) = self.store.fail_turn(turn_id, &error) {
@@ -45,11 +56,13 @@ impl SantiService {
                     },
                 );
             }
-            if let Ok(message) = self.store.append_santi_system_message(
-                &turn.strand_id,
-                failed_system_message(turn_id),
-                MessageIntake::Record,
-            ) {
+            if record_failure_message
+                && let Ok(message) = self.store.append_santi_system_message(
+                    &turn.strand_id,
+                    failed_system_message(turn_id),
+                    MessageIntake::Record,
+                )
+            {
                 last_seen_strand_seq = Some(message.strand_message.relation.strand_seq);
                 self.publish_stream(
                     strand_id,

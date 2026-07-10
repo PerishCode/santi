@@ -6,6 +6,12 @@ pub type Timestamp = String;
 
 mod message;
 pub use message::*;
+mod budget;
+pub use budget::*;
+mod compact;
+pub use compact::*;
+mod stream;
+pub use stream::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct HealthResponse {
@@ -164,58 +170,6 @@ pub struct ThinkingSpan {
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
     pub finished_at: Option<Timestamp>,
-}
-
-/// A compact is a pure projection overlay over a strand's spine. It
-/// self-describes its coverage by message-id boundaries (fork-safe) and carries
-/// the soul-authored summary. The spine is never annotated. Provenance lives in
-/// the audit log (the compact-exec tool_call), not here.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct Compact {
-    pub id: String,
-    pub strand_id: String,
-    pub summary: String,
-    pub start_message_id: String,
-    pub end_message_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct CompactExecRequest {
-    /// Range boundaries — must be FIXED user/assistant messages in this
-    /// strand's spine. Everything between (messages/tools/reasoning) collapses.
-    pub from_message_id: String,
-    pub to_message_id: String,
-    pub summary: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct CompactExecResponse {
-    pub compact_id: String,
-    pub start_message_id: String,
-    pub end_message_id: String,
-    /// Compacts fully covered by this range, dropped and replaced by the new one.
-    pub absorbed: Vec<String>,
-    /// Spine entries the new compact collapses out of the assembled view.
-    pub collapsed_count: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct CompactQueryEntry {
-    pub strand_seq: i64,
-    pub target_type: StrandTargetType,
-    pub target_id: String,
-    pub text: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct CompactQueryResponse {
-    pub compact_id: String,
-    pub start_message_id: String,
-    pub end_message_id: String,
-    pub total: i64,
-    pub page_index: i64,
-    pub page_size: i64,
-    pub entries: Vec<CompactQueryEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -432,94 +386,6 @@ pub struct ImInboxEntry {
     pub from_ref: Option<String>,
     pub content: String,
     pub created_at: Timestamp,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SantiStreamEvent {
-    pub event_id: String,
-    pub strand_id: String,
-    pub created_at: Timestamp,
-    pub payload: SantiStreamPayload,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TurnActivityState {
-    Requesting,
-    Thinking,
-    Generating,
-    CallingTool,
-    RunningTool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct TurnActivity {
-    pub turn_id: String,
-    pub state: TurnActivityState,
-    pub provider_response_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum SantiStreamPayload {
-    StreamOpen,
-    MessageCreated {
-        message: StrandMessage,
-    },
-    MessageDelta {
-        message_id: String,
-        turn_id: String,
-        role: ActorType,
-        text: String,
-    },
-    MessageCompleted {
-        turn_id: String,
-        message: StrandMessage,
-    },
-    ToolCallCreated {
-        tool_call: ToolCall,
-    },
-    ToolResultCreated {
-        tool_result: ToolResult,
-    },
-    ThinkingCreated {
-        thinking: ThinkingSpan,
-    },
-    ThinkingUpdated {
-        thinking: ThinkingSpan,
-    },
-    ThinkingCompleted {
-        thinking: ThinkingSpan,
-    },
-    MaterialUpdated {
-        material: MaterialUpdated,
-    },
-    TurnStarted {
-        turn: Turn,
-    },
-    TurnActivity {
-        activity: TurnActivity,
-    },
-    TurnCompleted {
-        turn_id: String,
-    },
-    TurnFailed {
-        turn_id: String,
-        error: String,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct StrandRuntimeSnapshot {
-    pub strand: Strand,
-    pub messages: Vec<StrandMessage>,
-    pub message_events: Vec<MessageEvent>,
-    pub turns: Vec<Turn>,
-    pub thinking_spans: Vec<ThinkingSpan>,
-    pub tool_calls: Vec<ToolCall>,
-    pub tool_results: Vec<ToolResult>,
-    pub compacts: Vec<Compact>,
-    pub effects: Vec<StrandEffect>,
 }
 
 pub fn timestamp_now() -> Timestamp {

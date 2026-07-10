@@ -7,6 +7,7 @@ model = ""
 base_url = "https://api.openai.com/v1"
 reasoning_effort = ""
 reasoning_summary = ""
+input_budget_bytes = 120000
 
 [providers.deepseek]
 kind = "chat_completions"
@@ -15,6 +16,7 @@ model = "deepseek-v4-pro"
 base_url = "https://api.deepseek.com"
 thinking = ""
 reasoning_effort = ""
+input_budget_bytes = 120000
 
 [providers.siliconflow]
 kind = "chat_completions"
@@ -23,3 +25,4 @@ model = "zai-org/GLM-5.2"
 base_url = "https://api.siliconflow.cn/v1"
 thinking = ""
 reasoning_effort = ""
+input_budget_bytes = 120000

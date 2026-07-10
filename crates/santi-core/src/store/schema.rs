@@ -156,9 +156,59 @@ CREATE TABLE IF NOT EXISTS compacts (
     strand_id TEXT NOT NULL,
     summary TEXT NOT NULL,
     start_message_id TEXT NOT NULL,
-    end_message_id TEXT NOT NULL
+    end_message_id TEXT NOT NULL,
+    created_at TEXT,
+    metadata TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_compacts_strand ON compacts (strand_id);
+
+CREATE TABLE IF NOT EXISTS strand_blocks (
+    id TEXT PRIMARY KEY,
+    strand_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('context_over_budget')),
+    status TEXT NOT NULL CHECK (status IN ('active', 'cleared')),
+    reason_code TEXT NOT NULL,
+    reason_text TEXT NOT NULL,
+    provider TEXT,
+    model TEXT,
+    budget_source TEXT,
+    budget_bytes INTEGER,
+    input_items INTEGER,
+    input_bytes INTEGER,
+    instructions_bytes INTEGER,
+    tools_bytes INTEGER,
+    total_bytes INTEGER,
+    observed_turn_id TEXT,
+    observed_at_seq INTEGER,
+    metadata TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    cleared_at TEXT,
+    cleared_by TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_strand_blocks_active_context
+ON strand_blocks(strand_id, kind)
+WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_strand_blocks_strand_created_at
+ON strand_blocks(strand_id, created_at);
+
+CREATE TABLE IF NOT EXISTS rejected_deliveries (
+    id TEXT PRIMARY KEY,
+    strand_id TEXT,
+    block_id TEXT,
+    source_type TEXT,
+    source_ref TEXT,
+    source_metadata TEXT,
+    message_kind TEXT,
+    content_sha256 TEXT NOT NULL,
+    content_bytes INTEGER NOT NULL,
+    content_excerpt TEXT NOT NULL,
+    reason_code TEXT NOT NULL,
+    reason_text TEXT NOT NULL,
+    received_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rejected_deliveries_strand_time
+ON rejected_deliveries(strand_id, received_at);
 
 CREATE TABLE IF NOT EXISTS strand_inbox (
     id TEXT PRIMARY KEY,

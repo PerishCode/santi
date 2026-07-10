@@ -20,6 +20,10 @@ const POLL_PENDING_MS = 10_000;
 const POLL_REGISTER_MS = 5_000;
 
 export async function land(argv: string[]): Promise<number> {
+  if (argv.includes("-h") || argv.includes("--help")) {
+    usage();
+    return 0;
+  }
   const { title, body } = parseArgs(argv);
   if (!title) {
     return fail("title is required — usage: runseal :land <title> [--body <text>]");
@@ -94,6 +98,14 @@ export async function land(argv: string[]): Promise<number> {
     .trim();
   console.log(`landed PR #${pr} → ${BASE} ${head}`);
   return 0;
+}
+
+function usage(): void {
+  console.log("Usage: runseal :land <title> [--body <text>]");
+  console.log("");
+  console.log("Push the current non-main branch, reuse or create its PR, wait for required");
+  console.log("checks, squash-merge it, delete the remote branch, and fast-forward local main.");
+  console.log("The working tree must already be clean; this wrapper never commits or rebases.");
 }
 
 async function openPr(branch: string, repo: string): Promise<number | null> {

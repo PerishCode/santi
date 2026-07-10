@@ -79,6 +79,7 @@ async function serviceHealth(tmp: string, bin: string): Promise<void> {
       'api_key = "smoke"',
       'model = "smoke"',
       'base_url = "http://127.0.0.1:1"',
+      "input_budget_bytes = 120000",
       "",
     ].join("\n"),
   );
@@ -96,8 +97,8 @@ async function serviceHealth(tmp: string, bin: string): Promise<void> {
       SANTI_EXECUTION_ROOT: join(tmp, "execution"),
     },
     stdin: "null",
-    stdout: "piped",
-    stderr: "piped",
+    stdout: "inherit",
+    stderr: "inherit",
   }).spawn();
 
   try {

@@ -15,7 +15,16 @@ interface Step {
   args: string[];
 }
 
-export async function guard(): Promise<number> {
+export async function guard(argv: string[]): Promise<number> {
+  if (argv.includes("-h") || argv.includes("--help")) {
+    usage();
+    return 0;
+  }
+  if (argv.length > 0) {
+    console.error(`:guard: unexpected argument: ${argv[0]}`);
+    usage();
+    return 2;
+  }
   const repo = repoRoot();
   const wrappers = wrapperFiles(repo);
   const config = ".runseal/deno.json";
@@ -52,6 +61,12 @@ export async function guard(): Promise<number> {
   }
   console.log("guard: ok");
   return 0;
+}
+
+function usage(): void {
+  console.log("Usage: runseal :guard");
+  console.log("");
+  console.log("Run the local flavor, Rust, and runseal validation suite used before landing.");
 }
 
 /** Discover wrapper entrypoints so `deno check` covers them (and their libs). */

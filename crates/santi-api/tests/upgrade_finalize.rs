@@ -7,7 +7,7 @@ use santi_api::{
         finalize_at, seed_come_look_at,
     },
 };
-use santi_core::{ErrorScope, IncidentStatus, MessageContent, MessageKind, SantiStore};
+use santi_core::{ErrorScope, IncidentStatus, SantiStore};
 
 #[test]
 fn stable_label_seeds() {
@@ -107,19 +107,25 @@ fn full_handover_is_idempotent() {
     let seeded = seed_come_look_at(&paths, santi_core::DEFAULT_SOUL_ID, None, "existing wake")
         .expect("initial seed");
     let store = SantiStore::open(&paths.database_path).expect("open store");
-    for index in 1..500 {
-        let outcome = store
-            .enqueue_inbox(
-                &seeded.strand_id,
-                MessageKind::SantiSystem,
-                MessageContent::text(format!("queued {index}")),
-            )
-            .expect("fill inbox");
-        assert!(matches!(
-            outcome,
-            santi_core::IngestOutcome::Accepted { .. }
-        ));
-    }
+    let conn = rusqlite::Connection::open(&paths.database_path).expect("open sqlite");
+    conn.execute(
+        r#"
+        WITH RECURSIVE seq(n) AS (
+          VALUES(1)
+          UNION ALL
+          SELECT n + 1 FROM seq WHERE n < 499
+        )
+        INSERT INTO strand_inbox (
+          id, strand_id, message_kind, content,
+          source_type, source_ref, source_metadata, created_at
+        )
+        SELECT 'inbox_fixture_' || n, ?1, 'santi_system', '{}',
+               NULL, NULL, NULL, 'fixture'
+        FROM seq
+        "#,
+        [&seeded.strand_id],
+    )
+    .expect("fill inbox fixture");
 
     let request = request(UpgradeTerminal::RolledBack {
         failure: UpgradeFailure {
@@ -144,7 +150,6 @@ fn full_handover_is_idempotent() {
             .iter()
             .all(|incident| incident.occurrence_count == 2 && incident.revision == 1)
     );
-    let conn = rusqlite::Connection::open(&paths.database_path).expect("open sqlite");
     let inbox_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM strand_inbox", [], |row| row.get(0))
         .expect("inbox count");

@@ -47,10 +47,18 @@ pub enum RollbackCause {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "outcome")]
 pub enum Outcome {
-    /// The new version installed and came up; it is the final version.
-    Upgraded,
+    /// The new version installed and came up; it is the final version. A
+    /// degraded runtime is still live and must not be rolled back implicitly.
+    Upgraded { readiness: UpgradeReadiness },
     /// A crisp pre-commit failure → restored to the previous version.
     RolledBack(RollbackCause),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpgradeReadiness {
+    Ready,
+    Degraded,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,7 +108,7 @@ pub struct UpgradeFailure {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "terminal")]
 pub enum UpgradeTerminal {
-    Upgraded,
+    Upgraded { readiness: UpgradeReadiness },
     RolledBack { failure: UpgradeFailure },
     Failed { failure: UpgradeFailure },
 }
@@ -174,8 +182,9 @@ pub trait UpgradeHost {
     fn install(&mut self, deb: &str) -> Result<(), String>;
     /// Start the newly-installed version and probe whether it CAME UP (the crisp
     /// soul-deep-adjacent gate: process up + schema migrated + memory readable),
-    /// then stop it again so the final start is uniform. `Ok(true)` ⟺ healthy.
-    fn trial_probe(&mut self) -> Result<bool, String>;
+    /// then stop it again so the final start is uniform. Degraded means the
+    /// process is live but canonical incidents still require intervention.
+    fn trial_probe(&mut self) -> Result<UpgradeReadiness, String>;
     /// Restore the snapshot + reinstall the previous version (the final = OLD).
     fn rollback(&mut self) -> Result<(), String>;
     /// Ask the binary currently installed on disk (the FINAL version) to record
@@ -236,12 +245,9 @@ pub(super) fn run_upgrade_attempt<H: UpgradeHost>(
     let outcome = match host.install(deb) {
         Err(error) => Outcome::RolledBack(RollbackCause::InstallFailed(error)),
         Ok(()) => match host.trial_probe() {
-            Ok(true) => Outcome::Upgraded,
-            // A failed probe OR a probe that could not run → conservative
-            // rollback (we could not confirm the new version is healthy).
-            Ok(false) => Outcome::RolledBack(RollbackCause::DidNotComeUp(
-                "health probe returned unhealthy".to_string(),
-            )),
+            Ok(readiness) => Outcome::Upgraded { readiness },
+            // A probe that could not prove the process came up routes to a
+            // conservative rollback. Explicit degraded readiness does not.
             Err(error) => Outcome::RolledBack(RollbackCause::DidNotComeUp(error)),
         },
     };
@@ -315,7 +321,9 @@ pub fn compose_record(attempt_id: &str) -> String {
 
 fn terminal_from_outcome(outcome: &Outcome) -> UpgradeTerminal {
     match outcome {
-        Outcome::Upgraded => UpgradeTerminal::Upgraded,
+        Outcome::Upgraded { readiness } => UpgradeTerminal::Upgraded {
+            readiness: *readiness,
+        },
         Outcome::RolledBack(cause) => UpgradeTerminal::RolledBack {
             failure: match cause {
                 RollbackCause::InstallFailed(detail) => UpgradeFailure {

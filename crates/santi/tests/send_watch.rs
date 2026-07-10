@@ -15,6 +15,7 @@ enum FakeEventsResponse {
     CompletesSeedTurn,
     ClosesImmediately,
     Status500,
+    AcceptedWarning,
 }
 
 struct CountingHttpServer {
@@ -63,13 +64,12 @@ async fn handle_request(
     };
     if method == "POST" && path == "/api/v1/strands/ss_cli/send" {
         post_send_count.fetch_add(1, Ordering::SeqCst);
-        write_response(
-            &mut stream,
-            "200 OK",
-            "application/json",
-            "{\"turn\":{\"id\":\"turn_seed\"}}",
-        )
-        .await;
+        let body = if matches!(&events_response, FakeEventsResponse::AcceptedWarning) {
+            r#"{"receipt":{"warning":{"code":"runtime.strand.drive_failed","context":{"recovery":{"command":"santi strand drive ss_cli"}}}}}"#
+        } else {
+            r#"{"turn":{"id":"turn_seed"}}"#
+        };
+        write_response(&mut stream, "200 OK", "application/json", body).await;
     } else if method == "GET" && path == "/api/v1/strands/ss_cli/events" {
         get_events_count.fetch_add(1, Ordering::SeqCst);
         match events_response {
@@ -94,6 +94,7 @@ async fn handle_request(
                 )
                 .await;
             }
+            FakeEventsResponse::AcceptedWarning => unreachable!("warning stops before watch"),
         }
     } else {
         write_response(&mut stream, "404 Not Found", "text/plain", "not found").await;
@@ -190,4 +191,26 @@ async fn posts_once_watch_error() {
     assert!(error.to_string().contains("request failed with status"));
     assert_eq!(server.post_send_count.load(Ordering::SeqCst), 1);
     assert_eq!(server.get_events_count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn accepted_warning_does_not_watch_or_resend() {
+    let server = spawn_server(FakeEventsResponse::AcceptedWarning).await;
+    let client = reqwest::Client::new();
+
+    let error = send(
+        &client,
+        &server.base_url,
+        "ss_cli",
+        serde_json::json!({"content":[{"type":"text","text":"hello"}]}),
+        true,
+        WatchFormat::Raw,
+    )
+    .await
+    .expect_err("accepted driver warning must require explicit recovery");
+
+    assert!(error.to_string().contains("do not resend"));
+    assert!(error.to_string().contains("santi strand drive ss_cli"));
+    assert_eq!(server.post_send_count.load(Ordering::SeqCst), 1);
+    assert_eq!(server.get_events_count.load(Ordering::SeqCst), 0);
 }

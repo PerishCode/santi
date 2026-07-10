@@ -85,11 +85,11 @@ async fn aggregates_provider_failures() {
     let strand = service.create_strand().expect("create strand").strand;
     let first = send_text(&service, &strand.id, "trigger failure").await;
 
-    let runtime = wait_for_turn(&service, &strand.id, &first.turn.id, TurnStatus::Failed).await;
+    let runtime = wait_for_turn(&service, &strand.id, &turn(&first).id, TurnStatus::Failed).await;
     let failed_turn = runtime
         .turns
         .iter()
-        .find(|turn| turn.id == first.turn.id)
+        .find(|candidate| candidate.id == turn(&first).id)
         .expect("failed turn");
     assert_eq!(failed_turn.error_text.as_deref(), Some(raw_error.as_str()));
     assert_no_failure_projection(&runtime);
@@ -103,7 +103,7 @@ async fn aggregates_provider_failures() {
     assert_eq!(incident.revision, 1);
     assert_eq!(incident.source.component, "santi-provider");
     assert_eq!(incident.source.operation, "turn.request");
-    assert_eq!(incident.context["turn_id"], first.turn.id);
+    assert_eq!(incident.context["turn_id"], turn(&first).id);
     assert_eq!(incident.context["provider"], "fake-provider");
     assert_eq!(incident.context["model"], "fake-model");
     assert_eq!(incident.context["stage"], "request");
@@ -112,7 +112,7 @@ async fn aggregates_provider_failures() {
 
     let failed_event = std::iter::from_fn(|| events.try_recv().ok())
         .find_map(|event| match event.payload {
-            SantiStreamPayload::TurnFailed { turn_id, error } if turn_id == first.turn.id => {
+            SantiStreamPayload::TurnFailed { turn_id, error } if turn_id == turn(&first).id => {
                 Some(error)
             }
             _ => None,
@@ -126,13 +126,13 @@ async fn aggregates_provider_failures() {
     assert_eq!(failed_event.source.operation, "turn.request");
 
     let retry = send_text(&service, &strand.id, "continue after failure").await;
-    let runtime = wait_for_turn(&service, &strand.id, &retry.turn.id, TurnStatus::Failed).await;
+    let runtime = wait_for_turn(&service, &strand.id, &turn(&retry).id, TurnStatus::Failed).await;
     assert_no_failure_projection(&runtime);
     assert_eq!(runtime.errors.len(), 1);
     assert_eq!(runtime.errors[0].id, incident.id);
     assert_eq!(runtime.errors[0].occurrence_count, 2);
     assert_eq!(runtime.errors[0].revision, 1);
-    assert_eq!(runtime.errors[0].latest_context["turn_id"], retry.turn.id);
+    assert_eq!(runtime.errors[0].latest_context["turn_id"], turn(&retry).id);
     assert_eq!(
         transition_count(&temp),
         1,
@@ -159,7 +159,7 @@ async fn preserves_aborted_output() {
     let strand = service.create_strand().expect("create strand").strand;
     let response = send_text(&service, &strand.id, "trigger stream failure").await;
 
-    let runtime = wait_for_aborted_output(&service, &strand.id, &response.turn.id).await;
+    let runtime = wait_for_aborted_output(&service, &strand.id, &turn(&response).id).await;
     let partial_message = runtime
         .messages
         .iter()
@@ -175,7 +175,7 @@ async fn preserves_aborted_output() {
     assert_eq!(runtime.errors[0].context["stage"], "stream");
 
     let retry = send_text(&service, &strand.id, "continue with preserved partial").await;
-    wait_for_turn(&service, &strand.id, &retry.turn.id, TurnStatus::Failed).await;
+    wait_for_turn(&service, &strand.id, &turn(&retry).id, TurnStatus::Failed).await;
 
     let requests = provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
@@ -200,7 +200,13 @@ async fn classifies_response_failure() {
     let strand = service.create_strand().expect("create strand").strand;
     let response = send_text(&service, &strand.id, "trigger response failure").await;
 
-    let runtime = wait_for_turn(&service, &strand.id, &response.turn.id, TurnStatus::Failed).await;
+    let runtime = wait_for_turn(
+        &service,
+        &strand.id,
+        &turn(&response).id,
+        TurnStatus::Failed,
+    )
+    .await;
     assert_no_failure_projection(&runtime);
     assert_eq!(runtime.errors.len(), 1);
     assert_eq!(runtime.errors[0].source.operation, "turn.response");
@@ -218,14 +224,14 @@ async fn success_resolves_incident() {
     let service = open_service(&temp, provider.clone());
     let strand = service.create_strand().expect("create strand").strand;
     let failed = send_text(&service, &strand.id, "first attempt").await;
-    let before = wait_for_turn(&service, &strand.id, &failed.turn.id, TurnStatus::Failed).await;
+    let before = wait_for_turn(&service, &strand.id, &turn(&failed).id, TurnStatus::Failed).await;
     let incident_id = before.errors[0].id.clone();
 
     let recovered = send_text(&service, &strand.id, "retry after recovery").await;
     let after = wait_for_turn(
         &service,
         &strand.id,
-        &recovered.turn.id,
+        &turn(&recovered).id,
         TurnStatus::Completed,
     )
     .await;
@@ -242,7 +248,7 @@ async fn success_resolves_incident() {
         incident.resolved_by.as_deref(),
         Some("provider.turn_succeeded")
     );
-    assert_eq!(incident.latest_context["turn_id"], recovered.turn.id);
+    assert_eq!(incident.latest_context["turn_id"], turn(&recovered).id);
     assert_eq!(incident.latest_context["provider"], "fake-provider");
     assert_eq!(incident.latest_context["model"], "fake-model");
     assert_eq!(
@@ -260,6 +266,10 @@ fn assert_no_failure_projection(runtime: &santi_core::StrandRuntimeSnapshot) {
             .all(|message| message.message.message_kind != MessageKind::SantiSystem),
         "provider failure must not append a model-visible system message"
     );
+}
+
+fn turn(response: &santi_core::SendStrandAcceptedResponse) -> &santi_core::Turn {
+    response.turn.as_ref().expect("send should start a turn")
 }
 
 fn open_service(temp: &tempfile::TempDir, provider: Arc<FailureProvider>) -> SantiService {

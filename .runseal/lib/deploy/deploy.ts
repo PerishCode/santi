@@ -1,7 +1,7 @@
 //! Deploy a santi beta to its live host: fetch the `.deb` on the box and run
 //! `santi upgrade` (the self-op orchestration — graceful-stop → snapshot → dpkg
 //! → probe → seed → restart), then verify (schema at the new version + the
-//! soul-memory md5 unchanged across any DB wipe + health). Does NOT cut a
+//! soul-memory md5 unchanged across any DB wipe + explicit readiness). Does NOT cut a
 //! release — that stays `runseal :release` / the release-beta workflow. This is
 //! the high-frequency hot op santi owns; the box + edge are consumed as running
 //! services, so it carries no dependency on the infra repo.
@@ -21,7 +21,7 @@ export async function deploy(argv: string[]): Promise<number> {
     console.log("");
     console.log("Deploy the latest beta (or the given <version>, e.g. v0.1.0-beta.17) to santi's");
     console.log(
-      "live host via `santi upgrade`, then verify schema + soul-memory continuity + health.",
+      "live host via `santi upgrade`, then verify schema + memory + ready/degraded state.",
     );
     console.log("Cut a release first with `runseal :release` / the release-beta workflow.");
     return 0;
@@ -68,8 +68,17 @@ export async function deploy(argv: string[]): Promise<number> {
     `AFTER=$(md5sum ${MEMORY} 2>/dev/null | awk '{print $1}')`,
     '[ -n "$BEFORE" ] && [ "$BEFORE" = "$AFTER" ] || { echo "soul-memory md5: CHANGED before=$BEFORE after=$AFTER"; exit 1; }',
     'echo "soul-memory md5: UNCHANGED ($AFTER)"',
-    `HEALTH_JSON=$(curl -fsS ${HEALTH})`,
+    `HEALTH_CODE=$(curl -sS -o /tmp/santi-health.json -w '%{http_code}' ${HEALTH})`,
+    "HEALTH_JSON=$(cat /tmp/santi-health.json)",
     'echo "health: $HEALTH_JSON"',
+    'if [ "$HEALTH_CODE" = 200 ]; then',
+    '  echo "deploy readiness: READY"',
+    'elif [ "$HEALTH_CODE" = 503 ]; then',
+    '  echo "deploy readiness: DEGRADED - package is live; inspect incidents and run santi strand drive"',
+    "else",
+    '  echo "unexpected health response: HTTP $HEALTH_CODE $HEALTH_JSON"',
+    "  exit 1",
+    "fi",
   ].join("\n");
 
   return await run("ssh", ["-F", SSH_CONFIG, HOST, remote], { cwd: repoRoot() });

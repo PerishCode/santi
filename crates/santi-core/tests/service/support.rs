@@ -6,8 +6,13 @@ pub(crate) use santi_core::{
     ActorType, CreateSoulRequest, InboxSource, MaterialKind, MaterialRequest, MessageContent,
     MessageIntake, MessageKind, MessagePart, MessageState, ObjectBucket, ObjectUri,
     SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, SantiService, SantiServiceConfig, SantiStore,
-    SendStrandRequest, ToolCallProvenance, soul_memory_uri, strand_memory_uri,
+    SendStrandAcceptedResponse, SendStrandRequest, ToolCallProvenance, soul_memory_uri,
+    strand_memory_uri,
 };
+
+pub(crate) fn accepted_turn(response: &SendStrandAcceptedResponse) -> &santi_core::Turn {
+    response.turn.as_ref().expect("send should land on a turn")
+}
 pub(crate) use santi_provider::{
     ProviderClient, ProviderContextBudget, ProviderEvent, ProviderFunctionCall, ProviderItem,
     ProviderMetadata, ProviderRequest, ProviderStream,

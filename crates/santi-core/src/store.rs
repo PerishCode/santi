@@ -4,14 +4,15 @@ use rusqlite::{Connection, params};
 
 use crate::{
     ActorType, InboxSource, IngestOutcome, MessageContent, MessageIntake, MessageKind,
-    MessageState, Strand, StrandMessage, StrandSelector, StrandTargetType, Turn, prefixed_id,
-    timestamp_now,
+    MessageState, SantiError, Strand, StrandMessage, StrandSelector, StrandTargetType, Turn,
+    prefixed_id, timestamp_now,
 };
 
 mod assembly;
 pub(crate) mod budget;
 mod compact;
 mod db;
+pub(crate) mod drive;
 mod errors;
 mod fork;
 mod im;
@@ -60,6 +61,13 @@ pub struct StartedTurn {
     /// Inbox entries this call committed into the timeline to reach this turn
     /// (empty for the manual/test-only `start_turn`, which does not drain).
     pub drained_messages: Vec<StrandMessage>,
+}
+
+pub(crate) enum StartTurnOutcome {
+    Started(StartedTurn),
+    Running(Turn),
+    Idle,
+    Held(SantiError),
 }
 
 pub(crate) struct ProviderFailureContext<'a> {

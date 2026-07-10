@@ -3,8 +3,8 @@ use std::path::Path;
 use santi_api::{
     config::RuntimePaths,
     upgrade::{
-        RecoveryStatus, UpgradeFailure, UpgradeFinalizeRequest, UpgradeStage, UpgradeTerminal,
-        finalize_at, seed_come_look_at,
+        RecoveryStatus, UpgradeFailure, UpgradeFinalizeRequest, UpgradeReadiness, UpgradeStage,
+        UpgradeTerminal, finalize_at, seed_come_look_at,
     },
 };
 use santi_core::{ErrorScope, IncidentStatus, SantiStore};
@@ -83,8 +83,13 @@ fn success_resolves_incident() {
         }),
     )
     .expect("finalize rollback");
-    let recovered =
-        finalize_at(&paths, request(UpgradeTerminal::Upgraded)).expect("finalize success");
+    let recovered = finalize_at(
+        &paths,
+        request(UpgradeTerminal::Upgraded {
+            readiness: UpgradeReadiness::Ready,
+        }),
+    )
+    .expect("finalize success");
     assert!(recovered.errors.is_empty());
 
     let store = SantiStore::open(&paths.database_path).expect("open store");

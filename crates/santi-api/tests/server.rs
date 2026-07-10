@@ -9,7 +9,8 @@ use axum::{
     response::IntoResponse,
 };
 use futures_util::stream;
-use santi_api::{ApiError, send_strand_handler};
+use rusqlite::Connection;
+use santi_api::{ApiError, drive_strand_handler, health_handler, send_strand_handler};
 use santi_core::{
     ErrorScope, ErrorSource, MessagePart, SantiService, SantiServiceConfig, SendStrandRequest,
     catalog, engine,
@@ -21,6 +22,8 @@ use santi_provider::{
 
 struct BudgetedProvider;
 
+struct DriverProvider;
+
 #[async_trait]
 impl ProviderClient for BudgetedProvider {
     fn metadata(&self) -> ProviderMetadata {
@@ -31,6 +34,23 @@ impl ProviderClient for BudgetedProvider {
                 input_budget_bytes: 1,
                 source: "test".to_string(),
             }),
+        }
+    }
+
+    async fn stream_response(&self, _request: ProviderRequest) -> Result<ProviderStream, String> {
+        Ok(Box::pin(stream::iter(vec![Ok(ProviderEvent::Completed {
+            provider_response_id: None,
+        })])))
+    }
+}
+
+#[async_trait]
+impl ProviderClient for DriverProvider {
+    fn metadata(&self) -> ProviderMetadata {
+        ProviderMetadata {
+            provider: Arc::from("driver-provider"),
+            model: "driver-model".to_string(),
+            context_budget: None,
         }
     }
 
@@ -53,6 +73,17 @@ fn classifies_errors() {
         serde_json::Value::Null,
     );
     assert_eq!(ApiError::from_santi(budget).status(), StatusCode::LOCKED);
+    let unavailable = engine().transient(
+        catalog::STRAND_DRIVE_FAILED,
+        ErrorSource::new("test", "driver"),
+        Some(ErrorScope::new("strand", "ss_x")),
+        "driver unavailable",
+        serde_json::Value::Null,
+    );
+    assert_eq!(
+        ApiError::from_santi(unavailable).status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
     assert_eq!(
         status("something unexpected"),
         StatusCode::INTERNAL_SERVER_ERROR
@@ -64,6 +95,8 @@ fn openapi_lists_error_surfaces() {
     let document = santi_api::export_openapi_json().expect("export openapi");
     assert!(document.contains("/api/v1/errors/{scope_kind}/{scope_id}"));
     assert!(document.contains("/api/v1/errors/events"));
+    assert!(document.contains("/api/v1/strands/{strand_id}/drive"));
+    assert!(document.contains("IngestReceipt"));
 }
 
 #[tokio::test]
@@ -108,6 +141,81 @@ async fn send_rejection_locks() {
         body.get("reason").is_none(),
         "old error wrapper must not survive"
     );
+}
+
+#[tokio::test]
+async fn accepted_drive_failure_degrades_health_until_explicit_recovery() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let database_path = temp.path().join("santi.sqlite");
+    let service = SantiService::open(
+        SantiServiceConfig {
+            database_path: database_path.display().to_string(),
+            runtime_root: temp.path().join("runtime").display().to_string(),
+            execution_root: temp.path().join("execution").display().to_string(),
+            bind_addr: Some("127.0.0.1:0".to_string()),
+        },
+        Arc::new(DriverProvider),
+    )
+    .expect("open service");
+    let strand = service.create_strand().expect("create strand").strand;
+    let conn = Connection::open(&database_path).expect("open sqlite");
+    conn.execute_batch(
+        r#"
+        CREATE TRIGGER force_api_turn_failure
+        BEFORE INSERT ON turns
+        BEGIN
+          SELECT RAISE(ABORT, 'forced api turn failure');
+        END;
+        "#,
+    )
+    .expect("install failure trigger");
+
+    let accepted = send_strand_handler(
+        State(service.clone()),
+        Path(strand.id.clone()),
+        Json(SendStrandRequest {
+            content: vec![MessagePart::Text {
+                text: "x".to_string(),
+            }],
+        }),
+    )
+    .await;
+    let Json(accepted) = match accepted {
+        Ok(accepted) => accepted,
+        Err(error) => panic!(
+            "durable request should remain accepted, got {}: {}",
+            error.code(),
+            error.message()
+        ),
+    };
+    let warning = accepted.receipt.warning.expect("canonical warning");
+    assert_eq!(warning.code, "runtime.strand.drive_failed");
+    assert_eq!(warning.context["accepted_before_failure"], true);
+
+    let health = health_handler(State(service.clone())).await.into_response();
+    assert_eq!(health.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = to_bytes(health.into_body(), usize::MAX)
+        .await
+        .expect("read degraded health");
+    let body: serde_json::Value = serde_json::from_slice(&body).expect("health json");
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["degraded"], true);
+
+    conn.execute_batch("DROP TRIGGER force_api_turn_failure;")
+        .expect("remove failure trigger");
+    let driven = drive_strand_handler(State(service.clone()), Path(strand.id)).await;
+    let Json(driven) = match driven {
+        Ok(driven) => driven,
+        Err(error) => panic!(
+            "explicit drive failed with {}: {}",
+            error.code(),
+            error.message()
+        ),
+    };
+    assert_eq!(driven.state, santi_core::DriveStrandState::Started);
+
+    let health = health_handler(State(service)).await.into_response();
+    assert_eq!(health.status(), StatusCode::OK);
 }
 
 fn status(message: &str) -> StatusCode {

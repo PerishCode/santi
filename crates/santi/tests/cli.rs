@@ -71,6 +71,23 @@ fn parses_fork() {
 }
 
 #[test]
+fn parses_drive() {
+    let parsed = Cli::try_parse_from(["santi", "strand", "drive", "ss_blocked"]).unwrap();
+    let Command::Strand(StrandCommand::Drive { id }) = parsed.command else {
+        panic!("expected strand drive command");
+    };
+    assert_eq!(id.as_deref(), Some("ss_blocked"));
+
+    let parsed =
+        Cli::try_parse_from(["santi", "--strand", "ss_default", "strand", "drive"]).unwrap();
+    let Command::Strand(StrandCommand::Drive { id }) = parsed.command else {
+        panic!("expected strand drive command");
+    };
+    assert_eq!(id, None);
+    assert_eq!(parsed.strand.as_deref(), Some("ss_default"));
+}
+
+#[test]
 fn errors_replaces_rejections() {
     let parsed = Cli::try_parse_from([
         "santi",

@@ -224,7 +224,7 @@ async fn resume_holds_pending() {
     };
     drop(store);
 
-    service.resume_pending();
+    service.resume_pending().expect("resume pending");
     let runtime = service
         .runtime_snapshot(&strand.id)
         .expect("runtime")
@@ -310,7 +310,7 @@ async fn compact_resolves_incident() {
         .await
         .expect("send strand");
 
-    let runtime = wait_for_failed_turn(&service, &strand.id, &response.turn.id).await;
+    let runtime = wait_for_failed_turn(&service, &strand.id, &accepted_turn(&response).id).await;
     assert_eq!(provider.requests.lock().unwrap().len(), 1);
     assert_eq!(runtime.errors.len(), 1);
     assert_eq!(runtime.errors[0].status, santi_core::IncidentStatus::Active);

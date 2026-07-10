@@ -1,10 +1,11 @@
+use crate::store::{StartTurnOutcome, drive::DriveFailureInput};
 use crate::{
-    ErrorScope, ErrorSource, InboxSource, IngestOutcome, MessageContent, MessageKind, SantiError,
-    SantiStreamPayload, SendStrandAcceptedResponse, SendStrandRequest, Strand, StrandSelector,
-    catalog, engine,
+    DriveStrandResponse, DriveStrandState, ErrorScope, ErrorSource, InboxSource, IngestOutcome,
+    MessageContent, MessageKind, SantiError, SantiStreamPayload, SendStrandAcceptedResponse,
+    SendStrandRequest, Strand, StrandSelector, catalog, engine,
 };
 
-use super::super::{DrivenTurn, SantiService};
+use super::super::{DriveOutcome, SantiService};
 
 impl SantiService {
     /// The one inbound path (see PHASE-06/STEP4): resolve `selector` to a
@@ -51,7 +52,7 @@ impl SantiService {
         kind: MessageKind,
         trigger_type: &str,
         source: Option<InboxSource>,
-    ) -> Result<(IngestOutcome, DrivenTurn), String> {
+    ) -> Result<(IngestOutcome, DriveOutcome), String> {
         let audit_source_type = source
             .as_ref()
             .map(|source| source.source_type.as_str())
@@ -63,6 +64,22 @@ impl SantiService {
             .unwrap_or("-")
             .to_string();
         let audit_content_bytes = content.content_text().len();
+        if let Some(error) = self.store.reject_if_drive_blocked(&strand.id)? {
+            self.dispatch_error_events();
+            log_ingest_rejection(
+                &error,
+                &strand.id,
+                &audit_source_type,
+                &audit_source_ref,
+                audit_content_bytes,
+            );
+            return Ok((
+                IngestOutcome::Rejected {
+                    error: Box::new(error),
+                },
+                DriveOutcome::Idle,
+            ));
+        }
         let admission = self.context_admission(&strand.id)?;
         let outcome = self.store.enqueue_inbox_with_context(
             &strand.id,
@@ -73,21 +90,33 @@ impl SantiService {
         )?;
         self.dispatch_error_events();
         if let IngestOutcome::Rejected { error } = &outcome {
-            eprintln!(
-                "santi: ingest rejected code={} incident_id={} strand_id={} source_type={} source_ref={} content_bytes={}",
-                error.code,
-                error.incident_id.as_deref().unwrap_or("-"),
-                strand.id,
-                audit_source_type,
-                audit_source_ref,
+            log_ingest_rejection(
+                error,
+                &strand.id,
+                &audit_source_type,
+                &audit_source_ref,
                 audit_content_bytes,
             );
         }
-        let driven = match outcome {
-            IngestOutcome::Accepted { .. } => self.poke(&strand.id, trigger_type),
-            IngestOutcome::Rejected { .. } => None,
+        let drive = match &outcome {
+            IngestOutcome::Accepted { receipt } => self.poke(
+                &strand.id,
+                trigger_type,
+                Some(&receipt.inbox_id),
+                "ingest_poke",
+            ),
+            IngestOutcome::Rejected { .. } => DriveOutcome::Idle,
         };
-        Ok((outcome, driven))
+        let mut outcome = outcome;
+        if let IngestOutcome::Accepted { receipt } = &mut outcome {
+            receipt.warning = match &drive {
+                DriveOutcome::Failed(error) | DriveOutcome::Held(error) => {
+                    Some(Box::new(error.clone()))
+                }
+                _ => None,
+            };
+        }
+        Ok((outcome, drive))
     }
 
     /// Ingest an external event already normalized by an adaptor: a `santi-system`
@@ -155,7 +184,7 @@ impl SantiService {
         // to drive a turn. If one is already running for this strand, this send
         // simply joins the thread (coalesced) and the running turn (or its
         // completion re-check) will drain it later — no second concurrent turn.
-        let (outcome, driven) = self
+        let (outcome, drive) = self
             .ingest_into(
                 &strand,
                 MessageContent {
@@ -166,51 +195,90 @@ impl SantiService {
                 Some(InboxSource::new("strand_send").with_ref(strand.id.clone())),
             )
             .map_err(|message| send_error(catalog::INTERNAL, strand_id, message))?;
-        if let IngestOutcome::Rejected { error } = outcome {
-            return Err(*error);
-        }
-        let (turn, user_message) = match driven {
-            Some((turn, mut drained)) => (turn, drained.pop()),
-            None => (
-                self.store
-                    .latest_turn(&strand.id)
-                    .map_err(|message| send_error(catalog::INTERNAL, strand_id, message))?
-                    .ok_or_else(|| {
-                        send_error(
-                            catalog::INTERNAL,
-                            strand_id,
-                            "no active turn after send".to_string(),
-                        )
-                    })?,
-                None,
-            ),
+        let receipt = match outcome {
+            IngestOutcome::Accepted { receipt } => receipt,
+            IngestOutcome::Rejected { error } => return Err(*error),
+        };
+        let (turn, user_message) = match drive {
+            DriveOutcome::Started(turn, mut drained) => (Some(turn), drained.pop()),
+            DriveOutcome::Running(turn) => (Some(turn), None),
+            DriveOutcome::Idle
+            | DriveOutcome::Held(_)
+            | DriveOutcome::Paused
+            | DriveOutcome::Failed(_) => (None, None),
         };
 
         Ok(SendStrandAcceptedResponse {
             strand,
+            receipt,
             turn,
             user_message,
         })
     }
 
-    /// Drive a turn if the strand is behind (its inbox is non-empty) and idle,
-    /// spawning the runner. Returns the started turn plus what it drained into
-    /// the timeline, or None when a turn is already running (this request
-    /// coalesces) or there is nothing pending. The atomic guard in
-    /// `try_start_turn` keeps "one present per thread of experience".
-    pub(in crate::service) fn poke(&self, strand_id: &str, trigger_type: &str) -> DrivenTurn {
+    pub fn drive_strand(&self, strand_id: &str) -> Result<DriveStrandResponse, Box<SantiError>> {
+        self.store
+            .strand(strand_id)
+            .map_err(|message| Box::new(send_error(catalog::INTERNAL, strand_id, message)))?
+            .ok_or_else(|| {
+                Box::new(send_error(
+                    catalog::NOT_FOUND,
+                    strand_id,
+                    "strand not found".to_string(),
+                ))
+            })?;
+        match self.poke(strand_id, "strand_send", None, "operator_redrive") {
+            DriveOutcome::Started(turn, _) => Ok(DriveStrandResponse {
+                strand_id: strand_id.to_string(),
+                state: DriveStrandState::Started,
+                turn: Some(turn),
+            }),
+            DriveOutcome::Running(turn) => Ok(DriveStrandResponse {
+                strand_id: strand_id.to_string(),
+                state: DriveStrandState::Running,
+                turn: Some(turn),
+            }),
+            DriveOutcome::Idle => Ok(DriveStrandResponse {
+                strand_id: strand_id.to_string(),
+                state: DriveStrandState::Idle,
+                turn: None,
+            }),
+            DriveOutcome::Paused => Ok(DriveStrandResponse {
+                strand_id: strand_id.to_string(),
+                state: DriveStrandState::Paused,
+                turn: None,
+            }),
+            DriveOutcome::Held(error) | DriveOutcome::Failed(error) => Err(Box::new(error)),
+        }
+    }
+
+    /// Drive a turn if the strand is behind and idle. The outcome distinguishes
+    /// normal coalescing/idle/paused states from context holds and driver
+    /// failures so each transport can surface the accepted-write truth.
+    pub(in crate::service) fn poke(
+        &self,
+        strand_id: &str,
+        trigger_type: &str,
+        accepted_inbox_id: Option<&str>,
+        operation: &str,
+    ) -> DriveOutcome {
         // Graceful shutdown: pause CONSUMPTION. The content stays durably in the
         // inbox (ingest already enqueued it) and boot recovery drains it on the
         // next start. This also stops the completion re-poke from spawning a
         // follow-on turn, so an in-flight turn can finish and the strand quiesce.
         if self.is_shutting_down() {
-            return None;
+            return DriveOutcome::Paused;
         }
         let admission = match self.context_admission(strand_id) {
             Ok(admission) => admission,
             Err(error) => {
-                eprintln!("santi: pending context-budget gate failed for {strand_id}: {error}");
-                return None;
+                return DriveOutcome::Failed(self.record_drive_failure(
+                    strand_id,
+                    trigger_type,
+                    accepted_inbox_id,
+                    operation,
+                    error,
+                ));
             }
         };
         let started =
@@ -218,7 +286,8 @@ impl SantiService {
                 .start_turn_with_budget(strand_id, trigger_type, None, admission.as_ref());
         self.dispatch_error_events();
         match started {
-            Ok(Some(started)) => {
+            Ok(StartTurnOutcome::Started(started)) => {
+                self.refresh_drive_health();
                 for message in started.drained_messages.iter().cloned() {
                     self.publish_stream(strand_id, SantiStreamPayload::MessageCreated { message });
                 }
@@ -236,15 +305,81 @@ impl SantiService {
                         .complete_provider_turn(background_strand_id, background_turn_id)
                         .await;
                 });
-                Some((started.turn, started.drained_messages))
+                DriveOutcome::Started(started.turn, started.drained_messages)
             }
-            Ok(None) => None,
-            Err(error) => {
-                eprintln!("santi: try_start_turn failed for {strand_id}: {error}");
-                None
-            }
+            Ok(StartTurnOutcome::Running(turn)) => DriveOutcome::Running(turn),
+            Ok(StartTurnOutcome::Idle) => DriveOutcome::Idle,
+            Ok(StartTurnOutcome::Held(error)) => DriveOutcome::Held(error),
+            Err(error) => DriveOutcome::Failed(self.record_drive_failure(
+                strand_id,
+                trigger_type,
+                accepted_inbox_id,
+                operation,
+                error,
+            )),
         }
     }
+
+    fn record_drive_failure(
+        &self,
+        strand_id: &str,
+        trigger_type: &str,
+        accepted_inbox_id: Option<&str>,
+        operation: &str,
+        detail: String,
+    ) -> SantiError {
+        self.mark_drive_degraded();
+        let error = match self.store.record_drive_failure(
+            strand_id,
+            DriveFailureInput {
+                operation,
+                trigger_type,
+                accepted_inbox_id,
+                detail: &detail,
+            },
+        ) {
+            Ok(error) => error,
+            Err(persistence_error) => engine().transient(
+                catalog::ERROR_ENGINE_PERSISTENCE_FAILED,
+                ErrorSource::new("santi-core", "strand_drive_failure"),
+                Some(ErrorScope::new("strand", strand_id)),
+                "failed to persist strand driver incident",
+                serde_json::json!({
+                    "accepted_before_failure": accepted_inbox_id.is_some(),
+                    "inbox_id": accepted_inbox_id,
+                    "detail": persistence_error,
+                }),
+            ),
+        };
+        eprintln!(
+            "santi: strand drive failed code={} incident_id={} strand_id={} operation={} accepted_before_failure={}",
+            error.code,
+            error.incident_id.as_deref().unwrap_or("-"),
+            strand_id,
+            operation,
+            accepted_inbox_id.is_some(),
+        );
+        self.dispatch_error_events();
+        error
+    }
+}
+
+fn log_ingest_rejection(
+    error: &SantiError,
+    strand_id: &str,
+    source_type: &str,
+    source_ref: &str,
+    content_bytes: usize,
+) {
+    eprintln!(
+        "santi: ingest rejected code={} incident_id={} strand_id={} source_type={} source_ref={} content_bytes={}",
+        error.code,
+        error.incident_id.as_deref().unwrap_or("-"),
+        strand_id,
+        source_type,
+        source_ref,
+        content_bytes,
+    );
 }
 
 fn send_error(

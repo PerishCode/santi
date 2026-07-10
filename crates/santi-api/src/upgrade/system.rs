@@ -10,8 +10,8 @@ use uuid::Uuid;
 use super::finalize::{FINALIZE_PROTOCOL_VERSION, finalize_at, persistence_error};
 use super::{
     RecoveryStatus, UpgradeFailure, UpgradeFinalizeReport, UpgradeFinalizeRequest, UpgradeHost,
-    UpgradeReport, UpgradeStage, UpgradeStarted, UpgradeTerminal, run_upgrade_attempt,
-    upgrade_timeout,
+    UpgradeReadiness, UpgradeReport, UpgradeStage, UpgradeStarted, UpgradeTerminal,
+    run_upgrade_attempt, upgrade_timeout,
 };
 use crate::config::{self, RuntimePaths};
 
@@ -243,18 +243,34 @@ impl UpgradeHost for SystemHost {
         self.privileged(&["dpkg", "-i", deb])
     }
 
-    fn trial_probe(&mut self) -> Result<bool, String> {
+    fn trial_probe(&mut self) -> Result<UpgradeReadiness, String> {
         self.systemctl("start")?;
         let deadline = Instant::now() + upgrade_timeout();
-        let healthy = loop {
-            match crate::ops::doctor_at(&self.paths) {
-                Ok(report) if report.ok => break true,
-                _ if Instant::now() >= deadline => break false,
-                _ => thread::sleep(Duration::from_millis(500)),
+        let mut last_detail = "service health was not reachable".to_string();
+        let readiness = loop {
+            if let Ok(report) = crate::ops::doctor_at(&self.paths)
+                && report.ok
+            {
+                match probe_runtime_readiness() {
+                    Ok(Some(readiness)) => break Ok(readiness),
+                    Ok(None) => {}
+                    Err(error) => last_detail = error,
+                }
             }
+            if Instant::now() >= deadline {
+                break Err(format!("trial probe timed out: {last_detail}"));
+            }
+            thread::sleep(Duration::from_millis(500));
         };
-        self.systemctl("stop")?;
-        Ok(healthy)
+        let stop = self.systemctl("stop");
+        match (readiness, stop) {
+            (Ok(readiness), Ok(())) => Ok(readiness),
+            (Err(error), Ok(())) => Err(error),
+            (Ok(_), Err(error)) => Err(format!("trial service stop failed: {error}")),
+            (Err(probe_error), Err(stop_error)) => Err(format!(
+                "{probe_error}; trial service stop also failed: {stop_error}"
+            )),
+        }
     }
 
     fn rollback(&mut self) -> Result<(), String> {
@@ -331,5 +347,35 @@ impl UpgradeHost for SystemHost {
 
     fn start(&mut self) -> Result<(), String> {
         self.systemctl("start")
+    }
+}
+
+fn probe_runtime_readiness() -> Result<Option<UpgradeReadiness>, String> {
+    let binary = env::current_exe().map_err(|error| format!("resolve current binary: {error}"))?;
+    let port = env::var("SANTI_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(43307);
+    let base_url = format!("http://127.0.0.1:{port}");
+    let output = Command::new(binary)
+        .args(["--base-url", &base_url, "health"])
+        .env_remove("SANTI_AUTH_TOKEN_URL")
+        .env_remove("SANTI_AUTH_CLIENT_ID")
+        .env_remove("SANTI_AUTH_USERNAME")
+        .env_remove("SANTI_AUTH_PASSWORD")
+        .env_remove("SANTI_API_KEY")
+        .output()
+        .map_err(|error| format!("run health probe: {error}"))?;
+    if output.stdout.is_empty() {
+        return Ok(None);
+    }
+    let health: santi_core::HealthResponse = serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("decode health probe: {error}"))?;
+    if health.degraded {
+        Ok(Some(UpgradeReadiness::Degraded))
+    } else if health.ok {
+        Ok(Some(UpgradeReadiness::Ready))
+    } else {
+        Ok(None)
     }
 }

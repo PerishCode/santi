@@ -191,10 +191,10 @@ fn inbox_seed_existing_strand(
         Some(santi_core::InboxSource::new("offline_inbox_seed")),
     )?;
     Ok(match outcome {
-        santi_core::IngestOutcome::Accepted { strand_id } => SeedReport {
-            strand_id,
+        santi_core::IngestOutcome::Accepted { receipt } => SeedReport {
+            strand_id: receipt.strand_id,
             accepted: true,
-            error: None,
+            error: receipt.warning.map(|warning| *warning),
         },
         santi_core::IngestOutcome::Rejected { error } => SeedReport {
             strand_id: strand_id.to_string(),

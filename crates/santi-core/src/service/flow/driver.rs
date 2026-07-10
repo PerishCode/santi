@@ -35,7 +35,7 @@ impl SantiService {
         // Re-check: a turn is one thread "catching up"; requests that arrived
         // during it (seq past this turn's start) make the strand behind
         // again → drive the next turn now.
-        self.poke(&strand_id, "strand_send");
+        self.poke(&strand_id, "strand_send", None, "turn_completion_poke");
     }
 
     /// Finalize a completed provider turn. Speech is optional (N6): an empty

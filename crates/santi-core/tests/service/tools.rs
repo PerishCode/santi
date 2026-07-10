@@ -31,8 +31,11 @@ async fn dispatches_tools() {
         .await
         .expect("send strand");
 
-    assert_eq!(response.turn.status, santi_core::TurnStatus::Running);
-    let runtime = wait_for_completed_turn(&service, &strand.id, &response.turn.id).await;
+    assert_eq!(
+        accepted_turn(&response).status,
+        santi_core::TurnStatus::Running
+    );
+    let runtime = wait_for_completed_turn(&service, &strand.id, &accepted_turn(&response).id).await;
     assert!(
         runtime
             .messages

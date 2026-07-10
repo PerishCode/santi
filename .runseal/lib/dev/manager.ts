@@ -130,10 +130,15 @@ async function start(): Promise<number> {
     startedAt: new Date().toISOString(),
   });
 
-  const healthy = await waitHealth(host, port, HEALTH_TIMEOUT_MS);
-  if (healthy) {
+  const health = await waitHealth(host, port, HEALTH_TIMEOUT_MS);
+  if (health === "ready") {
     console.log(
       `santi up on http://${host}:${port} (launcher pid ${child.pid})\nlogs: ${paths.log}`,
+    );
+  } else if (health === "degraded") {
+    console.log(
+      `santi up but degraded on http://${host}:${port} (launcher pid ${child.pid})\n` +
+        `inspect incidents; logs: ${paths.log}`,
     );
   } else {
     console.log(
@@ -186,7 +191,7 @@ async function status(): Promise<number> {
   const found = running[0];
   const host = readHost(paths.repo);
   const port = found.stamp.port || cache?.port || readPort(paths.repo);
-  const healthy = await waitHealth(host, port, 1_000);
+  const health = await waitHealth(host, port, 1_000);
   const uptime = cache?.startedAt
     ? `${Math.round((Date.now() - Date.parse(cache.startedAt)) / 1000)}s`
     : "?";
@@ -194,7 +199,7 @@ async function status(): Promise<number> {
   console.log(`  launcher pid : ${found.pid}`);
   if (cache?.serverPid) console.log(`  server pid   : ${cache.serverPid}`);
   console.log(
-    `  endpoint     : http://${host}:${port}  (health: ${healthy ? "ok" : "unreachable"})`,
+    `  endpoint     : http://${host}:${port}  (health: ${health})`,
   );
   console.log(`  uptime       : ${uptime}`);
   console.log(`  logs         : ${paths.log}`);
@@ -329,21 +334,23 @@ async function waitGone(timeoutMs: number): Promise<boolean> {
   return (await discover()).length === 0;
 }
 
-async function waitHealth(host: string, port: number, timeoutMs: number): Promise<boolean> {
+type HealthState = "ready" | "degraded" | "unreachable";
+
+async function waitHealth(host: string, port: number, timeoutMs: number): Promise<HealthState> {
   const deadline = Date.now() + timeoutMs;
   const url = `http://${host}:${port}/api/v1/health`;
   while (Date.now() < deadline) {
     try {
       const response = await fetch(url);
-      const ok = response.ok;
-      await response.body?.cancel();
-      if (ok) return true;
+      const body = await response.json() as { ok?: boolean; degraded?: boolean };
+      if (response.ok && body.ok === true && body.degraded === false) return "ready";
+      if (response.status === 503 && body.degraded === true) return "degraded";
     } catch {
       // not accepting connections yet
     }
     await sleep(300);
   }
-  return false;
+  return "unreachable";
 }
 
 function resolvePaths(): Paths {

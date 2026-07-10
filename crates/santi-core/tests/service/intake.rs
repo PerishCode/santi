@@ -17,12 +17,13 @@ async fn external_ingest_turn() {
 
     let soul_id = service.list_souls().expect("list souls")[0].id.clone();
     let label = "github:ops:issue:PerishCode/santi#42";
-    let santi_core::IngestOutcome::Accepted { strand_id } = service
+    let santi_core::IngestOutcome::Accepted { receipt } = service
         .ingest_external_event(&soul_id, label, "an external request arrived".to_string())
         .expect("ingest event")
     else {
         panic!("expected accepted");
     };
+    let strand_id = receipt.strand_id;
 
     // The webhook event is a REQUEST → it wakes the soul on a label-anchored
     // strand. Wait for the system-triggered turn to complete.
@@ -48,13 +49,14 @@ async fn external_ingest_turn() {
 
     // A second event on the same label coalesces onto the same strand, not a new one.
     let santi_core::IngestOutcome::Accepted {
-        strand_id: strand_id_again,
+        receipt: receipt_again,
     } = service
         .ingest_external_event(&soul_id, label, "a follow-up arrived".to_string())
         .expect("ingest second event")
     else {
         panic!("expected accepted");
     };
+    let strand_id_again = receipt_again.strand_id;
     assert_eq!(strand_id_again, strand_id);
 
     // A doorbell is a runtime-authored santi_system fact, not user speech — it
@@ -107,7 +109,7 @@ async fn boot_drains_inbox() {
 
     // A fresh service against the SAME db, as after a restart.
     let service = SantiService::open(config, provider.clone()).expect("reopen service");
-    service.resume_pending();
+    service.resume_pending().expect("resume pending");
 
     let runtime = wait_any_completed(&service, &strand_id).await;
     assert!(
@@ -152,7 +154,7 @@ async fn shutdown_pauses_consumption() {
             )
             .expect("ingest during shutdown");
         match outcome {
-            santi_core::IngestOutcome::Accepted { strand_id } => strand_id,
+            santi_core::IngestOutcome::Accepted { receipt } => receipt.strand_id,
             other => panic!("expected accepted, got {other:?}"),
         }
     };
@@ -176,7 +178,7 @@ async fn shutdown_pauses_consumption() {
 
     // A fresh service (not shutting down) drains the backlog on boot.
     let service = SantiService::open(config, provider.clone()).expect("reopen service");
-    service.resume_pending();
+    service.resume_pending().expect("resume pending");
     let runtime = wait_any_completed(&service, &strand_id).await;
     assert!(
         runtime
@@ -230,7 +232,7 @@ async fn send_targets_soul() {
 
     // A label-anchored strand can be owned by a non-default soul (via ingest).
     let santi_core::IngestOutcome::Accepted {
-        strand_id: secretary_strand_id,
+        receipt: secretary_receipt,
     } = service
         .ingest_external_event(
             &secretary.id,
@@ -241,6 +243,7 @@ async fn send_targets_soul() {
     else {
         panic!("expected accepted");
     };
+    let secretary_strand_id = secretary_receipt.strand_id;
     let secretary_response = service
         .send_strand(
             &secretary_strand_id,

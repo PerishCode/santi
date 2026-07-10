@@ -32,7 +32,7 @@ async fn emits_turn_completed() {
 
     // The CLI `--watch` idle check relies on a terminal turn event carrying the
     // same turn_id the send landed on. Drain the stream until it arrives.
-    let turn_id = response.turn.id.clone();
+    let turn_id = accepted_turn(&response).id.clone();
     let completed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events.recv().await.expect("stream event").payload {

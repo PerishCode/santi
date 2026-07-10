@@ -2,13 +2,19 @@ use rusqlite::params;
 use serde_json::json;
 
 use super::{
-    SantiStore, StartedTurn,
+    ProviderFailureContext, SantiStore, StartedTurn,
     db::{
         drain_inbox_in_tx, thinking_spans_for_turn, tool_calls_for_turn, tool_results_for_turn,
         turn_by_id,
     },
+    errors::{open_incident_in_conn, resolve_in_conn},
 };
-use crate::{ThinkingSpan, ToolCall, ToolResult, Turn, prefixed_id, timestamp_now};
+use crate::{
+    ErrorScope, ErrorSource, IncidentDraft, SantiError, ThinkingSpan, ToolCall, ToolResult, Turn,
+    catalog, prefixed_id, timestamp_now,
+};
+
+const PROVIDER_DETAIL_BYTES: usize = 4096;
 
 impl SantiStore {
     /// Atomically start a turn for a strand IFF (a) no turn is currently
@@ -135,11 +141,12 @@ impl SantiStore {
         turn_id: &str,
         assistant_message_seq: Option<i64>,
         provider: &str,
+        model: &str,
         provider_response_id: Option<String>,
     ) -> Result<Turn, String> {
-        let conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().unwrap();
         let now = timestamp_now();
-        let provider_state = provider_response_id.map(|response_id| {
+        let provider_state = provider_response_id.as_ref().map(|response_id| {
             json!({
                 "provider": provider,
                 "opaque": { "response_id": response_id },
@@ -151,7 +158,15 @@ impl SantiStore {
             .map(serde_json::to_string)
             .transpose()
             .map_err(|error| error.to_string())?;
-        conn.execute(
+        let tx = conn.transaction().map_err(|error| error.to_string())?;
+        let strand_id: String = tx
+            .query_row(
+                "SELECT strand_id FROM turns WHERE id = ?1",
+                params![turn_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        tx.execute(
             r#"
             UPDATE turns
             SET status = 'completed',
@@ -165,7 +180,7 @@ impl SantiStore {
             params![turn_id, now],
         )
         .map_err(|error| error.to_string())?;
-        conn.execute(
+        tx.execute(
             r#"
             UPDATE strands
             SET last_seen_strand_seq = COALESCE(?2, last_seen_strand_seq),
@@ -176,7 +191,68 @@ impl SantiStore {
             params![turn_id, assistant_message_seq, provider_state, now],
         )
         .map_err(|error| error.to_string())?;
+        resolve_in_conn(
+            &tx,
+            &provider_incident_key(&strand_id),
+            "provider.turn_succeeded",
+            json!({
+                "turn_id": turn_id,
+                "provider": provider,
+                "model": model,
+                "provider_response_id": provider_response_id,
+            }),
+        )?;
+        tx.commit().map_err(|error| error.to_string())?;
         turn_by_id(&conn, turn_id)?.ok_or_else(|| "completed turn missing".to_string())
+    }
+
+    pub(crate) fn fail_provider_turn(
+        &self,
+        turn_id: &str,
+        error_text: &str,
+        failure: ProviderFailureContext<'_>,
+    ) -> Result<(Turn, SantiError), String> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction().map_err(|error| error.to_string())?;
+        let strand_id: String = tx
+            .query_row(
+                "SELECT strand_id FROM turns WHERE id = ?1",
+                params![turn_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        let now = timestamp_now();
+        tx.execute(
+            r#"
+            UPDATE turns
+            SET status = 'failed', error_text = ?2, updated_at = ?3, finished_at = ?3
+            WHERE id = ?1
+            "#,
+            params![turn_id, error_text, now],
+        )
+        .map_err(|error| error.to_string())?;
+        let error = open_incident_in_conn(
+            &tx,
+            IncidentDraft {
+                incident_key: provider_incident_key(&strand_id),
+                descriptor: catalog::PROVIDER_TURN_FAILED,
+                scope: ErrorScope::new("strand", &strand_id),
+                source: ErrorSource::new("santi-provider", failure.operation),
+                message: format!("provider {} failed", failure.stage),
+                context: json!({
+                    "turn_id": turn_id,
+                    "provider": failure.provider,
+                    "model": failure.model,
+                    "stage": failure.stage,
+                    "round": failure.round,
+                    "detail": bounded_provider_detail(failure.detail),
+                    "trace": format!("log://turn/{turn_id}"),
+                }),
+            },
+        )?;
+        tx.commit().map_err(|error| error.to_string())?;
+        let turn = turn_by_id(&conn, turn_id)?.ok_or_else(|| "failed turn missing".to_string())?;
+        Ok((turn, error))
     }
 
     pub fn fail_turn(&self, turn_id: &str, error_text: &str) -> Result<Turn, String> {
@@ -243,4 +319,20 @@ impl SantiStore {
         let conn = self.conn.lock().unwrap();
         tool_results_for_turn(&conn, turn_id)
     }
+}
+
+fn provider_incident_key(strand_id: &str) -> String {
+    format!("{}:strand:{strand_id}", catalog::PROVIDER_TURN_FAILED.code)
+}
+
+fn bounded_provider_detail(detail: &str) -> String {
+    if detail.len() <= PROVIDER_DETAIL_BYTES {
+        return detail.to_string();
+    }
+    let suffix = " [truncated]";
+    let mut end = PROVIDER_DETAIL_BYTES.saturating_sub(suffix.len());
+    while end > 0 && !detail.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{}", &detail[..end], suffix)
 }

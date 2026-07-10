@@ -49,7 +49,7 @@ fn drive_coalesces_redrives() {
     // After the turn completes, the request that arrived during it is past the
     // turn's start → behind again → drive the next turn.
     store
-        .complete_turn(&turn.id, None, "fake", None)
+        .complete_turn(&turn.id, None, "fake", "fake-model", None)
         .expect("complete");
     assert!(
         store

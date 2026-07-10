@@ -1,28 +1,92 @@
-use crate::{ActorType, MessageContent, MessageIntake, MessageState, SantiStreamPayload};
+use crate::store::ProviderFailureContext;
+use crate::{
+    ActorType, ErrorScope, ErrorSource, MessageContent, MessageIntake, MessageState, SantiError,
+    SantiStreamPayload, Turn, catalog, engine,
+};
 
 use super::super::SantiService;
 
-#[derive(Debug)]
-pub(super) struct ProviderTurnFailure {
-    pub(super) error: String,
-    pub(super) partial_assistant_text: String,
-    pub(super) record_failure_message: bool,
+#[derive(Debug, Clone, Copy)]
+pub(super) enum ProviderFailureStage {
+    Request,
+    Stream,
+    Response,
 }
 
-impl ProviderTurnFailure {
-    pub(super) fn new(error: String, partial_assistant_text: &str) -> Self {
-        Self {
-            error,
-            partial_assistant_text: partial_assistant_text.to_string(),
-            record_failure_message: true,
+impl ProviderFailureStage {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Request => "request",
+            Self::Stream => "stream",
+            Self::Response => "response",
         }
     }
 
-    pub(super) fn context_budget(error: String) -> Self {
+    fn operation(self) -> &'static str {
+        match self {
+            Self::Request => "turn.request",
+            Self::Stream => "turn.stream",
+            Self::Response => "turn.response",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ProviderFailureMetadata {
+    provider: String,
+    model: String,
+    stage: ProviderFailureStage,
+    round: usize,
+}
+
+#[derive(Debug)]
+enum ProviderTurnFailureCause {
+    Provider(ProviderFailureMetadata),
+    ContextBudget(SantiError),
+    Runtime,
+}
+
+#[derive(Debug)]
+pub(super) struct ProviderTurnFailure {
+    error: String,
+    partial_assistant_text: String,
+    cause: ProviderTurnFailureCause,
+}
+
+impl ProviderTurnFailure {
+    pub(super) fn runtime(error: String, partial_assistant_text: &str) -> Self {
         Self {
             error,
+            partial_assistant_text: partial_assistant_text.to_string(),
+            cause: ProviderTurnFailureCause::Runtime,
+        }
+    }
+
+    pub(super) fn provider(
+        error: String,
+        partial_assistant_text: &str,
+        provider: &str,
+        model: &str,
+        stage: ProviderFailureStage,
+        round: usize,
+    ) -> Self {
+        Self {
+            error,
+            partial_assistant_text: partial_assistant_text.to_string(),
+            cause: ProviderTurnFailureCause::Provider(ProviderFailureMetadata {
+                provider: provider.to_string(),
+                model: model.to_string(),
+                stage,
+                round,
+            }),
+        }
+    }
+
+    pub(super) fn context_budget(error: SantiError) -> Self {
+        Self {
+            error: error.to_string(),
             partial_assistant_text: String::new(),
-            record_failure_message: false,
+            cause: ProviderTurnFailureCause::ContextBudget(error),
         }
     }
 }
@@ -32,69 +96,168 @@ impl SantiService {
         &self,
         strand_id: &str,
         turn_id: &str,
-        error: String,
-        partial_assistant_text: String,
-        record_failure_message: bool,
+        failure: ProviderTurnFailure,
     ) {
-        let mut last_seen_strand_seq = None;
-        if let Ok(turn) = self.store.fail_turn(turn_id, &error) {
-            if !partial_assistant_text.trim().is_empty()
-                && let Ok(message) = self.store.append_message(
-                    &turn.strand_id,
-                    ActorType::Soul,
-                    self.store.default_soul_id(),
-                    MessageContent::text(partial_assistant_text),
-                    MessageState::Aborted,
-                    MessageIntake::Record,
-                )
-            {
-                last_seen_strand_seq = Some(message.strand_message.relation.strand_seq);
-                self.publish_stream(
-                    strand_id,
-                    SantiStreamPayload::MessageCreated {
-                        message: message.strand_message,
-                    },
-                );
+        let ProviderTurnFailure {
+            error,
+            partial_assistant_text,
+            cause,
+        } = failure;
+        let (turn, canonical_error) = match cause {
+            ProviderTurnFailureCause::Provider(metadata) => {
+                self.persist_provider_failure(strand_id, turn_id, &error, metadata)
             }
-            if record_failure_message
-                && let Ok(message) = self.store.append_santi_system_message(
-                    &turn.strand_id,
-                    failed_system_message(turn_id),
-                    MessageIntake::Record,
-                )
-            {
-                last_seen_strand_seq = Some(message.strand_message.relation.strand_seq);
-                self.publish_stream(
-                    strand_id,
-                    SantiStreamPayload::MessageCreated {
-                        message: message.strand_message,
-                    },
-                );
+            ProviderTurnFailureCause::ContextBudget(canonical_error) => {
+                match self.store.fail_turn(turn_id, &error) {
+                    Ok(turn) => (Some(turn), canonical_error),
+                    Err(persistence_error) => {
+                        eprintln!(
+                            "santi: context-budget turn persistence failed for {turn_id}: {persistence_error}"
+                        );
+                        (
+                            None,
+                            terminal_runtime_error(strand_id, turn_id, persistence_error),
+                        )
+                    }
+                }
             }
-            if let Some(seq) = last_seen_strand_seq {
-                let _ = self.store.finish_failed_turn_context(turn_id, seq);
+            ProviderTurnFailureCause::Runtime => {
+                self.persist_runtime_failure(strand_id, turn_id, &error)
             }
+        };
+
+        if let Some(turn) = turn {
+            self.persist_partial_output(strand_id, turn_id, &turn, partial_assistant_text);
         }
+        self.dispatch_error_events();
         self.publish_stream(
             strand_id,
             SantiStreamPayload::TurnFailed {
                 turn_id: turn_id.to_string(),
-                error,
+                error: Box::new(canonical_error),
             },
         );
     }
+
+    fn persist_provider_failure(
+        &self,
+        strand_id: &str,
+        turn_id: &str,
+        error: &str,
+        metadata: ProviderFailureMetadata,
+    ) -> (Option<Turn>, SantiError) {
+        match self.store.fail_provider_turn(
+            turn_id,
+            error,
+            ProviderFailureContext {
+                provider: &metadata.provider,
+                model: &metadata.model,
+                stage: metadata.stage.name(),
+                operation: metadata.stage.operation(),
+                round: metadata.round,
+                detail: error,
+            },
+        ) {
+            Ok((turn, error)) => (Some(turn), error),
+            Err(persistence_error) => {
+                eprintln!(
+                    "santi: provider failure incident persistence failed for {turn_id}: {persistence_error}"
+                );
+                let turn = self.store.fail_turn(turn_id, error).ok();
+                (
+                    turn,
+                    terminal_persistence_error(strand_id, turn_id, persistence_error),
+                )
+            }
+        }
+    }
+
+    fn persist_runtime_failure(
+        &self,
+        strand_id: &str,
+        turn_id: &str,
+        error: &str,
+    ) -> (Option<Turn>, SantiError) {
+        match self.store.fail_turn(turn_id, error) {
+            Ok(turn) => (
+                Some(turn),
+                engine().transient(
+                    catalog::INTERNAL,
+                    ErrorSource::new("santi-core", "provider_turn"),
+                    Some(ErrorScope::new("strand", strand_id)),
+                    "provider turn failed inside the runtime",
+                    serde_json::json!({
+                        "turn_id": turn_id,
+                        "detail": error,
+                        "trace": format!("log://turn/{turn_id}"),
+                    }),
+                ),
+            ),
+            Err(persistence_error) => {
+                eprintln!(
+                    "santi: runtime turn failure persistence failed for {turn_id}: {persistence_error}"
+                );
+                (
+                    None,
+                    terminal_runtime_error(strand_id, turn_id, persistence_error),
+                )
+            }
+        }
+    }
+
+    fn persist_partial_output(
+        &self,
+        strand_id: &str,
+        turn_id: &str,
+        turn: &Turn,
+        partial_assistant_text: String,
+    ) {
+        if partial_assistant_text.trim().is_empty() {
+            return;
+        }
+        match self.store.append_message(
+            &turn.strand_id,
+            ActorType::Soul,
+            self.store.default_soul_id(),
+            MessageContent::text(partial_assistant_text),
+            MessageState::Aborted,
+            MessageIntake::Record,
+        ) {
+            Ok(message) => {
+                let seq = message.strand_message.relation.strand_seq;
+                self.publish_stream(
+                    strand_id,
+                    SantiStreamPayload::MessageCreated {
+                        message: message.strand_message,
+                    },
+                );
+                if let Err(error) = self.store.finish_failed_turn_context(turn_id, seq) {
+                    eprintln!("santi: failed to finalize partial output for {turn_id}: {error}");
+                }
+            }
+            Err(error) => {
+                eprintln!("santi: failed to persist partial output for {turn_id}: {error}");
+            }
+        }
+    }
 }
 
-fn failed_system_message(turn_id: &str) -> MessageContent {
-    MessageContent::text(
-        [
-            "<system_message>".to_string(),
-            "kind: turn_failed".to_string(),
-            format!("turn_id: {turn_id}"),
-            format!("trace: log://turn/{turn_id}"),
-            "summary: Previous response attempt failed before completion.".to_string(),
-            "</system_message>".to_string(),
-        ]
-        .join("\n"),
+fn terminal_persistence_error(strand_id: &str, turn_id: &str, detail: String) -> SantiError {
+    engine().transient(
+        catalog::ERROR_ENGINE_PERSISTENCE_FAILED,
+        ErrorSource::new("santi-core", "provider_turn_failure"),
+        Some(ErrorScope::new("strand", strand_id)),
+        "failed to persist provider failure incident",
+        serde_json::json!({ "turn_id": turn_id, "detail": detail }),
+    )
+}
+
+fn terminal_runtime_error(strand_id: &str, turn_id: &str, detail: String) -> SantiError {
+    engine().transient(
+        catalog::INTERNAL,
+        ErrorSource::new("santi-core", "turn_failure_persistence"),
+        Some(ErrorScope::new("strand", strand_id)),
+        "failed to persist turn failure",
+        serde_json::json!({ "turn_id": turn_id, "detail": detail }),
     )
 }

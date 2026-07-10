@@ -5,7 +5,7 @@ use super::{
     ActorType, Compact, MaterialUpdated, MessageEvent, Strand, StrandEffect, StrandMessage,
     ThinkingSpan, Timestamp, ToolCall, ToolResult, Turn,
 };
-use crate::{ErrorIncident, ErrorTransition};
+use crate::{ErrorIncident, ErrorTransition, SantiError};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SantiStreamEvent {
@@ -78,7 +78,7 @@ pub enum SantiStreamPayload {
     },
     TurnFailed {
         turn_id: String,
-        error: String,
+        error: Box<SantiError>,
     },
     ErrorTransition {
         transition: Box<ErrorTransition>,

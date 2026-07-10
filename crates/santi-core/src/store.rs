@@ -62,6 +62,15 @@ pub struct StartedTurn {
     pub drained_messages: Vec<StrandMessage>,
 }
 
+pub(crate) struct ProviderFailureContext<'a> {
+    pub provider: &'a str,
+    pub model: &'a str,
+    pub stage: &'a str,
+    pub operation: &'a str,
+    pub round: usize,
+    pub detail: &'a str,
+}
+
 impl SantiStore {
     pub fn default_soul_id(&self) -> &'static str {
         DEFAULT_SOUL_ID

@@ -23,7 +23,7 @@
 mod finalize;
 mod system;
 
-pub use finalize::{finalize, finalize_at, seed_come_look_at};
+pub use finalize::{finalize, finalize_at, seed_attempt_handover_at, seed_come_look_at};
 pub use system::{launch, run};
 
 use std::env;
@@ -150,7 +150,7 @@ pub struct UpgradeReport {
     pub record: String,
     pub seeded: bool,
     /// The concrete strand that received the record. It is a materialized room;
-    /// the durable addressing anchor is a stable label.
+    /// the durable addressing anchor is a deterministic attempt-scoped label.
     pub seeded_strand_id: Option<String>,
     /// Canonical execution and/or handover failures observed in this attempt.
     pub errors: Vec<santi_core::SantiError>,
@@ -318,8 +318,10 @@ pub(super) fn run_upgrade_attempt<H: UpgradeHost>(
 /// the runtime and may audit canonical incidents/operator logs when needed.
 pub fn compose_record(attempt_id: &str) -> String {
     format!(
-        "A santi self-upgrade attempt (`{attempt_id}`) reached handover. Inspect the current \
-         runtime state and audit runtime error incidents before continuing."
+        "A santi self-upgrade attempt (`{attempt_id}`) reached handover. Perform a bounded \
+         current-state audit, then record a concise assessment. Check doctor/service readiness \
+         and only the incidents relevant to this attempt. Do not enumerate artifact directories, \
+         dump database schemas or full incident histories, or print unbounded journals."
     )
 }
 

@@ -182,7 +182,10 @@ fn success_orders_steps() {
     );
     assert!(report.seeded);
     assert!(report.errors.is_empty());
-    assert!(host.seeded_text.unwrap().contains(&report.attempt_id));
+    let seeded_text = host.seeded_text.unwrap();
+    assert!(seeded_text.contains(&report.attempt_id));
+    assert!(seeded_text.contains("bounded current-state audit"));
+    assert!(seeded_text.contains("Do not enumerate artifact directories"));
 }
 
 #[test]

@@ -4,7 +4,7 @@ use santi_api::{
     config::RuntimePaths,
     upgrade::{
         RecoveryStatus, UpgradeFailure, UpgradeFinalizeRequest, UpgradeReadiness, UpgradeStage,
-        UpgradeTerminal, finalize_at, seed_come_look_at,
+        UpgradeTerminal, finalize_at, seed_attempt_handover_at, seed_come_look_at,
     },
 };
 use santi_core::{ErrorScope, IncidentStatus, SantiStore};
@@ -26,31 +26,75 @@ fn old_request_defaults() {
 }
 
 #[test]
-fn stable_label_seeds() {
+fn attempt_labels_isolate_rooms() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
     SantiStore::open(&paths.database_path).expect("open");
 
-    let outcome = seed_come_look_at(
+    let outcome = seed_attempt_handover_at(
         &paths,
         santi_core::DEFAULT_SOUL_ID,
+        "upgrade_one",
         Some("ss_stale"),
         "come look",
     )
-    .expect("seed via stable label");
+    .expect("seed via attempt label");
     assert!(outcome.warnings.is_empty());
+    let retry = seed_attempt_handover_at(
+        &paths,
+        santi_core::DEFAULT_SOUL_ID,
+        "upgrade_one",
+        Some("ss_stale"),
+        "come look again",
+    )
+    .expect("repeat seed via attempt label");
+    assert_eq!(retry.strand_id, outcome.strand_id);
+    let other = seed_attempt_handover_at(
+        &paths,
+        santi_core::DEFAULT_SOUL_ID,
+        "upgrade_two",
+        Some("ss_stale"),
+        "other attempt",
+    )
+    .expect("seed other attempt");
+    assert_ne!(other.strand_id, outcome.strand_id);
 
     let store = SantiStore::open(&paths.database_path).expect("reopen");
     let strand = store.strand(&outcome.strand_id).unwrap().expect("strand");
     assert_eq!(
         strand.external_label.as_deref(),
-        Some("soul:soul_default:ops")
+        Some("soul:soul_default:ops:upgrade:upgrade_one")
+    );
+    let other_strand = store
+        .strand(&other.strand_id)
+        .unwrap()
+        .expect("other strand");
+    assert_eq!(
+        other_strand.external_label.as_deref(),
+        Some("soul:soul_default:ops:upgrade:upgrade_two")
     );
     let started = store
         .try_start_turn(&outcome.strand_id, "strand_send", None)
         .unwrap()
         .expect("turn starts");
     assert_eq!(started.drained_messages[0].content_text, "come look");
+    assert_eq!(started.drained_messages[1].content_text, "come look again");
+}
+
+#[test]
+fn stable_helper_preserves_label() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let paths = paths_under(temp.path());
+    SantiStore::open(&paths.database_path).expect("open");
+
+    let outcome = seed_come_look_at(&paths, santi_core::DEFAULT_SOUL_ID, None, "stable wake")
+        .expect("seed stable label");
+    let store = SantiStore::open(&paths.database_path).expect("reopen");
+    let strand = store.strand(&outcome.strand_id).unwrap().expect("strand");
+    assert_eq!(
+        strand.external_label.as_deref(),
+        Some("soul:soul_default:ops")
+    );
 }
 
 #[test]
@@ -120,8 +164,14 @@ fn success_resolves_incident() {
 fn full_handover_is_idempotent() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
-    let seeded = seed_come_look_at(&paths, santi_core::DEFAULT_SOUL_ID, None, "existing wake")
-        .expect("initial seed");
+    let seeded = seed_attempt_handover_at(
+        &paths,
+        santi_core::DEFAULT_SOUL_ID,
+        "upgrade_test",
+        None,
+        "existing wake",
+    )
+    .expect("initial seed");
     let store = SantiStore::open(&paths.database_path).expect("open store");
     let conn = rusqlite::Connection::open(&paths.database_path).expect("open sqlite");
     conn.execute(
@@ -172,10 +222,80 @@ fn full_handover_is_idempotent() {
     assert_eq!(inbox_count, 500);
 }
 
+#[test]
+fn next_attempt_bypasses_exhaustion() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let paths = paths_under(temp.path());
+    let first = finalize_at(
+        &paths,
+        request_for("upgrade_full", UpgradeTerminal::Upgraded),
+    )
+    .expect("first finalize");
+    let first_strand = first.seeded_strand_id.expect("first seeded strand");
+
+    let conn = rusqlite::Connection::open(&paths.database_path).expect("open sqlite");
+    conn.execute(
+        r#"
+        WITH RECURSIVE seq(n) AS (
+          VALUES(1)
+          UNION ALL
+          SELECT n + 1 FROM seq WHERE n < 499
+        )
+        INSERT INTO strand_inbox (
+          id, strand_id, message_kind, content,
+          source_type, source_ref, source_metadata, created_at
+        )
+        SELECT 'inbox_isolation_fixture_' || n, ?1, 'santi_system', '{}',
+               NULL, NULL, NULL, 'fixture'
+        FROM seq
+        "#,
+        [&first_strand],
+    )
+    .expect("fill first attempt room");
+
+    let blocked = finalize_at(
+        &paths,
+        request_for("upgrade_full", UpgradeTerminal::Upgraded),
+    )
+    .expect("repeat full attempt");
+    assert!(!blocked.seeded);
+    assert_eq!(blocked.errors.len(), 1);
+    assert_eq!(blocked.errors[0].code, "runtime.upgrade.handover_failed");
+
+    let next = finalize_at(
+        &paths,
+        request_for("upgrade_next", UpgradeTerminal::Upgraded),
+    )
+    .expect("next finalize");
+    assert!(next.seeded);
+    assert!(next.errors.is_empty());
+    assert_ne!(
+        next.seeded_strand_id.as_deref(),
+        Some(first_strand.as_str())
+    );
+
+    let store = SantiStore::open(&paths.database_path).expect("open store");
+    let handover = store
+        .error_incidents(&ErrorScope::new("runtime", "default"), 10)
+        .expect("runtime incidents")
+        .into_iter()
+        .find(|incident| incident.code == "runtime.upgrade.handover_failed")
+        .expect("handover incident");
+    assert_eq!(handover.status, IncidentStatus::Resolved);
+    assert_eq!(
+        handover.resolved_by.as_deref(),
+        Some("upgrade.handover_succeeded")
+    );
+}
+
 fn request(terminal: UpgradeTerminal) -> UpgradeFinalizeRequest {
+    request_for("upgrade_test", terminal)
+}
+
+fn request_for(attempt_id: &str, terminal: UpgradeTerminal) -> UpgradeFinalizeRequest {
     UpgradeFinalizeRequest {
         protocol_version: 1,
-        attempt_id: "upgrade_test".to_string(),
+        attempt_id: attempt_id.to_string(),
         deb: "/tmp/santi.deb".to_string(),
         terminal,
         readiness: UpgradeReadiness::Ready,

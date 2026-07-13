@@ -1,4 +1,4 @@
-use crate::store::ProviderFailureContext;
+use crate::store::{ProviderFailureContext, RuntimeFailureContext};
 use crate::{
     ActorType, ErrorScope, ErrorSource, MessageContent, MessageIntake, MessageState, SantiError,
     SantiStreamPayload, Turn, catalog, engine,
@@ -43,7 +43,34 @@ struct ProviderFailureMetadata {
 enum ProviderTurnFailureCause {
     Provider(ProviderFailureMetadata),
     ContextBudget(SantiError),
-    Runtime,
+    Runtime(RuntimeTurnFailureOperation),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum RuntimeTurnFailureOperation {
+    AssemblyInput,
+    SystemPrompt,
+    ContextAdmission,
+    ThinkingPersistence,
+    TextPersistence,
+    AssistantPersistence,
+    ToolExecution,
+    CompletionPersistence,
+}
+
+impl RuntimeTurnFailureOperation {
+    fn name(self) -> &'static str {
+        match self {
+            Self::AssemblyInput => "turn.assembly_input",
+            Self::SystemPrompt => "turn.system_prompt",
+            Self::ContextAdmission => "turn.context_admission",
+            Self::ThinkingPersistence => "turn.thinking_persistence",
+            Self::TextPersistence => "turn.text_persistence",
+            Self::AssistantPersistence => "turn.assistant_persistence",
+            Self::ToolExecution => "turn.tool_execution",
+            Self::CompletionPersistence => "turn.completion_persistence",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -54,11 +81,15 @@ pub(super) struct ProviderTurnFailure {
 }
 
 impl ProviderTurnFailure {
-    pub(super) fn runtime(error: String, partial_assistant_text: &str) -> Self {
+    pub(super) fn runtime(
+        operation: RuntimeTurnFailureOperation,
+        error: String,
+        partial_assistant_text: &str,
+    ) -> Self {
         Self {
             error,
             partial_assistant_text: partial_assistant_text.to_string(),
-            cause: ProviderTurnFailureCause::Runtime,
+            cause: ProviderTurnFailureCause::Runtime(operation),
         }
     }
 
@@ -108,7 +139,11 @@ impl SantiService {
                 self.persist_provider_failure(strand_id, turn_id, &error, metadata)
             }
             ProviderTurnFailureCause::ContextBudget(canonical_error) => {
-                match self.store.fail_turn(turn_id, &error) {
+                match self.store.fail_turn_with_incident(
+                    turn_id,
+                    &error,
+                    canonical_error.incident_id.as_deref(),
+                ) {
                     Ok(turn) => (Some(turn), canonical_error),
                     Err(persistence_error) => {
                         eprintln!(
@@ -121,8 +156,8 @@ impl SantiService {
                     }
                 }
             }
-            ProviderTurnFailureCause::Runtime => {
-                self.persist_runtime_failure(strand_id, turn_id, &error)
+            ProviderTurnFailureCause::Runtime(operation) => {
+                self.persist_runtime_failure(strand_id, turn_id, &error, operation)
             }
         };
 
@@ -177,22 +212,17 @@ impl SantiService {
         strand_id: &str,
         turn_id: &str,
         error: &str,
+        operation: RuntimeTurnFailureOperation,
     ) -> (Option<Turn>, SantiError) {
-        match self.store.fail_turn(turn_id, error) {
-            Ok(turn) => (
-                Some(turn),
-                engine().transient(
-                    catalog::INTERNAL,
-                    ErrorSource::new("santi-core", "provider_turn"),
-                    Some(ErrorScope::new("strand", strand_id)),
-                    "provider turn failed inside the runtime",
-                    serde_json::json!({
-                        "turn_id": turn_id,
-                        "detail": error,
-                        "trace": format!("log://turn/{turn_id}"),
-                    }),
-                ),
-            ),
+        match self.store.fail_runtime_turn(
+            turn_id,
+            error,
+            RuntimeFailureContext {
+                operation: operation.name(),
+                detail: error,
+            },
+        ) {
+            Ok((turn, error)) => (Some(turn), error),
             Err(persistence_error) => {
                 eprintln!(
                     "santi: runtime turn failure persistence failed for {turn_id}: {persistence_error}"

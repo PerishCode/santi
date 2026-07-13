@@ -10,11 +10,16 @@ use crate::{StrandMessage, StrandTargetType, prefixed_id, timestamp_now};
 /// `r_strand_entries` in arrival order, then the inbox row is removed. This is
 /// the ONE place inbound content is committed — ingest itself only durably
 /// enqueues. Returns the drained messages (empty ⟺ nothing was pending).
+pub(in crate::store) struct DrainedInbox {
+    pub messages: Vec<StrandMessage>,
+    pub inbox_ids: Vec<String>,
+}
+
 pub(in crate::store) fn drain_inbox_in_tx(
     conn: &Connection,
     strand_id: &str,
     committing_turn_id: &str,
-) -> Result<Vec<StrandMessage>, String> {
+) -> Result<DrainedInbox, String> {
     let mut stmt = conn
         .prepare(
             r#"
@@ -44,6 +49,7 @@ pub(in crate::store) fn drain_inbox_in_tx(
 
     let now = timestamp_now();
     let mut drained = Vec::with_capacity(pending.len());
+    let mut inbox_ids = Vec::with_capacity(pending.len());
     for pending_entry in pending {
         let message_id = prefixed_id("msg");
         conn.execute(
@@ -77,12 +83,16 @@ pub(in crate::store) fn drain_inbox_in_tx(
             params![pending_entry.id],
         )
         .map_err(|error| error.to_string())?;
+        inbox_ids.push(pending_entry.id.clone());
         drained.push(
             message_by_id(conn, &message_id)?
                 .ok_or_else(|| "drained message missing".to_string())?,
         );
     }
-    Ok(drained)
+    Ok(DrainedInbox {
+        messages: drained,
+        inbox_ids,
+    })
 }
 
 struct PendingInboxEntry {

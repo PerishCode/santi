@@ -14,7 +14,7 @@ use super::super::{
     text_delta::TextDeltaUpdate,
     timing::{ProviderTurnTiming, provider_event_name},
 };
-use super::failure::{ProviderFailureStage, ProviderTurnFailure};
+use super::failure::{ProviderFailureStage, ProviderTurnFailure, RuntimeTurnFailureOperation};
 
 impl SantiService {
     pub(super) async fn complete_provider_turn(&self, strand_id: String, turn_id: String) {
@@ -81,7 +81,11 @@ impl SantiService {
             Err(error) => self.fail_background_turn(
                 strand_id,
                 turn_id,
-                ProviderTurnFailure::runtime(error, ""),
+                ProviderTurnFailure::runtime(
+                    RuntimeTurnFailureOperation::CompletionPersistence,
+                    error,
+                    "",
+                ),
             ),
         }
     }
@@ -96,10 +100,16 @@ impl SantiService {
         let mut timing = ProviderTurnTiming::new(turn_id);
         let mut round = 0;
         macro_rules! provider_try {
-            ($expr:expr) => {
+            ($operation:expr, $expr:expr) => {
                 match $expr {
                     Ok(value) => value,
-                    Err(error) => return Err(ProviderTurnFailure::runtime(error, &assistant_text)),
+                    Err(error) => {
+                        return Err(ProviderTurnFailure::runtime(
+                            $operation,
+                            error,
+                            &assistant_text,
+                        ));
+                    }
                 }
             };
         }
@@ -109,18 +119,25 @@ impl SantiService {
             // The timeline is the single source of truth: each round re-derives
             // input from it, including any tool calls/results just persisted by
             // the previous round (no function_call_outputs side-channel).
-            let input = provider_try!(provider_input(&self.store, strand_id));
+            let input = provider_try!(
+                RuntimeTurnFailureOperation::AssemblyInput,
+                provider_input(&self.store, strand_id)
+            );
             let metadata = self.provider.metadata();
             let provider_family = metadata.provider.to_string();
             let request = ProviderRequest {
                 model: metadata.model,
-                instructions: Some(provider_try!(self.system_prompt_text(strand_id))),
+                instructions: Some(provider_try!(
+                    RuntimeTurnFailureOperation::SystemPrompt,
+                    self.system_prompt_text(strand_id)
+                )),
                 input,
                 tools: Some(provider_tools()),
                 previous_response_id: None,
             };
             let estimate = estimate_provider_request(&request);
             if let Some(error) = provider_try!(
+                RuntimeTurnFailureOperation::ContextAdmission,
                 self.open_over_budget_incident(strand_id, turn_id, &request, &estimate)
             ) {
                 timing.failed(round, "context_budget", &error.to_string());
@@ -173,11 +190,14 @@ impl SantiService {
                     Ok(event) => event,
                     Err(error) => {
                         timing.failed(round, "sse_event", &error);
-                        provider_try!(self.fail_current_thinking_span(
-                            strand_id,
-                            &mut current_thinking_span,
-                            error.clone(),
-                        ));
+                        provider_try!(
+                            RuntimeTurnFailureOperation::ThinkingPersistence,
+                            self.fail_current_thinking_span(
+                                strand_id,
+                                &mut current_thinking_span,
+                                error.clone(),
+                            )
+                        );
                         return Err(ProviderTurnFailure::provider(
                             error,
                             &assistant_text,
@@ -205,13 +225,16 @@ impl SantiService {
                         provider_response_id,
                     } => {
                         active_provider_response_id = provider_response_id.clone();
-                        provider_try!(self.ensure_thinking_span(
-                            strand_id,
-                            turn_id,
-                            &mut current_thinking_span,
-                            &mut summary_thinking_span,
-                            provider_response_id.clone(),
-                        ));
+                        provider_try!(
+                            RuntimeTurnFailureOperation::ThinkingPersistence,
+                            self.ensure_thinking_span(
+                                strand_id,
+                                turn_id,
+                                &mut current_thinking_span,
+                                &mut summary_thinking_span,
+                                provider_response_id.clone(),
+                            )
+                        );
                         self.publish_turn_activity(
                             strand_id,
                             turn_id,
@@ -221,19 +244,25 @@ impl SantiService {
                     }
                     ProviderEvent::ReasoningSummaryDelta(delta) => {
                         reasoning_summary.push_str(&delta);
-                        provider_try!(self.update_thinking_span_summary(
-                            strand_id,
-                            &mut summary_thinking_span,
-                            reasoning_summary.clone(),
-                        ));
+                        provider_try!(
+                            RuntimeTurnFailureOperation::ThinkingPersistence,
+                            self.update_thinking_span_summary(
+                                strand_id,
+                                &mut summary_thinking_span,
+                                reasoning_summary.clone(),
+                            )
+                        );
                     }
                     ProviderEvent::ReasoningSummaryDone(summary) => {
                         reasoning_summary = summary;
-                        provider_try!(self.update_thinking_span_summary(
-                            strand_id,
-                            &mut summary_thinking_span,
-                            reasoning_summary.clone(),
-                        ));
+                        provider_try!(
+                            RuntimeTurnFailureOperation::ThinkingPersistence,
+                            self.update_thinking_span_summary(
+                                strand_id,
+                                &mut summary_thinking_span,
+                                reasoning_summary.clone(),
+                            )
+                        );
                     }
                     ProviderEvent::TextDelta(delta) => {
                         let update = TextDeltaUpdate {
@@ -246,15 +275,21 @@ impl SantiService {
                             current_thinking_span: &mut current_thinking_span,
                             active_provider_response_id: &active_provider_response_id,
                         };
-                        provider_try!(self.handle_text_delta(delta, update));
+                        provider_try!(
+                            RuntimeTurnFailureOperation::TextPersistence,
+                            self.handle_text_delta(delta, update)
+                        );
                     }
                     ProviderEvent::FunctionCallRequested(call) => {
                         timing.function_call_requested(round, &call.name);
-                        provider_try!(self.complete_current_thinking_span(
-                            strand_id,
-                            &mut current_thinking_span,
-                            ThinkingCompletionReason::ToolCallRequested,
-                        ));
+                        provider_try!(
+                            RuntimeTurnFailureOperation::ThinkingPersistence,
+                            self.complete_current_thinking_span(
+                                strand_id,
+                                &mut current_thinking_span,
+                                ThinkingCompletionReason::ToolCallRequested,
+                            )
+                        );
                         self.publish_turn_activity(
                             strand_id,
                             turn_id,
@@ -268,21 +303,27 @@ impl SantiService {
                     } => {
                         timing.completed(round);
                         active_provider_response_id = provider_response_id.clone();
-                        provider_try!(self.complete_current_thinking_span(
-                            strand_id,
-                            &mut current_thinking_span,
-                            ThinkingCompletionReason::ProviderCompleted,
-                        ));
+                        provider_try!(
+                            RuntimeTurnFailureOperation::ThinkingPersistence,
+                            self.complete_current_thinking_span(
+                                strand_id,
+                                &mut current_thinking_span,
+                                ThinkingCompletionReason::ProviderCompleted,
+                            )
+                        );
                         completed_response_id = provider_response_id;
                         break;
                     }
                     ProviderEvent::Failed(error) => {
                         timing.failed(round, "provider_response", &error);
-                        provider_try!(self.fail_current_thinking_span(
-                            strand_id,
-                            &mut current_thinking_span,
-                            error.clone(),
-                        ));
+                        provider_try!(
+                            RuntimeTurnFailureOperation::ThinkingPersistence,
+                            self.fail_current_thinking_span(
+                                strand_id,
+                                &mut current_thinking_span,
+                                error.clone(),
+                            )
+                        );
                         return Err(ProviderTurnFailure::provider(
                             error,
                             &assistant_text,
@@ -301,6 +342,7 @@ impl SantiService {
             // stored once at turn end.
             if !round_assistant_text.is_empty() {
                 last_soul_message = Some(provider_try!(
+                    RuntimeTurnFailureOperation::AssistantPersistence,
                     self.store
                         .append_soul_assistant_text(strand_id, &round_assistant_text)
                 ));
@@ -319,7 +361,10 @@ impl SantiService {
                     TurnActivityState::RunningTool,
                     active_provider_response_id.clone(),
                 );
-                provider_try!(self.handle_tool_call(strand_id, turn_id, call));
+                provider_try!(
+                    RuntimeTurnFailureOperation::ToolExecution,
+                    self.handle_tool_call(strand_id, turn_id, call)
+                );
             }
             timing.tool_outputs_completed(round, call_count);
         };

@@ -2,7 +2,7 @@ use rusqlite::params;
 use serde_json::json;
 
 use super::{
-    ProviderFailureContext, SantiStore, StartedTurn,
+    ProviderFailureContext, RuntimeFailureContext, SantiStore, StartedTurn,
     db::{
         drain_inbox_in_tx, thinking_spans_for_turn, tool_calls_for_turn, tool_results_for_turn,
         turn_by_id,
@@ -44,8 +44,8 @@ impl SantiStore {
             return Ok(None);
         }
         let turn_id = prefixed_id("turn");
-        let drained_messages = drain_inbox_in_tx(&tx, strand_id, &turn_id)?;
-        if drained_messages.is_empty() {
+        let drained = drain_inbox_in_tx(&tx, strand_id, &turn_id)?;
+        if drained.messages.is_empty() {
             return Ok(None);
         }
         let now = timestamp_now();
@@ -62,10 +62,11 @@ impl SantiStore {
             params![turn_id, strand_id, trigger_type, trigger_ref, now],
         )
         .map_err(|error| error.to_string())?;
+        super::db::begin_turn_in_conn(&tx, strand_id, &turn_id, &drained.inbox_ids, None)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(Some(StartedTurn {
             turn: turn_by_id(&conn, &turn_id)?.ok_or_else(|| "created turn missing".to_string())?,
-            drained_messages,
+            drained_messages: drained.messages,
         }))
     }
 
@@ -90,18 +91,44 @@ impl SantiStore {
     /// Reconcile them to an honest "interrupted" terminal — never fabricate a
     /// result — so the strand is idle again and the soul sees the truth.
     pub fn reconcile_orphaned_turns(&self) -> Result<usize, String> {
-        let conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction().map_err(|error| error.to_string())?;
         let now = timestamp_now();
-        conn.execute(
-            r#"
-            UPDATE turns
-            SET status = 'failed', error_text = 'interrupted by restart',
-                updated_at = ?1, finished_at = ?1
-            WHERE status = 'running'
-            "#,
-            params![now],
-        )
-        .map_err(|error| error.to_string())
+        let mut stmt = tx
+            .prepare("SELECT id, strand_id FROM turns WHERE status = 'running'")
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        drop(stmt);
+        for (turn_id, strand_id) in &rows {
+            tx.execute(
+                r#"
+                UPDATE turns
+                SET status = 'failed', error_text = 'interrupted by restart',
+                    updated_at = ?2, finished_at = ?2
+                WHERE id = ?1 AND status = 'running'
+                "#,
+                params![turn_id, now],
+            )
+            .map_err(|error| error.to_string())?;
+            let error = open_runtime_incident(
+                &tx,
+                strand_id,
+                turn_id,
+                RuntimeFailureContext {
+                    operation: "turn.restart_reconcile",
+                    detail: "interrupted by restart",
+                },
+            )?;
+            super::db::fail_turn_in_conn(&tx, turn_id, error.incident_id.as_deref(), &now)?;
+        }
+        tx.commit().map_err(|error| error.to_string())?;
+        Ok(rows.len())
     }
 
     /// How many turns are currently `running`. Used by graceful shutdown to
@@ -191,6 +218,7 @@ impl SantiStore {
             params![turn_id, assistant_message_seq, provider_state, now],
         )
         .map_err(|error| error.to_string())?;
+        super::db::complete_turn_in_conn(&tx, turn_id, &now)?;
         resolve_in_conn(
             &tx,
             &provider_incident_key(&strand_id),
@@ -200,6 +228,16 @@ impl SantiStore {
                 "provider": provider,
                 "model": model,
                 "provider_response_id": provider_response_id,
+            }),
+        )?;
+        resolve_in_conn(
+            &tx,
+            &runtime_incident_key(&strand_id),
+            "runtime.turn_succeeded",
+            json!({
+                "turn_id": turn_id,
+                "provider": provider,
+                "model": model,
             }),
         )?;
         tx.commit().map_err(|error| error.to_string())?;
@@ -250,15 +288,29 @@ impl SantiStore {
                 }),
             },
         )?;
+        super::db::fail_turn_in_conn(&tx, turn_id, error.incident_id.as_deref(), &now)?;
         tx.commit().map_err(|error| error.to_string())?;
         let turn = turn_by_id(&conn, turn_id)?.ok_or_else(|| "failed turn missing".to_string())?;
         Ok((turn, error))
     }
 
-    pub fn fail_turn(&self, turn_id: &str, error_text: &str) -> Result<Turn, String> {
-        let conn = self.conn.lock().unwrap();
+    pub(crate) fn fail_runtime_turn(
+        &self,
+        turn_id: &str,
+        error_text: &str,
+        failure: RuntimeFailureContext<'_>,
+    ) -> Result<(Turn, SantiError), String> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction().map_err(|error| error.to_string())?;
+        let strand_id: String = tx
+            .query_row(
+                "SELECT strand_id FROM turns WHERE id = ?1",
+                params![turn_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
         let now = timestamp_now();
-        conn.execute(
+        tx.execute(
             r#"
             UPDATE turns
             SET status = 'failed', error_text = ?2, updated_at = ?3, finished_at = ?3
@@ -267,6 +319,37 @@ impl SantiStore {
             params![turn_id, error_text, now],
         )
         .map_err(|error| error.to_string())?;
+        let error = open_runtime_incident(&tx, &strand_id, turn_id, failure)?;
+        super::db::fail_turn_in_conn(&tx, turn_id, error.incident_id.as_deref(), &now)?;
+        tx.commit().map_err(|error| error.to_string())?;
+        let turn = turn_by_id(&conn, turn_id)?.ok_or_else(|| "failed turn missing".to_string())?;
+        Ok((turn, error))
+    }
+
+    pub fn fail_turn(&self, turn_id: &str, error_text: &str) -> Result<Turn, String> {
+        self.fail_turn_with_incident(turn_id, error_text, None)
+    }
+
+    pub(crate) fn fail_turn_with_incident(
+        &self,
+        turn_id: &str,
+        error_text: &str,
+        incident_id: Option<&str>,
+    ) -> Result<Turn, String> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction().map_err(|error| error.to_string())?;
+        let now = timestamp_now();
+        tx.execute(
+            r#"
+            UPDATE turns
+            SET status = 'failed', error_text = ?2, updated_at = ?3, finished_at = ?3
+            WHERE id = ?1
+            "#,
+            params![turn_id, error_text, now],
+        )
+        .map_err(|error| error.to_string())?;
+        super::db::fail_turn_in_conn(&tx, turn_id, incident_id, &now)?;
+        tx.commit().map_err(|error| error.to_string())?;
         turn_by_id(&conn, turn_id)?.ok_or_else(|| "failed turn missing".to_string())
     }
 
@@ -323,6 +406,35 @@ impl SantiStore {
 
 fn provider_incident_key(strand_id: &str) -> String {
     format!("{}:strand:{strand_id}", catalog::PROVIDER_TURN_FAILED.code)
+}
+
+fn runtime_incident_key(strand_id: &str) -> String {
+    format!("{}:strand:{strand_id}", catalog::RUNTIME_TURN_FAILED.code)
+}
+
+fn open_runtime_incident(
+    conn: &rusqlite::Connection,
+    strand_id: &str,
+    turn_id: &str,
+    failure: RuntimeFailureContext<'_>,
+) -> Result<SantiError, String> {
+    open_incident_in_conn(
+        conn,
+        IncidentDraft {
+            incident_key: runtime_incident_key(strand_id),
+            descriptor: catalog::RUNTIME_TURN_FAILED,
+            scope: ErrorScope::new("strand", strand_id),
+            source: ErrorSource::new("santi-core", failure.operation),
+            message: "turn failed inside the runtime".to_string(),
+            context: json!({
+                "schema": "santi.error.runtime_turn.v1",
+                "turn_id": turn_id,
+                "operation": failure.operation,
+                "detail": bounded_provider_detail(failure.detail),
+                "trace": format!("log://turn/{turn_id}"),
+            }),
+        },
+    )
 }
 
 fn bounded_provider_detail(detail: &str) -> String {

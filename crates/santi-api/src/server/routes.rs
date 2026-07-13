@@ -8,9 +8,9 @@ use axum::{
 use santi_core::{
     CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSoulRequest,
     CreateStrandResponse, CreateWebhookRequest, DriveStrandResponse, ForkStrandResponse,
-    HealthResponse, MaterialRequest, SantiError, SantiService, SendStrandAcceptedResponse,
-    SendStrandRequest, Soul, Strand, StrandBudgetSnapshot, StrandDetail, StrandMaterial,
-    StrandRuntimeSnapshot, WebhookSubscription,
+    HealthResponse, MaterialRequest, ReceiptStatus, SantiError, SantiService,
+    SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand, StrandBudgetSnapshot,
+    StrandDetail, StrandMaterial, StrandRuntimeSnapshot, WebhookSubscription,
 };
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -46,6 +46,7 @@ pub(super) fn router(service: SantiService) -> Router {
         .route("/api/v1/strands/{strand_id}/errors", get(strand_errors))
         .route("/api/v1/errors/events", get(error_events))
         .route("/api/v1/errors/{scope_kind}/{scope_id}", get(errors))
+        .route("/api/v1/receipts/{inbox_id}", get(receipt_status))
         .route("/api/v1/compacts/{compact_id}", get(compact_query))
         .route("/api/v1/strands/{strand_id}/runtime", get(runtime_snapshot))
         // IM layer (orthogonal to the runtime; shares the server for cold-start):
@@ -80,7 +81,8 @@ pub(super) fn router(service: SantiService) -> Router {
     )
 )]
 pub async fn health(State(service): State<SantiService>) -> impl IntoResponse {
-    let degraded = service.is_drive_degraded();
+    let active_drive_incidents = service.active_drive_incident_count();
+    let degraded = service.is_drive_degraded() || active_drive_incidents > 0;
     let status = if degraded {
         StatusCode::SERVICE_UNAVAILABLE
     } else {
@@ -92,8 +94,30 @@ pub async fn health(State(service): State<SantiService>) -> impl IntoResponse {
             ok: !degraded,
             degraded,
             service: "santi-api".to_string(),
+            active_drive_incidents,
         }),
     )
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/receipts/{inbox_id}",
+    params(("inbox_id" = String, Path)),
+    responses(
+        (status = 200, body = ReceiptStatus),
+        (status = 404, body = SantiError),
+        (status = 500, body = SantiError)
+    )
+)]
+pub async fn receipt_status(
+    State(service): State<SantiService>,
+    Path(inbox_id): Path<String>,
+) -> Result<Json<ReceiptStatus>, ApiError> {
+    service
+        .receipt_status(&inbox_id)
+        .map_err(ApiError::from_service)?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("receipt not found"))
 }
 
 #[utoipa::path(

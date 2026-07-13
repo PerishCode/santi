@@ -1,5 +1,7 @@
 mod inbox;
 mod lifecycle;
+mod receipt_migration;
+mod receipts;
 mod timeline;
 
 use rusqlite::{Connection, OptionalExtension, params};
@@ -13,6 +15,9 @@ use crate::{
 use super::rows::*;
 pub(super) use inbox::drain_inbox_in_tx;
 pub use lifecycle::{read_schema_version, soul_memory_file};
+pub(in crate::store) use receipts::{
+    begin_turn_in_conn, complete_turn_in_conn, fail_turn_in_conn, insert_accepted_in_conn,
+};
 pub(super) use timeline::*;
 
 pub(super) fn append_entry_in_tx(

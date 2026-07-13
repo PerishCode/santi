@@ -115,6 +115,11 @@ async fn concurrent_request_follows() {
     );
 
     provider.wait_for_first_request().await;
+    let first_receipt = service
+        .receipt_status(&first.receipt.inbox_id)
+        .expect("first receipt query")
+        .expect("first receipt");
+    assert_eq!(first_receipt.state, santi_core::ReceiptState::Driving);
 
     let second = service
         .send_strand(
@@ -136,6 +141,11 @@ async fn concurrent_request_follows() {
         second.user_message.is_none(),
         "coalesced send is still in the inbox, not yet a timeline message"
     );
+    let second_receipt = service
+        .receipt_status(&second.receipt.inbox_id)
+        .expect("second receipt query")
+        .expect("second receipt");
+    assert_eq!(second_receipt.state, santi_core::ReceiptState::Accepted);
 
     let running = service
         .runtime_snapshot(&strand.id)
@@ -177,6 +187,14 @@ async fn concurrent_request_follows() {
         "follow-on provider call should include the coalesced real request"
     );
     drop(requests);
+
+    for inbox_id in [&first.receipt.inbox_id, &second.receipt.inbox_id] {
+        let receipt = service
+            .receipt_status(inbox_id)
+            .expect("receipt query")
+            .expect("receipt");
+        assert_eq!(receipt.state, santi_core::ReceiptState::Completed);
+    }
 
     assert_eq!(runtime.turns.len(), 2);
     assert!(

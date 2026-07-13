@@ -15,6 +15,8 @@ fn schema_matches_runtime() {
         "strand_effects",
         "strands",
         "strand_inbox",
+        "inbox_receipts",
+        "receipt_transitions",
         "turns",
         "tool_calls",
         "tool_results",

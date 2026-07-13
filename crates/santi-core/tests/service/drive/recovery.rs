@@ -45,6 +45,12 @@ async fn drive_failure_recovers() {
     assert_eq!(warning.context["accepted_before_failure"], true);
     assert_eq!(warning.context["inbox_id"], accepted.receipt.inbox_id);
     assert_eq!(warning.context["recovery"]["resend"], false);
+    let receipt_id = accepted.receipt.inbox_id.clone();
+    let receipt = service
+        .receipt_status(&receipt_id)
+        .expect("receipt status")
+        .expect("receipt");
+    assert_eq!(receipt.state, santi_core::ReceiptState::Accepted);
     assert!(service.is_drive_degraded());
 
     let runtime = service
@@ -100,6 +106,28 @@ async fn drive_failure_recovers() {
             .messages
             .iter()
             .any(|message| message.content_text == "accepted before drive failure")
+    );
+    let receipt = service
+        .receipt_status(&receipt_id)
+        .expect("receipt status")
+        .expect("receipt");
+    assert_eq!(receipt.state, santi_core::ReceiptState::Completed);
+    assert_eq!(
+        receipt
+            .transitions
+            .iter()
+            .map(|transition| transition.state.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            santi_core::ReceiptState::Accepted,
+            santi_core::ReceiptState::MechanicallyRecovered,
+            santi_core::ReceiptState::Driving,
+            santi_core::ReceiptState::Completed,
+        ]
+    );
+    assert_eq!(
+        receipt.transitions[1].incident_id.as_deref(),
+        Some(incident_id.as_str())
     );
     assert!(
         runtime

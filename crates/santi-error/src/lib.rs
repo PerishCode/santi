@@ -56,6 +56,14 @@ pub mod catalog {
         exposure: ErrorExposure::CALLER_AND_OPERATOR,
     };
 
+    pub const RUNTIME_TURN_FAILED: ErrorDescriptor = ErrorDescriptor {
+        code: "runtime.turn.failed",
+        category: ErrorCategory::Internal,
+        severity: ErrorSeverity::Error,
+        retry: ErrorRetry::Later,
+        exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    };
+
     pub const STRAND_DRIVE_FAILED: ErrorDescriptor = ErrorDescriptor {
         code: "runtime.strand.drive_failed",
         category: ErrorCategory::Unavailable,

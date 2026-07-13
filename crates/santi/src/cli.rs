@@ -91,6 +91,8 @@ pub enum Command {
         #[arg(long, default_value_t = 50)]
         limit: i64,
     },
+    /// Query one durable accepted-message obligation by inbox receipt id.
+    Receipt { inbox_id: String },
     /// Strand resources under /api/v1/strands
     #[command(subcommand)]
     Strand(StrandCommand),

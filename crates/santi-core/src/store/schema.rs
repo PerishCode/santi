@@ -220,6 +220,38 @@ CREATE TABLE IF NOT EXISTS strand_inbox (
 );
 CREATE INDEX IF NOT EXISTS idx_strand_inbox_strand_created_at ON strand_inbox (strand_id, created_at);
 
+-- Durable responsibility root for every accepted inbox item. Content remains
+-- in the inbox/timeline; this table carries only obligation state and locators.
+CREATE TABLE IF NOT EXISTS inbox_receipts (
+    id TEXT PRIMARY KEY,
+    strand_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN (
+        'accepted', 'mechanically_recovered', 'driving', 'turn_failed', 'completed'
+    )),
+    accepted_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_inbox_receipts_strand_state
+ON inbox_receipts(strand_id, state, accepted_at);
+
+-- Minimal state evidence. Turn and incident details remain canonical in their
+-- own tables; transitions retain only the locators needed to explain a receipt.
+CREATE TABLE IF NOT EXISTS receipt_transitions (
+    id TEXT PRIMARY KEY,
+    inbox_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL CHECK (sequence > 0),
+    state TEXT NOT NULL CHECK (state IN (
+        'accepted', 'mechanically_recovered', 'driving', 'turn_failed', 'completed'
+    )),
+    turn_id TEXT,
+    incident_id TEXT,
+    reconstructed_from TEXT,
+    occurred_at TEXT NOT NULL,
+    UNIQUE (inbox_id, sequence)
+);
+CREATE INDEX IF NOT EXISTS idx_receipt_transitions_receipt_time
+ON receipt_transitions(inbox_id, sequence);
+
 CREATE TABLE IF NOT EXISTS r_strand_entries (
     strand_id TEXT NOT NULL,
     target_type TEXT NOT NULL CHECK (target_type IN ('message', 'thinking', 'tool_call', 'tool_result')),

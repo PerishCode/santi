@@ -4,6 +4,8 @@ mod errors;
 mod fork;
 #[path = "store/inbox.rs"]
 mod inbox;
+#[path = "store/receipt_schema.rs"]
+mod receipt_schema;
 #[path = "store/schema.rs"]
 mod schema;
 #[path = "store/support.rs"]

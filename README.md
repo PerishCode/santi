@@ -53,6 +53,19 @@ cargo run -p santi -- session send <session_id> "hello"
 cargo run -p santi -- session events <session_id>
 ```
 
+Every accepted send returns a durable `receipt.inbox_id`. Query its obligation
+state and state-transition evidence without replaying the message timeline:
+
+```sh
+santi receipt <inbox_id>
+```
+
+Receipt completion means an assistant turn completed and was persisted. Driver
+recovery or incident resolution alone never marks the receipt completed.
+Migration-reconstructed transitions expose `reconstructed_from`; live
+transitions leave it unset. A v24 drain is completed only when its linked turn
+is durably completed, never merely because the inbox item was drained.
+
 Export the OpenAPI document:
 
 ```sh

@@ -394,7 +394,7 @@ impl SantiStore {
         let version = conn
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .map_err(|error| error.to_string())?;
-        if version == 21 && SCHEMA_VERSION == 26 {
+        if version == 21 && SCHEMA_VERSION == 27 {
             // v21 -> v22 is additive: PR #47 only adds bounded inbox-source
             // provenance columns. Migrate it in place so live ingress topology
             // (notably `webhooks` / the secretary subscription) cannot be
@@ -404,20 +404,27 @@ impl SantiStore {
             migrate_v23_to_v24(&conn)?;
             super::receipt_migration::migrate_v24_to_v25(&conn)?;
             super::effect_migration::migrate_v25_to_v26(&conn)?;
-        } else if version == 22 && SCHEMA_VERSION == 26 {
+            super::im_migration::migrate_v26_to_v27(&conn)?;
+        } else if version == 22 && SCHEMA_VERSION == 27 {
             migrate_v22_to_v23(&conn)?;
             migrate_v23_to_v24(&conn)?;
             super::receipt_migration::migrate_v24_to_v25(&conn)?;
             super::effect_migration::migrate_v25_to_v26(&conn)?;
-        } else if version == 23 && SCHEMA_VERSION == 26 {
+            super::im_migration::migrate_v26_to_v27(&conn)?;
+        } else if version == 23 && SCHEMA_VERSION == 27 {
             migrate_v23_to_v24(&conn)?;
             super::receipt_migration::migrate_v24_to_v25(&conn)?;
             super::effect_migration::migrate_v25_to_v26(&conn)?;
-        } else if version == 24 && SCHEMA_VERSION == 26 {
+            super::im_migration::migrate_v26_to_v27(&conn)?;
+        } else if version == 24 && SCHEMA_VERSION == 27 {
             super::receipt_migration::migrate_v24_to_v25(&conn)?;
             super::effect_migration::migrate_v25_to_v26(&conn)?;
-        } else if version == 25 && SCHEMA_VERSION == 26 {
+            super::im_migration::migrate_v26_to_v27(&conn)?;
+        } else if version == 25 && SCHEMA_VERSION == 27 {
             super::effect_migration::migrate_v25_to_v26(&conn)?;
+            super::im_migration::migrate_v26_to_v27(&conn)?;
+        } else if version == 26 && SCHEMA_VERSION == 27 {
+            super::im_migration::migrate_v26_to_v27(&conn)?;
         } else if version != SCHEMA_VERSION {
             // Fallback beta policy for unrecognized schema jumps: drop the
             // current runtime workspace and rebuild it. This must keep shrinking

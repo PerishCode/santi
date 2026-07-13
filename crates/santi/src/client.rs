@@ -433,7 +433,14 @@ async fn im_send(
             .as_array()
             .is_some_and(|entries| !entries.is_empty())
         {
-            println!("{}", serde_json::to_string_pretty(&entries)?);
+            let output = match accepted.as_ref() {
+                Some(send) => serde_json::json!({
+                    "send": send,
+                    "replies": entries,
+                }),
+                None => entries,
+            };
+            println!("{}", serde_json::to_string_pretty(&output)?);
             return Ok(());
         }
         if Instant::now() >= deadline {

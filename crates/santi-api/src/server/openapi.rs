@@ -63,6 +63,8 @@ use utoipa::OpenApi;
         santi_core::ImSendRequest,
         santi_core::ImSendResponse,
         santi_core::ImInboxEntry,
+        santi_core::ImDelivery,
+        santi_core::ImDeliveryMode,
         santi_core::ImParticipant,
         StrandDetail,
         StrandMaterial,

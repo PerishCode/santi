@@ -300,7 +300,8 @@ CREATE INDEX IF NOT EXISTS idx_r_strand_entries_seq ON r_strand_entries (strand_
 -- ── IM layer (im_*) ──────────────────────────────────────────────────────────
 -- A plain messenger integrated into the santi binary for cold-start; conceptually
 -- ORTHOGONAL to the runtime (souls/strands/turns). These tables are the IM's own
--- store — the runtime never reads them. A participant is a persistent messaging
+-- store. The runtime touches them only at the explicit IM service seam and when
+-- atomically delivering a completed IM turn. A participant is a persistent messaging
 -- endpoint (a human/CLI peer with a passive inbox; a soul participant's "inbox" is
 -- its strand and is NOT stored here). Reply-routing authority lives entirely
 -- here, in the IM's envelope. The runtime inbox may carry bounded diagnostic
@@ -316,13 +317,23 @@ CREATE TABLE IF NOT EXISTS im_participants (
 -- `seq` is a global monotonic cursor (caller polls `WHERE participant_id=? AND
 -- seq > since`); `from_ref` names the soul strand that replied. Retained for audit
 -- (the IM conversation history); no ack — the caller's high-water `seq` is the ack.
+-- Runtime-owned replies carry a unique turn id, joining participant delivery to
+-- the accepted inbox receipt without exposing the reply content in receipt status.
 CREATE TABLE IF NOT EXISTS im_inbox (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
     participant_id TEXT NOT NULL,
     from_ref TEXT,
+    turn_id TEXT,
+    message_id TEXT,
+    delivery_mode TEXT CHECK (
+        delivery_mode IS NULL OR delivery_mode IN ('explicit', 'automatic')
+    ),
     content TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_im_inbox_participant_seq ON im_inbox (participant_id, seq);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_im_inbox_turn
+ON im_inbox(turn_id)
+WHERE turn_id IS NOT NULL;
 "#;

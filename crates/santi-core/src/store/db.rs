@@ -1,4 +1,5 @@
 mod effect_migration;
+mod im_migration;
 mod inbox;
 mod lifecycle;
 mod receipt_migration;

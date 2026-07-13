@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use santi_api::{
     config::RuntimePaths,
-    ops::{doctor_at, im_reply_at, inbox_seed_at, inbox_seed_label_at},
+    ops::{doctor_at, im_reply_at, im_reply_turn_at, inbox_seed_at, inbox_seed_label_at},
 };
 
 fn paths_under(root: &Path) -> RuntimePaths {
@@ -156,6 +156,43 @@ fn im_reply_rejects_plain() {
     };
     let error = im_reply_at(&paths, &strand_id, "x").unwrap_err();
     assert!(error.contains("not an IM conversation"), "got: {error}");
+}
+
+#[test]
+fn turn_reply_deduplicates() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let paths = paths_under(temp.path());
+    let (strand_id, turn_id) = {
+        let store = santi_core::SantiStore::open(&paths.database_path).expect("open");
+        store.ensure_im_participant("operator", "human").unwrap();
+        let strand = store
+            .find_labeled_strand(santi_core::DEFAULT_SOUL_ID, "im:operator")
+            .unwrap();
+        store
+            .enqueue_inbox(
+                &strand.id,
+                santi_core::MessageKind::Text,
+                santi_core::MessageContent::text("hello"),
+            )
+            .unwrap();
+        let turn = store
+            .try_start_turn(&strand.id, "strand_send", None)
+            .unwrap()
+            .expect("turn")
+            .turn;
+        (strand.id, turn.id)
+    };
+
+    let first = im_reply_turn_at(&paths, &strand_id, Some(&turn_id), "early").unwrap();
+    assert!(!first.deduplicated);
+    assert_eq!(first.turn_id.as_deref(), Some(turn_id.as_str()));
+    assert_eq!(
+        first.delivery_mode,
+        Some(santi_core::ImDeliveryMode::Explicit)
+    );
+    let second = im_reply_turn_at(&paths, &strand_id, Some(&turn_id), "duplicate").unwrap();
+    assert!(second.deduplicated);
+    assert_eq!(second.seq, first.seq);
 }
 
 #[test]

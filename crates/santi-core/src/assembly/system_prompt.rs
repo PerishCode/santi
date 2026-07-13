@@ -83,10 +83,10 @@ pub(crate) fn render_system_prompt(request: SystemPromptRequest<'_>) -> Result<S
     Ok(sections.join("\n\n"))
 }
 
-/// The IM reply-capability block — present ONLY when this strand is an IM
-/// conversation (`im:` label). It tells the soul how to reach the person, the
-/// same way its shell reaches other worlds; the reply target is this very
-/// conversation (ambient), so nothing addressable is exposed as body-text.
+/// The IM delivery block — present ONLY when this strand is an IM conversation
+/// (`im:` label). Normal final speech is delivered transactionally; the ambient
+/// offline command remains available for an early reply without exposing an
+/// address in body text.
 fn render_im_reply_capability(request: &SystemPromptRequest<'_>) -> Option<String> {
     let label = request.strand.external_label.as_deref()?;
     if !label.starts_with(IM_LABEL_PREFIX) {
@@ -95,10 +95,11 @@ fn render_im_reply_capability(request: &SystemPromptRequest<'_>) -> Option<Strin
     Some(
         [
             "[santi-im]",
-            "This strand is an IM conversation with a person. To send them a reply, run in your shell:",
+            "This strand is an IM conversation with a person. Your final natural-language response is delivered to them automatically when the turn completes.",
+            "Normally, answer them directly and do not use the shell for delivery.",
+            "Only when you must send an early reply before the turn completes, run in your shell:",
             "  santi im reply \"<your message>\"",
-            "It delivers your message to that person and returns at once (they read it in their own client).",
-            "That command is the ONLY way your words reach them — a natural-language reply in the strand is not delivered.",
+            "The early-reply command and automatic completion share one idempotency key, so the automatic path will not duplicate a reply already sent in this turn.",
         ]
         .join("\n"),
     )

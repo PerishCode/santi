@@ -31,7 +31,7 @@ use rows::{actor_type_db, collect_rows, map_webhook_row, message_state_db};
 /// beta wipe + rebuild policy (see PHASE-07 crux #5 / PHASE-09 tier work).
 /// Public so ops paths (`santi doctor`) can compare a DB's `user_version` to it
 /// WITHOUT opening the store (which would migrate/wipe).
-pub const SCHEMA_VERSION: u32 = 26;
+pub const SCHEMA_VERSION: u32 = 27;
 /// The default soul's id. Public so offline ops (doctor/seed) can address it
 /// without a running service.
 pub const DEFAULT_SOUL_ID: &str = "soul_default";

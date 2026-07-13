@@ -7,12 +7,14 @@ use super::{
         drain_inbox_in_tx, thinking_spans_for_turn, tool_calls_for_turn, tool_results_for_turn,
         turn_by_id,
     },
-    errors::{open_incident_in_conn, resolve_in_conn},
+    errors::open_incident_in_conn,
 };
 use crate::{
     EffectTransitionReason, ErrorScope, ErrorSource, IncidentDraft, SantiError, ThinkingSpan,
     ToolCall, ToolResult, Turn, catalog, prefixed_id, timestamp_now,
 };
+
+mod completion;
 
 const PROVIDER_DETAIL_BYTES: usize = 4096;
 
@@ -168,87 +170,6 @@ impl SantiStore {
             out.push(row.map_err(|error| error.to_string())?);
         }
         Ok(out)
-    }
-
-    pub fn complete_turn(
-        &self,
-        turn_id: &str,
-        assistant_message_seq: Option<i64>,
-        provider: &str,
-        model: &str,
-        provider_response_id: Option<String>,
-    ) -> Result<Turn, String> {
-        let mut conn = self.conn.lock().unwrap();
-        let now = timestamp_now();
-        let provider_state = provider_response_id.as_ref().map(|response_id| {
-            json!({
-                "provider": provider,
-                "opaque": { "response_id": response_id },
-                "schema_version": "santi-v1"
-            })
-        });
-        let provider_state = provider_state
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(|error| error.to_string())?;
-        let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let strand_id: String = tx
-            .query_row(
-                "SELECT strand_id FROM turns WHERE id = ?1",
-                params![turn_id],
-                |row| row.get(0),
-            )
-            .map_err(|error| error.to_string())?;
-        tx.execute(
-            r#"
-            UPDATE turns
-            SET status = 'completed',
-                end_strand_seq = (
-                  SELECT next_seq - 1 FROM strands WHERE id = turns.strand_id
-                ),
-                updated_at = ?2,
-                finished_at = ?2
-            WHERE id = ?1
-            "#,
-            params![turn_id, now],
-        )
-        .map_err(|error| error.to_string())?;
-        tx.execute(
-            r#"
-            UPDATE strands
-            SET last_seen_strand_seq = COALESCE(?2, last_seen_strand_seq),
-                provider_state = ?3,
-                updated_at = ?4
-            WHERE id = (SELECT strand_id FROM turns WHERE id = ?1)
-            "#,
-            params![turn_id, assistant_message_seq, provider_state, now],
-        )
-        .map_err(|error| error.to_string())?;
-        super::db::complete_turn_in_conn(&tx, turn_id, &now)?;
-        resolve_in_conn(
-            &tx,
-            &provider_incident_key(&strand_id),
-            "provider.turn_succeeded",
-            json!({
-                "turn_id": turn_id,
-                "provider": provider,
-                "model": model,
-                "provider_response_id": provider_response_id,
-            }),
-        )?;
-        resolve_in_conn(
-            &tx,
-            &runtime_incident_key(&strand_id),
-            "runtime.turn_succeeded",
-            json!({
-                "turn_id": turn_id,
-                "provider": provider,
-                "model": model,
-            }),
-        )?;
-        tx.commit().map_err(|error| error.to_string())?;
-        turn_by_id(&conn, turn_id)?.ok_or_else(|| "completed turn missing".to_string())
     }
 
     pub(crate) fn fail_provider_turn(

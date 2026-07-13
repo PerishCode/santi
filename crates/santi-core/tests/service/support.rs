@@ -220,9 +220,9 @@ impl ProviderClient for GatedFirstProvider {
 
 fn probe_command() -> &'static str {
     if cfg!(windows) {
-        "[Console]::Out.WriteLine((Get-Location).Path); [Console]::Out.WriteLine($env:SANTI_STRAND_MEMORY_DIR); [Console]::Out.WriteLine($env:SANTI_SOUL_ID); [Console]::Out.WriteLine($env:SANTI_STRAND_ID)"
+        "[Console]::Out.WriteLine((Get-Location).Path); [Console]::Out.WriteLine($env:SANTI_STRAND_MEMORY_DIR); [Console]::Out.WriteLine($env:SANTI_SOUL_ID); [Console]::Out.WriteLine($env:SANTI_STRAND_ID); [Console]::Out.WriteLine($env:SANTI_TURN_ID)"
     } else {
-        "pwd && printf \"\\n$SANTI_STRAND_MEMORY_DIR\\n$SANTI_SOUL_ID\\n$SANTI_STRAND_ID\""
+        "pwd && printf \"\\n$SANTI_STRAND_MEMORY_DIR\\n$SANTI_SOUL_ID\\n$SANTI_STRAND_ID\\n$SANTI_TURN_ID\""
     }
 }
 

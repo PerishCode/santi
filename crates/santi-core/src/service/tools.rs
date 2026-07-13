@@ -43,7 +43,7 @@ impl SantiService {
             },
         );
         let result = if let Some(effect) = effect {
-            self.handle_shell_effect(strand_id, &call, &effect.id)?
+            self.handle_shell_effect(strand_id, turn_id, &call, &effect.id)?
         } else {
             self.store.append_tool_result(
                 &call.call_id,
@@ -63,12 +63,13 @@ impl SantiService {
     fn handle_shell_effect(
         &self,
         strand_id: &str,
+        turn_id: &str,
         call: &ProviderFunctionCall,
         effect_id: &str,
     ) -> Result<crate::ToolResult, String> {
         let soul_id = self.store.soul_id_for_strand(strand_id)?;
         let prepared = match parse_tool_args::<ShellArgs>(&call.arguments)
-            .and_then(|args| self.prepare_shell(strand_id, &soul_id, args))
+            .and_then(|args| self.prepare_shell(strand_id, turn_id, &soul_id, args))
         {
             Ok(prepared) => prepared,
             Err(error) => {
@@ -113,6 +114,7 @@ impl SantiService {
     fn prepare_shell(
         &self,
         strand_id: &str,
+        turn_id: &str,
         soul_id: &str,
         args: ShellArgs,
     ) -> Result<PreparedShell, String> {
@@ -132,6 +134,7 @@ impl SantiService {
             // --soul/--strand env defaults). Ambient capability, not authorization.
             .env("SANTI_SOUL_ID", soul_id)
             .env("SANTI_STRAND_ID", strand_id)
+            .env("SANTI_TURN_ID", turn_id)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         Ok(PreparedShell { command, cwd })

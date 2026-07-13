@@ -169,9 +169,9 @@ pub enum ImCommand {
         #[arg(long, default_value_t = 0)]
         since: i64,
     },
-    /// The soul's egress: reply into the current IM conversation's participant
-    /// inbox. OFFLINE (a direct store write, no HTTP — a mid-turn reply never
-    /// re-enters the turn-holding server). Conversation from --strand/SANTI_STRAND_ID.
+    /// Send an early reply before the current IM turn completes. Normal final
+    /// speech is delivered automatically. OFFLINE (a direct store write, no HTTP),
+    /// scoped by --strand/SANTI_STRAND_ID and deduplicated by SANTI_TURN_ID.
     Reply {
         /// The reply text. For multi-line or shell-sensitive content, prefer
         /// --file or --stdin.

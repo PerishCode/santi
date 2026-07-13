@@ -149,6 +149,7 @@ async fn im_capability_scope() {
 
     let im_text = harness.system_prompt_for(&im_id).text;
     assert!(im_text.contains("[santi-im]"));
+    assert!(im_text.contains("delivered to them automatically"));
     assert!(im_text.contains("santi im reply"));
     assert!(
         !harness

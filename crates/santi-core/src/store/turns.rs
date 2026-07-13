@@ -10,8 +10,8 @@ use super::{
     errors::{open_incident_in_conn, resolve_in_conn},
 };
 use crate::{
-    ErrorScope, ErrorSource, IncidentDraft, SantiError, ThinkingSpan, ToolCall, ToolResult, Turn,
-    catalog, prefixed_id, timestamp_now,
+    EffectTransitionReason, ErrorScope, ErrorSource, IncidentDraft, SantiError, ThinkingSpan,
+    ToolCall, ToolResult, Turn, catalog, prefixed_id, timestamp_now,
 };
 
 const PROVIDER_DETAIL_BYTES: usize = 4096;
@@ -106,6 +106,13 @@ impl SantiStore {
             .map_err(|error| error.to_string())?;
         drop(stmt);
         for (turn_id, strand_id) in &rows {
+            super::effects::reconcile_turn_in(
+                &tx,
+                turn_id,
+                EffectTransitionReason::RestartBeforeDispatch,
+                EffectTransitionReason::RestartDuringDispatch,
+                &now,
+            )?;
             tx.execute(
                 r#"
                 UPDATE turns
@@ -288,6 +295,13 @@ impl SantiStore {
                 }),
             },
         )?;
+        super::effects::reconcile_turn_in(
+            &tx,
+            turn_id,
+            EffectTransitionReason::TurnFailedBeforeDispatch,
+            EffectTransitionReason::TurnFailedDuringDispatch,
+            &now,
+        )?;
         super::db::fail_turn_in_conn(&tx, turn_id, error.incident_id.as_deref(), &now)?;
         tx.commit().map_err(|error| error.to_string())?;
         let turn = turn_by_id(&conn, turn_id)?.ok_or_else(|| "failed turn missing".to_string())?;
@@ -320,6 +334,13 @@ impl SantiStore {
         )
         .map_err(|error| error.to_string())?;
         let error = open_runtime_incident(&tx, &strand_id, turn_id, failure)?;
+        super::effects::reconcile_turn_in(
+            &tx,
+            turn_id,
+            EffectTransitionReason::TurnFailedBeforeDispatch,
+            EffectTransitionReason::TurnFailedDuringDispatch,
+            &now,
+        )?;
         super::db::fail_turn_in_conn(&tx, turn_id, error.incident_id.as_deref(), &now)?;
         tx.commit().map_err(|error| error.to_string())?;
         let turn = turn_by_id(&conn, turn_id)?.ok_or_else(|| "failed turn missing".to_string())?;
@@ -348,6 +369,13 @@ impl SantiStore {
             params![turn_id, error_text, now],
         )
         .map_err(|error| error.to_string())?;
+        super::effects::reconcile_turn_in(
+            &tx,
+            turn_id,
+            EffectTransitionReason::TurnFailedBeforeDispatch,
+            EffectTransitionReason::TurnFailedDuringDispatch,
+            &now,
+        )?;
         super::db::fail_turn_in_conn(&tx, turn_id, incident_id, &now)?;
         tx.commit().map_err(|error| error.to_string())?;
         turn_by_id(&conn, turn_id)?.ok_or_else(|| "failed turn missing".to_string())

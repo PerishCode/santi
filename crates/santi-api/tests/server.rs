@@ -11,11 +11,13 @@ use axum::{
 use futures_util::stream;
 use rusqlite::Connection;
 use santi_api::{
-    ApiError, drive_strand_handler, health_handler, receipt_status_handler, send_strand_handler,
+    ApiError, ResolveEffectRequest, drive_strand_handler, effect_status_handler, health_handler,
+    receipt_status_handler, resolve_effect_handler, send_strand_handler,
 };
 use santi_core::{
-    ErrorScope, ErrorSource, MessagePart, SantiService, SantiServiceConfig, SendStrandRequest,
-    catalog, engine,
+    EffectResolutionOutcome, EffectState, ErrorScope, ErrorSource, IngestOutcome, MessageContent,
+    MessageKind, MessagePart, SantiService, SantiServiceConfig, SantiStore, SendStrandRequest,
+    ToolCallProvenance, catalog, engine,
 };
 use santi_provider::{
     ProviderClient, ProviderContextBudget, ProviderEvent, ProviderMetadata, ProviderRequest,
@@ -99,7 +101,103 @@ fn openapi_lists_error_surfaces() {
     assert!(document.contains("/api/v1/errors/events"));
     assert!(document.contains("/api/v1/strands/{strand_id}/drive"));
     assert!(document.contains("/api/v1/receipts/{inbox_id}"));
+    assert!(document.contains("/api/v1/effects/{effect_id}"));
+    assert!(document.contains("/api/v1/effects/{effect_id}/resolve"));
+    assert!(document.contains("EffectTransitionReason"));
     assert!(document.contains("IngestReceipt"));
+}
+
+#[tokio::test]
+async fn effect_http_roundtrip() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let database_path = temp.path().join("santi.sqlite");
+    let store = SantiStore::open(&database_path).expect("open store");
+    let strand = store.create_strand().expect("create strand");
+    let inbox_id = match store
+        .enqueue_inbox(
+            &strand.id,
+            MessageKind::Text,
+            MessageContent::text("run effect"),
+        )
+        .expect("enqueue")
+    {
+        IngestOutcome::Accepted { receipt } => receipt.inbox_id,
+        IngestOutcome::Rejected { .. } => panic!("unexpected rejection"),
+    };
+    let turn = store
+        .try_start_turn(&strand.id, "strand_send", None)
+        .expect("start turn")
+        .expect("started turn")
+        .turn;
+    let (_, effect) = store
+        .append_effect_call(
+            &turn.id,
+            "call_api_effect",
+            "shell",
+            &serde_json::json!({"command": "printf api"}),
+            &ToolCallProvenance::default(),
+            Some("shell"),
+        )
+        .expect("append effect");
+    let effect_id = effect.expect("effect").id;
+    store
+        .begin_effect_dispatch(&effect_id)
+        .expect("open dispatch window");
+    drop(store);
+
+    let service = SantiService::open(
+        SantiServiceConfig {
+            database_path: database_path.display().to_string(),
+            runtime_root: temp.path().join("runtime").display().to_string(),
+            execution_root: temp.path().join("execution").display().to_string(),
+            bind_addr: Some("127.0.0.1:0".to_string()),
+        },
+        Arc::new(DriverProvider),
+    )
+    .expect("restart service");
+
+    let queried = effect_status_handler(State(service.clone()), Path(effect_id.clone())).await;
+    let Json(queried) = match queried {
+        Ok(queried) => queried,
+        Err(error) => panic!(
+            "effect query failed with {}: {}",
+            error.code(),
+            error.message()
+        ),
+    };
+    assert_eq!(queried.effect.state, EffectState::Unknown);
+    assert_eq!(queried.receipt_ids, vec![inbox_id]);
+
+    let error = resolve_effect_handler(
+        State(service.clone()),
+        Path(effect_id.clone()),
+        Json(ResolveEffectRequest {
+            outcome: EffectResolutionOutcome::Applied,
+            evidence: "   ".to_string(),
+        }),
+    )
+    .await
+    .expect_err("blank evidence must be rejected");
+    assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+
+    let resolved = resolve_effect_handler(
+        State(service),
+        Path(effect_id),
+        Json(ResolveEffectRequest {
+            outcome: EffectResolutionOutcome::Applied,
+            evidence: "operator found the target marker".to_string(),
+        }),
+    )
+    .await;
+    let Json(resolved) = match resolved {
+        Ok(resolved) => resolved,
+        Err(error) => panic!(
+            "effect resolution failed with {}: {}",
+            error.code(),
+            error.message()
+        ),
+    };
+    assert_eq!(resolved.effect.state, EffectState::ResolvedApplied);
 }
 
 #[tokio::test]

@@ -1,3 +1,4 @@
+mod effect_migration;
 mod inbox;
 mod lifecycle;
 mod receipt_migration;
@@ -397,8 +398,8 @@ pub(super) fn strand_effects(
     let mut stmt = conn
         .prepare(
             r#"
-            SELECT id, strand_id, effect_type, idempotency_key, status, source_hook_id,
-                   source_turn_id, result_ref, error_text, created_at, updated_at
+            SELECT id, strand_id, turn_id, tool_call_id, effect_type, state,
+                   result_ref, error_text, created_at, updated_at, dispatched_at, settled_at
             FROM strand_effects
             WHERE strand_id = ?1
             ORDER BY created_at ASC

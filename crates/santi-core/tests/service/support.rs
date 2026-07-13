@@ -3,11 +3,11 @@ pub(crate) use futures_util::stream;
 #[cfg(unix)]
 pub(crate) use rusqlite::{Connection, params};
 pub(crate) use santi_core::{
-    ActorType, CreateSoulRequest, InboxSource, MaterialKind, MaterialRequest, MessageContent,
-    MessageIntake, MessageKind, MessagePart, MessageState, ObjectBucket, ObjectUri,
-    SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, SantiService, SantiServiceConfig, SantiStore,
-    SendStrandAcceptedResponse, SendStrandRequest, ToolCallProvenance, soul_memory_uri,
-    strand_memory_uri,
+    ActorType, CreateSoulRequest, EffectState, EffectTransitionReason, InboxSource, MaterialKind,
+    MaterialRequest, MessageContent, MessageIntake, MessageKind, MessagePart, MessageState,
+    ObjectBucket, ObjectUri, SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, SantiService,
+    SantiServiceConfig, SantiStore, SendStrandAcceptedResponse, SendStrandRequest,
+    ToolCallProvenance, soul_memory_uri, strand_memory_uri,
 };
 
 pub(crate) fn accepted_turn(response: &SendStrandAcceptedResponse) -> &santi_core::Turn {

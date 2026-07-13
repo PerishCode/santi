@@ -75,6 +75,52 @@ async fn dispatches_tools() {
         .expect("shell cwd");
     assert!(Path::new(cwd).ends_with(&strand_memory_dir));
 
+    assert_eq!(runtime.effects.len(), 1);
+    let effect = &runtime.effects[0];
+    assert_eq!(effect.tool_call_id.as_deref(), Some("call_shell"));
+    assert_eq!(effect.effect_type, "shell");
+    assert_eq!(effect.state, EffectState::Confirmed);
+    assert_eq!(
+        effect.result_ref.as_deref(),
+        Some(runtime.tool_results[0].id.as_str())
+    );
+    let effect_status = service
+        .effect_status(&effect.id)
+        .expect("query effect")
+        .expect("shell effect");
+    assert_eq!(
+        effect_status
+            .transitions
+            .iter()
+            .map(|transition| (&transition.state, &transition.reason))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                &EffectState::Prepared,
+                &EffectTransitionReason::IntentPersisted
+            ),
+            (
+                &EffectState::Dispatching,
+                &EffectTransitionReason::DispatchWindowOpened,
+            ),
+            (
+                &EffectState::Confirmed,
+                &EffectTransitionReason::ResultPersisted
+            ),
+        ]
+    );
+    assert_eq!(
+        effect_status.receipt_ids,
+        vec![response.receipt.inbox_id.clone()]
+    );
+    let receipt = service
+        .receipt_status(&response.receipt.inbox_id)
+        .expect("query receipt")
+        .expect("receipt");
+    assert_eq!(receipt.effects.len(), 1);
+    assert_eq!(receipt.effects[0].id, effect.id);
+    assert_eq!(receipt.effects[0].state, EffectState::Confirmed);
+
     let requests = provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
     assert!(requests[1].previous_response_id.is_none());

@@ -1,10 +1,15 @@
-use std::{path::PathBuf, process::Command};
+use std::{
+    path::PathBuf,
+    process::{Command, Stdio},
+};
 
 use santi_provider::ProviderFunctionCall;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::{SantiStreamPayload, WorkspaceRoot, parse_workspace_uri};
+use crate::{
+    EffectState, EffectTransitionReason, SantiStreamPayload, WorkspaceRoot, parse_workspace_uri,
+};
 
 use super::SantiService;
 
@@ -17,7 +22,8 @@ impl SantiService {
     ) -> Result<(), String> {
         // Persist the provider's raw item + ids so the Responses adapter can
         // replay the call verbatim; chat_completions rebuilds from name/args.
-        let tool_call = self.store.append_tool_call(
+        let effect_type = (call.name == "shell").then_some("shell");
+        let (tool_call, effect) = self.store.append_effect_call(
             turn_id,
             &call.call_id,
             &call.name,
@@ -28,6 +34,7 @@ impl SantiService {
                 item_id: call.item_id.clone(),
                 response_id: Some(call.response_id.clone()),
             },
+            effect_type,
         )?;
         self.publish_stream(
             strand_id,
@@ -35,15 +42,15 @@ impl SantiService {
                 tool_call: tool_call.clone(),
             },
         );
-        let soul_id = self.store.soul_id_for_strand(strand_id)?;
-        let dispatch = self.dispatch_tool(strand_id, &soul_id, &call);
-        let (output, error_text) = match dispatch {
-            Ok(output) => (Some(output), None),
-            Err(error) => (None, Some(error)),
+        let result = if let Some(effect) = effect {
+            self.handle_shell_effect(strand_id, &call, &effect.id)?
+        } else {
+            self.store.append_tool_result(
+                &call.call_id,
+                None,
+                Some(format!("unsupported tool: {}", call.name)),
+            )?
         };
-        let result = self
-            .store
-            .append_tool_result(&call.call_id, output, error_text)?;
         self.publish_stream(
             strand_id,
             SantiStreamPayload::ToolResultCreated {
@@ -53,22 +60,62 @@ impl SantiService {
         Ok(())
     }
 
-    fn dispatch_tool(
+    fn handle_shell_effect(
         &self,
         strand_id: &str,
-        soul_id: &str,
         call: &ProviderFunctionCall,
-    ) -> Result<Value, String> {
-        match call.name.as_str() {
-            "shell" => {
-                let args = parse_tool_args::<ShellArgs>(&call.arguments)?;
-                self.run_shell(strand_id, soul_id, args)
+        effect_id: &str,
+    ) -> Result<crate::ToolResult, String> {
+        let soul_id = self.store.soul_id_for_strand(strand_id)?;
+        let prepared = match parse_tool_args::<ShellArgs>(&call.arguments)
+            .and_then(|args| self.prepare_shell(strand_id, &soul_id, args))
+        {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                return self.store.append_effect_tool_result(
+                    effect_id,
+                    &call.call_id,
+                    None,
+                    Some(error),
+                    EffectState::NotDispatched,
+                );
             }
-            name => Err(format!("unsupported tool: {name}")),
+        };
+        self.store.begin_effect_dispatch(effect_id)?;
+        match run_prepared_shell(prepared) {
+            ShellDispatchOutcome::Captured(output) => self.store.append_effect_tool_result(
+                effect_id,
+                &call.call_id,
+                Some(output),
+                None,
+                EffectState::Confirmed,
+            ),
+            ShellDispatchOutcome::NotDispatched(error) => self.store.append_effect_tool_result(
+                effect_id,
+                &call.call_id,
+                None,
+                Some(error),
+                EffectState::NotDispatched,
+            ),
+            ShellDispatchOutcome::Unknown(error) => {
+                self.store.mark_effect_unknown(
+                    effect_id,
+                    EffectTransitionReason::ResultCaptureFailed,
+                    &error,
+                )?;
+                Err(format!(
+                    "shell effect {effect_id} outcome is unknown; automatic replay is forbidden: {error}"
+                ))
+            }
         }
     }
 
-    fn run_shell(&self, strand_id: &str, soul_id: &str, args: ShellArgs) -> Result<Value, String> {
+    fn prepare_shell(
+        &self,
+        strand_id: &str,
+        soul_id: &str,
+        args: ShellArgs,
+    ) -> Result<PreparedShell, String> {
         std::fs::create_dir_all(self.soul_memory_dir(soul_id))
             .map_err(|error| error.to_string())?;
         std::fs::create_dir_all(self.strand_memory_dir(strand_id))
@@ -76,7 +123,7 @@ impl SantiService {
         let cwd = self.resolve_shell_cwd(strand_id, soul_id, args.cwd.as_deref())?;
         std::fs::create_dir_all(&cwd).map_err(|error| error.to_string())?;
         let mut command = shell_command(&args.command);
-        let output = command
+        command
             .current_dir(&cwd)
             .env("SANTI_SOUL_MEMORY_DIR", self.soul_memory_dir(soul_id))
             .env("SANTI_STRAND_MEMORY_DIR", self.strand_memory_dir(strand_id))
@@ -85,15 +132,9 @@ impl SantiService {
             // --soul/--strand env defaults). Ambient capability, not authorization.
             .env("SANTI_SOUL_ID", soul_id)
             .env("SANTI_STRAND_ID", strand_id)
-            .output()
-            .map_err(|error| format!("failed to run shell: {error}"))?;
-        Ok(json!({
-            "exit_code": output.status.code().unwrap_or(-1),
-            "stdout": String::from_utf8_lossy(&output.stdout),
-            "stderr": String::from_utf8_lossy(&output.stderr),
-            "shell": default_shell_name(),
-            "cwd": cwd.display().to_string(),
-        }))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        Ok(PreparedShell { command, cwd })
     }
 
     fn resolve_shell_cwd(
@@ -160,6 +201,40 @@ impl SantiService {
 struct ShellArgs {
     command: String,
     cwd: Option<String>,
+}
+
+struct PreparedShell {
+    command: Command,
+    cwd: PathBuf,
+}
+
+enum ShellDispatchOutcome {
+    Captured(Value),
+    NotDispatched(String),
+    Unknown(String),
+}
+
+fn run_prepared_shell(mut prepared: PreparedShell) -> ShellDispatchOutcome {
+    let child = match prepared.command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            return ShellDispatchOutcome::NotDispatched(format!(
+                "failed to spawn shell process: {error}"
+            ));
+        }
+    };
+    match child.wait_with_output() {
+        Ok(output) => ShellDispatchOutcome::Captured(json!({
+            "exit_code": output.status.code().unwrap_or(-1),
+            "stdout": String::from_utf8_lossy(&output.stdout),
+            "stderr": String::from_utf8_lossy(&output.stderr),
+            "shell": default_shell_name(),
+            "cwd": prepared.cwd.display().to_string(),
+        })),
+        Err(error) => ShellDispatchOutcome::Unknown(format!(
+            "shell process was spawned but its result could not be captured: {error}"
+        )),
+    }
 }
 
 fn shell_command(command: &str) -> Command {

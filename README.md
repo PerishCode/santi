@@ -66,6 +66,25 @@ Migration-reconstructed transitions expose `reconstructed_from`; live
 transitions leave it unset. A v24 drain is completed only when its linked turn
 is durably completed, never merely because the inbox item was drained.
 
+Shell commands also create a durable effect attempt. Receipt completion still
+only proves the assistant turn was persisted; inspect the linked effect before
+claiming that an external action occurred:
+
+```sh
+santi effect query <effect_id>
+santi effect resolve <effect_id> \
+  --outcome applied \
+  --evidence "operator found the target marker"
+```
+
+`prepared` means dispatch has not begun. An interrupted `dispatching` attempt
+becomes `unknown`, because the runtime cannot prove whether the command took
+effect, and is never replayed automatically. A mechanically rejected spawn is
+`not_dispatched`; a durably captured command result is `confirmed`. Only an
+`unknown` attempt accepts an explicit `applied` or `not-applied` operator
+resolution, and resolution records evidence without retrying the command or
+changing its turn/receipt state.
+
 Export the OpenAPI document:
 
 ```sh

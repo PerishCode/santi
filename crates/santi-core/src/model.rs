@@ -11,6 +11,8 @@ mod budget;
 pub use budget::*;
 mod compact;
 pub use compact::*;
+mod effects;
+pub use effects::*;
 mod stream;
 pub use stream::*;
 
@@ -171,21 +173,6 @@ pub struct ThinkingSpan {
     pub finished_at: Option<Timestamp>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct StrandEffect {
-    pub id: String,
-    pub strand_id: String,
-    pub effect_type: String,
-    pub idempotency_key: String,
-    pub status: String,
-    pub source_hook_id: String,
-    pub source_turn_id: String,
-    pub result_ref: Option<String>,
-    pub error_text: Option<String>,
-    pub created_at: Timestamp,
-    pub updated_at: Timestamp,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum StrandTargetType {
@@ -326,6 +313,9 @@ pub struct ReceiptStatus {
     pub accepted_at: Timestamp,
     pub updated_at: Timestamp,
     pub transitions: Vec<ReceiptTransition>,
+    /// Per-attempt external effects reached by any turn carrying this receipt.
+    /// Receipt completion remains assistant-turn persistence only.
+    pub effects: Vec<StrandEffect>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]

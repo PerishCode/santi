@@ -47,6 +47,14 @@ pub(super) fn router(service: SantiService) -> Router {
         .route("/api/v1/errors/events", get(error_events))
         .route("/api/v1/errors/{scope_kind}/{scope_id}", get(errors))
         .route("/api/v1/receipts/{inbox_id}", get(receipt_status))
+        .route(
+            "/api/v1/effects/{effect_id}",
+            get(super::effects::effect_status),
+        )
+        .route(
+            "/api/v1/effects/{effect_id}/resolve",
+            post(super::effects::resolve_effect),
+        )
         .route("/api/v1/compacts/{compact_id}", get(compact_query))
         .route("/api/v1/strands/{strand_id}/runtime", get(runtime_snapshot))
         // IM layer (orthogonal to the runtime; shares the server for cold-start):

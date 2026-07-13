@@ -1,7 +1,8 @@
 use clap::Parser;
 use santi::auth::form_urlencode;
 use santi::cli::{
-    Cli, ClientDefaults, Command, CompactCommand, StrandCommand, WatchFormat, split_send_args,
+    Cli, ClientDefaults, Command, CompactCommand, EffectCommand, EffectOutcomeArg, StrandCommand,
+    WatchFormat, split_send_args,
 };
 
 fn defaults(strand: Option<&str>, soul: Option<&str>) -> ClientDefaults {
@@ -163,6 +164,38 @@ fn parses_receipt_query() {
         panic!("expected receipt command");
     };
     assert_eq!(inbox_id, "inbox_123");
+}
+
+#[test]
+fn parses_effect_commands() {
+    let parsed = Cli::try_parse_from(["santi", "effect", "query", "effect_123"]).unwrap();
+    let Command::Effect(EffectCommand::Query { effect_id }) = parsed.command else {
+        panic!("expected effect query");
+    };
+    assert_eq!(effect_id, "effect_123");
+
+    let parsed = Cli::try_parse_from([
+        "santi",
+        "effect",
+        "resolve",
+        "effect_123",
+        "--outcome",
+        "not-applied",
+        "--evidence",
+        "marker absent",
+    ])
+    .unwrap();
+    let Command::Effect(EffectCommand::Resolve {
+        effect_id,
+        outcome,
+        evidence,
+    }) = parsed.command
+    else {
+        panic!("expected effect resolution");
+    };
+    assert_eq!(effect_id, "effect_123");
+    assert_eq!(outcome, EffectOutcomeArg::NotApplied);
+    assert_eq!(evidence, "marker absent");
 }
 
 #[test]

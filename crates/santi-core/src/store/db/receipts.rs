@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::super::SantiStore;
+use super::super::effects::for_receipt_in;
 use crate::{ReceiptState, ReceiptStatus, ReceiptTransition, prefixed_id, timestamp_now};
 
 pub(in crate::store) fn insert_accepted_in_conn(
@@ -250,6 +251,7 @@ impl SantiStore {
                 },
             )
             .collect::<Result<Vec<_>, String>>()?;
+        let effects = for_receipt_in(&conn, &inbox_id)?;
         Ok(Some(ReceiptStatus {
             inbox_id,
             strand_id,
@@ -257,6 +259,7 @@ impl SantiStore {
             accepted_at,
             updated_at,
             transitions,
+            effects,
         }))
     }
 }

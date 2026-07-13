@@ -8,6 +8,8 @@ mod server;
 pub mod webhook;
 
 pub use server::{
-    ApiError, drive_strand as drive_strand_handler, export_openapi_json, health as health_handler,
-    receipt_status as receipt_status_handler, send_strand as send_strand_handler, serve,
+    ApiError, ResolveEffectRequest, drive_strand as drive_strand_handler,
+    effect_status as effect_status_handler, export_openapi_json, health as health_handler,
+    receipt_status as receipt_status_handler, resolve_effect as resolve_effect_handler,
+    send_strand as send_strand_handler, serve,
 };

@@ -117,27 +117,19 @@ jobs:
         run: |
           echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
           "$SCCACHE_PATH" --version
-      - name: Start Windows sccache diagnostics
+      - name: Start Windows sccache server
         if: runner.os == 'Windows'
         shell: bash
         run: |
           "$SCCACHE_PATH" --start-server
-          "$SCCACHE_PATH" --zero-stats
-          "$SCCACHE_PATH" --show-stats
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
       - name: Package release artifact
         env:
-          CARGO_TERM_VERBOSE: ${{ runner.os == 'Windows' && 'true' || 'false' }}
           RELEASE_VERSION: ${{ needs.metadata.outputs.release_version }}
           TARGET: ${{ matrix.target }}
         run: deno run --allow-all --config .runseal/deno.json .runseal/wrappers/release.ts package
-      - name: Read Windows sccache diagnostics
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          "$SCCACHE_PATH" --show-stats
       - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.target }}

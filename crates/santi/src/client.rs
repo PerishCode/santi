@@ -5,7 +5,8 @@ use anyhow::{Context, Result};
 use futures_util::StreamExt;
 
 use crate::cli::{
-    ClientDefaults, Command, CompactCommand, ImCommand, StrandCommand, WatchFormat, split_send_args,
+    ClientDefaults, Command, CompactCommand, EffectCommand, ImCommand, StrandCommand, WatchFormat,
+    split_send_args,
 };
 use crate::text_source::read_summary_file;
 use crate::watch::{next_sse_frame, render_watch_event};
@@ -45,6 +46,24 @@ pub(crate) async fn run_client(
         }
         Command::Receipt { inbox_id } => {
             get(&client, &format!("{base}/api/v1/receipts/{inbox_id}")).await
+        }
+        Command::Effect(EffectCommand::Query { effect_id }) => {
+            get(&client, &format!("{base}/api/v1/effects/{effect_id}")).await
+        }
+        Command::Effect(EffectCommand::Resolve {
+            effect_id,
+            outcome,
+            evidence,
+        }) => {
+            post(
+                &client,
+                &format!("{base}/api/v1/effects/{effect_id}/resolve"),
+                Some(serde_json::json!({
+                    "outcome": outcome.as_api_str(),
+                    "evidence": evidence,
+                })),
+            )
+            .await
         }
         Command::Strand(StrandCommand::Create) => {
             post(&client, &format!("{base}/api/v1/strands"), None).await

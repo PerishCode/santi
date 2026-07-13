@@ -1,3 +1,5 @@
+#[path = "store/effects.rs"]
+mod effects;
 #[path = "store/errors.rs"]
 mod errors;
 #[path = "store/fork.rs"]

@@ -7,10 +7,11 @@ use super::{
         append_entry_in_tx, call_soul_id, message_by_id, thinking_span_by_id, tool_call_by_id,
         tool_result_by_id, turn_strand_id,
     },
+    effects::{find_in, insert_prepared_in},
 };
 use crate::{
-    StrandTargetType, ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState, ToolCall,
-    ToolResult, prefixed_id, timestamp_now,
+    StrandEffect, StrandTargetType, ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState,
+    ToolCall, ToolResult, prefixed_id, timestamp_now,
 };
 
 impl SantiStore {
@@ -115,6 +116,26 @@ impl SantiStore {
         arguments: &Value,
         provenance: &crate::ToolCallProvenance,
     ) -> Result<ToolCall, String> {
+        self.append_effect_call(
+            turn_id,
+            tool_call_id,
+            tool_name,
+            arguments,
+            provenance,
+            None,
+        )
+        .map(|(tool_call, _)| tool_call)
+    }
+
+    pub fn append_effect_call(
+        &self,
+        turn_id: &str,
+        tool_call_id: &str,
+        tool_name: &str,
+        arguments: &Value,
+        provenance: &crate::ToolCallProvenance,
+        effect_type: Option<&str>,
+    ) -> Result<(ToolCall, Option<StrandEffect>), String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let now = timestamp_now();
@@ -166,8 +187,20 @@ impl SantiStore {
             .map_err(|error| error.to_string())?;
         }
         append_entry_in_tx(&tx, &strand_id, StrandTargetType::ToolCall, tool_call_id)?;
+        let effect_id = effect_type
+            .map(|effect_type| {
+                insert_prepared_in(&tx, &strand_id, turn_id, tool_call_id, effect_type, &now)
+            })
+            .transpose()?;
         tx.commit().map_err(|error| error.to_string())?;
-        tool_call_by_id(&conn, tool_call_id)?.ok_or_else(|| "created tool_call missing".to_string())
+        let tool_call = tool_call_by_id(&conn, tool_call_id)?
+            .ok_or_else(|| "created tool_call missing".to_string())?;
+        let effect = effect_id
+            .as_deref()
+            .map(|effect_id| find_in(&conn, effect_id))
+            .transpose()?
+            .flatten();
+        Ok((tool_call, effect))
     }
 
     pub fn append_tool_result(

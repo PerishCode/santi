@@ -21,11 +21,11 @@ use std::{
 use tokio::sync::broadcast;
 
 use crate::{
-    CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, ErrorEventSink, ErrorIncident,
-    ErrorScope, ErrorTransition, MaterialKind, ReceiptStatus, SantiError, SantiStore,
-    SantiStreamEvent, SantiStreamPayload, Soul, Strand, StrandBudgetSnapshot, StrandDetail,
-    StrandMaterial, StrandMessage, StrandRuntimeSnapshot, Turn, WebhookSubscription, engine,
-    prefixed_id, timestamp_now,
+    CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, EffectResolutionOutcome,
+    EffectStatus, ErrorEventSink, ErrorIncident, ErrorScope, ErrorTransition, MaterialKind,
+    ReceiptStatus, SantiError, SantiStore, SantiStreamEvent, SantiStreamPayload, Soul, Strand,
+    StrandBudgetSnapshot, StrandDetail, StrandMaterial, StrandMessage, StrandRuntimeSnapshot, Turn,
+    WebhookSubscription, engine, prefixed_id, timestamp_now,
 };
 use runtime_notice::RuntimeNoticeBus;
 
@@ -346,6 +346,19 @@ impl SantiService {
 
     pub fn receipt_status(&self, inbox_id: &str) -> Result<Option<ReceiptStatus>, String> {
         self.store.receipt_status(inbox_id)
+    }
+
+    pub fn effect_status(&self, effect_id: &str) -> Result<Option<EffectStatus>, String> {
+        self.store.effect_status(effect_id)
+    }
+
+    pub fn resolve_effect(
+        &self,
+        effect_id: &str,
+        outcome: EffectResolutionOutcome,
+        evidence: &str,
+    ) -> Result<Option<EffectStatus>, String> {
+        self.store.resolve_effect(effect_id, outcome, evidence)
     }
 
     pub(crate) fn publish_stream(&self, strand_id: &str, payload: SantiStreamPayload) {

@@ -1,3 +1,4 @@
+mod effects;
 mod error;
 mod errors;
 mod im;
@@ -11,6 +12,7 @@ use std::{env, fs, net::SocketAddr};
 use crate::{config, provider};
 use santi_core::{SantiService, SantiServiceConfig};
 
+pub use effects::{ResolveEffectRequest, effect_status, resolve_effect};
 pub use error::ApiError;
 pub use routes::{drive_strand, health, receipt_status, send_strand};
 

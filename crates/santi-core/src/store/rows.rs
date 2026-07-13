@@ -2,10 +2,10 @@ use rusqlite::Row;
 use serde_json::Value;
 
 use crate::{
-    ActorType, Compact, Message, MessageContent, MessageEvent, MessageKind, MessageState, Soul,
-    Strand, StrandEffect, StrandMessage, StrandMessageRef, StrandTargetType,
-    ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState, ToolCall, ToolResult, Turn,
-    TurnStatus, TurnTriggerType, WebhookSubscription,
+    ActorType, Compact, EffectState, EffectTransitionReason, Message, MessageContent, MessageEvent,
+    MessageKind, MessageState, Soul, Strand, StrandEffect, StrandMessage, StrandMessageRef,
+    StrandTargetType, ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState, ToolCall,
+    ToolResult, Turn, TurnStatus, TurnTriggerType, WebhookSubscription,
 };
 
 pub(super) fn map_soul_row(row: &Row<'_>) -> rusqlite::Result<Soul> {
@@ -190,16 +190,75 @@ pub(super) fn map_strand_effect_row(row: &Row<'_>) -> rusqlite::Result<StrandEff
     Ok(StrandEffect {
         id: row.get(0)?,
         strand_id: row.get(1)?,
-        effect_type: row.get(2)?,
-        idempotency_key: row.get(3)?,
-        status: row.get(4)?,
-        source_hook_id: row.get(5)?,
-        source_turn_id: row.get(6)?,
-        result_ref: row.get(7)?,
-        error_text: row.get(8)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
+        turn_id: row.get(2)?,
+        tool_call_id: row.get(3)?,
+        effect_type: row.get(4)?,
+        state: effect_state_from_db(&row.get::<_, String>(5)?),
+        result_ref: row.get(6)?,
+        error_text: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
+        dispatched_at: row.get(10)?,
+        settled_at: row.get(11)?,
     })
+}
+
+pub(super) fn effect_state_db(value: &EffectState) -> &'static str {
+    match value {
+        EffectState::Prepared => "prepared",
+        EffectState::Dispatching => "dispatching",
+        EffectState::Unknown => "unknown",
+        EffectState::Confirmed => "confirmed",
+        EffectState::NotDispatched => "not_dispatched",
+        EffectState::ResolvedApplied => "resolved_applied",
+        EffectState::ResolvedNotApplied => "resolved_not_applied",
+    }
+}
+
+pub(super) fn effect_state_from_db(value: &str) -> EffectState {
+    match value {
+        "prepared" => EffectState::Prepared,
+        "dispatching" => EffectState::Dispatching,
+        "confirmed" => EffectState::Confirmed,
+        "not_dispatched" => EffectState::NotDispatched,
+        "resolved_applied" => EffectState::ResolvedApplied,
+        "resolved_not_applied" => EffectState::ResolvedNotApplied,
+        _ => EffectState::Unknown,
+    }
+}
+
+pub(super) fn effect_reason_db(value: &EffectTransitionReason) -> &'static str {
+    match value {
+        EffectTransitionReason::IntentPersisted => "intent_persisted",
+        EffectTransitionReason::DispatchWindowOpened => "dispatch_window_opened",
+        EffectTransitionReason::ResultPersisted => "result_persisted",
+        EffectTransitionReason::DispatchRejected => "dispatch_rejected",
+        EffectTransitionReason::RestartBeforeDispatch => "restart_before_dispatch",
+        EffectTransitionReason::RestartDuringDispatch => "restart_during_dispatch",
+        EffectTransitionReason::TurnFailedBeforeDispatch => "turn_failed_before_dispatch",
+        EffectTransitionReason::TurnFailedDuringDispatch => "turn_failed_during_dispatch",
+        EffectTransitionReason::ResultCaptureFailed => "result_capture_failed",
+        EffectTransitionReason::OperatorResolvedApplied => "operator_resolved_applied",
+        EffectTransitionReason::OperatorResolvedNotApplied => "operator_resolved_not_applied",
+        EffectTransitionReason::LegacyImport => "legacy_import",
+    }
+}
+
+pub(super) fn effect_reason_from_db(value: &str) -> EffectTransitionReason {
+    match value {
+        "intent_persisted" => EffectTransitionReason::IntentPersisted,
+        "dispatch_window_opened" => EffectTransitionReason::DispatchWindowOpened,
+        "result_persisted" => EffectTransitionReason::ResultPersisted,
+        "dispatch_rejected" => EffectTransitionReason::DispatchRejected,
+        "restart_before_dispatch" => EffectTransitionReason::RestartBeforeDispatch,
+        "restart_during_dispatch" => EffectTransitionReason::RestartDuringDispatch,
+        "turn_failed_before_dispatch" => EffectTransitionReason::TurnFailedBeforeDispatch,
+        "turn_failed_during_dispatch" => EffectTransitionReason::TurnFailedDuringDispatch,
+        "result_capture_failed" => EffectTransitionReason::ResultCaptureFailed,
+        "operator_resolved_applied" => EffectTransitionReason::OperatorResolvedApplied,
+        "operator_resolved_not_applied" => EffectTransitionReason::OperatorResolvedNotApplied,
+        _ => EffectTransitionReason::LegacyImport,
+    }
 }
 
 pub(super) fn collect_rows<T>(

@@ -45,16 +45,34 @@ CREATE TABLE IF NOT EXISTS message_events (
 CREATE TABLE IF NOT EXISTS strand_effects (
     id TEXT PRIMARY KEY,
     strand_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    tool_call_id TEXT UNIQUE,
     effect_type TEXT NOT NULL,
-    idempotency_key TEXT NOT NULL,
-    status TEXT NOT NULL,
-    source_hook_id TEXT NOT NULL,
-    source_turn_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN (
+        'prepared', 'dispatching', 'unknown', 'confirmed', 'not_dispatched',
+        'resolved_applied', 'resolved_not_applied'
+    )),
     result_ref TEXT,
     error_text TEXT,
+    metadata TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    UNIQUE (strand_id, effect_type, idempotency_key)
+    dispatched_at TEXT,
+    settled_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS effect_transitions (
+    id TEXT PRIMARY KEY,
+    effect_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL CHECK (sequence > 0),
+    state TEXT NOT NULL CHECK (state IN (
+        'prepared', 'dispatching', 'unknown', 'confirmed', 'not_dispatched',
+        'resolved_applied', 'resolved_not_applied'
+    )),
+    reason TEXT NOT NULL,
+    evidence TEXT,
+    occurred_at TEXT NOT NULL,
+    UNIQUE (effect_id, sequence)
 );
 
 CREATE TABLE IF NOT EXISTS strands (
@@ -266,7 +284,9 @@ CREATE INDEX IF NOT EXISTS idx_messages_actor_created_at ON messages (actor_type
 CREATE INDEX IF NOT EXISTS idx_messages_state_created_at ON messages (state, created_at);
 CREATE INDEX IF NOT EXISTS idx_message_events_message_id_created_at ON message_events (message_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_strand_effects_strand_created_at ON strand_effects (strand_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_strand_effects_lookup ON strand_effects (strand_id, effect_type, idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_strand_effects_turn_created_at ON strand_effects (turn_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_strand_effects_state_updated_at ON strand_effects (state, updated_at);
+CREATE INDEX IF NOT EXISTS idx_effect_transitions_effect_sequence ON effect_transitions (effect_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_strands_soul_id ON strands (soul_id);
 CREATE INDEX IF NOT EXISTS idx_strands_lineage ON strands (parent_strand_id, fork_point);
 CREATE INDEX IF NOT EXISTS idx_turns_strand_created_at ON turns (strand_id, created_at);

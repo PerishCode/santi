@@ -99,6 +99,8 @@ impl ApiError {
             || text.contains("object uri")
             || text.contains("path segment")
             || text.contains("path separators")
+            || text.starts_with("only an unknown effect")
+            || text.starts_with("effect resolution evidence")
         {
             Self::bad_request(message)
         } else {

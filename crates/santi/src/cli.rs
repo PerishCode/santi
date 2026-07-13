@@ -98,6 +98,9 @@ pub enum Command {
     },
     /// Query one durable accepted-message obligation by inbox receipt id.
     Receipt { inbox_id: String },
+    /// Query or explicitly resolve one external-effect attempt.
+    #[command(subcommand)]
+    Effect(EffectCommand),
     /// Strand resources under /api/v1/strands
     #[command(subcommand)]
     Strand(StrandCommand),
@@ -108,6 +111,36 @@ pub enum Command {
     /// participant (send/poll over HTTP), or the soul's offline reply egress.
     #[command(subcommand)]
     Im(ImCommand),
+}
+
+#[derive(Subcommand)]
+pub enum EffectCommand {
+    /// GET /api/v1/effects/{id}
+    Query { effect_id: String },
+    /// Resolve an unknown effect from operator-supplied evidence. This never
+    /// retries a command or changes its receipt/turn state.
+    Resolve {
+        effect_id: String,
+        #[arg(long, value_enum)]
+        outcome: EffectOutcomeArg,
+        #[arg(long)]
+        evidence: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+pub enum EffectOutcomeArg {
+    Applied,
+    NotApplied,
+}
+
+impl EffectOutcomeArg {
+    pub fn as_api_str(self) -> &'static str {
+        match self {
+            Self::Applied => "applied",
+            Self::NotApplied => "not_applied",
+        }
+    }
 }
 
 #[derive(Subcommand)]

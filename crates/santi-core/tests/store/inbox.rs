@@ -161,28 +161,65 @@ fn drain_records_provenance() {
 #[test]
 fn inbox_gate_rejects() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
+    let db = temp.path().join("santi.sqlite");
+    let store = SantiStore::open(&db).expect("open store");
     let strand = store.create_strand().expect("create strand");
 
-    // Never drained (no try_start_turn call), so every enqueue adds to the
-    // undrained count — eventually the gate must start rejecting rather than
-    // growing without bound.
-    let mut rejected = false;
-    for _ in 0..600 {
-        match store
-            .enqueue_inbox(&strand.id, MessageKind::Text, MessageContent::text("x"))
-            .expect("enqueue")
-        {
-            IngestOutcome::Accepted { .. } => {}
-            IngestOutcome::Rejected { error } => {
-                assert_eq!(error.code, "runtime.inbox.capacity_exceeded");
-                assert!(error.message.contains("inbox is full"), "got: {error}");
-                rejected = true;
-                break;
-            }
+    // Arrange the full inbox in one transaction. Calling the durable public
+    // enqueue path 500 times makes this gate assertion dominated by fsync,
+    // especially on Windows; the behavior under test is the next admission.
+    let mut conn = Connection::open(&db).expect("open sqlite");
+    let tx = conn.transaction().expect("begin seed transaction");
+    {
+        let mut insert_inbox = tx
+            .prepare(
+                "INSERT INTO strand_inbox \
+                 (id, strand_id, message_kind, content, created_at) \
+                 VALUES (?1, ?2, 'text', '{}', '2026-07-13T00:00:00Z')",
+            )
+            .expect("prepare inbox seed");
+        let mut insert_receipt = tx
+            .prepare(
+                "INSERT INTO inbox_receipts \
+                 (id, strand_id, state, accepted_at, updated_at) \
+                 VALUES (?1, ?2, 'accepted', \
+                         '2026-07-13T00:00:00Z', '2026-07-13T00:00:00Z')",
+            )
+            .expect("prepare receipt seed");
+        let mut insert_transition = tx
+            .prepare(
+                "INSERT INTO receipt_transitions \
+                 (id, inbox_id, sequence, state, occurred_at) \
+                 VALUES (?1, ?2, 1, 'accepted', '2026-07-13T00:00:00Z')",
+            )
+            .expect("prepare receipt transition seed");
+        for index in 0..500 {
+            let inbox_id = format!("inbox_gate_seed_{index}");
+            insert_inbox
+                .execute(rusqlite::params![&inbox_id, &strand.id])
+                .expect("seed inbox row");
+            insert_receipt
+                .execute(rusqlite::params![&inbox_id, &strand.id])
+                .expect("seed inbox receipt");
+            insert_transition
+                .execute(rusqlite::params![
+                    format!("receipt_transition_seed_{index}"),
+                    &inbox_id
+                ])
+                .expect("seed receipt transition");
         }
     }
-    assert!(rejected, "gate never rejected after 600 enqueues");
+    tx.commit().expect("commit inbox seed");
+    drop(conn);
+
+    let outcome = store
+        .enqueue_inbox(&strand.id, MessageKind::Text, MessageContent::text("x"))
+        .expect("enqueue at gate");
+    let IngestOutcome::Rejected { error } = outcome else {
+        panic!("gate accepted an enqueue after 500 pending rows");
+    };
+    assert_eq!(error.code, "runtime.inbox.capacity_exceeded");
+    assert!(error.message.contains("inbox is full"), "got: {error}");
 }
 
 #[test]

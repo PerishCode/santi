@@ -11,6 +11,7 @@ struct FakeHost {
     calls: Vec<String>,
     install_result: Result<(), String>,
     probe_result: Result<UpgradeReadiness, String>,
+    retain_result: Result<(), String>,
     seed_result: Result<SeedOutcome, String>,
     graceful_stop_result: Result<(), String>,
     snapshot_result: Result<(), String>,
@@ -27,6 +28,7 @@ impl Default for FakeHost {
             calls: Vec::new(),
             install_result: Ok(()),
             probe_result: Ok(UpgradeReadiness::Ready),
+            retain_result: Ok(()),
             seed_result: Ok(fake_seed()),
             graceful_stop_result: Ok(()),
             snapshot_result: Ok(()),
@@ -58,6 +60,11 @@ impl UpgradeHost for FakeHost {
     fn trial_probe(&mut self) -> Result<UpgradeReadiness, String> {
         self.calls.push("trial_probe".into());
         self.probe_result.clone()
+    }
+
+    fn retain_candidate(&mut self) -> Result<(), String> {
+        self.calls.push("retain_candidate".into());
+        self.retain_result.clone()
     }
 
     fn rollback(&mut self) -> Result<(), String> {
@@ -170,6 +177,7 @@ fn success_orders_steps() {
             "snapshot",
             "install",
             "trial_probe",
+            "retain_candidate",
             "finalize",
             "start"
         ]
@@ -268,6 +276,39 @@ fn probe_error_rolls_back() {
         Outcome::RolledBack(RollbackCause::DidNotComeUp("probe timed out".into()))
     );
     assert_eq!(report.errors[0].context["detail"], "probe timed out");
+}
+
+#[test]
+fn retention_failure_rolls_back() {
+    let mut host = FakeHost {
+        retain_result: Err("manifest sync failed".into()),
+        ..Default::default()
+    };
+    let report = run(&mut host);
+    assert_eq!(
+        report.outcome,
+        Outcome::RolledBack(RollbackCause::ArtifactRetentionFailed(
+            "manifest sync failed".into()
+        ))
+    );
+    assert_eq!(
+        host.calls,
+        [
+            "graceful_stop",
+            "snapshot",
+            "install",
+            "trial_probe",
+            "retain_candidate",
+            "rollback",
+            "finalize",
+            "start"
+        ]
+    );
+    let UpgradeTerminal::RolledBack { failure } = &host.finalizations[0].terminal else {
+        panic!("expected rolled-back terminal");
+    };
+    assert_eq!(failure.stage.operation(), "upgrade.retain_artifact");
+    assert_eq!(failure.recovery, RecoveryStatus::PreviousVersionRestored);
 }
 
 #[test]

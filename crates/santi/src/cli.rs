@@ -75,7 +75,8 @@ pub enum Command {
     Upgrade {
         /// The `.deb` to install (path or, later, a downloaded artifact).
         deb: Option<String>,
-        /// The currently installed `.deb`, required for truthful rollback.
+        /// Bootstrap artifact for the currently installed package. Required
+        /// only until the runtime has retained a verified installed manifest.
         #[arg(long, env = "SANTI_PREVIOUS_DEB")]
         previous_deb: Option<String>,
         /// Run the orchestration in-process instead of launching the unit.

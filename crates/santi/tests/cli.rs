@@ -114,6 +114,24 @@ fn parses_upgrade_rollback() {
 }
 
 #[test]
+fn parses_durable_upgrade() {
+    let parsed = Cli::try_parse_from(["santi", "upgrade", "/tmp/santi-new.deb"]).unwrap();
+    let Command::Upgrade {
+        deb,
+        previous_deb,
+        run,
+        finalize,
+    } = parsed.command
+    else {
+        panic!("expected upgrade command");
+    };
+    assert_eq!(deb.as_deref(), Some("/tmp/santi-new.deb"));
+    assert_eq!(previous_deb, None);
+    assert!(!run);
+    assert!(!finalize);
+}
+
+#[test]
 fn parses_internal_storage_doctor() {
     let parsed = Cli::try_parse_from(["santi", "doctor", "--storage-only"]).unwrap();
     let Command::Doctor { storage_only } = parsed.command else {

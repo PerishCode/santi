@@ -113,6 +113,15 @@ fn parses_upgrade_rollback() {
 }
 
 #[test]
+fn parses_internal_storage_doctor() {
+    let parsed = Cli::try_parse_from(["santi", "doctor", "--storage-only"]).unwrap();
+    let Command::Doctor { storage_only } = parsed.command else {
+        panic!("expected doctor command");
+    };
+    assert!(storage_only);
+}
+
+#[test]
 fn errors_replaces_rejections() {
     let parsed = Cli::try_parse_from([
         "santi",

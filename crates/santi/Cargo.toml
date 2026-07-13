@@ -17,3 +17,7 @@ reqwest.workspace = true
 santi-api.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+santi-core.workspace = true
+tempfile = "3.27.0"

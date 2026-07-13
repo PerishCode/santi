@@ -60,7 +60,12 @@ pub enum Command {
     /// Offline pre-check of the store, default soul memory, and provider budget.
     /// A local ops command (NOT an HTTP client): exits non-zero when unhealthy,
     /// so the upgrade flow can gate on it. See PHASE-07.
-    Doctor,
+    Doctor {
+        /// Internal storage-only check used by the installed final-version
+        /// binary during a self-upgrade trial.
+        #[arg(long, hide = true)]
+        storage_only: bool,
+    },
     /// Offline store-level ops (act directly on the DB, no running service).
     #[command(subcommand)]
     Inbox(InboxCommand),

@@ -316,13 +316,14 @@ impl UpgradeHost for SystemHost {
         let mut last_detail = "service health was not reachable".to_string();
         let binary = final_version_binary();
         let readiness = loop {
-            if let Ok(report) = crate::ops::doctor_at(&self.paths)
-                && report.ok
-            {
-                match probe_runtime_readiness(&binary) {
+            match probe_final_version_storage(&binary) {
+                Ok(()) => match probe_runtime_readiness(&binary) {
                     Ok(Some(readiness)) => break Ok(readiness),
                     Ok(None) => {}
                     Err(error) => last_detail = error,
+                },
+                Err(error) => {
+                    last_detail = error;
                 }
             }
             if Instant::now() >= deadline {
@@ -422,6 +423,24 @@ impl UpgradeHost for SystemHost {
     fn start(&mut self) -> Result<(), String> {
         self.systemctl("start")
     }
+}
+
+fn probe_final_version_storage(binary: &Path) -> Result<(), String> {
+    let output = Command::new(binary)
+        .args(["doctor", "--storage-only"])
+        .output()
+        .map_err(|error| format!("run final-version storage doctor: {error}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(format!(
+        "final-version storage doctor failed with {}: {}{}",
+        output.status,
+        stdout.trim(),
+        stderr.trim()
+    ))
 }
 
 fn probe_runtime_readiness(binary: &Path) -> Result<Option<UpgradeReadiness>, String> {

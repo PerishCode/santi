@@ -19,7 +19,7 @@ pub async fn run() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Service { args } => run_service(args).await,
-        Command::Doctor => run_doctor(),
+        Command::Doctor { storage_only } => run_doctor(storage_only),
         Command::Inbox(inbox) => run_inbox(inbox, cli.strand),
         Command::Upgrade {
             deb,
@@ -53,8 +53,13 @@ pub async fn run() -> Result<()> {
 
 /// Offline pre-check (local ops, no HTTP). Prints the report as JSON to stdout
 /// and exits non-zero when unhealthy, so a caller (the upgrade flow) can gate.
-fn run_doctor() -> Result<()> {
-    let report = santi_api::ops::doctor().map_err(|error| anyhow::anyhow!(error))?;
+fn run_doctor(storage_only: bool) -> Result<()> {
+    let report = if storage_only {
+        santi_api::ops::doctor_at(&santi_api::config::resolve_runtime_paths())
+    } else {
+        santi_api::ops::doctor()
+    }
+    .map_err(|error| anyhow::anyhow!(error))?;
     println!("{}", serde_json::to_string_pretty(&report)?);
     if !report.ok {
         anyhow::bail!("doctor: unhealthy (see report above)");

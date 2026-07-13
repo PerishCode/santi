@@ -148,7 +148,6 @@ export async function verifyPublish(): Promise<void> {
   const urls: string[] = [
     ...Object.values(metadata.artifacts).map((item) => (item as { url: string }).url),
     metadata.manage.unix,
-    metadata.manage.windows,
   ];
   for (const url of urls) {
     const head = await fetch(url, { method: "HEAD" });

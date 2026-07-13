@@ -12,8 +12,7 @@ const HEALTH_TIMEOUT_MS = 20_000;
 export async function smoke(repo: string): Promise<void> {
   const channel = required("RELEASE_CHANNEL");
   const version = required("RELEASE_VERSION");
-  const isWindows = Deno.build.os === "windows";
-  const binName = isWindows ? "santi.exe" : "santi";
+  if (Deno.build.os !== "linux") fail("release smoke supports Linux only");
 
   const tmp = await Deno.makeTempDir({ prefix: "santi-smoke-" });
   const installRoot = join(tmp, "install");
@@ -27,7 +26,7 @@ export async function smoke(repo: string): Promise<void> {
     SANTI_LOCAL_BIN_DIR: binDir,
   };
 
-  await manage(repo, isWindows, [
+  await manage(repo, [
     "install",
     "--channel",
     channel,
@@ -36,13 +35,13 @@ export async function smoke(repo: string): Promise<void> {
     "--retain=false",
   ], managerEnv);
 
-  const bin = join(binDir, binName);
+  const bin = join(binDir, "santi");
   if (!exists(bin)) fail(`install did not place ${bin}`);
   if (await run(bin, ["--help"]) !== 0) fail("santi --help failed");
 
   await serviceHealth(tmp, bin);
 
-  await manage(repo, isWindows, ["uninstall", "--version", version], managerEnv);
+  await manage(repo, ["uninstall", "--version", version], managerEnv);
   if (exists(join(installRoot, normalizeVersion(version)))) {
     fail(`uninstall left ${join(installRoot, version)}`);
   }
@@ -57,13 +56,10 @@ function normalizeVersion(value: string): string {
 
 async function manage(
   repo: string,
-  isWindows: boolean,
   args: string[],
   env: Record<string, string>,
 ): Promise<void> {
-  const code = isWindows
-    ? await run("pwsh", ["-NoProfile", "-File", join(repo, "manage.ps1"), ...args], { env })
-    : await run("sh", [join(repo, "manage.sh"), ...args], { env });
+  const code = await run("sh", [join(repo, "manage.sh"), ...args], { env });
   if (code !== 0) fail(`manage ${args[0]} failed`);
 }
 

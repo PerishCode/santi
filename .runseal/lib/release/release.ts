@@ -1,10 +1,10 @@
-//! `runseal :release <step>` — one step of the release pipeline, driven by the
+//! `release-ci.ts <step>` — one step of the release pipeline, driven by the
 //! CI workflow (the YAML owns the job DAG + build matrix; each step's logic
 //! lives here). Inputs come from the environment, mirroring the workflow.
 //!
 //! Steps:
 //!   access-check     write-probe R2 to confirm credentials (metadata job)
-//!   metadata         resolve the next version → GITHUB_OUTPUT
+//!   metadata         resolve the next version → Actions step output
 //!   package          build santi for $TARGET and archive into dist/<version>/
 //!   publish          checksums + accept + verify members + upload + metadata
 //!   verify-publish   re-fetch published metadata, validate, HEAD every URL
@@ -61,14 +61,14 @@ export async function release(argv: string[]): Promise<number> {
 }
 
 function usage(): void {
-  console.log("Usage: runseal :release <step>");
+  console.log("Usage: release-ci.ts <step>");
   console.log("");
   console.log("Run one internal step of the CI release pipeline.");
-  console.log("This wrapper does not dispatch a release workflow by itself.");
+  console.log("This internal wrapper does not dispatch a release workflow.");
   console.log("");
   console.log("Steps:");
   console.log("  access-check    Probe release storage credentials for the selected channel");
-  console.log("  metadata        Resolve the next release version and write GITHUB_OUTPUT");
+  console.log("  metadata        Resolve the next release version and write Actions output");
   console.log("  package         Build and archive santi for TARGET");
   console.log("  publish         Build checksums, verify members, and publish artifacts");
   console.log("  verify-publish  Re-fetch metadata and verify every published artifact URL");

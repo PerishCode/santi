@@ -1,0 +1,82 @@
+name: release-beta
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_override:
+        description: "Optional beta version override, for example v0.1.0-beta.47"
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  release:
+    runs-on: docker
+    container: mirror.perish.lan/ci/deno
+    env:
+      BETA_VERSION_OVERRIDE: ${{ inputs.version_override }}
+      CI_COMMIT: ${{ github.sha }}
+      CI_REPOSITORY: ${{ github.repository }}
+      CI_RUN_ATTEMPT: ${{ github.run_attempt }}
+      CI_RUN_ID: ${{ github.run_id }}
+      CI_WORKFLOW: release-beta
+      R2_ACCESS_PROBE_NAME: release-beta
+      RELEASE_CHANNEL: beta
+      SANTI_RELEASES_PUBLIC_URL: ${{ vars.SANTI_RELEASES_PUBLIC_URL }}
+      SANTI_RELEASES_S3_AK: ${{ secrets.SANTI_RELEASES_S3_AK }}
+      SANTI_RELEASES_S3_BUCKET: ${{ secrets.SANTI_RELEASES_S3_BUCKET }}
+      SANTI_RELEASES_S3_SK: ${{ secrets.SANTI_RELEASES_S3_SK }}
+      SANTI_RELEASES_S3_URL: ${{ secrets.SANTI_RELEASES_S3_URL }}
+      TARGET: x86_64-unknown-linux-gnu
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install flavor
+        run: |
+          set -eu
+          curl -fsSL https://flavor.perish.uk/install.sh -o "$RUNNER_TEMP/install-flavor.sh"
+          sh "$RUNNER_TEMP/install-flavor.sh"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Validate R2 access
+        run: deno run --allow-all --config .runseal/deno.json .runseal/wrappers/release-ci.ts access-check
+
+      - name: Resolve beta metadata
+        id: meta
+        run: deno run --allow-all --config .runseal/deno.json .runseal/wrappers/release-ci.ts metadata
+
+      - name: Guard
+        run: |
+          set -eu
+          export PATH="$HOME/.local/bin:$PATH"
+          deno run --allow-all --config .runseal/deno.json .runseal/wrappers/guard.ts
+
+      - name: Package Linux release
+        env:
+          RELEASE_VERSION: ${{ steps.meta.outputs.release_version }}
+        run: deno run --allow-all --config .runseal/deno.json .runseal/wrappers/release-ci.ts package
+
+      - name: Publish to R2
+        id: publish
+        env:
+          BASE_VERSION: ${{ steps.meta.outputs.base_version }}
+          BETA_NUMBER: ${{ steps.meta.outputs.beta_number }}
+          RELEASE_VERSION: ${{ steps.meta.outputs.release_version }}
+          STATE_SOURCE: ${{ steps.meta.outputs.state_source }}
+        run: deno run --allow-all --config .runseal/deno.json .runseal/wrappers/release-ci.ts publish
+
+      - name: Verify R2 publish
+        env:
+          R2_METADATA_URL: ${{ steps.publish.outputs.metadata_url }}
+          RELEASE_VERSION: ${{ steps.meta.outputs.release_version }}
+        run: deno run --allow-all --config .runseal/deno.json .runseal/wrappers/release-ci.ts verify-publish
+
+      - name: Smoke install, help, and service health
+        env:
+          RELEASE_VERSION: ${{ steps.meta.outputs.release_version }}
+        run: deno run --allow-all --config .runseal/deno.json .runseal/wrappers/release-ci.ts smoke
+
+      - name: sccache statistics
+        if: ${{ always() }}
+        run: sccache --show-stats

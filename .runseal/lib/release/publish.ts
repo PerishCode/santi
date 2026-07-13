@@ -31,10 +31,8 @@ export async function publish(repo: string): Promise<void> {
     IMMUTABLE,
   );
 
-  // Public install managers live at the root and are refreshed every release
-  // (same script regardless of channel), so installs work on any channel.
+  // The Linux install manager lives at the root and is refreshed every release.
   await putObject(join(repo, "manage.sh"), "manage.sh", contentTypeFor("manage.sh"), REVALIDATE);
-  await putObject(join(repo, "manage.ps1"), "manage.ps1", contentTypeFor("manage.ps1"), REVALIDATE);
 
   const metadata = buildMetadata(channel, version, versionPrefix, latestPrefix, pub, dir);
   const metaPath = join(dir, "metadata.json");
@@ -75,17 +73,22 @@ function buildMetadata(
     };
   };
 
+  const artifacts: Record<string, unknown> = Object.fromEntries(
+    ARTIFACTS.map((spec) => [spec.metadataKey, artifact(spec.archive, spec.contentType)]),
+  );
+  artifacts.checksums = artifact("checksums.txt", "text/plain; charset=utf-8");
+
   const metadata: Record<string, unknown> = {
     version: 1,
     channel,
     releaseVersion: version,
     generatedAt: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
-    github: {
-      repository: Deno.env.get("GITHUB_REPOSITORY") ?? "",
-      commit: Deno.env.get("GITHUB_SHA") ?? "",
-      runId: Number(Deno.env.get("GITHUB_RUN_ID") ?? 0),
-      runAttempt: Number(Deno.env.get("GITHUB_RUN_ATTEMPT") ?? 0),
-      workflow: Deno.env.get("GITHUB_WORKFLOW") ?? "",
+    ci: {
+      repository: Deno.env.get("CI_REPOSITORY") ?? "",
+      commit: Deno.env.get("CI_COMMIT") ?? "",
+      runId: Number(Deno.env.get("CI_RUN_ID") ?? 0),
+      runAttempt: Number(Deno.env.get("CI_RUN_ATTEMPT") ?? 0),
+      workflow: Deno.env.get("CI_WORKFLOW") ?? "",
     },
     r2: {
       publicUrl: pub,
@@ -94,18 +97,8 @@ function buildMetadata(
       versionPrefix,
       latestPrefix,
     },
-    manage: { unix: `${pub}/manage.sh`, windows: `${pub}/manage.ps1` },
-    artifacts: {
-      linuxX64: artifact("santi-x86_64-unknown-linux-gnu.tar.gz", "application/gzip"),
-      debX64: artifact(
-        "santi-x86_64-unknown-linux-gnu.deb",
-        "application/vnd.debian.binary-package",
-      ),
-      macArm64: artifact("santi-aarch64-apple-darwin.tar.gz", "application/gzip"),
-      macX64: artifact("santi-x86_64-apple-darwin.tar.gz", "application/gzip"),
-      winX64: artifact("santi-x86_64-pc-windows-msvc.zip", "application/zip"),
-      checksums: artifact("checksums.txt", "text/plain; charset=utf-8"),
-    },
+    manage: { unix: `${pub}/manage.sh` },
+    artifacts,
   };
 
   if (channel === "beta") {
@@ -128,7 +121,7 @@ export async function verifyPublish(): Promise<void> {
   const metadataUrl = required("R2_METADATA_URL");
   const pub = publicUrl();
 
-  const run = Deno.env.get("GITHUB_RUN_ID") ?? "local";
+  const run = Deno.env.get("CI_RUN_ID") ?? "local";
   const response = await fetch(`${metadataUrl}?run=${run}`);
   if (!response.ok) fail(`failed to fetch published metadata: HTTP ${response.status}`);
   // deno-lint-ignore no-explicit-any
@@ -140,9 +133,6 @@ export async function verifyPublish(): Promise<void> {
   }
   if (metadata.manage?.unix !== `${pub}/manage.sh`) {
     fail(`unexpected unix manager url: ${metadata.manage?.unix}`);
-  }
-  if (metadata.manage?.windows !== `${pub}/manage.ps1`) {
-    fail(`unexpected windows manager url: ${metadata.manage?.windows}`);
   }
   if (channel === "beta") {
     if (metadata.betaVersion !== version) fail(`unexpected betaVersion: ${metadata.betaVersion}`);

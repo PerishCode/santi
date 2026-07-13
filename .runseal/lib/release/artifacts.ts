@@ -1,5 +1,4 @@
-//! Build, archive, checksum, and validate release artifacts for one `santi`
-//! binary per target.
+//! Build, archive, checksum, and validate the Linux x86_64 `santi` release.
 
 import { capture, run } from "@/lib/std/cmd.ts";
 import { exists, join } from "@/lib/std/fs.ts";
@@ -11,7 +10,7 @@ export interface Artifact {
   member: string;
   metadataKey: string;
   contentType: string;
-  /** "archive" = tar.gz/zip of the bare binary; "deb" = a Debian package. */
+  /** "archive" = tar.gz of the bare binary; "deb" = a Debian package. */
   kind?: "archive" | "deb";
 }
 
@@ -33,27 +32,6 @@ export const ARTIFACTS: Artifact[] = [
     metadataKey: "debX64",
     contentType: "application/vnd.debian.binary-package",
     kind: "deb",
-  },
-  {
-    target: "aarch64-apple-darwin",
-    archive: "santi-aarch64-apple-darwin.tar.gz",
-    member: "santi",
-    metadataKey: "macArm64",
-    contentType: "application/gzip",
-  },
-  {
-    target: "x86_64-apple-darwin",
-    archive: "santi-x86_64-apple-darwin.tar.gz",
-    member: "santi",
-    metadataKey: "macX64",
-    contentType: "application/gzip",
-  },
-  {
-    target: "x86_64-pc-windows-msvc",
-    archive: "santi-x86_64-pc-windows-msvc.zip",
-    member: "santi.exe",
-    metadataKey: "winX64",
-    contentType: "application/zip",
   },
 ];
 
@@ -91,16 +69,8 @@ export async function pkg(repo: string): Promise<void> {
     } else {
       const stage = await Deno.makeTempDir();
       await Deno.copyFile(bin, join(stage, spec.member));
-      if (!spec.member.endsWith(".exe")) {
-        try {
-          Deno.chmodSync(join(stage, spec.member), 0o755);
-        } catch {
-          // non-unix; ignore
-        }
-      }
-      const code = spec.archive.endsWith(".tar.gz")
-        ? await run("tar", ["-C", stage, "-czf", out, spec.member])
-        : await run("tar", ["-C", stage, "-a", "-c", "-f", out, spec.member]); // bsdtar (Windows) → zip
+      Deno.chmodSync(join(stage, spec.member), 0o755);
+      const code = await run("tar", ["-C", stage, "-czf", out, spec.member]);
       if (code !== 0) fail(`archiving ${spec.archive} failed`);
     }
     console.log(out);
@@ -108,7 +78,7 @@ export async function pkg(repo: string): Promise<void> {
 }
 
 /** Stage the .deb tree from `.runseal/packaging/deb/` + the built binary and
- * `dpkg-deb --build` it. Requires `dpkg-deb` (present on the ubuntu build job). */
+ * `dpkg-deb --build` it. Requires `dpkg-deb` on the Linux runner image. */
 async function buildDeb(
   repo: string,
   version: string,
@@ -197,9 +167,7 @@ export async function verifyMembers(repo: string): Promise<void> {
       }
       continue;
     }
-    const names = spec.archive.endsWith(".tar.gz")
-      ? (await capture("tar", ["-tzf", path])).stdout
-      : (await capture("unzip", ["-Z1", path])).stdout;
+    const names = (await capture("tar", ["-tzf", path])).stdout;
     if (!names.split("\n").map((n) => n.trim()).includes(spec.member)) {
       fail(`missing ${spec.member} in ${spec.archive}`);
     }

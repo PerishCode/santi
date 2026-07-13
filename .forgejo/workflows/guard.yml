@@ -1,0 +1,33 @@
+name: guard
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  guard:
+    runs-on: docker
+    container: mirror.perish.lan/ci/deno
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install flavor
+        run: |
+          set -eu
+          curl -fsSL https://flavor.perish.uk/install.sh -o "$RUNNER_TEMP/install-flavor.sh"
+          sh "$RUNNER_TEMP/install-flavor.sh"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Guard
+        run: |
+          set -eu
+          export PATH="$HOME/.local/bin:$PATH"
+          deno run --allow-all --config .runseal/deno.json .runseal/wrappers/guard.ts
+
+      - name: sccache statistics
+        if: ${{ always() }}
+        run: sccache --show-stats

@@ -1,177 +1,206 @@
-//! `runseal :land <title> [--body <text>]`
-//!
-//! Consolidates the squash-merge hot path into one blocking call so the
-//! operator (human or agent) does not burn round-trips polling CI:
-//!
-//!   clean non-main branch → push → reuse/create PR → wait for required checks
-//!   (polled inside this wrapper) → squash merge --delete-branch → sync main.
-//!
-//! Fail-fast everywhere: missing title, on main, dirty tree, no commits ahead,
-//! failing/timed-out checks — all stop with a message and leave the PR open. It
-//! never commits, branches, or rebases on your behalf.
+//! Forgejo landing flow: push one clean topic branch, create or reuse its PR,
+//! wait for the exact head guard, squash-merge it, and synchronize local main.
 
-import { capture, run, sleep } from "@/lib/std/cmd.ts";
+import { capture, run } from "@/lib/std/cmd.ts";
 import { repoRoot } from "@/lib/std/repo.ts";
 
-const BASE = "main";
-// ~2x the observed ~110s `smoke (ubuntu-latest)` duration on PRs.
-const CHECK_TIMEOUT_MS = 220_000;
-const POLL_PENDING_MS = 10_000;
-const POLL_REGISTER_MS = 5_000;
+interface Options {
+  title: string;
+  body: string;
+  base: string;
+  repo: string;
+  deleteBranch: boolean;
+}
 
 export async function land(argv: string[]): Promise<number> {
   if (argv.includes("-h") || argv.includes("--help")) {
     usage();
     return 0;
   }
-  const { title, body } = parseArgs(argv);
-  if (!title) {
-    return fail("title is required — usage: runseal :land <title> [--body <text>]");
-  }
-  const repo = repoRoot();
 
-  // 1. Preconditions — fail fast, never mutate the working state.
-  const branch = (await capture("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: repo }))
-    .stdout.trim();
-  if (branch === "" || branch === "HEAD") return fail("detached HEAD — checkout a branch first");
-  if (branch === BASE) return fail(`on ${BASE} — :land lands a non-${BASE} branch`);
-  if ((await capture("git", ["status", "--porcelain"], { cwd: repo })).stdout.trim() !== "") {
-    return fail("working tree not clean — commit or stash first");
-  }
-  const ahead = (await capture("git", ["rev-list", "--count", `${BASE}..HEAD`], { cwd: repo }))
-    .stdout.trim();
-  if (Number(ahead) === 0) return fail(`no commits on ${branch} ahead of ${BASE}`);
+  try {
+    const options = parse(argv);
+    if (options.title === "") throw new Error("title is required");
+    const root = repoRoot();
+    const branch = await text("git", ["branch", "--show-current"], root);
+    if (branch === "") throw new Error("detached HEAD — checkout a topic branch first");
+    if (branch === options.base || branch === "main" || branch === "master") {
+      throw new Error(`must run on a topic branch, not ${branch}`);
+    }
+    if ((await text("git", ["status", "--short"], root)) !== "") {
+      throw new Error("working tree must be clean; commit or stash changes first");
+    }
 
-  // 2. Push.
-  console.log(`pushing ${branch} ...`);
-  if ((await run("git", ["push", "-u", "origin", branch], { cwd: repo })) !== 0) {
-    return fail("git push failed");
-  }
+    await command("git", ["fetch", "origin", options.base], root);
+    const remote = `origin/${options.base}`;
+    if (!(await ok("git", ["merge-base", "--is-ancestor", remote, "HEAD"], root))) {
+      throw new Error(`current branch must contain latest ${remote}; rebase first`);
+    }
+    const ahead = Number(await text("git", ["rev-list", "--count", `${remote}..HEAD`], root));
+    if (!Number.isFinite(ahead) || ahead <= 0) {
+      throw new Error(`current branch has no commits ahead of ${remote}`);
+    }
 
-  // 3. PR — reuse an open one for this branch, else create.
-  let pr = await openPr(branch, repo);
-  if (pr === null) {
-    console.log("creating PR ...");
-    const created = await capture("gh", [
+    await command("git", ["push", "-u", "origin", branch], root);
+    const target = options.repo || await targetRepo(root);
+    let pull = await forgejoJson([
       "pr",
-      "create",
-      "--base",
-      BASE,
+      "find",
+      "--repo",
+      target,
       "--head",
       branch,
-      "--title",
-      title,
-      "--body",
-      body ?? "",
-    ], { cwd: repo });
-    if (created.code !== 0) return fail(`gh pr create failed: ${oneLine(created.stderr)}`);
-    pr = await openPr(branch, repo);
-    if (pr === null) return fail("PR created but could not be resolved");
-  } else {
-    console.log(`reusing PR #${pr}`);
-  }
+      "--base",
+      options.base,
+    ], root);
+    if (pull === null) {
+      const args = [
+        "pr",
+        "create",
+        "--repo",
+        target,
+        "--head",
+        branch,
+        "--base",
+        options.base,
+        "--title",
+        options.title,
+      ];
+      if (options.body !== "") args.push("--body", options.body);
+      pull = await forgejoJson(args, root);
+    }
 
-  // 4. Wait for required checks — polled here, quietly, with a bounded timeout.
-  console.log(`waiting for PR checks (timeout ${CHECK_TIMEOUT_MS / 1000}s) ...`);
-  const outcome = await waitChecks(pr, repo);
-  if (outcome !== "pass") {
-    return fail(`PR checks ${outcome} — PR #${pr} left open`);
-  }
+    const number = integerField(pull, "number");
+    const url = stringField(pull, "html_url");
+    console.log(url);
+    const guarded = await forgejoJson([
+      "pr",
+      "guard",
+      "--repo",
+      target,
+      "--number",
+      String(number),
+    ], root);
+    const sha = stringField(guarded, "commit_sha");
+    await forgejo([
+      "pr",
+      "merge",
+      "--repo",
+      target,
+      "--number",
+      String(number),
+      "--head",
+      sha,
+      "--delete-branch",
+      String(options.deleteBranch),
+    ], root);
 
-  // 5. Squash merge.
-  console.log(`squash-merging PR #${pr} ...`);
-  const merged = await capture(
-    "gh",
-    ["pr", "merge", String(pr), "--squash", "--delete-branch"],
-    { cwd: repo },
-  );
-  if (merged.code !== 0) return fail(`gh pr merge failed: ${oneLine(merged.stderr)}`);
-
-  // 6. Sync base.
-  if ((await run("git", ["checkout", BASE], { cwd: repo })) !== 0) {
-    return fail(`merged PR #${pr}, but could not checkout ${BASE} — sync manually`);
+    await command("git", ["checkout", options.base], root);
+    await command("git", ["pull", "--ff-only", "origin", options.base], root);
+    if (options.deleteBranch && await ok("git", ["rev-parse", "--verify", branch], root)) {
+      await command("git", ["branch", "-D", branch], root);
+    }
+    console.log(`landed Forgejo PR #${number} on ${options.base}`);
+    return 0;
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error));
   }
-  if ((await run("git", ["pull", "--ff-only"], { cwd: repo })) !== 0) {
-    return fail(`merged PR #${pr}, but git pull --ff-only failed — sync manually`);
-  }
-  const head = (await capture("git", ["rev-parse", "--short", "HEAD"], { cwd: repo })).stdout
-    .trim();
-  console.log(`landed PR #${pr} → ${BASE} ${head}`);
-  return 0;
 }
 
 function usage(): void {
-  console.log("Usage: runseal :land <title> [--body <text>]");
+  console.log("Usage: runseal :land <title> [options]");
   console.log("");
-  console.log("Push the current non-main branch, reuse or create its PR, wait for required");
-  console.log("checks, squash-merge it, delete the remote branch, and fast-forward local main.");
-  console.log("The working tree must already be clean; this wrapper never commits or rebases.");
+  console.log("Push and squash-merge the current clean topic branch through Forgejo.");
+  console.log("");
+  console.log("Options:");
+  console.log("  --body <text>       pull request body");
+  console.log("  --base <branch>     base branch (default: main)");
+  console.log("  --repo <owner/name> Forgejo repository (default: derived from origin)");
+  console.log("  --no-delete         keep the topic branch after merge");
 }
 
-async function openPr(branch: string, repo: string): Promise<number | null> {
-  const result = await capture("gh", [
-    "pr",
-    "list",
-    "--head",
-    branch,
-    "--state",
-    "open",
-    "--json",
-    "number",
-    "-q",
-    ".[0].number",
-  ], { cwd: repo });
-  const value = Number(result.stdout.trim());
-  return Number.isInteger(value) && value > 0 ? value : null;
-}
-
-/**
- * Poll all PR checks until they pass, one fails, or the timeout elapses. Parses
- * `--json bucket` from stdout and ignores exit codes so pending
- * states are handled uniformly; an empty set means checks have not registered
- * yet (just after creation).
- */
-async function waitChecks(pr: number, repo: string): Promise<"pass" | "fail" | "timeout"> {
-  const deadline = Date.now() + CHECK_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const result = await capture(
-      "gh",
-      ["pr", "checks", String(pr), "--json", "bucket"],
-      { cwd: repo },
-    );
-    let buckets: string[] = [];
-    try {
-      buckets = (JSON.parse(result.stdout) as { bucket: string }[]).map((check) => check.bucket);
-    } catch {
-      buckets = [];
-    }
-    if (buckets.length === 0) {
-      await sleep(POLL_REGISTER_MS); // not registered yet
-      continue;
-    }
-    if (buckets.some((bucket) => bucket === "fail" || bucket === "cancel")) return "fail";
-    if (buckets.every((bucket) => bucket === "pass" || bucket === "skipping")) return "pass";
-    await sleep(POLL_PENDING_MS); // some still pending
-  }
-  return "timeout";
-}
-
-function parseArgs(argv: string[]): { title?: string; body?: string } {
-  let title: string | undefined;
-  let body: string | undefined;
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === "--body") {
-      body = argv[++i];
-    } else if (!arg.startsWith("--") && title === undefined) {
+function parse(argv: string[]): Options {
+  const values = [...argv];
+  let title = "";
+  let body = "";
+  let base = "main";
+  let repo = "";
+  let deleteBranch = true;
+  for (let index = 0; index < values.length; index++) {
+    const arg = values[index];
+    if (arg === "--body" || arg === "--base" || arg === "--repo") {
+      const value = values[++index];
+      if (value === undefined) throw new Error(`${arg} requires a value`);
+      if (arg === "--body") body = value;
+      if (arg === "--base") base = value;
+      if (arg === "--repo") repo = value;
+    } else if (arg === "--no-delete") {
+      deleteBranch = false;
+    } else if (arg.startsWith("--")) {
+      throw new Error(`unknown option: ${arg}`);
+    } else if (title === "") {
       title = arg;
+    } else {
+      throw new Error(`unexpected argument: ${arg}`);
     }
   }
-  return { title, body };
+  return { title, body, base, repo, deleteBranch };
+}
+
+async function targetRepo(root: string): Promise<string> {
+  const origin = (await text("git", ["remote", "get-url", "origin"], root)).replace(/\.git$/, "");
+  const found = origin.match(/[:/]([^/:]+)\/([^/]+)$/);
+  if (found === null) throw new Error(`cannot derive Forgejo owner/name from origin: ${origin}`);
+  return `${found[1]}/${found[2]}`;
+}
+
+async function forgejo(args: string[], root: string): Promise<string> {
+  const result = await capture("runseal", ["@tool", "forgejo", ...args], { cwd: root });
+  if (result.code !== 0) throw new Error(`Forgejo ${args[0]} failed: ${oneLine(result.stderr)}`);
+  return result.stdout.trim();
+}
+
+async function forgejoJson(args: string[], root: string): Promise<unknown> {
+  const raw = await forgejo(args, root);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error(`Forgejo ${args[0]} returned invalid JSON`);
+  }
+}
+
+async function text(command: string, args: string[], root: string): Promise<string> {
+  const result = await capture(command, args, { cwd: root });
+  if (result.code !== 0) throw new Error(`${command} ${args[0]} failed: ${oneLine(result.stderr)}`);
+  return result.stdout.trim();
+}
+
+async function command(command: string, args: string[], root: string): Promise<void> {
+  if (await run(command, args, { cwd: root }) !== 0) {
+    throw new Error(`${command} ${args[0]} failed`);
+  }
+}
+
+async function ok(command: string, args: string[], root: string): Promise<boolean> {
+  return (await capture(command, args, { cwd: root })).code === 0;
+}
+
+function integerField(value: unknown, name: string): number {
+  if (typeof value !== "object" || value === null) throw new Error(`missing Forgejo ${name}`);
+  const found = (value as Record<string, unknown>)[name];
+  if (!Number.isInteger(found) || Number(found) <= 0) throw new Error(`invalid Forgejo ${name}`);
+  return Number(found);
+}
+
+function stringField(value: unknown, name: string): string {
+  if (typeof value !== "object" || value === null) throw new Error(`missing Forgejo ${name}`);
+  const found = (value as Record<string, unknown>)[name];
+  if (typeof found !== "string" || found === "") throw new Error(`invalid Forgejo ${name}`);
+  return found;
 }
 
 function oneLine(text: string): string {
-  return text.trim().split("\n").join(" ");
+  return text.trim().split(/\r?\n/).join(" ");
 }
 
 function fail(message: string): number {

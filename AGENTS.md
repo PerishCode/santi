@@ -32,8 +32,9 @@ cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo test --locked --workspace
 ```
 
-CI (`.github/workflows/guard.yml`) runs `flavor check` plus the Rust
-fmt/clippy/test triad on PRs and a 3-OS matrix on `main`.
+CI (`.forgejo/workflows/guard.yml`) runs `flavor check` plus the Rust
+fmt/clippy/test triad on the self-hosted Linux runner. Release workflows publish
+Linux x86_64 tar and Debian artifacts to R2.
 
 ## Trigger a single turn locally (hot path)
 
@@ -73,5 +74,8 @@ rejected, not silently created). To address a soul ad hoc without a default:
 
 - Edition 2024, MIT. Workspace dependencies are pinned in the root
   `Cargo.toml`; crates reference them with `.workspace = true`.
-- Secrets live in `santi.toml` (gitignored). Never commit live credentials;
-  `santi.example.toml` is the tracked template.
+- Forgejo (`PerishFire/santi`) is the canonical write target. The public GitHub
+  repository is historical and is not reverse-synchronized.
+- Runtime secrets live in `santi.toml`; local release credentials live in
+  `.forgejo/release.env`. Both are gitignored. Never commit live credentials;
+  `santi.example.toml` and `.forgejo/release.env.example` are tracked templates.

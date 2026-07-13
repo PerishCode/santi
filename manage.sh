@@ -112,8 +112,6 @@ platform_archive() {
   arch=$(uname -m)
   case "$os:$arch" in
     Linux:x86_64|Linux:amd64) echo "santi-x86_64-unknown-linux-gnu.tar.gz" ;;
-    Darwin:arm64|Darwin:aarch64) echo "santi-aarch64-apple-darwin.tar.gz" ;;
-    Darwin:x86_64|Darwin:amd64) echo "santi-x86_64-apple-darwin.tar.gz" ;;
     *) echo "unsupported platform: $os $arch" >&2; exit 1 ;;
   esac
 }

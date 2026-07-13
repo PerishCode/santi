@@ -1,7 +1,5 @@
-//! `runseal :release <step>` — one step of the CI release pipeline. Use
-//! `runseal :release --help` for the step contract. Thin entry point; logic
-//! lives in the release module.
+//! `runseal :release --channel beta|stable [options]` — dispatch Forgejo CI.
 
-import { release } from "@/lib/release/release.ts";
+import { dispatch } from "@/lib/release/dispatch.ts";
 
-Deno.exit(await release(Deno.args));
+Deno.exit(await dispatch(Deno.args));

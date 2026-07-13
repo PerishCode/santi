@@ -2,7 +2,7 @@
 
 Static packaging artifacts for the minimal server `.deb`. The `.deb` is the low-friction entry that
 lets Liberte take over upgrades (`santi upgrade`); it replaces the hand-rolled `manage.sh`
-version-slots on the SERVER only (the macOS/Windows client install stays on `manage.sh`/tarball).
+version-slots on the server. The release pipeline currently supports Linux x86_64 only.
 
 ## Files here
 
@@ -35,19 +35,19 @@ The binary is installed to `/usr/bin/santi`.
 - **Upgrade unit runs as santi + sudo**, so every file it writes stays santi-owned; the privileged
   dpkg/systemctl calls use santi's passwordless sudo (a SystemHost detail tuned on-box in STEP 6).
 
-## Build assembly — NOT YET WIRED (the deferred outward half)
+## Build assembly
 
-Building + publishing the `.deb` lives in the release pipeline (`.runseal/wrappers/release.ts` +
-`release-beta.yml`) and is the outward-facing R2 path, so it is intentionally NOT wired here yet
-(awaiting operator go-ahead). The plan when wired:
+Building and publishing the `.deb` lives in the Forgejo release pipeline
+(`.runseal/wrappers/release-ci.ts` + `.forgejo/workflows/release-beta.yml`) and shares the
+outward-facing R2 path with the Linux tarball:
 
 1. In the `x86_64-unknown-linux-gnu` build, after producing the binary, stage a tree:
    `usr/bin/santi`, `lib/systemd/system/{santi,santi-upgrade}.service`,
    `etc/santi/santi.env.example`, `DEBIAN/{control,postinst,prerm,postrm}` (control's `__VERSION__`
    ← the release version; scripts `chmod 0755`).
-2. `dpkg-deb --build` → `santi_<version>_amd64.deb`; upload as a release artifact.
+2. `dpkg-deb --build` produces `santi-x86_64-unknown-linux-gnu.deb`.
 3. `publish` puts it on R2 next to the tarballs and records it in `metadata.json`.
 4. Server upgrade path becomes `curl <r2>/…/santi_<v>_amd64.deb -o … && santi upgrade …`.
 
-Validated only by running the release workflow / building on a Debian box — never in the unit-test
-CI.
+The Forgejo release job validates the package member, publishes it, then performs a public install
+and live service-health smoke on Linux.

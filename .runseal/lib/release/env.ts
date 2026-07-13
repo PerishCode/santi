@@ -1,4 +1,4 @@
-//! Shared release helpers: fail-fast, required env, public URL, GitHub outputs.
+//! Shared release helpers: fail-fast, required env, public URL, Actions outputs.
 
 export function fail(message: string): never {
   console.error(`[release] ${message}`);

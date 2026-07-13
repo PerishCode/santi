@@ -115,6 +115,19 @@ its own variable (and the provider config follows `--flag` > config file > env):
 A `.env` in the working directory is loaded and overrides the process
 environment (via `dotenvy::dotenv_override`).
 
+## Distribution
+
+The current release gate supports Linux x86_64 only. R2 publishes both a
+standalone tarball and the Debian package used by the self-upgrade path:
+
+```sh
+curl -fsSL https://releases.santi.perish.uk/manage.sh | sh -s -- install --channel beta
+```
+
+Forgejo `PerishFire/santi` is the canonical source and automation target. The
+public GitHub repository is retained as historical context without reverse
+synchronization.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

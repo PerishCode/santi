@@ -27,8 +27,8 @@ pub async fn run() -> Result<()> {
             run,
             finalize,
         } => run_upgrade(deb, previous_deb, run, finalize),
-        // The soul's IM reply is an offline store write (like `inbox seed`) — no
-        // HTTP, so a mid-turn reply never re-enters the turn-holding server.
+        // The soul's optional early IM reply is an offline store write (like
+        // `inbox seed`) — no HTTP, so it never re-enters the turn-holding server.
         Command::Im(ImCommand::Reply { text, file, stdin }) => {
             let text = read_im_reply_text(text, file, stdin)?;
             run_im_reply(text, cli.strand)
@@ -95,10 +95,9 @@ fn run_inbox(command: InboxCommand, default_strand: Option<String>) -> Result<()
     }
 }
 
-/// The soul's IM reply egress (local ops, no HTTP). Resolves the current IM
-/// conversation from --strand/SANTI_STRAND_ID (ambient in the soul's shell) and
-/// delivers the reply into that conversation's participant inbox — a direct store
-/// write, so a mid-turn reply never re-enters the turn-holding server.
+/// The soul's optional early IM reply (local ops, no HTTP). Resolves the current
+/// conversation from --strand/SANTI_STRAND_ID and shares SANTI_TURN_ID with the
+/// automatic completion path, making the two delivery paths idempotent.
 fn run_im_reply(text: String, default_strand: Option<String>) -> Result<()> {
     let strand_id = default_strand
         .map(|id| id.trim().to_string())

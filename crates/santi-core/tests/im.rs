@@ -1,4 +1,6 @@
-use santi_core::{DEFAULT_SOUL_ID, SantiStore};
+use santi_core::{
+    DEFAULT_SOUL_ID, ImDeliveryMode, IngestOutcome, MessageContent, MessageKind, SantiStore,
+};
 
 fn store() -> (SantiStore, tempfile::TempDir) {
     let temp = tempfile::tempdir().expect("temp dir");
@@ -58,5 +60,103 @@ fn participant_resolves_label() {
             .im_participant_for_strand(&plain.id)
             .unwrap()
             .is_none()
+    );
+}
+
+#[test]
+fn turn_reply_deduplicates() {
+    let (store, _temp) = store();
+    store.ensure_im_participant("operator", "human").unwrap();
+    let strand = store
+        .find_labeled_strand(DEFAULT_SOUL_ID, "im:operator")
+        .unwrap();
+    let outcome = store
+        .enqueue_inbox(&strand.id, MessageKind::Text, MessageContent::text("hello"))
+        .unwrap();
+    let IngestOutcome::Accepted { receipt } = outcome else {
+        panic!("inbox rejected");
+    };
+    let turn = store
+        .try_start_turn(&strand.id, "strand_send", None)
+        .unwrap()
+        .expect("turn")
+        .turn;
+
+    let (early, inserted) = store
+        .enqueue_turn_reply(
+            &strand.id,
+            &turn.id,
+            None,
+            "early",
+            ImDeliveryMode::Explicit,
+        )
+        .unwrap();
+    assert!(inserted);
+    let (same, inserted) = store
+        .enqueue_turn_reply(
+            &strand.id,
+            &turn.id,
+            Some("msg_final"),
+            "final",
+            ImDeliveryMode::Automatic,
+        )
+        .unwrap();
+    assert!(!inserted);
+    assert_eq!(same.id, early.id);
+    assert_eq!(same.content, "early");
+    assert_eq!(same.delivery_mode, Some(ImDeliveryMode::Explicit));
+
+    store
+        .complete_turn(&turn.id, None, "fake", "fake-model", None)
+        .unwrap();
+    let status = store
+        .receipt_status(&receipt.inbox_id)
+        .unwrap()
+        .expect("receipt");
+    assert_eq!(status.im_deliveries.len(), 1);
+    assert_eq!(status.im_deliveries[0].id, early.id);
+    assert_eq!(
+        status.im_deliveries[0].delivery_mode,
+        ImDeliveryMode::Explicit
+    );
+}
+
+#[test]
+fn v26_history_migrates() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let db = temp.path().join("db");
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    conn.execute_batch(
+        r#"
+        CREATE TABLE im_inbox (
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            id TEXT NOT NULL UNIQUE,
+            participant_id TEXT NOT NULL,
+            from_ref TEXT,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        INSERT INTO im_inbox (
+            id, participant_id, from_ref, content, created_at
+        ) VALUES (
+            'imx_legacy', 'operator', 'ss_legacy', 'old reply',
+            '2026-07-13T00:00:00.000Z'
+        );
+        PRAGMA user_version = 26;
+        "#,
+    )
+    .unwrap();
+    drop(conn);
+
+    let store = SantiStore::open(&db).expect("migrate v26");
+    let entries = store.poll_im_inbox("operator", 0).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].content, "old reply");
+    assert_eq!(entries[0].turn_id, None);
+    assert_eq!(entries[0].message_id, None);
+    assert_eq!(entries[0].delivery_mode, None);
+    assert_eq!(
+        santi_core::read_schema_version(&db).unwrap(),
+        Some(santi_core::SCHEMA_VERSION)
     );
 }

@@ -50,21 +50,19 @@ impl SantiService {
         last_soul_message: Option<StrandMessage>,
         provider_response_id: Option<String>,
     ) {
-        let assistant_seq = last_soul_message.map(|message| {
-            let seq = message.relation.strand_seq;
+        if let Some(message) = last_soul_message.as_ref() {
             self.publish_stream(
                 strand_id,
                 SantiStreamPayload::MessageCompleted {
                     turn_id: turn_id.to_string(),
-                    message,
+                    message: message.clone(),
                 },
             );
-            seq
-        });
+        }
         let metadata = self.provider.metadata();
-        match self.store.complete_turn(
+        match self.store.complete_turn_reply(
             turn_id,
-            assistant_seq,
+            last_soul_message.as_ref(),
             &metadata.provider,
             &metadata.model,
             provider_response_id,

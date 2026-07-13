@@ -204,12 +204,18 @@ fn inbox_seed_existing_strand(
     })
 }
 
-/// The result of an offline IM reply — the soul's egress into a participant inbox.
+/// The result of an offline early IM reply into a participant inbox.
 #[derive(Debug, Clone, Serialize)]
 pub struct ImReplyReport {
     pub participant_id: String,
     /// The delivered entry's cursor seq (what the participant's poll advances past).
     pub seq: i64,
+    /// Present when the command runs in a provider turn's ambient shell.
+    pub turn_id: Option<String>,
+    pub delivery_mode: Option<santi_core::ImDeliveryMode>,
+    /// True when this turn had already delivered a reply and the existing entry
+    /// was returned instead of enqueueing a duplicate.
+    pub deduplicated: bool,
 }
 
 /// Deliver the soul's reply into an IM participant's passive inbox WITHOUT reaching
@@ -219,7 +225,16 @@ pub struct ImReplyReport {
 /// the soul's shell env); it must be an IM conversation (an `im:<participant>` label)
 /// — the reply-routing correlation resolves the target participant from it.
 pub fn im_reply(strand_id: &str, content: &str) -> Result<ImReplyReport, String> {
-    im_reply_at(&config::resolve_runtime_paths(), strand_id, content)
+    let turn_id = std::env::var("SANTI_TURN_ID")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    im_reply_turn_at(
+        &config::resolve_runtime_paths(),
+        strand_id,
+        turn_id.as_deref(),
+        content,
+    )
 }
 
 pub fn im_reply_at(
@@ -227,13 +242,39 @@ pub fn im_reply_at(
     strand_id: &str,
     content: &str,
 ) -> Result<ImReplyReport, String> {
+    im_reply_turn_at(paths, strand_id, None, content)
+}
+
+pub fn im_reply_turn_at(
+    paths: &RuntimePaths,
+    strand_id: &str,
+    turn_id: Option<&str>,
+    content: &str,
+) -> Result<ImReplyReport, String> {
     let store = santi_core::SantiStore::open(&paths.database_path)?;
-    let participant_id = store
-        .im_participant_for_strand(strand_id)?
-        .ok_or_else(|| format!("strand {strand_id} is not an IM conversation"))?;
-    let entry = store.enqueue_im_inbox(&participant_id, Some(strand_id), content)?;
+    let (entry, inserted) = match turn_id {
+        Some(turn_id) => store.enqueue_turn_reply(
+            strand_id,
+            turn_id,
+            None,
+            content,
+            santi_core::ImDeliveryMode::Explicit,
+        )?,
+        None => {
+            let participant_id = store
+                .im_participant_for_strand(strand_id)?
+                .ok_or_else(|| format!("strand {strand_id} is not an IM conversation"))?;
+            (
+                store.enqueue_im_inbox(&participant_id, Some(strand_id), content)?,
+                true,
+            )
+        }
+    };
     Ok(ImReplyReport {
-        participant_id,
+        participant_id: entry.participant_id.clone(),
         seq: entry.seq,
+        turn_id: entry.turn_id,
+        delivery_mode: entry.delivery_mode,
+        deduplicated: !inserted,
     })
 }

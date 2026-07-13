@@ -69,6 +69,10 @@ async fn dispatches_tools() {
         stdout.contains(&strand.id),
         "SANTI_STRAND_ID in shell env: {stdout}"
     );
+    assert!(
+        stdout.contains(&accepted_turn(&response).id),
+        "SANTI_TURN_ID in shell env: {stdout}"
+    );
     let cwd = output
         .get("cwd")
         .and_then(|value| value.as_str())

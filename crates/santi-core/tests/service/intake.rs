@@ -73,6 +73,116 @@ async fn external_ingest_turn() {
     }));
 }
 
+#[tokio::test]
+async fn completion_delivers() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let service = SantiService::open(
+        SantiServiceConfig {
+            database_path: temp.path().join("santi.sqlite").display().to_string(),
+            runtime_root: temp.path().join("runtime").display().to_string(),
+            execution_root: temp.path().join("execution").display().to_string(),
+            bind_addr: Some("127.0.0.1:0".to_string()),
+        },
+        Arc::new(FakeProvider::default()),
+    )
+    .expect("open service");
+
+    let outcome = service
+        .im_send(santi_core::DEFAULT_SOUL_ID, "operator", "hello")
+        .expect("send IM");
+    let santi_core::IngestOutcome::Accepted { receipt } = outcome else {
+        panic!("IM send rejected");
+    };
+    let runtime = wait_any_completed(&service, &receipt.strand_id).await;
+    let turn = runtime
+        .turns
+        .iter()
+        .find(|turn| turn.status == santi_core::TurnStatus::Completed)
+        .expect("completed turn");
+
+    let entries = service.im_poll("operator", 0).expect("poll replies");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].content, "hi from runtime");
+    assert_eq!(entries[0].turn_id.as_deref(), Some(turn.id.as_str()));
+    assert!(entries[0].message_id.is_some());
+    assert_eq!(
+        entries[0].delivery_mode,
+        Some(santi_core::ImDeliveryMode::Automatic)
+    );
+
+    let status = service
+        .receipt_status(&receipt.inbox_id)
+        .expect("query receipt")
+        .expect("receipt");
+    assert_eq!(status.state, santi_core::ReceiptState::Completed);
+    assert_eq!(status.im_deliveries.len(), 1);
+    assert_eq!(status.im_deliveries[0].id, entries[0].id);
+    assert_eq!(status.im_deliveries[0].turn_id, turn.id);
+    assert_eq!(
+        status.im_deliveries[0].delivery_mode,
+        santi_core::ImDeliveryMode::Automatic
+    );
+}
+
+#[tokio::test]
+async fn delivery_failure_rolls_back() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let database_path = temp.path().join("santi.sqlite");
+    let service = SantiService::open(
+        SantiServiceConfig {
+            database_path: database_path.display().to_string(),
+            runtime_root: temp.path().join("runtime").display().to_string(),
+            execution_root: temp.path().join("execution").display().to_string(),
+            bind_addr: Some("127.0.0.1:0".to_string()),
+        },
+        Arc::new(FakeProvider::default()),
+    )
+    .expect("open service");
+    let conn = rusqlite::Connection::open(&database_path).unwrap();
+    conn.execute_batch(
+        r#"
+        CREATE TRIGGER reject_im_delivery
+        BEFORE INSERT ON im_inbox
+        BEGIN
+          SELECT RAISE(ABORT, 'injected IM delivery failure');
+        END;
+        "#,
+    )
+    .unwrap();
+    drop(conn);
+
+    let outcome = service
+        .im_send(santi_core::DEFAULT_SOUL_ID, "operator", "hello")
+        .expect("send IM");
+    let santi_core::IngestOutcome::Accepted { receipt } = outcome else {
+        panic!("IM send rejected");
+    };
+    let mut failed = None;
+    for _ in 0..100 {
+        let status = service
+            .receipt_status(&receipt.inbox_id)
+            .expect("query receipt")
+            .expect("receipt");
+        if status.state == santi_core::ReceiptState::TurnFailed {
+            failed = Some(status);
+            break;
+        }
+        sleep(Duration::from_millis(20)).await;
+    }
+    let status = failed.expect("receipt should fail when delivery cannot commit");
+    assert!(status.im_deliveries.is_empty());
+    let runtime = service
+        .runtime_snapshot(&receipt.strand_id)
+        .unwrap()
+        .expect("runtime");
+    assert!(
+        runtime
+            .turns
+            .iter()
+            .all(|turn| turn.status != santi_core::TurnStatus::Completed)
+    );
+}
+
 /// Boot recovery drains the inbox: content that an adaptor durably enqueued
 /// but that never got drained before a crash (nobody called `ingest`'s poke —
 /// simulated here by writing straight to the store, bypassing the service)

@@ -148,6 +148,15 @@ fn errors_replaces_rejections() {
 }
 
 #[test]
+fn parses_receipt_query() {
+    let parsed = Cli::try_parse_from(["santi", "receipt", "inbox_123"]).unwrap();
+    let Command::Receipt { inbox_id } = parsed.command else {
+        panic!("expected receipt command");
+    };
+    assert_eq!(inbox_id, "inbox_123");
+}
+
+#[test]
 fn parses_watch_flags() {
     let parsed = Cli::try_parse_from(["santi", "strand", "send", "--watch", "hello"]).unwrap();
     let Command::Strand(StrandCommand::Send {

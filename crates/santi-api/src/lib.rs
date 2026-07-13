@@ -9,5 +9,5 @@ pub mod webhook;
 
 pub use server::{
     ApiError, drive_strand as drive_strand_handler, export_openapi_json, health as health_handler,
-    send_strand as send_strand_handler, serve,
+    receipt_status as receipt_status_handler, send_strand as send_strand_handler, serve,
 };

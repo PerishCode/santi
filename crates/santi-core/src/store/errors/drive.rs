@@ -48,7 +48,9 @@ pub(in crate::store) fn resolve_in_conn(
     strand_id: &str,
     turn_id: &str,
     drained_count: usize,
-) -> Result<bool, String> {
+) -> Result<Option<String>, String> {
+    let incident_id =
+        active_in_conn(conn, &drive_incident_key(strand_id))?.map(|incident| incident.id);
     resolve_error_in_conn(
         conn,
         &drive_incident_key(strand_id),
@@ -58,7 +60,8 @@ pub(in crate::store) fn resolve_in_conn(
             "turn_id": turn_id,
             "drained_count": drained_count,
         }),
-    )
+    )?;
+    Ok(incident_id)
 }
 
 impl SantiStore {

@@ -10,7 +10,9 @@ use axum::{
 };
 use futures_util::stream;
 use rusqlite::Connection;
-use santi_api::{ApiError, drive_strand_handler, health_handler, send_strand_handler};
+use santi_api::{
+    ApiError, drive_strand_handler, health_handler, receipt_status_handler, send_strand_handler,
+};
 use santi_core::{
     ErrorScope, ErrorSource, MessagePart, SantiService, SantiServiceConfig, SendStrandRequest,
     catalog, engine,
@@ -96,6 +98,7 @@ fn openapi_lists_error_surfaces() {
     assert!(document.contains("/api/v1/errors/{scope_kind}/{scope_id}"));
     assert!(document.contains("/api/v1/errors/events"));
     assert!(document.contains("/api/v1/strands/{strand_id}/drive"));
+    assert!(document.contains("/api/v1/receipts/{inbox_id}"));
     assert!(document.contains("IngestReceipt"));
 }
 
@@ -191,6 +194,21 @@ async fn drive_failure_http_recovery() {
     let warning = accepted.receipt.warning.expect("canonical warning");
     assert_eq!(warning.code, "runtime.strand.drive_failed");
     assert_eq!(warning.context["accepted_before_failure"], true);
+    let receipt = receipt_status_handler(
+        State(service.clone()),
+        Path(accepted.receipt.inbox_id.clone()),
+    )
+    .await;
+    let Json(receipt) = match receipt {
+        Ok(receipt) => receipt,
+        Err(error) => panic!(
+            "receipt query failed with {}: {}",
+            error.code(),
+            error.message()
+        ),
+    };
+    assert_eq!(receipt.inbox_id, accepted.receipt.inbox_id);
+    assert_eq!(receipt.state, santi_core::ReceiptState::Accepted);
 
     let health = health_handler(State(service.clone())).await.into_response();
     assert_eq!(health.status(), StatusCode::SERVICE_UNAVAILABLE);
@@ -200,6 +218,9 @@ async fn drive_failure_http_recovery() {
     let body: serde_json::Value = serde_json::from_slice(&body).expect("health json");
     assert_eq!(body["ok"], false);
     assert_eq!(body["degraded"], true);
+    assert_eq!(body["active_drive_incidents"], 1);
+    assert!(body.get("strand_id").is_none());
+    assert!(body.get("inbox_id").is_none());
 
     conn.execute_batch("DROP TRIGGER force_api_turn_failure;")
         .expect("remove failure trigger");

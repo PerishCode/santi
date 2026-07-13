@@ -202,6 +202,7 @@ impl SantiStore {
             ],
         )
         .map_err(|error| error.to_string())?;
+        super::db::insert_accepted_in_conn(&tx, &inbox_id, strand_id, &now)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(IngestOutcome::Accepted {
             receipt: IngestReceipt {
@@ -282,8 +283,8 @@ impl SantiStore {
         }
 
         let turn_id = prefixed_id("turn");
-        let drained_messages = drain_inbox_in_tx(&tx, strand_id, &turn_id)?;
-        if drained_messages.is_empty() {
+        let drained = drain_inbox_in_tx(&tx, strand_id, &turn_id)?;
+        if drained.messages.is_empty() {
             return Ok(StartTurnOutcome::Idle);
         }
         let now = timestamp_now();
@@ -300,11 +301,23 @@ impl SantiStore {
             params![turn_id, strand_id, trigger_type, trigger_ref, now],
         )
         .map_err(|error| error.to_string())?;
-        super::errors::drive::resolve_in_conn(&tx, strand_id, &turn_id, drained_messages.len())?;
+        let recovered_incident_id = super::errors::drive::resolve_in_conn(
+            &tx,
+            strand_id,
+            &turn_id,
+            drained.messages.len(),
+        )?;
+        super::db::begin_turn_in_conn(
+            &tx,
+            strand_id,
+            &turn_id,
+            &drained.inbox_ids,
+            recovered_incident_id.as_deref(),
+        )?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(StartTurnOutcome::Started(StartedTurn {
             turn: turn_by_id(&conn, &turn_id)?.ok_or_else(|| "created turn missing".to_string())?,
-            drained_messages,
+            drained_messages: drained.messages,
         }))
     }
 

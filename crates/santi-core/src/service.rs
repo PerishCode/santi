@@ -22,10 +22,10 @@ use tokio::sync::broadcast;
 
 use crate::{
     CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, ErrorEventSink, ErrorIncident,
-    ErrorScope, ErrorTransition, MaterialKind, SantiError, SantiStore, SantiStreamEvent,
-    SantiStreamPayload, Soul, Strand, StrandBudgetSnapshot, StrandDetail, StrandMaterial,
-    StrandMessage, StrandRuntimeSnapshot, Turn, WebhookSubscription, engine, prefixed_id,
-    timestamp_now,
+    ErrorScope, ErrorTransition, MaterialKind, ReceiptStatus, SantiError, SantiStore,
+    SantiStreamEvent, SantiStreamPayload, Soul, Strand, StrandBudgetSnapshot, StrandDetail,
+    StrandMaterial, StrandMessage, StrandRuntimeSnapshot, Turn, WebhookSubscription, engine,
+    prefixed_id, timestamp_now,
 };
 use runtime_notice::RuntimeNoticeBus;
 
@@ -182,6 +182,17 @@ impl SantiService {
         self.drive_degraded.load(Ordering::SeqCst)
     }
 
+    pub fn active_drive_incident_count(&self) -> i64 {
+        match self.store.active_drive_incident_count() {
+            Ok(count) => count,
+            Err(error) => {
+                self.drive_degraded.store(true, Ordering::SeqCst);
+                eprintln!("santi: drive health count failed: {error}");
+                0
+            }
+        }
+    }
+
     pub(in crate::service) fn mark_drive_degraded(&self) {
         self.drive_degraded.store(true, Ordering::SeqCst);
     }
@@ -331,6 +342,10 @@ impl SantiService {
 
     pub fn errors(&self, scope: &ErrorScope, limit: i64) -> Result<Vec<ErrorIncident>, String> {
         self.store.error_incidents(scope, limit)
+    }
+
+    pub fn receipt_status(&self, inbox_id: &str) -> Result<Option<ReceiptStatus>, String> {
+        self.store.receipt_status(inbox_id)
     }
 
     pub(crate) fn publish_stream(&self, strand_id: &str, payload: SantiStreamPayload) {

@@ -43,6 +43,9 @@ pub(crate) async fn run_client(
             )
             .await
         }
+        Command::Receipt { inbox_id } => {
+            get(&client, &format!("{base}/api/v1/receipts/{inbox_id}")).await
+        }
         Command::Strand(StrandCommand::Create) => {
             post(&client, &format!("{base}/api/v1/strands"), None).await
         }

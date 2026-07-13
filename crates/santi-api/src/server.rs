@@ -12,7 +12,7 @@ use crate::{config, provider};
 use santi_core::{SantiService, SantiServiceConfig};
 
 pub use error::ApiError;
-pub use routes::{drive_strand, health, send_strand};
+pub use routes::{drive_strand, health, receipt_status, send_strand};
 
 pub fn export_openapi_json() -> Result<String, String> {
     serde_json::to_string_pretty(&openapi::document()).map_err(|error| error.to_string())

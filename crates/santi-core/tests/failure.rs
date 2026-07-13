@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use futures_util::stream;
 use rusqlite::Connection;
 use santi_core::{
-    ActorType, ErrorCategory, IncidentStatus, MessageKind, MessagePart, MessageState, SantiService,
-    SantiServiceConfig, SantiStreamPayload, SendStrandRequest, TurnStatus,
+    ActorType, ErrorCategory, IncidentStatus, MessageKind, MessagePart, MessageState, ReceiptState,
+    SantiService, SantiServiceConfig, SantiStreamPayload, SendStrandRequest, TurnStatus,
 };
 use santi_provider::{
     ProviderClient, ProviderEvent, ProviderItem, ProviderMetadata, ProviderRequest, ProviderStream,
@@ -25,6 +25,7 @@ struct FailureProvider {
     fail_for_requests: Option<usize>,
     stream_error_after_text: Option<String>,
     response_failure: Option<String>,
+    response_started: bool,
 }
 
 #[async_trait]
@@ -63,12 +64,17 @@ impl ProviderClient for FailureProvider {
                 error.clone(),
             ))])));
         }
-        Ok(Box::pin(stream::iter(vec![
-            Ok(ProviderEvent::TextDelta("ok".to_string())),
-            Ok(ProviderEvent::Completed {
+        let mut events = Vec::new();
+        if self.response_started {
+            events.push(Ok(ProviderEvent::ResponseStarted {
                 provider_response_id: Some("fake-response-id".to_string()),
-            }),
-        ])))
+            }));
+        }
+        events.push(Ok(ProviderEvent::TextDelta("ok".to_string())));
+        events.push(Ok(ProviderEvent::Completed {
+            provider_response_id: Some("fake-response-id".to_string()),
+        }));
+        Ok(Box::pin(stream::iter(events)))
     }
 }
 
@@ -256,6 +262,99 @@ async fn success_resolves_incident() {
         2,
         "only open and resolve are lifecycle transitions"
     );
+}
+
+#[tokio::test]
+async fn runtime_receipt_recovers() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let provider = Arc::new(FailureProvider {
+        response_started: true,
+        ..FailureProvider::default()
+    });
+    let service = open_service(&temp, provider.clone());
+    let strand = service.create_strand().expect("create strand").strand;
+    let conn = Connection::open(temp.path().join("santi.sqlite")).expect("open sqlite");
+    conn.execute_batch(
+        r#"
+        CREATE TRIGGER force_thinking_persistence_failure
+        BEFORE INSERT ON thinking_spans
+        BEGIN
+          SELECT RAISE(ABORT, 'forced thinking persistence failure');
+        END;
+        "#,
+    )
+    .expect("install trigger");
+
+    let failed = send_text(&service, &strand.id, "first obligation").await;
+    let runtime = wait_for_turn(&service, &strand.id, &turn(&failed).id, TurnStatus::Failed).await;
+    assert_eq!(runtime.errors.len(), 1);
+    let incident = &runtime.errors[0];
+    assert_eq!(incident.code, "runtime.turn.failed");
+    assert_eq!(incident.source.component, "santi-core");
+    assert_eq!(incident.source.operation, "turn.thinking_persistence");
+    assert_eq!(incident.context["operation"], "turn.thinking_persistence");
+    assert!(
+        runtime
+            .turns
+            .iter()
+            .find(|candidate| candidate.id == turn(&failed).id)
+            .and_then(|turn| turn.error_text.as_deref())
+            .is_some_and(|detail| detail.contains("forced thinking persistence failure"))
+    );
+    assert!(
+        runtime
+            .errors
+            .iter()
+            .all(|error| error.code != "provider.turn.failed")
+    );
+    let failed_receipt = service
+        .receipt_status(&failed.receipt.inbox_id)
+        .expect("receipt query")
+        .expect("receipt");
+    assert_eq!(failed_receipt.state, ReceiptState::TurnFailed);
+    assert_eq!(
+        failed_receipt
+            .transitions
+            .last()
+            .and_then(|event| event.incident_id.as_deref()),
+        Some(incident.id.as_str())
+    );
+
+    conn.execute_batch("DROP TRIGGER force_thinking_persistence_failure;")
+        .expect("remove trigger");
+    let successor = send_text(&service, &strand.id, "successor attempt").await;
+    let runtime = wait_for_turn(
+        &service,
+        &strand.id,
+        &turn(&successor).id,
+        TurnStatus::Completed,
+    )
+    .await;
+    assert_eq!(runtime.errors[0].status, IncidentStatus::Resolved);
+    assert_eq!(
+        runtime.errors[0].resolved_by.as_deref(),
+        Some("runtime.turn_succeeded")
+    );
+    let recovered_receipt = service
+        .receipt_status(&failed.receipt.inbox_id)
+        .expect("receipt query")
+        .expect("receipt");
+    assert_eq!(recovered_receipt.state, ReceiptState::Completed);
+    assert_eq!(
+        recovered_receipt
+            .transitions
+            .iter()
+            .map(|event| event.state.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            ReceiptState::Accepted,
+            ReceiptState::Driving,
+            ReceiptState::TurnFailed,
+            ReceiptState::Driving,
+            ReceiptState::Completed,
+        ]
+    );
+    assert_eq!(provider.requests.lock().unwrap().len(), 2);
 }
 
 fn assert_no_failure_projection(runtime: &santi_core::StrandRuntimeSnapshot) {

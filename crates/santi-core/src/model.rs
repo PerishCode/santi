@@ -19,6 +19,9 @@ pub struct HealthResponse {
     pub ok: bool,
     pub service: String,
     pub degraded: bool,
+    /// Aggregate only: `/health` is public and must never expose strand,
+    /// receipt, or incident locators.
+    pub active_drive_incidents: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq, Hash)]
@@ -287,6 +290,42 @@ pub struct IngestReceipt {
     pub strand_id: String,
     pub inbox_id: String,
     pub warning: Option<Box<SantiError>>,
+}
+
+/// Current durable responsibility state for one accepted inbox item. A
+/// mechanically-recovered transition can be immediately followed by `driving`
+/// in the same transaction; callers inspect `transitions` for that evidence.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReceiptState {
+    Accepted,
+    MechanicallyRecovered,
+    Driving,
+    TurnFailed,
+    Completed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ReceiptTransition {
+    pub id: String,
+    pub sequence: i64,
+    pub state: ReceiptState,
+    pub turn_id: Option<String>,
+    pub incident_id: Option<String>,
+    /// Present only when schema migration reconstructed this evidence from a
+    /// durable v24 source row. Live transitions leave it unset.
+    pub reconstructed_from: Option<String>,
+    pub occurred_at: Timestamp,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ReceiptStatus {
+    pub inbox_id: String,
+    pub strand_id: String,
+    pub state: ReceiptState,
+    pub accepted_at: Timestamp,
+    pub updated_at: Timestamp,
+    pub transitions: Vec<ReceiptTransition>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]

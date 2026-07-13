@@ -28,10 +28,10 @@ The binary is installed to `/usr/bin/santi`.
   memory is the one thing that must survive.
 - **Rollback artifacts are runtime-owned.** Upgrade launch copies packages into a content-addressed
   store, checks Debian package/version identity plus SHA-256, and atomically records the package
-  currently installed. `--previous-deb` is required once to bootstrap that manifest; later
-  upgrades resolve the durable artifact and reject a conflicting caller file. A successful trial
-  promotes its retained candidate before finalization, while rollback restores both runtime data
-  and the previous installed-package manifest.
+  currently installed. `--previous-deb` is required once to bootstrap that manifest; later upgrades
+  resolve the durable artifact and reject a conflicting caller file. A successful trial promotes its
+  retained candidate before finalization, while rollback restores both runtime data and the previous
+  installed-package manifest.
 - **Upgrade unit runs as santi + sudo**, so every file it writes stays santi-owned; the privileged
   dpkg/systemctl calls use santi's passwordless sudo (a SystemHost detail tuned on-box in STEP 6).
 

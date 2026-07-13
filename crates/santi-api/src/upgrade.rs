@@ -13,13 +13,15 @@
 //!   canonical incidents and seeds a neutral wake before the final start.
 //!
 //! Sequence (`run_upgrade`): graceful-stop → snapshot → dpkg → resolve (install +
-//! a trial start/health probe) → auto-rollback on a CRISP failure → finalize
-//! terminal truth + wake (offline, with the FINAL binary) → start FINAL.
+//! a trial start/health probe + atomically retain the installed package) →
+//! auto-rollback on a CRISP failure → finalize terminal truth + wake (offline,
+//! with the FINAL binary) → start FINAL.
 //!
 //! The side effects live behind [`UpgradeHost`] so the orchestration LOGIC here
 //! is unit-tested with a fake; the real systemctl/dpkg shell is
 //! validated on a Debian box (PHASE-07 STEP 6), not in CI.
 
+mod artifacts;
 mod finalize;
 mod system;
 
@@ -41,6 +43,7 @@ use finalize::{FINALIZE_PROTOCOL_VERSION, persistence_error};
 pub enum RollbackCause {
     InstallFailed(String),
     DidNotComeUp(String),
+    ArtifactRetentionFailed(String),
 }
 
 /// The resolved outcome of an upgrade attempt.
@@ -71,6 +74,7 @@ pub enum UpgradeStage {
     Snapshot,
     Install,
     TrialProbe,
+    RetainArtifact,
     Rollback,
     FinalStart,
 }
@@ -84,6 +88,7 @@ impl UpgradeStage {
             Self::Snapshot => "upgrade.snapshot",
             Self::Install => "upgrade.install",
             Self::TrialProbe => "upgrade.trial_probe",
+            Self::RetainArtifact => "upgrade.retain_artifact",
             Self::Rollback => "upgrade.rollback",
             Self::FinalStart => "upgrade.final_start",
         }
@@ -170,6 +175,10 @@ pub struct UpgradeStarted {
     pub status: &'static str,
     pub timeout_secs: u64,
     pub log_hint: String,
+    pub candidate_version: String,
+    pub candidate_sha256: String,
+    pub previous_version: String,
+    pub previous_sha256: String,
 }
 
 /// The side effects an upgrade needs, abstracted so the orchestration is
@@ -188,6 +197,9 @@ pub trait UpgradeHost {
     /// then stop it again so the final start is uniform. Degraded means the
     /// process is live but canonical incidents still require intervention.
     fn trial_probe(&mut self) -> Result<UpgradeReadiness, String>;
+    /// Atomically make the installed candidate the durable rollback source for
+    /// the next upgrade. Failure is still pre-commit and routes to rollback.
+    fn retain_candidate(&mut self) -> Result<(), String>;
     /// Restore the snapshot + reinstall the previous version (the final = OLD).
     fn rollback(&mut self) -> Result<(), String>;
     /// Ask the binary currently installed on disk (the FINAL version) to record
@@ -248,7 +260,10 @@ pub(super) fn run_upgrade_attempt<H: UpgradeHost>(
     let outcome = match host.install(deb) {
         Err(error) => Outcome::RolledBack(RollbackCause::InstallFailed(error)),
         Ok(()) => match host.trial_probe() {
-            Ok(readiness) => Outcome::Upgraded { readiness },
+            Ok(readiness) => match host.retain_candidate() {
+                Ok(()) => Outcome::Upgraded { readiness },
+                Err(error) => Outcome::RolledBack(RollbackCause::ArtifactRetentionFailed(error)),
+            },
             // A probe that could not prove the process came up routes to a
             // conservative rollback. Explicit degraded readiness does not.
             Err(error) => Outcome::RolledBack(RollbackCause::DidNotComeUp(error)),
@@ -338,6 +353,11 @@ fn terminal_from_outcome(outcome: &Outcome) -> (UpgradeTerminal, UpgradeReadines
                     },
                     RollbackCause::DidNotComeUp(detail) => UpgradeFailure {
                         stage: UpgradeStage::TrialProbe,
+                        detail: detail.clone(),
+                        recovery: RecoveryStatus::PreviousVersionRestored,
+                    },
+                    RollbackCause::ArtifactRetentionFailed(detail) => UpgradeFailure {
+                        stage: UpgradeStage::RetainArtifact,
                         detail: detail.clone(),
                         recovery: RecoveryStatus::PreviousVersionRestored,
                     },

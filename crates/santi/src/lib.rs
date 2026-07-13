@@ -147,7 +147,7 @@ fn run_upgrade(
         }
     } else {
         let deb = deb.ok_or_else(|| {
-            anyhow::anyhow!("usage: santi upgrade <deb> --previous-deb <current.deb> [--run]")
+            anyhow::anyhow!("usage: santi upgrade <deb> [--previous-deb <current.deb>] [--run]")
         })?;
         let started =
             santi_api::upgrade::launch(&deb, previous_deb.as_deref()).map_err(|error| {

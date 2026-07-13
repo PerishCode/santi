@@ -34,12 +34,28 @@ jobs:
     name: smoke (ubuntu-latest)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_BASEDIRS: ${{ github.workspace }}
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_VERSION: santi-guard-v1
     steps:
       - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+
+      - name: Configure sccache
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+        with:
+          version: v0.16.0
+
+      - name: Activate sccache wrapper
+        shell: bash
+        run: |
+          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+          "$SCCACHE_PATH" --version
 
       - name: Format
         run: cargo fmt --all --check
@@ -58,12 +74,34 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_BASEDIRS: ${{ github.workspace }}
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_VERSION: santi-guard-v1
     steps:
       - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+
+      - name: Configure sccache
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+        with:
+          version: v0.16.0
+
+      - name: Activate sccache wrapper
+        shell: bash
+        run: |
+          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+          "$SCCACHE_PATH" --version
+
+      - name: Start Windows sccache server
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          "$SCCACHE_PATH" --start-server
 
       - name: Format
         run: cargo fmt --all --check

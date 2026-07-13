@@ -1554,7 +1554,9 @@ dependencies = [
  "futures-util",
  "reqwest",
  "santi-api",
+ "santi-core",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 

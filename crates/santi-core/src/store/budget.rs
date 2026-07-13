@@ -15,7 +15,7 @@ use super::{
 };
 use crate::{
     ContextEstimate, InboxSource, IngestOutcome, IngestReceipt, MessageContent, MessageKind,
-    prefixed_id, timestamp_now,
+    StrandExecutionUsage, prefixed_id, timestamp_now,
 };
 
 use state::{current_strand_seq, open_context_incident, pending_items, repeat_context_incident};
@@ -377,4 +377,82 @@ impl SantiStore {
 
 fn over_budget_reason(total_bytes: i64, budget_bytes: i64) -> String {
     format!("strand context is over budget ({total_bytes} estimated bytes, budget {budget_bytes})")
+}
+
+pub(crate) fn execution_budget_incident_key(strand_id: &str) -> String {
+    format!(
+        "{}:strand:{strand_id}",
+        catalog::EXECUTION_BUDGET_EXCEEDED.code
+    )
+}
+
+impl SantiStore {
+    pub(crate) fn strand_execution_usage(
+        &self,
+        strand_id: &str,
+    ) -> Result<StrandExecutionUsage, String> {
+        let conn = self.conn.lock().unwrap();
+        let tool_calls = conn
+            .query_row(
+                r#"
+                SELECT COUNT(*)
+                FROM tool_calls AS call
+                JOIN turns AS turn ON turn.id = call.turn_id
+                WHERE turn.strand_id = ?1
+                "#,
+                params![strand_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| error.to_string())?;
+        let mut stmt = conn
+            .prepare(
+                r#"
+                SELECT result.output, result.error_text
+                FROM tool_results AS result
+                JOIN tool_calls AS call ON call.id = result.tool_call_id
+                JOIN turns AS turn ON turn.id = call.turn_id
+                WHERE turn.strand_id = ?1
+                "#,
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map(params![strand_id], |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            })
+            .map_err(|error| error.to_string())?;
+        let mut tool_output_bytes = 0usize;
+        for row in rows {
+            let (output, error_text) = row.map_err(|error| error.to_string())?;
+            tool_output_bytes = tool_output_bytes.saturating_add(match output {
+                Some(output) => captured_output_bytes(&output),
+                None => error_text.as_deref().map_or(0, str::len),
+            });
+        }
+        Ok(StrandExecutionUsage {
+            tool_calls: usize::try_from(tool_calls).unwrap_or(usize::MAX),
+            tool_output_bytes,
+        })
+    }
+}
+
+fn captured_output_bytes(output: &str) -> usize {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
+        return output.len();
+    };
+    let stdout = value
+        .get("stdout")
+        .and_then(serde_json::Value::as_str)
+        .map_or(0, str::len);
+    let stderr = value
+        .get("stderr")
+        .and_then(serde_json::Value::as_str)
+        .map_or(0, str::len);
+    if value.get("stdout").is_some() || value.get("stderr").is_some() {
+        stdout.saturating_add(stderr)
+    } else {
+        output.len()
+    }
 }

@@ -3,7 +3,10 @@ use serde_json::json;
 use crate::context_budget::estimate_provider_parts;
 use crate::service_prompt::provider_tools;
 use crate::store::budget::{ContextAdmission, ContextIncidentInput};
-use crate::{ContextBudget, ContextEstimate, SantiError};
+use crate::{
+    ContextBudget, ContextEstimate, ErrorScope, ErrorSource, IncidentDraft, SantiError,
+    StrandExecutionBudget, StrandExecutionUsage, catalog,
+};
 
 use super::super::SantiService;
 
@@ -120,4 +123,149 @@ impl SantiService {
 
 fn over_budget_reason(total_bytes: i64, budget_bytes: i64) -> String {
     format!("strand context is over budget ({total_bytes} estimated bytes, budget {budget_bytes})")
+}
+
+pub(super) enum ToolBatchAdmission {
+    Unbounded,
+    Bounded(Vec<usize>),
+    Rejected(Box<SantiError>),
+}
+
+impl SantiService {
+    pub(super) fn admit_execution_round(
+        &self,
+        strand_id: &str,
+        turn_id: &str,
+        next_round: usize,
+    ) -> Result<Option<SantiError>, String> {
+        let Some(budget) = self.strand_execution_budget(strand_id) else {
+            return Ok(None);
+        };
+        if next_round <= budget.max_provider_rounds {
+            return Ok(None);
+        }
+        let usage = self.store.strand_execution_usage(strand_id)?;
+        self.open_execution_budget_incident(
+            strand_id,
+            turn_id,
+            &budget,
+            usage,
+            "provider_rounds",
+            json!({"next_provider_round": next_round}),
+        )
+        .map(Some)
+    }
+
+    pub(super) fn admit_tool_batch(
+        &self,
+        strand_id: &str,
+        turn_id: &str,
+        round: usize,
+        call_count: usize,
+    ) -> Result<ToolBatchAdmission, String> {
+        let Some(budget) = self.strand_execution_budget(strand_id) else {
+            return Ok(ToolBatchAdmission::Unbounded);
+        };
+        let usage = self.store.strand_execution_usage(strand_id)?;
+        let request = json!({
+            "provider_round": round,
+            "tool_calls": call_count,
+        });
+        if round >= budget.max_provider_rounds {
+            return self
+                .open_execution_budget_incident(
+                    strand_id,
+                    turn_id,
+                    &budget,
+                    usage,
+                    "provider_rounds",
+                    request,
+                )
+                .map(Box::new)
+                .map(ToolBatchAdmission::Rejected);
+        }
+        if usage.tool_calls.saturating_add(call_count) > budget.max_tool_calls {
+            return self
+                .open_execution_budget_incident(
+                    strand_id,
+                    turn_id,
+                    &budget,
+                    usage,
+                    "tool_calls",
+                    request,
+                )
+                .map(Box::new)
+                .map(ToolBatchAdmission::Rejected);
+        }
+        let output_remaining = budget
+            .max_tool_output_bytes
+            .saturating_sub(usage.tool_output_bytes);
+        if output_remaining < call_count {
+            return self
+                .open_execution_budget_incident(
+                    strand_id,
+                    turn_id,
+                    &budget,
+                    usage,
+                    "tool_output_bytes",
+                    request,
+                )
+                .map(Box::new)
+                .map(ToolBatchAdmission::Rejected);
+        }
+        Ok(ToolBatchAdmission::Bounded(allocate_capture_limits(
+            output_remaining,
+            budget.max_shell_output_bytes,
+            call_count,
+        )))
+    }
+
+    fn open_execution_budget_incident(
+        &self,
+        strand_id: &str,
+        turn_id: &str,
+        budget: &StrandExecutionBudget,
+        usage: StrandExecutionUsage,
+        reason: &str,
+        request: serde_json::Value,
+    ) -> Result<SantiError, String> {
+        let error = self.store.open_error_incident(IncidentDraft {
+            incident_key: crate::store::execution_budget_incident_key(strand_id),
+            descriptor: catalog::EXECUTION_BUDGET_EXCEEDED,
+            scope: ErrorScope::new("strand", strand_id),
+            source: ErrorSource::new("santi-core", "turn.execution_budget"),
+            message: format!("strand execution budget exceeded: {reason}"),
+            context: json!({
+                "schema": "santi.error.execution_budget.v1",
+                "profile": budget.profile,
+                "reason": reason,
+                "turn_id": turn_id,
+                "limits": {
+                    "provider_rounds": budget.max_provider_rounds,
+                    "tool_calls": budget.max_tool_calls,
+                    "tool_output_bytes": budget.max_tool_output_bytes,
+                    "shell_output_bytes": budget.max_shell_output_bytes,
+                },
+                "usage": {
+                    "tool_calls": usage.tool_calls,
+                    "tool_output_bytes": usage.tool_output_bytes,
+                },
+                "request": request,
+            }),
+        })?;
+        self.dispatch_error_events();
+        Ok(error)
+    }
+}
+
+fn allocate_capture_limits(total: usize, per_call: usize, call_count: usize) -> Vec<usize> {
+    let mut remaining = total;
+    let mut limits = Vec::with_capacity(call_count);
+    for index in 0..call_count {
+        let remaining_calls = call_count - index;
+        let limit = (remaining / remaining_calls).min(per_call);
+        limits.push(limit);
+        remaining -= limit;
+    }
+    limits
 }

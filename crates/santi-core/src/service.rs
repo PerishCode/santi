@@ -24,8 +24,8 @@ use crate::{
     CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, EffectResolutionOutcome,
     EffectStatus, ErrorEventSink, ErrorIncident, ErrorScope, ErrorTransition, MaterialKind,
     ReceiptStatus, SantiError, SantiStore, SantiStreamEvent, SantiStreamPayload, Soul, Strand,
-    StrandBudgetSnapshot, StrandDetail, StrandMaterial, StrandMessage, StrandRuntimeSnapshot, Turn,
-    WebhookSubscription, engine, prefixed_id, timestamp_now,
+    StrandBudgetSnapshot, StrandDetail, StrandExecutionBudget, StrandMaterial, StrandMessage,
+    StrandRuntimeSnapshot, Turn, WebhookSubscription, engine, prefixed_id, timestamp_now,
 };
 use runtime_notice::RuntimeNoticeBus;
 
@@ -38,6 +38,7 @@ pub struct SantiService {
     stream_events: broadcast::Sender<SantiStreamEvent>,
     error_events: broadcast::Sender<ErrorTransition>,
     runtime_notices: RuntimeNoticeBus,
+    execution_budgets: Arc<Mutex<HashMap<String, StrandExecutionBudget>>>,
     /// Graceful-shutdown latch (PHASE-07): once set, `poke` refuses to START new
     /// turns, so inbox CONSUMPTION pauses while ingest keeps durably enqueuing
     /// (the inbox is an MQ — we stop consuming, never producing). The in-flight
@@ -114,9 +115,40 @@ impl SantiService {
             stream_events: broadcast::channel(1024).0,
             error_events: broadcast::channel(1024).0,
             runtime_notices: RuntimeNoticeBus::new(),
+            execution_budgets: Arc::new(Mutex::new(HashMap::new())),
             shutting_down: Arc::new(AtomicBool::new(false)),
             drive_degraded: Arc::new(AtomicBool::new(drive_degraded)),
         })
+    }
+
+    /// Register a generic execution envelope before a strand is driven. The
+    /// caller owns strand classification; core deliberately does not interpret
+    /// external labels.
+    pub fn set_strand_execution_budget(
+        &self,
+        strand_id: &str,
+        budget: StrandExecutionBudget,
+    ) -> Result<(), String> {
+        budget.validate()?;
+        if self.store.strand(strand_id)?.is_none() {
+            return Err("strand not found".to_string());
+        }
+        self.execution_budgets
+            .lock()
+            .unwrap()
+            .insert(strand_id.to_string(), budget);
+        Ok(())
+    }
+
+    pub(in crate::service) fn strand_execution_budget(
+        &self,
+        strand_id: &str,
+    ) -> Option<StrandExecutionBudget> {
+        self.execution_budgets
+            .lock()
+            .unwrap()
+            .get(strand_id)
+            .cloned()
     }
 
     /// Begin a graceful shutdown: stop consuming the inbox (no new turns start).

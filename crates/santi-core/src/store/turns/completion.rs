@@ -6,6 +6,7 @@ use crate::store::{
     SantiStore,
     db::{complete_turn_in_conn, turn_by_id},
     errors::resolve_in_conn,
+    execution_budget_incident_key,
     im::enqueue_turn_in,
 };
 use crate::{IM_LABEL_PREFIX, ImDeliveryMode, StrandMessage, Turn, timestamp_now};
@@ -124,6 +125,16 @@ impl SantiStore {
             &tx,
             &runtime_incident_key(&strand_id),
             "runtime.turn_succeeded",
+            json!({
+                "turn_id": turn_id,
+                "provider": provider,
+                "model": model,
+            }),
+        )?;
+        resolve_in_conn(
+            &tx,
+            &execution_budget_incident_key(&strand_id),
+            "execution_budget.turn_succeeded",
             json!({
                 "turn_id": turn_id,
                 "provider": provider,

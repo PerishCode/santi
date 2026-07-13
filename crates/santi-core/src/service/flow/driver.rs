@@ -14,6 +14,7 @@ use super::super::{
     text_delta::TextDeltaUpdate,
     timing::{ProviderTurnTiming, provider_event_name},
 };
+use super::budget::ToolBatchAdmission;
 use super::failure::{ProviderFailureStage, ProviderTurnFailure, RuntimeTurnFailureOperation};
 
 impl SantiService {
@@ -113,7 +114,17 @@ impl SantiService {
         }
 
         let final_response_id = loop {
-            round += 1;
+            let next_round = round + 1;
+            if let Some(error) = provider_try!(
+                RuntimeTurnFailureOperation::ExecutionBudgetAdmission,
+                self.admit_execution_round(strand_id, turn_id, next_round)
+            ) {
+                return Err(ProviderTurnFailure::execution_budget(
+                    error,
+                    &assistant_text,
+                ));
+            }
+            round = next_round;
             // The timeline is the single source of truth: each round re-derives
             // input from it, including any tool calls/results just persisted by
             // the previous round (no function_call_outputs side-channel).
@@ -350,9 +361,24 @@ impl SantiService {
                 break completed_response_id;
             }
 
+            let output_limits = match provider_try!(
+                RuntimeTurnFailureOperation::ExecutionBudgetAdmission,
+                self.admit_tool_batch(strand_id, turn_id, round, calls.len())
+            ) {
+                ToolBatchAdmission::Unbounded => vec![None; calls.len()],
+                ToolBatchAdmission::Bounded(limits) => {
+                    limits.into_iter().map(Some).collect::<Vec<_>>()
+                }
+                ToolBatchAdmission::Rejected(error) => {
+                    return Err(ProviderTurnFailure::execution_budget(
+                        *error,
+                        &assistant_text,
+                    ));
+                }
+            };
             timing.tool_outputs_started(round, calls.len());
             let call_count = calls.len();
-            for call in calls {
+            for (call, output_limit) in calls.into_iter().zip(output_limits) {
                 self.publish_turn_activity(
                     strand_id,
                     turn_id,
@@ -361,7 +387,7 @@ impl SantiService {
                 );
                 provider_try!(
                     RuntimeTurnFailureOperation::ToolExecution,
-                    self.handle_tool_call(strand_id, turn_id, call)
+                    self.handle_tool_call(strand_id, turn_id, call, output_limit)
                 );
             }
             timing.tool_outputs_completed(round, call_count);

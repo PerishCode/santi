@@ -40,6 +40,7 @@ pub async fn serve(config: config::ConfigService) -> Result<(), String> {
         },
         provider,
     )?;
+    crate::upgrade::register_attempt_handover_budgets(&service)?;
     let address: SocketAddr = bind_addr_string()
         .parse()
         .map_err(|_| "SANTI_HOST/SANTI_PORT did not form a valid socket address".to_string())?;

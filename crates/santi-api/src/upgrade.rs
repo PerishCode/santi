@@ -36,6 +36,45 @@ use uuid::Uuid;
 
 use finalize::{FINALIZE_PROTOCOL_VERSION, persistence_error};
 
+const HANDOVER_BUDGET_PROFILE: &str = "upgrade_handover_audit_v1";
+const HANDOVER_MAX_PROVIDER_ROUNDS: usize = 12;
+const HANDOVER_MAX_TOOL_CALLS: usize = 16;
+const HANDOVER_MAX_TOOL_OUTPUT_BYTES: usize = 40 * 1024;
+const HANDOVER_MAX_SHELL_OUTPUT_BYTES: usize = 16 * 1024;
+
+/// Apply the upgrade adaptor's attempt-label semantics to the generic core
+/// execution budget registry. This runs before boot recovery, so an offline
+/// handover seed is bounded from its first provider request without teaching
+/// core what an upgrade label means.
+pub fn register_attempt_handover_budgets(
+    service: &santi_core::SantiService,
+) -> Result<usize, String> {
+    let mut registered = 0;
+    for strand in service.list_strands()? {
+        let expected_prefix = format!("soul:{}:ops:upgrade:", strand.soul_id);
+        let is_attempt_handover = strand
+            .external_label
+            .as_deref()
+            .and_then(|label| label.strip_prefix(&expected_prefix))
+            .is_some_and(|attempt_id| !attempt_id.is_empty());
+        if !is_attempt_handover {
+            continue;
+        }
+        service.set_strand_execution_budget(
+            &strand.id,
+            santi_core::StrandExecutionBudget {
+                profile: HANDOVER_BUDGET_PROFILE.to_string(),
+                max_provider_rounds: HANDOVER_MAX_PROVIDER_ROUNDS,
+                max_tool_calls: HANDOVER_MAX_TOOL_CALLS,
+                max_tool_output_bytes: HANDOVER_MAX_TOOL_OUTPUT_BYTES,
+                max_shell_output_bytes: HANDOVER_MAX_SHELL_OUTPUT_BYTES,
+            },
+        )?;
+        registered += 1;
+    }
+    Ok(registered)
+}
+
 /// Why the runner rolled back to the previous version. The detail is durable
 /// operator truth in the error incident; it is never projected into come-look.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

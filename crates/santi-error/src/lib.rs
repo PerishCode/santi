@@ -24,6 +24,14 @@ pub mod catalog {
         exposure: ErrorExposure::CALLER_AND_OPERATOR,
     };
 
+    pub const EXECUTION_BUDGET_EXCEEDED: ErrorDescriptor = ErrorDescriptor {
+        code: "runtime.execution_budget.exceeded",
+        category: ErrorCategory::ResourceExhausted,
+        severity: ErrorSeverity::Error,
+        retry: ErrorRetry::AfterChange,
+        exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    };
+
     pub const UPGRADE_FAILED: ErrorDescriptor = ErrorDescriptor {
         code: "runtime.upgrade.failed",
         category: ErrorCategory::Internal,

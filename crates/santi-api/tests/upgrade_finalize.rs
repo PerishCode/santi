@@ -1,13 +1,40 @@
-use std::path::Path;
+use std::{path::Path, sync::Arc};
+
+use async_trait::async_trait;
+use futures_util::stream;
 
 use santi_api::{
     config::RuntimePaths,
     upgrade::{
         RecoveryStatus, UpgradeFailure, UpgradeFinalizeRequest, UpgradeReadiness, UpgradeStage,
-        UpgradeTerminal, finalize_at, seed_attempt_handover_at, seed_come_look_at,
+        UpgradeTerminal, finalize_at, register_attempt_handover_budgets, seed_attempt_handover_at,
+        seed_come_look_at,
     },
 };
-use santi_core::{ErrorScope, IncidentStatus, SantiStore};
+use santi_core::{ErrorScope, IncidentStatus, SantiService, SantiServiceConfig, SantiStore};
+use santi_provider::{
+    ProviderClient, ProviderEvent, ProviderMetadata, ProviderRequest, ProviderStream,
+};
+
+#[derive(Clone)]
+struct NoopProvider;
+
+#[async_trait]
+impl ProviderClient for NoopProvider {
+    fn metadata(&self) -> ProviderMetadata {
+        ProviderMetadata {
+            provider: Arc::from("noop"),
+            model: "noop".to_string(),
+            context_budget: None,
+        }
+    }
+
+    async fn stream_response(&self, _request: ProviderRequest) -> Result<ProviderStream, String> {
+        Ok(Box::pin(stream::iter(vec![Ok(ProviderEvent::Completed {
+            provider_response_id: Some("noop".to_string()),
+        })])))
+    }
+}
 
 #[test]
 fn old_request_defaults() {
@@ -95,6 +122,38 @@ fn stable_helper_preserves_label() {
         strand.external_label.as_deref(),
         Some("soul:soul_default:ops")
     );
+}
+
+#[test]
+fn registers_attempt_rooms() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let paths = paths_under(temp.path());
+    seed_attempt_handover_at(
+        &paths,
+        santi_core::DEFAULT_SOUL_ID,
+        "upgrade_budgeted",
+        None,
+        "bounded wake",
+    )
+    .expect("seed attempt room");
+    seed_come_look_at(&paths, santi_core::DEFAULT_SOUL_ID, None, "stable wake")
+        .expect("seed stable room");
+    SantiStore::open(&paths.database_path)
+        .expect("open store")
+        .create_strand()
+        .expect("create unlabeled room");
+
+    let service = SantiService::open(
+        SantiServiceConfig {
+            database_path: paths.database_path.display().to_string(),
+            runtime_root: paths.runtime_root.display().to_string(),
+            execution_root: paths.execution_root.display().to_string(),
+            bind_addr: Some("127.0.0.1:0".to_string()),
+        },
+        Arc::new(NoopProvider),
+    )
+    .expect("open service");
+    assert_eq!(register_attempt_handover_budgets(&service).unwrap(), 1);
 }
 
 #[test]

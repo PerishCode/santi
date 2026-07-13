@@ -21,6 +21,7 @@ mod runtime;
 mod schema;
 mod turns;
 
+pub(crate) use budget::execution_budget_incident_key;
 use db::*;
 pub use db::{read_schema_version, soul_memory_file};
 pub(crate) use errors::drive::DriveFailureInput;

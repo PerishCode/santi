@@ -43,6 +43,7 @@ struct ProviderFailureMetadata {
 enum ProviderTurnFailureCause {
     Provider(ProviderFailureMetadata),
     ContextBudget(SantiError),
+    ExecutionBudget(SantiError),
     Runtime(RuntimeTurnFailureOperation),
 }
 
@@ -51,6 +52,7 @@ pub(super) enum RuntimeTurnFailureOperation {
     AssemblyInput,
     SystemPrompt,
     ContextAdmission,
+    ExecutionBudgetAdmission,
     ThinkingPersistence,
     TextPersistence,
     AssistantPersistence,
@@ -64,6 +66,7 @@ impl RuntimeTurnFailureOperation {
             Self::AssemblyInput => "turn.assembly_input",
             Self::SystemPrompt => "turn.system_prompt",
             Self::ContextAdmission => "turn.context_admission",
+            Self::ExecutionBudgetAdmission => "turn.execution_budget_admission",
             Self::ThinkingPersistence => "turn.thinking_persistence",
             Self::TextPersistence => "turn.text_persistence",
             Self::AssistantPersistence => "turn.assistant_persistence",
@@ -120,6 +123,14 @@ impl ProviderTurnFailure {
             cause: ProviderTurnFailureCause::ContextBudget(error),
         }
     }
+
+    pub(super) fn execution_budget(error: SantiError, partial_assistant_text: &str) -> Self {
+        Self {
+            error: error.to_string(),
+            partial_assistant_text: partial_assistant_text.to_string(),
+            cause: ProviderTurnFailureCause::ExecutionBudget(error),
+        }
+    }
 }
 
 impl SantiService {
@@ -148,6 +159,24 @@ impl SantiService {
                     Err(persistence_error) => {
                         eprintln!(
                             "santi: context-budget turn persistence failed for {turn_id}: {persistence_error}"
+                        );
+                        (
+                            None,
+                            terminal_runtime_error(strand_id, turn_id, persistence_error),
+                        )
+                    }
+                }
+            }
+            ProviderTurnFailureCause::ExecutionBudget(canonical_error) => {
+                match self.store.fail_turn_with_incident(
+                    turn_id,
+                    &error,
+                    canonical_error.incident_id.as_deref(),
+                ) {
+                    Ok(turn) => (Some(turn), canonical_error),
+                    Err(persistence_error) => {
+                        eprintln!(
+                            "santi: execution-budget turn persistence failed for {turn_id}: {persistence_error}"
                         );
                         (
                             None,

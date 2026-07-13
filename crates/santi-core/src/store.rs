@@ -61,7 +61,8 @@ pub struct AppendedMessage {
 pub struct StartedTurn {
     pub turn: Turn,
     /// Inbox entries this call committed into the timeline to reach this turn
-    /// (empty for the manual/test-only `start_turn`, which does not drain).
+    /// (empty for an explicit redrive of an already-projected failed receipt,
+    /// or for the manual/test-only `start_turn`, which does not drain).
     pub drained_messages: Vec<StrandMessage>,
 }
 

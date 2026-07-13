@@ -66,6 +66,12 @@ Migration-reconstructed transitions expose `reconstructed_from`; live
 transitions leave it unset. A v24 drain is completed only when its linked turn
 is durably completed, never merely because the inbox item was drained.
 
+After the cause of a `turn_failed` receipt is cleared, an explicit
+`santi strand drive <strand_id>` starts a recovery turn even when no new inbox
+message exists. A context compact that resolves its incident does the same.
+Ordinary boot/completion pokes do not retry failed receipts, and recovery reuses
+durable confirmed effect results rather than replaying them automatically.
+
 Shell commands also create a durable effect attempt. Receipt completion still
 only proves the assistant turn was persisted; inspect the linked effect before
 claiming that an external action occurred:

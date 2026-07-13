@@ -227,7 +227,7 @@ impl SantiService {
                     "strand not found".to_string(),
                 ))
             })?;
-        match self.poke(strand_id, "strand_send", None, "operator_redrive") {
+        match self.poke_failed_receipts(strand_id, "strand_send", None, "operator_redrive") {
             DriveOutcome::Started(turn, _) => Ok(DriveStrandResponse {
                 strand_id: strand_id.to_string(),
                 state: DriveStrandState::Started,
@@ -262,6 +262,31 @@ impl SantiService {
         accepted_inbox_id: Option<&str>,
         operation: &str,
     ) -> DriveOutcome {
+        self.poke_inner(strand_id, trigger_type, accepted_inbox_id, operation, false)
+    }
+
+    /// Explicit recovery path: unlike ordinary ingest/completion/boot pokes,
+    /// this may start a turn with no new inbox content when a prior durable
+    /// receipt is `turn_failed`. The provider reuses the projected timeline;
+    /// no external effect is replayed by the driver itself.
+    pub(in crate::service) fn poke_failed_receipts(
+        &self,
+        strand_id: &str,
+        trigger_type: &str,
+        accepted_inbox_id: Option<&str>,
+        operation: &str,
+    ) -> DriveOutcome {
+        self.poke_inner(strand_id, trigger_type, accepted_inbox_id, operation, true)
+    }
+
+    fn poke_inner(
+        &self,
+        strand_id: &str,
+        trigger_type: &str,
+        accepted_inbox_id: Option<&str>,
+        operation: &str,
+        recover_failed_receipts: bool,
+    ) -> DriveOutcome {
         // Graceful shutdown: pause CONSUMPTION. The content stays durably in the
         // inbox (ingest already enqueued it) and boot recovery drains it on the
         // next start. This also stops the completion re-poke from spawning a
@@ -281,9 +306,13 @@ impl SantiService {
                 ));
             }
         };
-        let started =
-            self.store
-                .start_turn_with_budget(strand_id, trigger_type, None, admission.as_ref());
+        let started = self.store.start_turn_with_budget(
+            strand_id,
+            trigger_type,
+            None,
+            admission.as_ref(),
+            recover_failed_receipts,
+        );
         self.dispatch_error_events();
         match started {
             Ok(StartTurnOutcome::Started(started)) => {

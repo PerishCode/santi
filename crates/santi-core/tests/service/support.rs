@@ -33,6 +33,7 @@ pub(crate) struct FakeProvider {
     pub(crate) requests: Arc<Mutex<Vec<ProviderRequest>>>,
     pub(crate) request_tool: bool,
     pub(crate) input_budget_bytes: Option<usize>,
+    pub(crate) fail_for_requests: Option<usize>,
 }
 
 #[async_trait]
@@ -56,6 +57,12 @@ impl ProviderClient for FakeProvider {
             requests.push(request);
             requests.len()
         };
+        if self
+            .fail_for_requests
+            .is_some_and(|failure_count| index <= failure_count)
+        {
+            return Err("temporary fake-provider outage".to_string());
+        }
         if self.request_tool && index == 1 {
             let command = probe_command();
             let arguments = json!({

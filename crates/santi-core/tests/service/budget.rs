@@ -1,6 +1,9 @@
 use super::support::*;
 use rusqlite::Connection;
 
+#[path = "budget/recovery.rs"]
+mod recovery;
+
 fn service_with_budget(
     temp: &tempfile::TempDir,
     provider: Arc<dyn ProviderClient>,

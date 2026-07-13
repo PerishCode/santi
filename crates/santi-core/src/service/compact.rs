@@ -116,7 +116,7 @@ impl SantiService {
         response.active_incident_resolved =
             self.clear_context_incident(&strand.id, "compact_exec")?;
         if response.active_incident_resolved {
-            self.poke(&strand.id, "strand_send", None, "compact_recovery_poke");
+            self.poke_failed_receipts(&strand.id, "strand_send", None, "compact_recovery_poke");
         }
         response.pre_estimate = Some(pre_estimate);
         response.post_estimate = Some(post_estimate);

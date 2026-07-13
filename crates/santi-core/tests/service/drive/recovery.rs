@@ -2,6 +2,67 @@ use super::super::support::*;
 use rusqlite::Connection;
 
 #[tokio::test]
+async fn failed_receipt_redrives() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let provider = Arc::new(FakeProvider {
+        fail_for_requests: Some(1),
+        ..FakeProvider::default()
+    });
+    let service = SantiService::open(
+        SantiServiceConfig {
+            database_path: temp.path().join("santi.sqlite").display().to_string(),
+            runtime_root: temp.path().join("runtime").display().to_string(),
+            execution_root: temp.path().join("execution").display().to_string(),
+            bind_addr: Some("127.0.0.1:0".to_string()),
+        },
+        provider.clone(),
+    )
+    .expect("open service");
+    let strand = service.create_strand().expect("create strand").strand;
+    let failed = service
+        .send_strand(
+            &strand.id,
+            SendStrandRequest {
+                content: vec![MessagePart::Text {
+                    text: "one durable obligation".to_string(),
+                }],
+            },
+        )
+        .await
+        .expect("send strand");
+    wait_for_failed_turn(&service, &strand.id, &accepted_turn(&failed).id).await;
+
+    let driven = service
+        .drive_strand(&strand.id)
+        .expect("explicit failed-receipt redrive");
+    assert_eq!(driven.state, santi_core::DriveStrandState::Started);
+    let recovered_turn = driven.turn.expect("recovery turn");
+    let runtime = wait_for_completed_turn(&service, &strand.id, &recovered_turn.id).await;
+
+    assert_eq!(provider.requests.lock().unwrap().len(), 2);
+    assert_eq!(count_messages(&runtime, "one durable obligation"), 1);
+    let receipt = service
+        .receipt_status(&failed.receipt.inbox_id)
+        .expect("receipt query")
+        .expect("receipt");
+    assert_eq!(receipt.state, santi_core::ReceiptState::Completed);
+    assert_eq!(
+        receipt
+            .transitions
+            .iter()
+            .map(|transition| transition.state.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            santi_core::ReceiptState::Accepted,
+            santi_core::ReceiptState::Driving,
+            santi_core::ReceiptState::TurnFailed,
+            santi_core::ReceiptState::Driving,
+            santi_core::ReceiptState::Completed,
+        ]
+    );
+}
+
+#[tokio::test]
 async fn drive_failure_recovers() {
     let temp = tempfile::tempdir().expect("temp dir");
     let database_path = temp.path().join("santi.sqlite");

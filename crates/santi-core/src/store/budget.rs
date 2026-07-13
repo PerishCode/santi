@@ -219,6 +219,7 @@ impl SantiStore {
         trigger_type: &str,
         trigger_ref: Option<&str>,
         admission: Option<&ContextAdmission>,
+        recover_failed_receipts: bool,
     ) -> Result<StartTurnOutcome, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn
@@ -239,7 +240,16 @@ impl SantiStore {
         }
 
         let pending = pending_items(&tx, strand_id)?;
-        if pending.is_empty() {
+        let has_failed_receipt = recover_failed_receipts
+            && tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM inbox_receipts WHERE strand_id = ?1 AND state = 'turn_failed')",
+                    params![strand_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|error| error.to_string())?
+                != 0;
+        if pending.is_empty() && !has_failed_receipt {
             return Ok(StartTurnOutcome::Idle);
         }
 
@@ -284,7 +294,7 @@ impl SantiStore {
 
         let turn_id = prefixed_id("turn");
         let drained = drain_inbox_in_tx(&tx, strand_id, &turn_id)?;
-        if drained.messages.is_empty() {
+        if drained.messages.is_empty() && !has_failed_receipt {
             return Ok(StartTurnOutcome::Idle);
         }
         let now = timestamp_now();

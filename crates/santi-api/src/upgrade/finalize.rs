@@ -174,9 +174,10 @@ fn finalize_handover(
     mut errors: Vec<santi_core::SantiError>,
 ) -> Result<UpgradeFinalizeReport, Box<santi_core::SantiError>> {
     let record = compose_record(&request.attempt_id);
-    let seed = seed_come_look_at(
+    let seed = seed_attempt_handover_at(
         paths,
         &request.soul_id,
+        &request.attempt_id,
         request.configured_strand_id.as_deref(),
         &record,
     );
@@ -192,7 +193,8 @@ fn finalize_handover(
                 descriptor: santi_core::catalog::UPGRADE_HANDOVER_FAILED,
                 scope: santi_core::ErrorScope::new("runtime", RUNTIME_SCOPE_ID),
                 source: santi_core::ErrorSource::new("santi-api", "upgrade.handover"),
-                message: "self-upgrade handover could not use the stable ops strand".to_string(),
+                message: "self-upgrade handover could not use its attempt-scoped ops strand"
+                    .to_string(),
                 context: json!({
                     "attempt_id": request.attempt_id,
                     "artifact": bounded_detail(&request.deb),
@@ -239,22 +241,60 @@ fn finalize_handover(
     })
 }
 
+fn attempt_ops_label(soul_id: &str, attempt_id: &str) -> String {
+    format!("soul:{soul_id}:ops:upgrade:{attempt_id}")
+}
+
 fn self_ops_label(soul_id: &str) -> String {
     format!("soul:{soul_id}:ops")
 }
 
+/// Preserve the original stable-label seed helper for callers that explicitly
+/// want one long-lived ops room. Upgrade finalization uses the attempt-scoped
+/// variant below so audit scratch output cannot accumulate across releases.
 pub fn seed_come_look_at(
     paths: &RuntimePaths,
     soul_id: &str,
     configured_strand: Option<&str>,
     text: &str,
 ) -> Result<SeedOutcome, String> {
-    let label = self_ops_label(soul_id);
+    seed_handover_label_at(
+        paths,
+        soul_id,
+        &self_ops_label(soul_id),
+        configured_strand,
+        text,
+    )
+}
+
+pub fn seed_attempt_handover_at(
+    paths: &RuntimePaths,
+    soul_id: &str,
+    attempt_id: &str,
+    configured_strand: Option<&str>,
+    text: &str,
+) -> Result<SeedOutcome, String> {
+    seed_handover_label_at(
+        paths,
+        soul_id,
+        &attempt_ops_label(soul_id, attempt_id),
+        configured_strand,
+        text,
+    )
+}
+
+fn seed_handover_label_at(
+    paths: &RuntimePaths,
+    soul_id: &str,
+    label: &str,
+    configured_strand: Option<&str>,
+    text: &str,
+) -> Result<SeedOutcome, String> {
     let configured_strand = configured_strand
         .map(str::trim)
         .filter(|value| !value.is_empty());
 
-    match crate::ops::inbox_seed_label_at(paths, soul_id, &label, text) {
+    match crate::ops::inbox_seed_label_at(paths, soul_id, label, text) {
         Ok(report) if report.accepted => Ok(SeedOutcome {
             strand_id: report.strand_id,
             warnings: Vec::new(),
@@ -264,7 +304,7 @@ pub fn seed_come_look_at(
             configured_strand,
             text,
             format!(
-                "stable self-strand label {label} rejected the come-look seed: {}",
+                "self-ops label {label} rejected the come-look seed: {}",
                 report
                     .error
                     .map(|error| error.to_string())
@@ -275,9 +315,7 @@ pub fn seed_come_look_at(
             paths,
             configured_strand,
             text,
-            format!(
-                "stable self-strand label {label} could not receive the come-look seed: {error}"
-            ),
+            format!("self-ops label {label} could not receive the come-look seed: {error}"),
         ),
     }
 }
@@ -286,28 +324,28 @@ fn seed_via_configured_strand(
     paths: &RuntimePaths,
     configured_strand: Option<&str>,
     text: &str,
-    stable_label_error: String,
+    label_error: String,
 ) -> Result<SeedOutcome, String> {
     let Some(strand_id) = configured_strand else {
-        return Err(stable_label_error);
+        return Err(label_error);
     };
 
     match crate::ops::inbox_seed_at(paths, strand_id, text) {
         Ok(report) if report.accepted => Ok(SeedOutcome {
             strand_id: report.strand_id,
             warnings: vec![format!(
-                "{stable_label_error}; fell back to configured SANTI_STRAND_ID {strand_id}"
+                "{label_error}; fell back to configured SANTI_STRAND_ID {strand_id}"
             )],
         }),
         Ok(report) => Err(format!(
-            "{stable_label_error}; configured SANTI_STRAND_ID {strand_id} also rejected the come-look seed: {}",
+            "{label_error}; configured SANTI_STRAND_ID {strand_id} also rejected the come-look seed: {}",
             report
                 .error
                 .map(|error| error.to_string())
                 .unwrap_or_else(|| "seed rejected".to_string())
         )),
         Err(error) => Err(format!(
-            "{stable_label_error}; configured SANTI_STRAND_ID {strand_id} also could not receive the come-look seed: {error}"
+            "{label_error}; configured SANTI_STRAND_ID {strand_id} also could not receive the come-look seed: {error}"
         )),
     }
 }

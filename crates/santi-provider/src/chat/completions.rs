@@ -121,41 +121,51 @@ fn messages(request: &ProviderRequest) -> Value {
             "content": instructions,
         }));
     }
-    // Flatten the typed item timeline into the chat_completions messages array.
-    // Reasoning is dropped: GLM has no hard requirement for replayed
-    // reasoning_content (DC5), and the encrypted payload isn't modeled yet.
     for item in &request.input {
-        match item {
-            ProviderItem::Message { role, content } => messages.push(json!({
-                "role": role,
-                "content": content,
-            })),
-            ProviderItem::Reasoning { .. } => {}
-            ProviderItem::FunctionCall {
-                call_id,
-                name,
-                arguments_raw,
-                ..
-            } => messages.push(json!({
-                "role": "assistant",
-                "content": Value::Null,
-                "tool_calls": [{
-                    "id": call_id,
-                    "type": "function",
-                    "function": {
-                        "name": name,
-                        "arguments": arguments_raw,
-                    },
-                }],
-            })),
-            ProviderItem::FunctionCallOutput { call_id, output } => messages.push(json!({
-                "role": "tool",
-                "tool_call_id": call_id,
-                "content": output,
-            })),
+        if let Some(message) = message(item) {
+            messages.push(message);
         }
     }
     json!(messages)
+}
+
+fn message(item: &ProviderItem) -> Option<Value> {
+    match item {
+        ProviderItem::Message { role, content } => Some(text_message(role, content)),
+        ProviderItem::Reasoning { .. } => None,
+        ProviderItem::FunctionCall {
+            call_id,
+            name,
+            arguments_raw,
+            ..
+        } => Some(call_message(call_id, name, arguments_raw)),
+        ProviderItem::FunctionCallOutput { call_id, output } => {
+            Some(output_message(call_id, output))
+        }
+    }
+}
+
+fn text_message(role: &str, content: &str) -> Value {
+    json!({ "role": role, "content": content })
+}
+
+fn call_message(call: &str, name: &str, arguments: &str) -> Value {
+    json!({
+        "role": "assistant",
+        "content": Value::Null,
+        "tool_calls": [{
+            "id": call,
+            "type": "function",
+            "function": {
+                "name": name,
+                "arguments": arguments,
+            },
+        }],
+    })
+}
+
+fn output_message(call: &str, output: &str) -> Value {
+    json!({ "role": "tool", "tool_call_id": call, "content": output })
 }
 
 fn map_tools(tools: Vec<ProviderTool>) -> Vec<Value> {
@@ -185,25 +195,31 @@ fn parse_sse(
             let chunk = chunk.map_err(|error| error.to_string())?;
             yield ProviderEvent::StreamTrace(ProviderStreamTrace::Chunk { bytes: chunk.len() });
             buffer.push_str(&String::from_utf8_lossy(&chunk));
-            while let Some(index) = buffer.find('\n') {
-                let line = buffer[..index].trim_end_matches('\r').to_string();
-                buffer = buffer[index + 1..].to_string();
-                if let Some(payload) = line.strip_prefix("data: ") {
-                    if payload == "[DONE]" {
-                        continue;
-                    }
-                    let events = parse_event(payload, &mut response_id, &mut accumulator)?;
-                    yield ProviderEvent::StreamTrace(ProviderStreamTrace::RawEvent {
-                        raw_type: raw_event_type(payload),
-                        mapped_events: provider_event_names(&events),
-                    });
-                    for event in events {
-                        yield event;
-                    }
-                }
+            for event in parse_buffer(&mut buffer, &mut response_id, &mut accumulator)? {
+                yield event;
             }
         }
     }
+}
+
+fn parse_buffer(
+    buffer: &mut String,
+    response_id: &mut Option<String>,
+    accumulator: &mut ToolCallAccumulator,
+) -> Result<Vec<ProviderEvent>, String> {
+    let mut mapped = Vec::new();
+    for line in crate::sse::lines(buffer) {
+        let Some(payload) = crate::sse::data(&line) else {
+            continue;
+        };
+        let events = parse_event(payload, response_id, accumulator)?;
+        mapped.push(ProviderEvent::StreamTrace(ProviderStreamTrace::RawEvent {
+            raw_type: raw_event_type(payload),
+            mapped_events: provider_event_names(&events),
+        }));
+        mapped.extend(events);
+    }
+    Ok(mapped)
 }
 
 fn parse_event(

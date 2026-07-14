@@ -6,7 +6,6 @@ fn drive_coalesces_redrives() {
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let strand = store.create_strand().expect("create strand");
 
-    // No requests → not behind → no turn.
     assert!(
         store
             .try_start_turn(&strand.id, "strand_send", None)
@@ -14,14 +13,13 @@ fn drive_coalesces_redrives() {
             .is_none()
     );
 
-    // A REQUEST makes the thread behind → starts a turn.
-    append_timeline_message(
-        &store,
-        &strand.id,
-        ActorType::System,
-        "hi",
-        MessageIntake::Request,
-    );
+    append_timeline_message(Line {
+        store: &store,
+        strand: &strand.id,
+        actor: ActorType::System,
+        text: "hi",
+        intake: MessageIntake::Request,
+    });
     let started = store
         .try_start_turn(&strand.id, "strand_send", None)
         .expect("try")
@@ -30,14 +28,13 @@ fn drive_coalesces_redrives() {
     assert_eq!(started.drained_messages.len(), 1);
     let turn = started.turn;
 
-    // A second request while the turn runs coalesces — no concurrent turn.
-    append_timeline_message(
-        &store,
-        &strand.id,
-        ActorType::System,
-        "and again",
-        MessageIntake::Request,
-    );
+    append_timeline_message(Line {
+        store: &store,
+        strand: &strand.id,
+        actor: ActorType::System,
+        text: "and again",
+        intake: MessageIntake::Request,
+    });
     assert!(
         store
             .try_start_turn(&strand.id, "strand_send", None)
@@ -46,10 +43,14 @@ fn drive_coalesces_redrives() {
         "a running turn must block a second concurrent turn"
     );
 
-    // After the turn completes, the request that arrived during it is past the
-    // turn's start → behind again → drive the next turn.
     store
-        .complete_turn(&turn.id, None, "fake", "fake-model", None)
+        .complete_turn(Completion {
+            turn: &turn.id,
+            sequence: None,
+            provider: "fake",
+            model: "fake-model",
+            response: None,
+        })
         .expect("complete");
     assert!(
         store
@@ -66,8 +67,6 @@ fn drain_commits_pending() {
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let strand = store.create_strand().expect("create strand");
 
-    // Multiple adaptors can enqueue concurrently before the driver ever runs;
-    // the NEXT drive drains everything present into ONE turn, in arrival order.
     for text in ["first", "second", "third"] {
         store
             .enqueue_inbox(&strand.id, MessageKind::Text, MessageContent::text(text))
@@ -85,7 +84,6 @@ fn drain_commits_pending() {
         assert_eq!(message.relation.strand_seq, (index + 1) as i64);
     }
 
-    // The inbox is now empty — nothing left to drain, no new turn.
     assert!(
         store
             .try_start_turn(&strand.id, "strand_send", None)
@@ -165,9 +163,6 @@ fn inbox_gate_rejects() {
     let store = SantiStore::open(&db).expect("open store");
     let strand = store.create_strand().expect("create strand");
 
-    // Arrange the full inbox in one transaction. Calling the durable public
-    // enqueue path 500 times makes this gate assertion dominated by fsync,
-    // especially on Windows; the behavior under test is the next admission.
     let mut conn = Connection::open(&db).expect("open sqlite");
     let tx = conn.transaction().expect("begin seed transaction");
     {
@@ -228,15 +223,13 @@ fn records_do_not_drive() {
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let strand = store.create_strand().expect("create strand");
 
-    // A RECORD (the soul's own output / a failure notice) is not a request and
-    // must not wake the soul.
-    append_timeline_message(
-        &store,
-        &strand.id,
-        ActorType::Soul,
-        "a note to self",
-        MessageIntake::Record,
-    );
+    append_timeline_message(Line {
+        store: &store,
+        strand: &strand.id,
+        actor: ActorType::Soul,
+        text: "a note to self",
+        intake: MessageIntake::Record,
+    });
     assert!(
         store
             .try_start_turn(&strand.id, "strand_send", None)
@@ -257,21 +250,18 @@ fn boot_reconciles_once() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let strand = store.create_strand().expect("create strand");
-    append_timeline_message(
-        &store,
-        &strand.id,
-        ActorType::System,
-        "do a thing",
-        MessageIntake::Request,
-    );
-    // A turn starts and then the process "crashes" (turn left running).
+    append_timeline_message(Line {
+        store: &store,
+        strand: &strand.id,
+        actor: ActorType::System,
+        text: "do a thing",
+        intake: MessageIntake::Request,
+    });
     store
         .try_start_turn(&strand.id, "strand_send", None)
         .expect("try")
         .expect("turn started");
-    // Before recovery it is the only pending-driver; reconcile interrupts it.
     assert_eq!(store.reconcile_orphaned_turns().expect("reconcile"), 1);
-    // The interrupted turn counts as "attempted" → the request is NOT retried.
     assert!(
         store
             .try_start_turn(&strand.id, "strand_send", None)
@@ -279,14 +269,13 @@ fn boot_reconciles_once() {
             .is_none(),
         "an interrupted turn must not auto-retry its request"
     );
-    // But a genuinely new request drives a fresh turn (liveness).
-    append_timeline_message(
-        &store,
-        &strand.id,
-        ActorType::System,
-        "a new thing",
-        MessageIntake::Request,
-    );
+    append_timeline_message(Line {
+        store: &store,
+        strand: &strand.id,
+        actor: ActorType::System,
+        text: "a new thing",
+        intake: MessageIntake::Request,
+    });
     assert!(
         store
             .strands_with_pending_requests()

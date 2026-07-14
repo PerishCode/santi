@@ -1,15 +1,15 @@
 use super::support::*;
 use rusqlite::Connection;
+use santi_core::service::{self, Service};
 
+#[path = "budget/memory_pressure.rs"]
+mod memory_pressure;
 #[path = "budget/recovery.rs"]
 mod recovery;
 
-fn service_with_budget(
-    temp: &tempfile::TempDir,
-    provider: Arc<dyn ProviderClient>,
-) -> SantiService {
-    SantiService::open(
-        SantiServiceConfig {
+fn service_with_budget(temp: &tempfile::TempDir, provider: Arc<dyn ProviderClient>) -> Service {
+    Service::open(
+        service::Config {
             database_path: temp.path().join("santi.sqlite").display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -82,6 +82,77 @@ async fn admission_opens_incident() {
         )
         .expect("transition counts");
     assert_eq!(delivered, (1, 1));
+}
+
+#[tokio::test]
+async fn remeasures_hot_memory() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let runtime_root = temp.path().join("runtime");
+    let memory_path = runtime_root.join("souls/soul_default/memory/MEMORY.md");
+    fs::create_dir_all(memory_path.parent().expect("memory parent")).expect("create memory parent");
+    fs::write(&memory_path, "m".repeat(9_000)).expect("write initial memory");
+    let provider = Arc::new(FakeProvider {
+        input_budget_bytes: Some(20_000),
+        ..FakeProvider::default()
+    });
+    let service = Service::open(
+        service::Config {
+            database_path: temp.path().join("santi.sqlite").display().to_string(),
+            runtime_root: runtime_root.display().to_string(),
+            execution_root: temp.path().join("execution").display().to_string(),
+            bind_addr: Some("127.0.0.1:0".to_string()),
+        },
+        provider.clone(),
+    )
+    .expect("open service");
+    let strand = service.create_strand().expect("create strand").strand;
+
+    let error = service
+        .send_strand(
+            &strand.id,
+            SendStrandRequest {
+                content: vec![MessagePart::Text {
+                    text: "x".repeat(15_000),
+                }],
+            },
+        )
+        .await
+        .expect_err("first candidate exceeds context budget");
+    assert_eq!(error.code, "context.budget.exceeded");
+    assert!(provider.requests.lock().unwrap().is_empty());
+
+    fs::write(&memory_path, "# Small memory\n").expect("shrink memory directly");
+    let accepted = service
+        .send_strand(
+            &strand.id,
+            SendStrandRequest {
+                content: vec![MessagePart::Text {
+                    text: "new request after material relief".to_string(),
+                }],
+            },
+        )
+        .await
+        .expect("hot memory change should clear stale incident");
+    let turn = accepted.turn.expect("relieved request starts turn");
+    Probe::new(&service)
+        .completed_turn(&strand.id, &turn.id)
+        .await;
+
+    assert_eq!(provider.requests.lock().unwrap().len(), 1);
+    assert!(
+        service
+            .strand_budget(&strand.id)
+            .expect("strand budget")
+            .expect("strand")
+            .active_incident
+            .is_none()
+    );
+    let incidents = service
+        .strand_errors(&strand.id, 10)
+        .expect("strand errors")
+        .expect("strand");
+    assert_eq!(incidents.len(), 1);
+    assert_eq!(incidents[0].status, santi_core::IncidentStatus::Resolved);
 }
 
 #[tokio::test]
@@ -313,7 +384,9 @@ async fn compact_resolves_incident() {
         .await
         .expect("send strand");
 
-    let runtime = wait_for_failed_turn(&service, &strand.id, &accepted_turn(&response).id).await;
+    let runtime = Probe::new(&service)
+        .failed_turn(&strand.id, &accepted_turn(&response).id)
+        .await;
     assert_eq!(provider.requests.lock().unwrap().len(), 1);
     assert_eq!(runtime.errors.len(), 1);
     assert_eq!(runtime.errors[0].status, santi_core::IncidentStatus::Active);
@@ -357,14 +430,14 @@ async fn compact_resolves_incident() {
     drop(conn);
     let store = SantiStore::open(&db).expect("open store directly");
     let boundary = store
-        .append_message(
-            &strand.id,
-            ActorType::Soul,
-            store.default_soul_id(),
-            MessageContent::text("manual compact boundary"),
-            MessageState::Fixed,
-            MessageIntake::Record,
-        )
+        .append_message(Draft {
+            strand: &strand.id,
+            actor: ActorType::Soul,
+            id: store.default_soul_id(),
+            content: MessageContent::text("manual compact boundary"),
+            state: MessageState::Fixed,
+            intake: MessageIntake::Record,
+        })
         .expect("append manual boundary")
         .strand_message;
 
@@ -384,7 +457,7 @@ async fn compact_resolves_incident() {
         .expect("compact should resolve incident when estimate is under budget");
     assert!(compact.active_incident_resolved);
 
-    let after = wait_any_completed(&service, &strand.id).await;
+    let after = Probe::new(&service).any_completed(&strand.id).await;
     assert_eq!(after.errors.len(), 1);
     assert_eq!(after.errors[0].status, santi_core::IncidentStatus::Resolved);
     assert_eq!(after.errors[0].revision, 2);

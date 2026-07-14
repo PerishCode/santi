@@ -1,9 +1,10 @@
 use async_trait::async_trait;
 use futures_util::stream;
 use rusqlite::Connection;
+use santi_core::service::{self, Service};
 use santi_core::{
     ActorType, ErrorCategory, IncidentStatus, MessageKind, MessagePart, MessageState, ReceiptState,
-    SantiService, SantiServiceConfig, SantiStreamPayload, SendStrandRequest, TurnStatus,
+    SantiStreamPayload, SendStrandRequest, TurnStatus,
 };
 use santi_provider::{
     ProviderClient, ProviderEvent, ProviderItem, ProviderMetadata, ProviderRequest, ProviderStream,
@@ -371,9 +372,9 @@ fn turn(response: &santi_core::SendStrandAcceptedResponse) -> &santi_core::Turn 
     response.turn.as_ref().expect("send should start a turn")
 }
 
-fn open_service(temp: &tempfile::TempDir, provider: Arc<FailureProvider>) -> SantiService {
-    SantiService::open(
-        SantiServiceConfig {
+fn open_service(temp: &tempfile::TempDir, provider: Arc<FailureProvider>) -> Service {
+    Service::open(
+        service::Config {
             database_path: temp.path().join("santi.sqlite").display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -394,7 +395,7 @@ fn transition_count(temp: &tempfile::TempDir) -> i64 {
 }
 
 async fn send_text(
-    service: &SantiService,
+    service: &Service,
     strand_id: &str,
     text: &str,
 ) -> santi_core::SendStrandAcceptedResponse {
@@ -412,7 +413,7 @@ async fn send_text(
 }
 
 async fn wait_for_turn(
-    service: &SantiService,
+    service: &Service,
     strand_id: &str,
     turn_id: &str,
     status: TurnStatus,
@@ -435,7 +436,7 @@ async fn wait_for_turn(
 }
 
 async fn wait_for_aborted_output(
-    service: &SantiService,
+    service: &Service,
     strand_id: &str,
     turn_id: &str,
 ) -> santi_core::StrandRuntimeSnapshot {

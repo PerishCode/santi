@@ -2,13 +2,14 @@
 mod recovery;
 
 use super::support::*;
+use santi_core::service::{self, Service};
 
 #[tokio::test]
 async fn reminder_no_repoke() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FakeProvider::default());
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: temp.path().join("santi.sqlite").display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -31,15 +32,13 @@ async fn reminder_no_repoke() {
         .await
         .expect("send strand");
 
-    let _runtime =
-        wait_for_completed_turn(&service, &strand.id, &accepted_turn(&response).id).await;
+    let _runtime = Probe::new(&service)
+        .completed_turn(&strand.id, &accepted_turn(&response).id)
+        .await;
 
-    // The provider-input observation is drained only after completion. Wait for
-    // the compact reminder Record to materialize, then give the completion
-    // re-poke a chance to run. That re-poke must not start a second turn: the
-    // reminder is a Record, not a new inbox Request.
-    let _runtime =
-        wait_for_message_containing(&service, &strand.id, "kind: compact_reminder").await;
+    let _runtime = Probe::new(&service)
+        .message_containing(&strand.id, "kind: compact_reminder")
+        .await;
     sleep(Duration::from_millis(100)).await;
     let runtime = service
         .runtime_snapshot(&strand.id)
@@ -81,8 +80,8 @@ async fn reminder_no_repoke() {
 async fn concurrent_request_follows() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(GatedFirstProvider::new());
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: temp.path().join("santi.sqlite").display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -158,7 +157,7 @@ async fn concurrent_request_follows() {
     assert_eq!(provider.requests.lock().unwrap().len(), 1);
 
     provider.release_first_request();
-    let runtime = wait_completed_count(&service, &strand.id, 2).await;
+    let runtime = Probe::new(&service).completed_count(&strand.id, 2).await;
     let requests = provider.requests.lock().unwrap();
     assert_eq!(
         requests.len(),
@@ -213,8 +212,8 @@ async fn concurrent_request_follows() {
 async fn drain_preserves_provenance() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(GatedFirstProvider::new());
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: temp.path().join("santi.sqlite").display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -260,7 +259,7 @@ async fn drain_preserves_provenance() {
     assert!(second.user_message.is_none());
 
     provider.release_first_request();
-    let runtime = wait_completed_count(&service, &strand.id, 2).await;
+    let runtime = Probe::new(&service).completed_count(&strand.id, 2).await;
 
     let second_message = runtime
         .messages

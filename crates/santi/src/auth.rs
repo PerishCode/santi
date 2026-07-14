@@ -4,18 +4,24 @@ use anyhow::{Context, Result};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-pub(crate) async fn resolve_edge_bearer(
-    token_url: Option<&str>,
-    client_id: Option<&str>,
-    username: Option<&str>,
-    password: Option<&str>,
-    api_key: Option<&str>,
-) -> Result<Option<String>> {
-    if let (Some(url), Some(cid), Some(user), Some(pw)) = (token_url, client_id, username, password)
-    {
+pub(crate) struct Credentials<'a> {
+    pub(crate) endpoint: Option<&'a str>,
+    pub(crate) identity: Option<&'a str>,
+    pub(crate) username: Option<&'a str>,
+    pub(crate) password: Option<&'a str>,
+    pub(crate) key: Option<&'a str>,
+}
+
+pub(crate) async fn resolve_edge_bearer(credentials: Credentials<'_>) -> Result<Option<String>> {
+    if let (Some(url), Some(cid), Some(user), Some(pw)) = (
+        credentials.endpoint,
+        credentials.identity,
+        credentials.username,
+        credentials.password,
+    ) {
         return Ok(Some(edge_jwt_cached(url, cid, user, pw).await?));
     }
-    Ok(api_key.map(str::to_string))
+    Ok(credentials.key.map(str::to_string))
 }
 
 fn now_secs() -> u64 {
@@ -25,9 +31,6 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-/// Return a valid edge JWT, reusing a cached one until ~60s before it expires and
-/// otherwise fetching a fresh one via client_credentials. Cache errors are
-/// non-fatal — a bad/missing cache just means a fresh fetch.
 async fn edge_jwt_cached(
     token_url: &str,
     client_id: &str,
@@ -53,8 +56,6 @@ async fn edge_jwt_cached(
     Ok(access_token)
 }
 
-/// One `grant_type=client_credentials` exchange against authentik's token
-/// endpoint. Returns `(access_token, expires_in_secs)`.
 async fn fetch_edge_jwt(
     token_url: &str,
     client_id: &str,
@@ -101,10 +102,6 @@ async fn fetch_edge_jwt(
     Ok((access_token, expires_in))
 }
 
-/// Where the edge JWT is cached. `SANTI_TOKEN_CACHE` overrides with an explicit
-/// file path; else `$HOME/.cache/santi/edge-jwt-<key>.json`; else the temp dir.
-/// `<key>` derives from (token_url, client_id, username) so distinct edges don't
-/// collide.
 fn edge_token_cache_path(
     token_url: &str,
     client_id: &str,
@@ -128,8 +125,6 @@ fn edge_token_cache_path(
     Some(dir.join(format!("edge-jwt-{key}.json")))
 }
 
-/// Encode key/value pairs as `application/x-www-form-urlencoded` (RFC 3986
-/// unreserved set kept literal, space → `+`, everything else percent-encoded).
 pub fn form_urlencode(pairs: &[(&str, &str)]) -> String {
     fn enc(input: &str) -> String {
         let mut out = String::with_capacity(input.len());

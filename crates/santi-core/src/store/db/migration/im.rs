@@ -1,9 +1,7 @@
 use rusqlite::{Connection, params};
 
-pub(super) fn migrate_v26_to_v27(conn: &Connection) -> Result<(), String> {
+pub(in crate::store::db) fn migrate_v26_to_v27(conn: &Connection) -> Result<(), String> {
     if !table_exists(conn, "im_inbox")? {
-        // The canonical schema installed after migrations creates the complete
-        // v27 table for partial/early beta databases.
         return Ok(());
     }
     add_column_if_missing(conn, "im_inbox", "turn_id", "TEXT")?;

@@ -1,10 +1,11 @@
+use santi_core::service::{self, Service};
 use std::{fs, sync::Arc};
 
 use async_trait::async_trait;
 use futures_util::stream;
 use santi_core::{
-    MaterialKind, MaterialRequest, SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, SantiService,
-    SantiServiceConfig, StrandMaterial, soul_memory_uri, strand_memory_uri,
+    MaterialKind, MaterialRequest, SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, StrandMaterial,
+    soul_memory_uri, strand_memory_uri,
 };
 use santi_provider::{ProviderClient, ProviderMetadata, ProviderStream};
 
@@ -37,7 +38,6 @@ fn renders_material_shape() {
 
     let text = harness.system_prompt().text;
 
-    // [santi] constitution (encoded default — no constitution.md written here).
     assert!(text.contains("[santi]"));
     assert!(text.contains(
         "santi is an agent runtime: a container that keeps souls and runs their strands."
@@ -46,7 +46,6 @@ fn renders_material_shape() {
     assert!(!text.contains("channel: santi"));
     assert!(text.contains("soul_id: soul_default"));
     assert!(text.contains("strand_id: "));
-    // soul_profile dissolved: no name in [santi-meta] (identity is in memory).
     assert!(!text.contains("soul_name"));
     assert!(text.contains(&format!(
         "{} will always be displayed in [santi-soul].",
@@ -95,22 +94,41 @@ fn constitution_override() {
 
     let text = harness.system_prompt().text;
 
-    // The [santi] block renders the config file, not the encoded default.
     assert!(text.contains("[santi]\nmy own physics, hot-edited"));
     assert!(!text.contains("santi is an agent runtime: a container that keeps souls"));
 }
 
 #[test]
 fn default_memory_fallback() {
-    // No soul memory written: the DEFAULT soul falls back (read-through, per
-    // turn — no write) to the encoded default soul memory in [santi-soul].
     let harness = PromptHarness::open();
 
     let text = harness.system_prompt().text;
 
     assert!(text.contains("Your memory is still empty. You are a soul"));
-    // And it is role-NEUTRAL — no product/role vocabulary baked into core.
     assert!(!text.to_lowercase().contains("secretary"));
+}
+
+#[test]
+fn projects_utf8_safely() {
+    let harness = PromptHarness::open();
+    let memory = format!("# Memory\n{}\nSOURCE_TAIL", "界".repeat(90_000));
+    harness.write_soul(&memory);
+
+    let text = harness.system_prompt().text;
+
+    assert!(text.contains("kind: soul_memory_projection"));
+    assert!(text.contains("allowance_bytes: 250000"));
+    assert!(!text.contains("SOURCE_TAIL"));
+    let source = fs::read_to_string(
+        harness
+            .runtime_root
+            .join("souls/soul_default/memory/MEMORY.md"),
+    )
+    .expect("read source memory");
+    assert_eq!(
+        source, memory,
+        "projection must never rewrite source memory"
+    );
 }
 
 #[tokio::test]
@@ -162,7 +180,7 @@ async fn im_capability_scope() {
 
 struct PromptHarness {
     _temp: tempfile::TempDir,
-    service: SantiService,
+    service: Service,
     strand_id: String,
     runtime_root: std::path::PathBuf,
 }
@@ -171,8 +189,8 @@ impl PromptHarness {
     fn open() -> Self {
         let temp = tempfile::tempdir().expect("temp dir");
         let runtime_root = temp.path().join("runtime");
-        let service = SantiService::open(
-            SantiServiceConfig {
+        let service = Service::open(
+            service::Config {
                 database_path: temp.path().join("santi.sqlite").display().to_string(),
                 runtime_root: runtime_root.display().to_string(),
                 execution_root: temp.path().join("execution").display().to_string(),
@@ -191,7 +209,6 @@ impl PromptHarness {
     }
 
     fn write_soul(&self, text: &str) {
-        // Per-soul home: the default soul's memory lives under souls/<soul_id>.
         let path = self
             .runtime_root
             .join("souls")
@@ -212,7 +229,6 @@ impl PromptHarness {
     }
 
     fn write_constitution(&self, text: &str) {
-        // The default constitution config path: <runtime_root>/constitution.md.
         fs::create_dir_all(&self.runtime_root).expect("create runtime dir");
         fs::write(self.runtime_root.join("constitution.md"), text).expect("write constitution");
     }

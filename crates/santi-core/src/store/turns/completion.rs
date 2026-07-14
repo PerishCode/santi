@@ -3,66 +3,42 @@ use serde_json::json;
 
 use super::{provider_incident_key, runtime_incident_key};
 use crate::store::{
-    SantiStore,
-    db::{complete_turn_in_conn, turn_by_id},
-    errors::resolve_in_conn,
-    execution_budget_incident_key,
-    im::enqueue_turn_in,
+    Reply, SantiStore, db::Database, execution_budget_incident_key, im::enqueue_turn_in,
 };
 use crate::{IM_LABEL_PREFIX, ImDeliveryMode, StrandMessage, Turn, timestamp_now};
 
+pub struct Completion<'a> {
+    pub turn: &'a str,
+    pub sequence: Option<i64>,
+    pub provider: &'a str,
+    pub model: &'a str,
+    pub response: Option<String>,
+}
+
 impl SantiStore {
-    pub fn complete_turn(
-        &self,
-        turn_id: &str,
-        assistant_message_seq: Option<i64>,
-        provider: &str,
-        model: &str,
-        provider_response_id: Option<String>,
-    ) -> Result<Turn, String> {
-        self.complete_inner(
-            turn_id,
-            assistant_message_seq,
-            provider,
-            model,
-            provider_response_id,
-            None,
-        )
+    pub fn complete_turn(&self, completion: Completion<'_>) -> Result<Turn, String> {
+        self.complete_inner(completion, None)
     }
 
     pub(crate) fn complete_turn_reply(
         &self,
-        turn_id: &str,
-        assistant_message: Option<&StrandMessage>,
-        provider: &str,
-        model: &str,
-        provider_response_id: Option<String>,
+        completion: Completion<'_>,
+        message: Option<&StrandMessage>,
     ) -> Result<Turn, String> {
-        self.complete_inner(
-            turn_id,
-            assistant_message.map(|message| message.relation.strand_seq),
-            provider,
-            model,
-            provider_response_id,
-            assistant_message,
-        )
+        self.complete_inner(completion, message)
     }
 
     fn complete_inner(
         &self,
-        turn_id: &str,
-        assistant_message_seq: Option<i64>,
-        provider: &str,
-        model: &str,
-        provider_response_id: Option<String>,
-        assistant_message: Option<&StrandMessage>,
+        completion: Completion<'_>,
+        message: Option<&StrandMessage>,
     ) -> Result<Turn, String> {
         let mut conn = self.conn.lock().unwrap();
         let now = timestamp_now();
-        let provider_state = provider_response_id.as_ref().map(|response_id| {
+        let provider_state = completion.response.as_ref().map(|response| {
             json!({
-                "provider": provider,
-                "opaque": { "response_id": response_id },
+                "provider": completion.provider,
+                "opaque": { "response_id": response },
                 "schema_version": "santi-v1"
             })
         });
@@ -80,7 +56,7 @@ impl SantiStore {
                 JOIN strands AS strand ON strand.id = turn.strand_id
                 WHERE turn.id = ?1
                 "#,
-                params![turn_id],
+                params![completion.turn],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .map_err(|error| error.to_string())?;
@@ -95,7 +71,7 @@ impl SantiStore {
                 finished_at = ?2
             WHERE id = ?1
             "#,
-            params![turn_id, now],
+            params![completion.turn, now],
         )
         .map_err(|error| error.to_string())?;
         tx.execute(
@@ -106,58 +82,59 @@ impl SantiStore {
                 updated_at = ?4
             WHERE id = (SELECT strand_id FROM turns WHERE id = ?1)
             "#,
-            params![turn_id, assistant_message_seq, provider_state, now],
+            params![completion.turn, completion.sequence, provider_state, now],
         )
         .map_err(|error| error.to_string())?;
-        complete_turn_in_conn(&tx, turn_id, &now)?;
-        resolve_in_conn(
-            &tx,
+        Database::new(&tx).complete_turn(completion.turn, &now)?;
+        Database::new(&tx).resolve_incident(
             &provider_incident_key(&strand_id),
             "provider.turn_succeeded",
             json!({
-                "turn_id": turn_id,
-                "provider": provider,
-                "model": model,
-                "provider_response_id": provider_response_id,
+                "turn_id": completion.turn,
+                "provider": completion.provider,
+                "model": completion.model,
+                "provider_response_id": completion.response,
             }),
         )?;
-        resolve_in_conn(
-            &tx,
+        Database::new(&tx).resolve_incident(
             &runtime_incident_key(&strand_id),
             "runtime.turn_succeeded",
             json!({
-                "turn_id": turn_id,
-                "provider": provider,
-                "model": model,
+                "turn_id": completion.turn,
+                "provider": completion.provider,
+                "model": completion.model,
             }),
         )?;
-        resolve_in_conn(
-            &tx,
+        Database::new(&tx).resolve_incident(
             &execution_budget_incident_key(&strand_id),
             "execution_budget.turn_succeeded",
             json!({
-                "turn_id": turn_id,
-                "provider": provider,
-                "model": model,
+                "turn_id": completion.turn,
+                "provider": completion.provider,
+                "model": completion.model,
             }),
         )?;
-        if let (Some(_), Some(message)) = (
+        if let (Some(_), Some(reply)) = (
             external_label
                 .as_deref()
                 .and_then(|label| label.strip_prefix(IM_LABEL_PREFIX)),
-            assistant_message.filter(|message| !message.content_text.trim().is_empty()),
+            message.filter(|message| !message.content_text.trim().is_empty()),
         ) {
             enqueue_turn_in(
                 &tx,
-                &strand_id,
-                turn_id,
-                Some(&message.message.id),
-                &message.content_text,
-                ImDeliveryMode::Automatic,
+                Reply {
+                    strand: &strand_id,
+                    turn: completion.turn,
+                    message: Some(&reply.message.id),
+                    content: &reply.content_text,
+                    mode: ImDeliveryMode::Automatic,
+                },
                 &now,
             )?;
         }
         tx.commit().map_err(|error| error.to_string())?;
-        turn_by_id(&conn, turn_id)?.ok_or_else(|| "completed turn missing".to_string())
+        Database::new(&conn)
+            .turn_by_id(completion.turn)?
+            .ok_or_else(|| "completed turn missing".to_string())
     }
 }

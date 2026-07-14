@@ -1,18 +1,15 @@
-use rusqlite::{Connection, params};
+use rusqlite::params;
 
 use crate::{ThinkingSpan, ToolCall, ToolResult, Turn};
 
-use super::{
-    collect_rows, map_thinking_span_row, map_tool_call_row, map_tool_result_row, map_turn_row,
-};
+use super::{Database, Decode, collect_rows};
 
-pub(in crate::store) fn turns_for_strand(
-    conn: &Connection,
-    strand_id: &str,
-) -> Result<Vec<Turn>, String> {
-    let mut stmt = conn
-        .prepare(
-            r#"
+impl Database<'_> {
+    pub(in crate::store) fn turns_for_strand(&self, strand_id: &str) -> Result<Vec<Turn>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
             SELECT id, strand_id, trigger_type, trigger_ref,
                    base_strand_seq, end_strand_seq, status, error_text,
                    created_at, updated_at, finished_at
@@ -20,57 +17,60 @@ pub(in crate::store) fn turns_for_strand(
             WHERE strand_id = ?1
             ORDER BY created_at ASC
             "#,
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map(params![strand_id], map_turn_row)
-        .map_err(|error| error.to_string())?;
-    collect_rows(rows)
-}
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map(params![strand_id], Turn::decode)
+            .map_err(|error| error.to_string())?;
+        collect_rows(rows)
+    }
 
-pub(in crate::store) fn soul_tool_calls(
-    conn: &Connection,
-    strand_id: &str,
-) -> Result<Vec<ToolCall>, String> {
-    let mut stmt = conn
-        .prepare(
-            r#"
+    pub(in crate::store) fn soul_tool_calls(
+        &self,
+        strand_id: &str,
+    ) -> Result<Vec<ToolCall>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
             SELECT c.id, c.turn_id, c.tool_name, c.arguments, c.created_at
             FROM r_strand_entries e
             JOIN tool_calls c ON c.id = e.target_id
             WHERE e.strand_id = ?1 AND e.target_type = 'tool_call'
             ORDER BY e.strand_seq ASC
             "#,
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map(params![strand_id], map_tool_call_row)
-        .map_err(|error| error.to_string())?;
-    collect_rows(rows)
-}
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map(params![strand_id], ToolCall::decode)
+            .map_err(|error| error.to_string())?;
+        collect_rows(rows)
+    }
 
-pub(in crate::store) fn tool_calls_for_turn(
-    conn: &Connection,
-    turn_id: &str,
-) -> Result<Vec<ToolCall>, String> {
-    let mut stmt = conn
+    pub(in crate::store) fn tool_calls_for_turn(
+        &self,
+        turn_id: &str,
+    ) -> Result<Vec<ToolCall>, String> {
+        let mut stmt = self
+            .conn
         .prepare(
             "SELECT id, turn_id, tool_name, arguments, created_at FROM tool_calls WHERE turn_id = ?1 ORDER BY created_at ASC",
         )
         .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map(params![turn_id], map_tool_call_row)
-        .map_err(|error| error.to_string())?;
-    collect_rows(rows)
-}
+        let rows = stmt
+            .query_map(params![turn_id], ToolCall::decode)
+            .map_err(|error| error.to_string())?;
+        collect_rows(rows)
+    }
 
-pub(in crate::store) fn soul_thinking_spans(
-    conn: &Connection,
-    strand_id: &str,
-) -> Result<Vec<ThinkingSpan>, String> {
-    let mut stmt = conn
-        .prepare(
-            r#"
+    pub(in crate::store) fn soul_thinking_spans(
+        &self,
+        strand_id: &str,
+    ) -> Result<Vec<ThinkingSpan>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
             SELECT s.id, s.turn_id, s.provider_response_id, s.state, s.summary,
                    s.completion_reason, s.error_text, s.created_at, s.updated_at,
                    s.finished_at
@@ -79,73 +79,77 @@ pub(in crate::store) fn soul_thinking_spans(
             WHERE e.strand_id = ?1 AND e.target_type = 'thinking'
             ORDER BY e.strand_seq ASC
             "#,
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map(params![strand_id], map_thinking_span_row)
-        .map_err(|error| error.to_string())?;
-    collect_rows(rows)
-}
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map(params![strand_id], ThinkingSpan::decode)
+            .map_err(|error| error.to_string())?;
+        collect_rows(rows)
+    }
 
-pub(in crate::store) fn thinking_spans_for_turn(
-    conn: &Connection,
-    turn_id: &str,
-) -> Result<Vec<ThinkingSpan>, String> {
-    let mut stmt = conn
-        .prepare(
-            r#"
+    pub(in crate::store) fn thinking_spans_for_turn(
+        &self,
+        turn_id: &str,
+    ) -> Result<Vec<ThinkingSpan>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
             SELECT id, turn_id, provider_response_id, state, summary, completion_reason,
                    error_text, created_at, updated_at, finished_at
             FROM thinking_spans
             WHERE turn_id = ?1
             ORDER BY created_at ASC
             "#,
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map(params![turn_id], map_thinking_span_row)
-        .map_err(|error| error.to_string())?;
-    collect_rows(rows)
-}
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map(params![turn_id], ThinkingSpan::decode)
+            .map_err(|error| error.to_string())?;
+        collect_rows(rows)
+    }
 
-pub(in crate::store) fn soul_tool_results(
-    conn: &Connection,
-    strand_id: &str,
-) -> Result<Vec<ToolResult>, String> {
-    let mut stmt = conn
-        .prepare(
-            r#"
+    pub(in crate::store) fn soul_tool_results(
+        &self,
+        strand_id: &str,
+    ) -> Result<Vec<ToolResult>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
             SELECT r.id, r.tool_call_id, r.output, r.error_text, r.created_at
             FROM r_strand_entries e
             JOIN tool_results r ON r.id = e.target_id
             WHERE e.strand_id = ?1 AND e.target_type = 'tool_result'
             ORDER BY e.strand_seq ASC
             "#,
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map(params![strand_id], map_tool_result_row)
-        .map_err(|error| error.to_string())?;
-    collect_rows(rows)
-}
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map(params![strand_id], ToolResult::decode)
+            .map_err(|error| error.to_string())?;
+        collect_rows(rows)
+    }
 
-pub(in crate::store) fn tool_results_for_turn(
-    conn: &Connection,
-    turn_id: &str,
-) -> Result<Vec<ToolResult>, String> {
-    let mut stmt = conn
-        .prepare(
-            r#"
+    pub(in crate::store) fn tool_results_for_turn(
+        &self,
+        turn_id: &str,
+    ) -> Result<Vec<ToolResult>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
             SELECT r.id, r.tool_call_id, r.output, r.error_text, r.created_at
             FROM tool_results r
             JOIN tool_calls c ON c.id = r.tool_call_id
             WHERE c.turn_id = ?1
             ORDER BY r.created_at ASC
             "#,
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map(params![turn_id], map_tool_result_row)
-        .map_err(|error| error.to_string())?;
-    collect_rows(rows)
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map(params![turn_id], ToolResult::decode)
+            .map_err(|error| error.to_string())?;
+        collect_rows(rows)
+    }
 }

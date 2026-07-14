@@ -13,7 +13,7 @@ const INSTALLED_MANIFEST: &str = "installed-package.json";
 const PACKAGE_FILE: &str = "santi.deb";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) struct PackageArtifact {
+pub(super) struct Artifact {
     pub package: String,
     pub version: String,
     pub sha256: String,
@@ -21,33 +21,33 @@ pub(super) struct PackageArtifact {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct PackageIdentity {
+pub(super) struct Identity {
     pub package: String,
     pub version: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct InstalledPackageManifest {
+struct Manifest {
     protocol_version: u32,
-    artifact: PackageArtifact,
+    artifact: Artifact,
 }
 
-pub(super) trait PackageProbe {
-    fn inspect_deb(&self, path: &Path) -> Result<PackageIdentity, String>;
-    fn installed(&self) -> Result<PackageIdentity, String>;
+pub(super) trait Probe {
+    fn inspect_deb(&self, path: &Path) -> Result<Identity, String>;
+    fn installed(&self) -> Result<Identity, String>;
 }
 
-pub(super) struct DpkgProbe;
+pub(super) struct Dpkg;
 
-impl PackageProbe for DpkgProbe {
-    fn inspect_deb(&self, path: &Path) -> Result<PackageIdentity, String> {
-        Ok(PackageIdentity {
+impl Probe for Dpkg {
+    fn inspect_deb(&self, path: &Path) -> Result<Identity, String> {
+        Ok(Identity {
             package: deb_field(path, "Package")?,
             version: deb_field(path, "Version")?,
         })
     }
 
-    fn installed(&self) -> Result<PackageIdentity, String> {
+    fn installed(&self) -> Result<Identity, String> {
         let output = Command::new("dpkg-query")
             .args(["-W", "-f=${Package}\t${Version}", PACKAGE_NAME])
             .output()
@@ -65,7 +65,7 @@ impl PackageProbe for DpkgProbe {
             .trim()
             .split_once('\t')
             .ok_or_else(|| "installed package identity has an invalid shape".to_string())?;
-        validate_identity(PackageIdentity {
+        validate_identity(Identity {
             package: package.to_string(),
             version: version.to_string(),
         })
@@ -98,22 +98,18 @@ fn deb_field(path: &Path, field: &str) -> Result<String, String> {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct ArtifactStore {
+pub(super) struct Store {
     root: PathBuf,
 }
 
-impl ArtifactStore {
+impl Store {
     pub(super) fn new(runtime_root: &Path) -> Self {
         Self {
             root: runtime_root.join("upgrade"),
         }
     }
 
-    pub(super) fn stage(
-        &self,
-        source: &Path,
-        probe: &impl PackageProbe,
-    ) -> Result<PackageArtifact, String> {
+    pub(super) fn stage(&self, source: &Path, probe: &impl Probe) -> Result<Artifact, String> {
         if !source.is_file() {
             return Err(format!(
                 "package artifact is not a readable file: {}",
@@ -135,8 +131,8 @@ impl ArtifactStore {
         &self,
         source: &Path,
         temporary: &Path,
-        probe: &impl PackageProbe,
-    ) -> Result<PackageArtifact, String> {
+        probe: &impl Probe,
+    ) -> Result<Artifact, String> {
         let mut input = File::open(source)
             .map_err(|error| format!("open package artifact {}: {error}", source.display()))?;
         let mut output = OpenOptions::new()
@@ -166,7 +162,7 @@ impl ArtifactStore {
         drop(output);
 
         let identity = validate_identity(probe.inspect_deb(temporary)?)?;
-        let artifact = PackageArtifact {
+        let artifact = Artifact {
             package: identity.package,
             version: identity.version,
             sha256: hex::encode(digest.finalize()),
@@ -197,8 +193,8 @@ impl ArtifactStore {
     pub(super) fn resolve_previous(
         &self,
         supplied: Option<&Path>,
-        probe: &impl PackageProbe,
-    ) -> Result<PackageArtifact, String> {
+        probe: &impl Probe,
+    ) -> Result<Artifact, String> {
         let installed = validate_identity(probe.installed()?)?;
         let durable = self.load_installed(probe)?;
         let supplied = supplied.map(|path| self.stage(path, probe)).transpose()?;
@@ -230,16 +226,13 @@ impl ArtifactStore {
         }
     }
 
-    pub(super) fn load_installed(
-        &self,
-        probe: &impl PackageProbe,
-    ) -> Result<Option<PackageArtifact>, String> {
+    pub(super) fn load_installed(&self, probe: &impl Probe) -> Result<Option<Artifact>, String> {
         let raw = match fs::read(self.installed_manifest_path()) {
             Ok(raw) => raw,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(format!("read installed package manifest: {error}")),
         };
-        let manifest: InstalledPackageManifest = serde_json::from_slice(&raw)
+        let manifest: Manifest = serde_json::from_slice(&raw)
             .map_err(|error| format!("decode installed package manifest: {error}"))?;
         if manifest.protocol_version != ARTIFACT_PROTOCOL_VERSION {
             return Err(format!(
@@ -253,13 +246,13 @@ impl ArtifactStore {
 
     pub(super) fn commit_installed(
         &self,
-        artifact: &PackageArtifact,
-        probe: &impl PackageProbe,
+        artifact: &Artifact,
+        probe: &impl Probe,
     ) -> Result<(), String> {
         self.verify(artifact, probe)?;
         let installed = validate_identity(probe.installed()?)?;
         require_matches_installed(artifact, &installed, "retained package")?;
-        let manifest = InstalledPackageManifest {
+        let manifest = Manifest {
             protocol_version: ARTIFACT_PROTOCOL_VERSION,
             artifact: artifact.clone(),
         };
@@ -268,8 +261,8 @@ impl ArtifactStore {
 
     pub(super) fn verify(
         &self,
-        artifact: &PackageArtifact,
-        probe: &impl PackageProbe,
+        artifact: &Artifact,
+        probe: &impl Probe,
     ) -> Result<PathBuf, String> {
         validate_artifact_shape(artifact)?;
         let path = self.path_for(artifact)?;
@@ -289,7 +282,7 @@ impl ArtifactStore {
                 metadata.len()
             ));
         }
-        let actual = sha256_file(&path)?;
+        let actual = self.digest(&path)?;
         if actual != artifact.sha256 {
             return Err(format!(
                 "retained package checksum mismatch: expected={} actual={actual}",
@@ -306,7 +299,7 @@ impl ArtifactStore {
         Ok(path)
     }
 
-    pub(super) fn prune(&self, keep: &[&PackageArtifact]) -> Result<(), String> {
+    pub(super) fn prune(&self, keep: &[&Artifact]) -> Result<(), String> {
         let packages = self.packages_dir();
         let entries = match fs::read_dir(&packages) {
             Ok(entries) => entries,
@@ -330,7 +323,24 @@ impl ArtifactStore {
         Ok(())
     }
 
-    pub(super) fn path_for(&self, artifact: &PackageArtifact) -> Result<PathBuf, String> {
+    fn digest(&self, path: &Path) -> Result<String, String> {
+        let mut file = File::open(path)
+            .map_err(|error| format!("open retained package {}: {error}", path.display()))?;
+        let mut digest = Sha256::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let read = file
+                .read(&mut buffer)
+                .map_err(|error| format!("read retained package {}: {error}", path.display()))?;
+            if read == 0 {
+                break;
+            }
+            digest.update(&buffer[..read]);
+        }
+        Ok(hex::encode(digest.finalize()))
+    }
+
+    pub(super) fn path_for(&self, artifact: &Artifact) -> Result<PathBuf, String> {
         if !is_sha256(&artifact.sha256) {
             return Err("package artifact sha256 is invalid".to_string());
         }
@@ -411,7 +421,7 @@ fn sync_directory(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_identity(identity: PackageIdentity) -> Result<PackageIdentity, String> {
+fn validate_identity(identity: Identity) -> Result<Identity, String> {
     if identity.package != PACKAGE_NAME {
         return Err(format!(
             "package identity mismatch: expected={PACKAGE_NAME} actual={}",
@@ -424,8 +434,8 @@ fn validate_identity(identity: PackageIdentity) -> Result<PackageIdentity, Strin
     Ok(identity)
 }
 
-fn validate_artifact_shape(artifact: &PackageArtifact) -> Result<(), String> {
-    validate_identity(PackageIdentity {
+fn validate_artifact_shape(artifact: &Artifact) -> Result<(), String> {
+    validate_identity(Identity {
         package: artifact.package.clone(),
         version: artifact.version.clone(),
     })?;
@@ -436,8 +446,8 @@ fn validate_artifact_shape(artifact: &PackageArtifact) -> Result<(), String> {
 }
 
 fn require_matches_installed(
-    artifact: &PackageArtifact,
-    installed: &PackageIdentity,
+    artifact: &Artifact,
+    installed: &Identity,
     label: &str,
 ) -> Result<(), String> {
     if artifact.package == installed.package && artifact.version == installed.version {
@@ -448,23 +458,6 @@ fn require_matches_installed(
             installed.package, installed.version, artifact.package, artifact.version
         ))
     }
-}
-
-fn sha256_file(path: &Path) -> Result<String, String> {
-    let mut file = File::open(path)
-        .map_err(|error| format!("open retained package {}: {error}", path.display()))?;
-    let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let read = file
-            .read(&mut buffer)
-            .map_err(|error| format!("read retained package {}: {error}", path.display()))?;
-        if read == 0 {
-            break;
-        }
-        digest.update(&buffer[..read]);
-    }
-    Ok(hex::encode(digest.finalize()))
 }
 
 fn is_sha256(value: &str) -> bool {

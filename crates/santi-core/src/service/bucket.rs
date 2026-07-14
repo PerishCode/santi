@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 
-use crate::{LocalObjectStore, ObjectBucket, ObjectMeta, ObjectPayload, ObjectUri, SantiService};
+use crate::{LocalObjectStore, ObjectBucket, ObjectMeta, ObjectPayload, ObjectUri};
 
-impl SantiService {
+use super::Service;
+
+impl Service {
     pub fn renderable_ref(&self, value: &str) -> Result<String, String> {
         if !value.starts_with("santi://") {
             return Ok(value.to_string());

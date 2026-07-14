@@ -1,23 +1,237 @@
 use futures_util::StreamExt;
-use santi_provider::{ProviderEvent, ProviderRequest};
+use santi_provider::{ProviderEvent, ProviderFunctionCall, ProviderRequest, ProviderStream};
 
 use crate::assembly::input::provider_input;
-use crate::context_budget::estimate_provider_request;
-use crate::service_prompt::provider_tools;
+use crate::context::budget::estimate_provider_request;
+use crate::service::tools::provider_tools;
 use crate::{
     SantiStreamPayload, StrandMessage, ThinkingCompletionReason, ThinkingSpan, TurnActivityState,
 };
 
 use super::super::{
-    SantiService,
-    runtime_notice::ProviderInputObservation,
-    text_delta::TextDeltaUpdate,
-    timing::{ProviderTurnTiming, provider_event_name},
+    Service, notice::Observation, text::delta, timing, timing::provider_event_name,
 };
-use super::budget::ToolBatchAdmission;
-use super::failure::{ProviderFailureStage, ProviderTurnFailure, RuntimeTurnFailureOperation};
+use super::budget::Verdict;
+use super::failure::{Admission, Failure, Metadata, Operation, Persistence, Stage};
 
-impl SantiService {
+struct Output {
+    calls: Vec<ProviderFunctionCall>,
+    completed_response_id: Option<String>,
+    active_provider_response_id: Option<String>,
+    assistant_text: String,
+}
+
+struct Driver<'a, 'turn> {
+    service: &'a Service,
+    strand_id: &'a str,
+    turn_id: &'a str,
+    number: usize,
+    provider_family: &'a str,
+    request_model: &'a str,
+    assistant_text: &'a mut String,
+    timing: &'a mut timing::Turn<'turn>,
+    calls: Vec<ProviderFunctionCall>,
+    completed_response_id: Option<String>,
+    active_provider_response_id: Option<String>,
+    current_thinking_span: Option<ThinkingSpan>,
+    summary_thinking_span: Option<ThinkingSpan>,
+    reasoning_summary: String,
+    round_assistant_text: String,
+    saw_sse_event: bool,
+}
+
+impl Driver<'_, '_> {
+    async fn consume(mut self, mut stream: ProviderStream) -> Result<Output, Failure> {
+        while let Some(event) = stream.next().await {
+            let Some(event) = self.receive_event(event)? else {
+                continue;
+            };
+            self.record_first_event(&event);
+            if self.handle_event(event)? {
+                break;
+            }
+        }
+        Ok(Output {
+            calls: self.calls,
+            completed_response_id: self.completed_response_id,
+            active_provider_response_id: self.active_provider_response_id,
+            assistant_text: self.round_assistant_text,
+        })
+    }
+
+    fn receive_event(
+        &mut self,
+        event: Result<ProviderEvent, String>,
+    ) -> Result<Option<ProviderEvent>, Failure> {
+        match event {
+            Ok(ProviderEvent::StreamTrace(trace)) => {
+                self.timing.provider_trace(self.number, trace);
+                Ok(None)
+            }
+            Ok(event) => Ok(Some(event)),
+            Err(error) => {
+                self.timing.failed(self.number, "sse_event", &error);
+                let result = self.service.fail_current_thinking_span(
+                    self.strand_id,
+                    &mut self.current_thinking_span,
+                    error.clone(),
+                );
+                self.runtime(Operation::Persistence(Persistence::Thinking), result)?;
+                Err(self.provider_failure(error, Stage::Stream))
+            }
+        }
+    }
+
+    fn record_first_event(&mut self, event: &ProviderEvent) {
+        if !self.saw_sse_event {
+            self.saw_sse_event = true;
+            self.timing
+                .first_sse_event(self.number, provider_event_name(event));
+        }
+    }
+
+    fn handle_event(&mut self, event: ProviderEvent) -> Result<bool, Failure> {
+        match event {
+            ProviderEvent::StreamTrace(_) => Ok(false),
+            ProviderEvent::ResponseStarted {
+                provider_response_id,
+            }
+            | ProviderEvent::ResponseInProgress {
+                provider_response_id,
+            } => self.response_progress(provider_response_id),
+            ProviderEvent::ReasoningSummaryDelta(delta) => {
+                self.reasoning_summary.push_str(&delta);
+                self.persist_reasoning_summary()?;
+                Ok(false)
+            }
+            ProviderEvent::ReasoningSummaryDone(summary) => {
+                self.reasoning_summary = summary;
+                self.persist_reasoning_summary()?;
+                Ok(false)
+            }
+            ProviderEvent::TextDelta(delta) => {
+                self.text_delta(delta)?;
+                Ok(false)
+            }
+            ProviderEvent::FunctionCallRequested(call) => {
+                self.function_call_requested(call)?;
+                Ok(false)
+            }
+            ProviderEvent::Completed {
+                provider_response_id,
+            } => self.complete(provider_response_id),
+            ProviderEvent::Failed(error) => Err(self.failed(error)),
+        }
+    }
+
+    fn response_progress(&mut self, provider_response_id: Option<String>) -> Result<bool, Failure> {
+        self.active_provider_response_id = provider_response_id.clone();
+        let result = self
+            .service
+            .ensure_thinking_span(crate::service::thinking::Progress {
+                strand: self.strand_id,
+                turn: self.turn_id,
+                current: &mut self.current_thinking_span,
+                summary: &mut self.summary_thinking_span,
+                response: provider_response_id.clone(),
+            });
+        self.runtime(Operation::Persistence(Persistence::Thinking), result)?;
+        self.service.publish_turn_activity(
+            self.strand_id,
+            self.turn_id,
+            TurnActivityState::Thinking,
+            provider_response_id,
+        );
+        Ok(false)
+    }
+
+    fn persist_reasoning_summary(&mut self) -> Result<(), Failure> {
+        let result = self.service.update_thinking_span_summary(
+            self.strand_id,
+            &mut self.summary_thinking_span,
+            self.reasoning_summary.clone(),
+        );
+        self.runtime(Operation::Persistence(Persistence::Thinking), result)
+    }
+
+    fn text_delta(&mut self, delta: String) -> Result<(), Failure> {
+        let update = delta::Update {
+            strand_id: self.strand_id,
+            turn_id: self.turn_id,
+            assistant_text: self.assistant_text,
+            round_assistant_text: &mut self.round_assistant_text,
+            timing: self.timing,
+            round: self.number,
+            current_thinking_span: &mut self.current_thinking_span,
+            active_provider_response_id: &self.active_provider_response_id,
+        };
+        let result = self.service.handle_text_delta(delta, update);
+        self.runtime(Operation::Persistence(Persistence::Text), result)
+    }
+
+    fn function_call_requested(&mut self, call: ProviderFunctionCall) -> Result<(), Failure> {
+        self.timing.function_call_requested(self.number, &call.name);
+        let result = self.service.complete_current_thinking_span(
+            self.strand_id,
+            &mut self.current_thinking_span,
+            ThinkingCompletionReason::ToolCallRequested,
+        );
+        self.runtime(Operation::Persistence(Persistence::Thinking), result)?;
+        self.service.publish_turn_activity(
+            self.strand_id,
+            self.turn_id,
+            TurnActivityState::CallingTool,
+            self.active_provider_response_id.clone(),
+        );
+        self.calls.push(call);
+        Ok(())
+    }
+
+    fn complete(&mut self, provider_response_id: Option<String>) -> Result<bool, Failure> {
+        self.timing.completed(self.number);
+        self.active_provider_response_id = provider_response_id.clone();
+        let result = self.service.complete_current_thinking_span(
+            self.strand_id,
+            &mut self.current_thinking_span,
+            ThinkingCompletionReason::ProviderCompleted,
+        );
+        self.runtime(Operation::Persistence(Persistence::Thinking), result)?;
+        self.completed_response_id = provider_response_id;
+        Ok(true)
+    }
+
+    fn failed(&mut self, error: String) -> Failure {
+        self.timing.failed(self.number, "provider_response", &error);
+        let result = self.service.fail_current_thinking_span(
+            self.strand_id,
+            &mut self.current_thinking_span,
+            error.clone(),
+        );
+        match self.runtime(Operation::Persistence(Persistence::Thinking), result) {
+            Ok(()) => self.provider_failure(error, Stage::Response),
+            Err(failure) => failure,
+        }
+    }
+
+    fn runtime<T>(&self, operation: Operation, result: Result<T, String>) -> Result<T, Failure> {
+        result.map_err(|error| Failure::runtime(operation, error, self.assistant_text.as_str()))
+    }
+
+    fn provider_failure(&self, error: String, stage: Stage) -> Failure {
+        Failure::provider(
+            error,
+            self.assistant_text,
+            Metadata {
+                provider: self.provider_family.to_string(),
+                model: self.request_model.to_string(),
+                stage,
+                round: self.number,
+            },
+        )
+    }
+}
+
+impl Service {
     pub(super) async fn complete_provider_turn(&self, strand_id: String, turn_id: String) {
         match self.run_provider_turn(&strand_id, &turn_id).await {
             Err(failure) => {
@@ -33,17 +247,10 @@ impl SantiService {
             }
         }
         self.drain_runtime_notices(&turn_id);
-        // Re-check: a turn is one thread "catching up"; requests that arrived
-        // during it (seq past this turn's start) make the strand behind
-        // again → drive the next turn now.
         self.poke(&strand_id, "strand_send", None, "turn_completion_poke");
+        self.resume_after_memory_maintenance(&strand_id);
     }
 
-    /// Finalize a completed provider turn. Speech is optional (N6): an empty
-    /// turn (no per-round text ever appended) is a valid silent completion, not
-    /// a failure. `last_soul_message` is the final per-round entry `run_provider_turn`
-    /// appended (if any) — already the operator-visible truth, so completion just
-    /// marks the turn done, it does not write anything new.
     fn finalize_turn(
         &self,
         strand_id: &str,
@@ -62,11 +269,16 @@ impl SantiService {
         }
         let metadata = self.provider.metadata();
         match self.store.complete_turn_reply(
-            turn_id,
+            crate::Completion {
+                turn: turn_id,
+                sequence: last_soul_message
+                    .as_ref()
+                    .map(|message| message.relation.strand_seq),
+                provider: &metadata.provider,
+                model: &metadata.model,
+                response: provider_response_id,
+            },
             last_soul_message.as_ref(),
-            &metadata.provider,
-            &metadata.model,
-            provider_response_id,
         ) {
             Ok(_) => {
                 self.dispatch_error_events();
@@ -80,11 +292,7 @@ impl SantiService {
             Err(error) => self.fail_background_turn(
                 strand_id,
                 turn_id,
-                ProviderTurnFailure::runtime(
-                    RuntimeTurnFailureOperation::CompletionPersistence,
-                    error,
-                    "",
-                ),
+                Failure::runtime(Operation::Persistence(Persistence::Completion), error, ""),
             ),
         }
     }
@@ -93,21 +301,17 @@ impl SantiService {
         &self,
         strand_id: &str,
         turn_id: &str,
-    ) -> Result<(Option<StrandMessage>, Option<String>), ProviderTurnFailure> {
+    ) -> Result<(Option<StrandMessage>, Option<String>), Failure> {
         let mut assistant_text = String::new();
         let mut last_soul_message: Option<StrandMessage> = None;
-        let mut timing = ProviderTurnTiming::new(turn_id);
+        let mut timing = timing::Turn::new(turn_id);
         let mut round = 0;
         macro_rules! provider_try {
             ($operation:expr, $expr:expr) => {
                 match $expr {
                     Ok(value) => value,
                     Err(error) => {
-                        return Err(ProviderTurnFailure::runtime(
-                            $operation,
-                            error,
-                            &assistant_text,
-                        ));
+                        return Err(Failure::runtime($operation, error, &assistant_text));
                     }
                 }
             };
@@ -116,28 +320,19 @@ impl SantiService {
         let final_response_id = loop {
             let next_round = round + 1;
             if let Some(error) = provider_try!(
-                RuntimeTurnFailureOperation::ExecutionBudgetAdmission,
+                Operation::Admission(Admission::Execution),
                 self.admit_execution_round(strand_id, turn_id, next_round)
             ) {
-                return Err(ProviderTurnFailure::execution_budget(
-                    error,
-                    &assistant_text,
-                ));
+                return Err(Failure::execution_budget(error, &assistant_text));
             }
             round = next_round;
-            // The timeline is the single source of truth: each round re-derives
-            // input from it, including any tool calls/results just persisted by
-            // the previous round (no function_call_outputs side-channel).
-            let input = provider_try!(
-                RuntimeTurnFailureOperation::AssemblyInput,
-                provider_input(&self.store, strand_id)
-            );
+            let input = provider_try!(Operation::Assembly, provider_input(&self.store, strand_id));
             let metadata = self.provider.metadata();
             let provider_family = metadata.provider.to_string();
             let request = ProviderRequest {
                 model: metadata.model,
                 instructions: Some(provider_try!(
-                    RuntimeTurnFailureOperation::SystemPrompt,
+                    Operation::Prompt,
                     self.system_prompt_text(strand_id)
                 )),
                 input,
@@ -146,18 +341,18 @@ impl SantiService {
             };
             let estimate = estimate_provider_request(&request);
             if let Some(error) = provider_try!(
-                RuntimeTurnFailureOperation::ContextAdmission,
+                Operation::Admission(Admission::Context),
                 self.open_over_budget_incident(strand_id, turn_id, &request, &estimate)
             ) {
                 timing.failed(round, "context_budget", &error.to_string());
-                return Err(ProviderTurnFailure::context_budget(error));
+                return Err(Failure::context_budget(error));
             }
             timing.request_built(
                 round,
                 request.input.len(),
                 request.instructions.as_ref().map_or(0, |text| text.len()),
             );
-            self.observe_provider_input(ProviderInputObservation {
+            self.observe_provider_input(Observation {
                 strand_id,
                 turn_id,
                 round,
@@ -168,190 +363,54 @@ impl SantiService {
             });
             self.publish_turn_activity(strand_id, turn_id, TurnActivityState::Requesting, None);
             let request_model = request.model.clone();
-            let mut stream = match self.provider.stream_response(request).await {
+            let stream = match self.provider.stream_response(request).await {
                 Ok(stream) => {
                     timing.http_response_started(round);
                     stream
                 }
                 Err(error) => {
                     timing.failed(round, "http_response", &error);
-                    return Err(ProviderTurnFailure::provider(
+                    return Err(Failure::provider(
                         error,
                         &assistant_text,
-                        &provider_family,
-                        &request_model,
-                        ProviderFailureStage::Request,
-                        round,
+                        Metadata {
+                            provider: provider_family.clone(),
+                            model: request_model.clone(),
+                            stage: Stage::Request,
+                            round,
+                        },
                     ));
                 }
             };
-            let mut calls = Vec::new();
-            let mut completed_response_id = None;
-            let mut active_provider_response_id = None;
-            let mut current_thinking_span: Option<ThinkingSpan> = None;
-            let mut summary_thinking_span: Option<ThinkingSpan> = None;
-            let mut reasoning_summary = String::new();
-            let mut round_assistant_text = String::new();
-            let mut saw_sse_event = false;
-
-            while let Some(event) = stream.next().await {
-                let event = match event {
-                    Ok(event) => event,
-                    Err(error) => {
-                        timing.failed(round, "sse_event", &error);
-                        provider_try!(
-                            RuntimeTurnFailureOperation::ThinkingPersistence,
-                            self.fail_current_thinking_span(
-                                strand_id,
-                                &mut current_thinking_span,
-                                error.clone(),
-                            )
-                        );
-                        return Err(ProviderTurnFailure::provider(
-                            error,
-                            &assistant_text,
-                            &provider_family,
-                            &request_model,
-                            ProviderFailureStage::Stream,
-                            round,
-                        ));
-                    }
-                };
-                if let ProviderEvent::StreamTrace(trace) = event {
-                    timing.provider_trace(round, trace);
-                    continue;
-                }
-                if !saw_sse_event {
-                    saw_sse_event = true;
-                    timing.first_sse_event(round, provider_event_name(&event));
-                }
-                match event {
-                    ProviderEvent::StreamTrace(_) => {}
-                    ProviderEvent::ResponseStarted {
-                        provider_response_id,
-                    }
-                    | ProviderEvent::ResponseInProgress {
-                        provider_response_id,
-                    } => {
-                        active_provider_response_id = provider_response_id.clone();
-                        provider_try!(
-                            RuntimeTurnFailureOperation::ThinkingPersistence,
-                            self.ensure_thinking_span(
-                                strand_id,
-                                turn_id,
-                                &mut current_thinking_span,
-                                &mut summary_thinking_span,
-                                provider_response_id.clone(),
-                            )
-                        );
-                        self.publish_turn_activity(
-                            strand_id,
-                            turn_id,
-                            TurnActivityState::Thinking,
-                            provider_response_id,
-                        );
-                    }
-                    ProviderEvent::ReasoningSummaryDelta(delta) => {
-                        reasoning_summary.push_str(&delta);
-                        provider_try!(
-                            RuntimeTurnFailureOperation::ThinkingPersistence,
-                            self.update_thinking_span_summary(
-                                strand_id,
-                                &mut summary_thinking_span,
-                                reasoning_summary.clone(),
-                            )
-                        );
-                    }
-                    ProviderEvent::ReasoningSummaryDone(summary) => {
-                        reasoning_summary = summary;
-                        provider_try!(
-                            RuntimeTurnFailureOperation::ThinkingPersistence,
-                            self.update_thinking_span_summary(
-                                strand_id,
-                                &mut summary_thinking_span,
-                                reasoning_summary.clone(),
-                            )
-                        );
-                    }
-                    ProviderEvent::TextDelta(delta) => {
-                        let update = TextDeltaUpdate {
-                            strand_id,
-                            turn_id,
-                            assistant_text: &mut assistant_text,
-                            round_assistant_text: &mut round_assistant_text,
-                            timing: &timing,
-                            round,
-                            current_thinking_span: &mut current_thinking_span,
-                            active_provider_response_id: &active_provider_response_id,
-                        };
-                        provider_try!(
-                            RuntimeTurnFailureOperation::TextPersistence,
-                            self.handle_text_delta(delta, update)
-                        );
-                    }
-                    ProviderEvent::FunctionCallRequested(call) => {
-                        timing.function_call_requested(round, &call.name);
-                        provider_try!(
-                            RuntimeTurnFailureOperation::ThinkingPersistence,
-                            self.complete_current_thinking_span(
-                                strand_id,
-                                &mut current_thinking_span,
-                                ThinkingCompletionReason::ToolCallRequested,
-                            )
-                        );
-                        self.publish_turn_activity(
-                            strand_id,
-                            turn_id,
-                            TurnActivityState::CallingTool,
-                            active_provider_response_id.clone(),
-                        );
-                        calls.push(call);
-                    }
-                    ProviderEvent::Completed {
-                        provider_response_id,
-                    } => {
-                        timing.completed(round);
-                        active_provider_response_id = provider_response_id.clone();
-                        provider_try!(
-                            RuntimeTurnFailureOperation::ThinkingPersistence,
-                            self.complete_current_thinking_span(
-                                strand_id,
-                                &mut current_thinking_span,
-                                ThinkingCompletionReason::ProviderCompleted,
-                            )
-                        );
-                        completed_response_id = provider_response_id;
-                        break;
-                    }
-                    ProviderEvent::Failed(error) => {
-                        timing.failed(round, "provider_response", &error);
-                        provider_try!(
-                            RuntimeTurnFailureOperation::ThinkingPersistence,
-                            self.fail_current_thinking_span(
-                                strand_id,
-                                &mut current_thinking_span,
-                                error.clone(),
-                            )
-                        );
-                        return Err(ProviderTurnFailure::provider(
-                            error,
-                            &assistant_text,
-                            &provider_family,
-                            &request_model,
-                            ProviderFailureStage::Response,
-                            round,
-                        ));
-                    }
-                }
+            let Output {
+                calls,
+                completed_response_id,
+                active_provider_response_id,
+                assistant_text: round_assistant_text,
+            } = Driver {
+                service: self,
+                strand_id,
+                turn_id,
+                number: round,
+                provider_family: &provider_family,
+                request_model: &request_model,
+                assistant_text: &mut assistant_text,
+                timing: &mut timing,
+                calls: Vec::new(),
+                completed_response_id: None,
+                active_provider_response_id: None,
+                current_thinking_span: None,
+                summary_thinking_span: None,
+                reasoning_summary: String::new(),
+                round_assistant_text: String::new(),
+                saw_sse_event: false,
             }
+            .consume(stream)
+            .await?;
 
-            // Persist this round's assistant text as a timeline item before its
-            // tool calls (or as the final item), so the replay timeline stays a
-            // faithful interleaved log (DC4b). The lumped strand-visible reply is
-            // stored once at turn end.
             if !round_assistant_text.is_empty() {
                 last_soul_message = Some(provider_try!(
-                    RuntimeTurnFailureOperation::AssistantPersistence,
+                    Operation::Persistence(Persistence::Assistant),
                     self.store
                         .append_soul_assistant_text(strand_id, &round_assistant_text)
                 ));
@@ -362,18 +421,13 @@ impl SantiService {
             }
 
             let output_limits = match provider_try!(
-                RuntimeTurnFailureOperation::ExecutionBudgetAdmission,
+                Operation::Admission(Admission::Execution),
                 self.admit_tool_batch(strand_id, turn_id, round, calls.len())
             ) {
-                ToolBatchAdmission::Unbounded => vec![None; calls.len()],
-                ToolBatchAdmission::Bounded(limits) => {
-                    limits.into_iter().map(Some).collect::<Vec<_>>()
-                }
-                ToolBatchAdmission::Rejected(error) => {
-                    return Err(ProviderTurnFailure::execution_budget(
-                        *error,
-                        &assistant_text,
-                    ));
+                Verdict::Unbounded => vec![None; calls.len()],
+                Verdict::Bounded(limits) => limits.into_iter().map(Some).collect::<Vec<_>>(),
+                Verdict::Rejected(error) => {
+                    return Err(Failure::execution_budget(*error, &assistant_text));
                 }
             };
             timing.tool_outputs_started(round, calls.len());
@@ -386,7 +440,7 @@ impl SantiService {
                     active_provider_response_id.clone(),
                 );
                 provider_try!(
-                    RuntimeTurnFailureOperation::ToolExecution,
+                    Operation::Tool,
                     self.handle_tool_call(strand_id, turn_id, call, output_limit)
                 );
             }

@@ -2,9 +2,9 @@ use std::{fs, path::Path};
 
 use crate::ForkStrandResponse;
 
-use super::SantiService;
+use super::Service;
 
-impl SantiService {
+impl Service {
     pub fn fork_strand(&self, parent_strand_id: &str) -> Result<ForkStrandResponse, String> {
         let parent = self
             .store

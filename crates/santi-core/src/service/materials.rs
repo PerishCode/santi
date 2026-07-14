@@ -1,14 +1,16 @@
-use crate::assembly::system_prompt::{SystemPromptRequest, render_system_prompt};
+use crate::assembly::prompt::{SystemPromptRequest, render_system_prompt};
 use crate::{
     MaterialKind, MaterialRequest, MaterialUpdated, SantiStreamPayload, Strand, StrandMaterial,
     timestamp_now,
 };
 
-use super::{MaterialCacheKey, SantiService};
+use super::Service;
+
+pub(super) type Key = (String, MaterialKind);
 
 const TEXT_PLAIN_UTF8: &str = "text/plain; charset=utf-8";
 
-impl SantiService {
+impl Service {
     pub fn strand_material(
         &self,
         strand_id: &str,
@@ -26,8 +28,6 @@ impl SantiService {
     }
 
     pub(super) fn system_prompt_text(&self, strand_id: &str) -> Result<String, String> {
-        // Load identity + memory from THIS strand's soul (not a hardcoded
-        // default) so every soul speaks as itself.
         let strand = self
             .store
             .strand(strand_id)?
@@ -43,10 +43,10 @@ impl SantiService {
             constitution_path: self.constitution_file(),
             soul_memory_path: self.soul_memory_file(&strand.soul_id),
             strand_memory_path: self.strand_memory_file(strand_id),
+            soul_memory_allowance_bytes: self.soul_memory_policy().allowance_bytes,
             is_default_soul: strand.soul_id == self.store.default_soul_id(),
         })?;
-        // A strand has exactly one soul, so its id alone is a stable cache key.
-        let key: MaterialCacheKey = (strand_id.to_string(), MaterialKind::SystemPrompt);
+        let key: Key = (strand_id.to_string(), MaterialKind::SystemPrompt);
         let mut cache = self.material_cache.lock().unwrap();
         if let Some(existing) = cache.get(&key)
             && existing.text == text

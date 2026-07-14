@@ -1,9 +1,6 @@
 use std::path::Path;
 
-use santi_api::{
-    config::{ConfigService, RuntimePaths},
-    ops::doctor_configured_at,
-};
+use santi_api::config::{ConfigService, RuntimePaths};
 
 #[test]
 fn reports_budget() {
@@ -12,7 +9,7 @@ fn reports_budget() {
     santi_core::SantiStore::open(&paths.database_path).expect("open store");
     let config = config_under(temp.path(), Some(120000));
 
-    let report = doctor_configured_at(&paths, &config).expect("doctor");
+    let report = paths.doctor_configured(&config).expect("doctor");
     assert!(report.ok, "expected healthy: {report:?}");
     let provider = report.provider.expect("provider report");
     assert_eq!(provider.profile.as_deref(), Some("openai"));
@@ -29,7 +26,7 @@ fn rejects_missing_budget() {
     santi_core::SantiStore::open(&paths.database_path).expect("open store");
     let config = config_under(temp.path(), None);
 
-    let report = doctor_configured_at(&paths, &config).expect("doctor");
+    let report = paths.doctor_configured(&config).expect("doctor");
     assert!(!report.ok);
     let provider = report.provider.expect("provider report");
     assert!(!provider.ok);

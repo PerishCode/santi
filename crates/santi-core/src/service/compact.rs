@@ -1,18 +1,15 @@
 use serde_json::json;
 
-use crate::context_budget::estimate_provider_parts;
-use crate::service_prompt::provider_tools;
+use super::tools::provider_tools;
+use crate::context::budget::estimate_provider_parts;
 use crate::{
     CompactCapsuleOptions, CompactExecRequest, CompactExecResponse, CompactQueryResponse,
     ContextBudget, ContextEstimate,
 };
 
-use super::SantiService;
+use super::Service;
 
-impl SantiService {
-    /// Compact a range of a strand's own timeline (self-involved: the soul
-    /// runs this on itself). Creates the projection overlay directly over the
-    /// addressed strand. The soul authors `summary`; the system only checks scale.
+impl Service {
     pub fn compact_exec(
         &self,
         strand_id: &str,
@@ -32,7 +29,7 @@ impl SantiService {
             let mut response = self.store.preview_compact(&strand.id, &from, &to)?;
             response.pre_estimate = Some(pre_estimate);
             if let Some(capsule) = request.capsule.as_ref() {
-                let metadata = compact_capsule_metadata(CompactCapsuleMetadataInput {
+                let metadata = compact_capsule_metadata(Capsule {
                     compact_id: Some(&response.compact_id),
                     capsule,
                     response: Some(&response),
@@ -47,7 +44,7 @@ impl SantiService {
                     response.pre_estimate.as_ref().unwrap(),
                     &post_estimate,
                 );
-                let metadata = compact_capsule_metadata(CompactCapsuleMetadataInput {
+                let metadata = compact_capsule_metadata(Capsule {
                     compact_id: Some(&response.compact_id),
                     capsule,
                     response: Some(&response),
@@ -68,7 +65,7 @@ impl SantiService {
         }
 
         let initial_metadata = request.capsule.as_ref().map(|capsule| {
-            compact_capsule_metadata(CompactCapsuleMetadataInput {
+            compact_capsule_metadata(Capsule {
                 compact_id: None,
                 capsule,
                 response: None,
@@ -78,17 +75,19 @@ impl SantiService {
                 compression_ratio: None,
             })
         });
-        let mut response = self.store.create_compact_with_metadata(
-            &strand.id,
-            &from,
-            &to,
-            summary,
-            initial_metadata,
-        )?;
+        let mut response = self
+            .store
+            .create_compact_with_metadata(crate::store::Collapse {
+                strand: &strand.id,
+                from: &from,
+                to: &to,
+                summary,
+                metadata: initial_metadata,
+            })?;
         let mut post_estimate = self.current_context_estimate(&strand.id)?;
         let mut compression_ratio = compact_compression_ratio(&pre_estimate, &post_estimate);
         if let Some(capsule) = request.capsule.as_ref() {
-            let metadata = compact_capsule_metadata(CompactCapsuleMetadataInput {
+            let metadata = compact_capsule_metadata(Capsule {
                 compact_id: Some(&response.compact_id),
                 capsule,
                 response: Some(&response),
@@ -101,7 +100,7 @@ impl SantiService {
                 .update_compact_metadata(&response.compact_id, metadata)?;
             post_estimate = self.current_context_estimate(&strand.id)?;
             compression_ratio = compact_compression_ratio(&pre_estimate, &post_estimate);
-            let metadata = compact_capsule_metadata(CompactCapsuleMetadataInput {
+            let metadata = compact_capsule_metadata(Capsule {
                 compact_id: Some(&response.compact_id),
                 capsule,
                 response: Some(&response),
@@ -190,7 +189,7 @@ impl SantiService {
     }
 }
 
-struct CompactCapsuleMetadataInput<'a> {
+struct Capsule<'a> {
     compact_id: Option<&'a str>,
     capsule: &'a CompactCapsuleOptions,
     response: Option<&'a CompactExecResponse>,
@@ -205,7 +204,7 @@ const CAPSULE_REASON_BYTES: usize = 512;
 const CAPSULE_RISK_BYTES: usize = 1024;
 const CAPSULE_QUERYABILITY_BYTES: usize = 512;
 
-fn compact_capsule_metadata(input: CompactCapsuleMetadataInput<'_>) -> serde_json::Value {
+fn compact_capsule_metadata(input: Capsule<'_>) -> serde_json::Value {
     let originals_query = input
         .compact_id
         .map(|id| format!("santi compact query --compact-id {id}"));

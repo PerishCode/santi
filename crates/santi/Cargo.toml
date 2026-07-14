@@ -20,4 +20,5 @@ tokio.workspace = true
 
 [dev-dependencies]
 santi-core.workspace = true
+sha2.workspace = true
 tempfile = "3.27.0"

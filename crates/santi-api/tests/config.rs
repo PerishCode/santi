@@ -62,7 +62,6 @@ fn resolves_chat_completions_profile() {
 #[test]
 fn resolves_env_reference() {
     let var = "SANTI_TEST_RESPONSES_KEY";
-    // SAFETY: a uniquely-named var only this test reads, set+removed locally.
     unsafe { std::env::set_var(var, "secret-from-env") };
     let path = write_config(
         r#"
@@ -228,7 +227,6 @@ fn write_config(content: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system clock")
         .as_nanos();
-    // A per-call counter keeps parallel tests from colliding on the same name.
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!("santi-config-{id}-{seq}.toml"));
     fs::write(&path, content).expect("write config");

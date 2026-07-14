@@ -22,7 +22,9 @@ async fn compact_redrives_receipt() {
         )
         .await
         .expect("send strand");
-    let runtime = wait_for_failed_turn(&service, &strand.id, &accepted_turn(&response).id).await;
+    let runtime = Probe::new(&service)
+        .failed_turn(&strand.id, &accepted_turn(&response).id)
+        .await;
     let receipt = service
         .receipt_status(&response.receipt.inbox_id)
         .expect("receipt query")
@@ -39,14 +41,14 @@ async fn compact_redrives_receipt() {
         .clone();
     let store = SantiStore::open(&db).expect("open store directly");
     let boundary = store
-        .append_message(
-            &strand.id,
-            ActorType::Soul,
-            store.default_soul_id(),
-            MessageContent::text("manual compact boundary"),
-            MessageState::Fixed,
-            MessageIntake::Record,
-        )
+        .append_message(Draft {
+            strand: &strand.id,
+            actor: ActorType::Soul,
+            id: store.default_soul_id(),
+            content: MessageContent::text("manual compact boundary"),
+            state: MessageState::Fixed,
+            intake: MessageIntake::Record,
+        })
         .expect("append manual boundary")
         .strand_message;
 
@@ -66,7 +68,7 @@ async fn compact_redrives_receipt() {
         .expect("compact should resolve and redrive");
     assert!(compact.active_incident_resolved);
 
-    let runtime = wait_any_completed(&service, &strand.id).await;
+    let runtime = Probe::new(&service).any_completed(&strand.id).await;
     assert_eq!(provider.requests.lock().unwrap().len(), 2);
     assert_eq!(runtime.effects.len(), 1, "effect must not replay");
     assert_eq!(runtime.effects[0].state, EffectState::Confirmed);

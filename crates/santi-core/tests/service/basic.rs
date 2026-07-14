@@ -1,11 +1,12 @@
 use super::support::*;
+use santi_core::service::{self, Service};
 
 #[tokio::test]
 async fn sends_with_runtime() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FakeProvider::default());
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: temp.path().join("santi.sqlite").display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -40,7 +41,9 @@ async fn sends_with_runtime() {
         accepted_turn(&response).status,
         santi_core::TurnStatus::Running
     );
-    let runtime = wait_for_completed_turn(&service, &strand.id, &accepted_turn(&response).id).await;
+    let runtime = Probe::new(&service)
+        .completed_turn(&strand.id, &accepted_turn(&response).id)
+        .await;
     assert!(
         runtime
             .messages
@@ -63,8 +66,6 @@ async fn sends_with_runtime() {
         .instructions
         .as_deref()
         .expect("runtime instructions");
-    // The [santi] constitution replaces the old preamble prose (encoded default,
-    // since no constitution.md is written in this temp runtime).
     assert!(instructions.contains("[santi]"));
     assert!(instructions.contains(
         "santi is an agent runtime: a container that keeps souls and runs their strands."
@@ -72,7 +73,6 @@ async fn sends_with_runtime() {
     assert!(instructions.contains("[santi-meta]"));
     assert!(instructions.contains("soul_id: soul_default"));
     assert!(instructions.contains("strand_id: "));
-    // [santi-meta] is slim: no channel, no soul_name (identity is memory).
     assert!(!instructions.contains("channel: santi"));
     assert!(!instructions.contains("soul_name"));
     assert!(instructions.contains("[santi-soul]"));

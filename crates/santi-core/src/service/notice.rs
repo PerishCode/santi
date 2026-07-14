@@ -7,9 +7,9 @@ use santi_provider::ProviderItem;
 
 use crate::{MessageContent, MessageIntake, SantiStreamPayload};
 
-use super::SantiService;
+use super::Service;
 
-pub(super) struct ProviderInputObservation<'a> {
+pub(super) struct Observation<'a> {
     pub(super) strand_id: &'a str,
     pub(super) turn_id: &'a str,
     pub(super) round: usize,
@@ -23,26 +23,26 @@ const RUNTIME_NOTICE_QUEUE_CAPACITY: usize = 128;
 pub(super) const COMPACT_REMINDER_REFERENCE_BYTES: usize = 96 * 1024;
 
 #[derive(Debug, Clone)]
-pub(super) enum RuntimeEvent {
-    ProviderInputObserved(ProviderInputObserved),
+pub(super) enum Event {
+    Observed(Observed),
 }
 
-impl RuntimeEvent {
+impl Event {
     fn turn_id(&self) -> &str {
         match self {
-            Self::ProviderInputObserved(event) => &event.turn_id,
+            Self::Observed(event) => &event.turn_id,
         }
     }
 
     fn dedupe_key(&self) -> Option<String> {
         match self {
-            Self::ProviderInputObserved(event) => event.dedupe_key(),
+            Self::Observed(event) => event.dedupe_key(),
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct ProviderInputObserved {
+pub(super) struct Observed {
     pub(super) strand_id: String,
     pub(super) turn_id: String,
     pub(super) round: usize,
@@ -55,7 +55,7 @@ pub(super) struct ProviderInputObserved {
     pub(super) band: String,
 }
 
-impl ProviderInputObserved {
+impl Observed {
     fn total_input_bytes(&self) -> usize {
         self.input_bytes.saturating_add(self.instructions_bytes)
     }
@@ -75,25 +75,25 @@ impl ProviderInputObserved {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct RuntimeNoticeBus {
-    inner: Arc<Mutex<RuntimeNoticeState>>,
+pub(super) struct Bus {
+    inner: Arc<Mutex<State>>,
 }
 
 #[derive(Debug)]
-struct RuntimeNoticeState {
-    queue: VecDeque<RuntimeEvent>,
+struct State {
+    queue: VecDeque<Event>,
     queued_or_delivered_keys: HashSet<String>,
     capacity: usize,
 }
 
-impl RuntimeNoticeBus {
+impl Bus {
     pub(super) fn new() -> Self {
         Self::with_capacity(RUNTIME_NOTICE_QUEUE_CAPACITY)
     }
 
     fn with_capacity(capacity: usize) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(RuntimeNoticeState {
+            inner: Arc::new(Mutex::new(State {
                 queue: VecDeque::new(),
                 queued_or_delivered_keys: HashSet::new(),
                 capacity,
@@ -101,7 +101,7 @@ impl RuntimeNoticeBus {
         }
     }
 
-    pub(super) fn publish(&self, event: RuntimeEvent) -> bool {
+    pub(super) fn publish(&self, event: Event) -> bool {
         let dedupe_key = event.dedupe_key();
         let mut state = self.inner.lock().unwrap();
         if let Some(key) = dedupe_key.as_ref()
@@ -119,7 +119,7 @@ impl RuntimeNoticeBus {
         true
     }
 
-    pub(super) fn drain_for_turn(&self, turn_id: &str) -> Vec<RuntimeEvent> {
+    pub(super) fn drain_for_turn(&self, turn_id: &str) -> Vec<Event> {
         let mut state = self.inner.lock().unwrap();
         let mut drained = Vec::new();
         let mut kept = VecDeque::with_capacity(state.queue.len());
@@ -135,17 +135,17 @@ impl RuntimeNoticeBus {
     }
 }
 
-impl Default for RuntimeNoticeBus {
+impl Default for Bus {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl SantiService {
-    pub(super) fn observe_provider_input(&self, observation: ProviderInputObservation<'_>) {
+impl Service {
+    pub(super) fn observe_provider_input(&self, observation: Observation<'_>) {
         let input_bytes = provider_input_bytes(observation.input);
         let instructions_bytes = observation.instructions.map_or(0, str::len);
-        let event = ProviderInputObserved {
+        let event = Observed {
             strand_id: observation.strand_id.to_string(),
             turn_id: observation.turn_id.to_string(),
             round: observation.round,
@@ -157,11 +157,7 @@ impl SantiService {
             reference_threshold_bytes: COMPACT_REMINDER_REFERENCE_BYTES,
             band: "soft".to_string(),
         };
-        // Ordinary compact reminders are hygiene notices. Losing or coalescing
-        // this in-memory event must not affect the provider call.
-        let _ = self
-            .runtime_notices
-            .publish(RuntimeEvent::ProviderInputObserved(event));
+        let _ = self.runtime_notices.publish(Event::Observed(event));
     }
 
     pub(super) fn drain_runtime_notices(&self, turn_id: &str) {
@@ -172,18 +168,13 @@ impl SantiService {
         }
     }
 
-    fn handle_internal_runtime_event(&self, event: RuntimeEvent) -> Result<(), String> {
+    fn handle_internal_runtime_event(&self, event: Event) -> Result<(), String> {
         match event {
-            RuntimeEvent::ProviderInputObserved(event) => {
-                self.maybe_materialize_compact_reminder(event)
-            }
+            Event::Observed(event) => self.maybe_materialize_compact_reminder(event),
         }
     }
 
-    fn maybe_materialize_compact_reminder(
-        &self,
-        event: ProviderInputObserved,
-    ) -> Result<(), String> {
+    fn maybe_materialize_compact_reminder(&self, event: Observed) -> Result<(), String> {
         if !event.should_remind() {
             return Ok(());
         }
@@ -203,7 +194,7 @@ impl SantiService {
     }
 }
 
-fn compact_reminder_message(event: &ProviderInputObserved) -> MessageContent {
+fn compact_reminder_message(event: &Observed) -> MessageContent {
     MessageContent::text(
         [
             "<system_message>".to_string(),

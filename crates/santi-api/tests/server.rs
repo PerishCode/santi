@@ -14,10 +14,11 @@ use santi_api::{
     ApiError, ResolveEffectRequest, drive_strand_handler, effect_status_handler, health_handler,
     receipt_status_handler, resolve_effect_handler, send_strand_handler,
 };
+use santi_core::service::{self, Service};
 use santi_core::{
-    EffectResolutionOutcome, EffectState, ErrorScope, ErrorSource, IngestOutcome, MessageContent,
-    MessageKind, MessagePart, SantiService, SantiServiceConfig, SantiStore, SendStrandRequest,
-    ToolCallProvenance, catalog, engine,
+    EffectResolutionOutcome, EffectState, ErrorScope, ErrorSource, IngestOutcome, Invocation,
+    MessageContent, MessageKind, MessagePart, SantiStore, SendStrandRequest, ToolCallProvenance,
+    catalog, engine,
 };
 use santi_provider::{
     ProviderClient, ProviderContextBudget, ProviderEvent, ProviderMetadata, ProviderRequest,
@@ -69,21 +70,21 @@ impl ProviderClient for DriverProvider {
 fn classifies_errors() {
     assert_eq!(status("strand not found"), StatusCode::NOT_FOUND);
     assert_eq!(status("unknown soul: soul_x"), StatusCode::BAD_REQUEST);
-    let budget = engine().transient(
-        catalog::CONTEXT_BUDGET_EXCEEDED,
-        ErrorSource::new("test", "admission"),
-        Some(ErrorScope::new("strand", "ss_x")),
-        "over budget",
-        serde_json::Value::Null,
-    );
+    let budget = engine().transient(santi_core::Signal {
+        descriptor: catalog::CONTEXT_BUDGET_EXCEEDED,
+        source: ErrorSource::new("test", "admission"),
+        scope: Some(ErrorScope::new("strand", "ss_x")),
+        message: "over budget".to_string(),
+        context: serde_json::Value::Null,
+    });
     assert_eq!(ApiError::from_santi(budget).status(), StatusCode::LOCKED);
-    let unavailable = engine().transient(
-        catalog::STRAND_DRIVE_FAILED,
-        ErrorSource::new("test", "driver"),
-        Some(ErrorScope::new("strand", "ss_x")),
-        "driver unavailable",
-        serde_json::Value::Null,
-    );
+    let unavailable = engine().transient(santi_core::Signal {
+        descriptor: catalog::STRAND_DRIVE_FAILED,
+        source: ErrorSource::new("test", "driver"),
+        scope: Some(ErrorScope::new("strand", "ss_x")),
+        message: "driver unavailable".to_string(),
+        context: serde_json::Value::Null,
+    });
     assert_eq!(
         ApiError::from_santi(unavailable).status(),
         StatusCode::SERVICE_UNAVAILABLE
@@ -131,11 +132,13 @@ async fn effect_http_roundtrip() {
         .turn;
     let (_, effect) = store
         .append_effect_call(
-            &turn.id,
-            "call_api_effect",
-            "shell",
-            &serde_json::json!({"command": "printf api"}),
-            &ToolCallProvenance::default(),
+            Invocation {
+                turn: &turn.id,
+                call: "call_api_effect",
+                name: "shell",
+                arguments: &serde_json::json!({"command": "printf api"}),
+                provenance: &ToolCallProvenance::default(),
+            },
             Some("shell"),
         )
         .expect("append effect");
@@ -145,8 +148,8 @@ async fn effect_http_roundtrip() {
         .expect("open dispatch window");
     drop(store);
 
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: database_path.display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -203,8 +206,8 @@ async fn effect_http_roundtrip() {
 #[tokio::test]
 async fn send_rejection_locks() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: temp.path().join("santi.sqlite").display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -248,8 +251,8 @@ async fn send_rejection_locks() {
 async fn drive_failure_http_recovery() {
     let temp = tempfile::tempdir().expect("temp dir");
     let database_path = temp.path().join("santi.sqlite");
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: database_path.display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),

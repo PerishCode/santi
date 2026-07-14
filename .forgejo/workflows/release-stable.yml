@@ -32,11 +32,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install flavor
+      - name: Install pinned Negentropy
         run: |
           set -eu
-          curl -fsSL https://flavor.perish.uk/install.sh -o "$RUNNER_TEMP/install-flavor.sh"
-          sh "$RUNNER_TEMP/install-flavor.sh"
+          version=$(cat .runseal/negentropy.version)
+          curl -fsSL https://releases.negentropy.perish.uk/manage.sh -o "$RUNNER_TEMP/manage-negentropy.sh"
+          sh "$RUNNER_TEMP/manage-negentropy.sh" install --channel stable --version "$version" --bin-dir "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Validate R2 access

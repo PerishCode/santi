@@ -137,92 +137,66 @@ fn reasoning_options(config: &OpenAIProviderConfig) -> Option<Value> {
 }
 
 fn response_input(request: &ProviderRequest) -> Value {
-    let mut items = Vec::new();
-    for item in &request.input {
-        match item {
-            ProviderItem::Message { role, content } => {
-                let content_type = if role == "assistant" {
-                    "output_text"
-                } else {
-                    "input_text"
-                };
-                items.push(json!({
-                    "role": role,
-                    "content": [
-                        {
-                            "type": content_type,
-                            "text": content,
-                        }
-                    ],
-                }));
-            }
-            // Reasoning replay needs the encrypted reasoning item, not modeled
-            // yet (DC1a) — skip until a Responses reasoning model is live.
-            ProviderItem::Reasoning { .. } => {}
-            ProviderItem::FunctionCall {
-                call_id,
-                name,
-                arguments_raw,
-                item,
-                ..
-            } => {
-                // The raw item is adaptor-owned advisory REPLAY CACHE, not truth.
-                // Validate it before re-sending; if it is absent or invalid (e.g.
-                // an upstream `item_`-prefixed id the API rejects on input), treat
-                // it as a cache-miss and regenerate from the neutral fields. A bad
-                // blob can never become a durable poison this way — old wedged
-                // strands self-heal on re-assembly. (PHASE-09 SLICE 0 invariant.)
-                let wire = validated_function_call_replay(item).unwrap_or_else(|| {
-                    eprintln!(
-                        "santi-provider: ignored invalid openai replay cache for call {call_id}; regenerated from canonical event"
-                    );
-                    json!({
-                        "type": "function_call",
-                        "call_id": call_id,
-                        "name": name,
-                        "arguments": arguments_raw,
-                    })
-                });
-                items.push(wire);
-            }
-            ProviderItem::FunctionCallOutput { call_id, output } => {
-                items.push(json!({
-                    "type": "function_call_output",
-                    "call_id": call_id,
-                    "output": output,
-                }));
-            }
-        }
-    }
+    let items = request
+        .input
+        .iter()
+        .filter_map(response_item)
+        .collect::<Vec<_>>();
     json!(items)
 }
 
-/// Validate an adaptor-owned function_call REPLAY blob before re-sending it to
-/// the Responses API. The blob is `regenerable` advisory material: return `Some`
-/// only when it is safe to replay verbatim; return `None` (a cache-miss) when it
-/// is absent or invalid — the caller regenerates the item from the neutral
-/// tool_call fields. This is the OpenAI adaptor's own wire rule (per-adaptor
-/// validation); other adaptors validate their own material.
-///
-/// Guards the upstream inconsistency behind this session's fc-id poison: a
-/// Responses proxy may emit a function_call whose output-item `id` is `item_`-
-/// prefixed, yet reject that same id on input ("Expected an ID that begins with
-/// 'fc'"). Rather than forward known-invalid input and let the provider 400
-/// (which also wedges the strand), we drop the blob and regenerate.
-///
-/// NOTE: only `regenerable` material reaches here. `irreplaceable` provider
-/// material (e.g. a future encrypted-reasoning credential) must NOT be validated
-/// through this path and is NEVER silently regenerated — modeling it is deferred,
-/// but it must never be quietly treated as regenerable.
+fn response_item(item: &ProviderItem) -> Option<Value> {
+    match item {
+        ProviderItem::Message { role, content } => Some(response_message(role, content)),
+        ProviderItem::Reasoning { .. } => None,
+        ProviderItem::FunctionCall {
+            call_id,
+            name,
+            arguments_raw,
+            item,
+            ..
+        } => Some(response_call(call_id, name, arguments_raw, item)),
+        ProviderItem::FunctionCallOutput { call_id, output } => {
+            Some(response_output(call_id, output))
+        }
+    }
+}
+
+fn response_message(role: &str, content: &str) -> Value {
+    let content_type = if role == "assistant" {
+        "output_text"
+    } else {
+        "input_text"
+    };
+    json!({
+        "role": role,
+        "content": [{ "type": content_type, "text": content }],
+    })
+}
+
+fn response_call(call: &str, name: &str, arguments: &str, item: &Option<Value>) -> Value {
+    validated_function_call_replay(item).unwrap_or_else(|| {
+        eprintln!(
+            "santi-provider: ignored invalid openai replay cache for call {call}; regenerated from canonical event"
+        );
+        json!({
+            "type": "function_call",
+            "call_id": call,
+            "name": name,
+            "arguments": arguments,
+        })
+    })
+}
+
+fn response_output(call: &str, output: &str) -> Value {
+    json!({ "type": "function_call_output", "call_id": call, "output": output })
+}
+
 fn validated_function_call_replay(item: &Option<Value>) -> Option<Value> {
     let item = item.as_ref()?;
     if item.get("type").and_then(Value::as_str) != Some("function_call") {
         return None;
     }
-    // The output-item `id`, when present, must be `fc`-prefixed on the way back
-    // in. `call_id` (the neutral pairing key) is preserved separately, and the
-    // synthesized fallback carries no `id` at all, so dropping a bad-id blob is a
-    // clean regeneration, not a lossy drop.
     if let Some(id) = item.get("id").and_then(Value::as_str)
         && !id.starts_with("fc")
     {
@@ -255,25 +229,30 @@ fn parse_sse(
             let chunk = chunk.map_err(|error| error.to_string())?;
             yield ProviderEvent::StreamTrace(ProviderStreamTrace::Chunk { bytes: chunk.len() });
             buffer.push_str(&String::from_utf8_lossy(&chunk));
-            while let Some(index) = buffer.find('\n') {
-                let line = buffer[..index].trim_end_matches('\r').to_string();
-                buffer = buffer[index + 1..].to_string();
-                if let Some(payload) = line.strip_prefix("data: ") {
-                    if payload == "[DONE]" {
-                        continue;
-                    }
-                    let events = parse_event(payload, &mut current_response_id)?;
-                    yield ProviderEvent::StreamTrace(ProviderStreamTrace::RawEvent {
-                        raw_type: raw_event_type(payload),
-                        mapped_events: provider_event_names(&events),
-                    });
-                    for event in events {
-                        yield event;
-                    }
-                }
+            for event in parse_buffer(&mut buffer, &mut current_response_id)? {
+                yield event;
             }
         }
     }
+}
+
+fn parse_buffer(
+    buffer: &mut String,
+    response_id: &mut Option<String>,
+) -> Result<Vec<ProviderEvent>, String> {
+    let mut mapped = Vec::new();
+    for line in crate::sse::lines(buffer) {
+        let Some(payload) = crate::sse::data(&line) else {
+            continue;
+        };
+        let events = parse_event(payload, response_id)?;
+        mapped.push(ProviderEvent::StreamTrace(ProviderStreamTrace::RawEvent {
+            raw_type: raw_event_type(payload),
+            mapped_events: provider_event_names(&events),
+        }));
+        mapped.extend(events);
+    }
+    Ok(mapped)
 }
 
 fn raw_event_type(payload: &str) -> String {

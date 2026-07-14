@@ -1,116 +1,124 @@
 use std::collections::BTreeSet;
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{OptionalExtension, params};
 
 use super::super::SantiStore;
-use super::super::effects::for_receipt_in;
 use super::super::im::deliveries_for_receipt_in;
+use super::Database;
 use crate::{ReceiptState, ReceiptStatus, ReceiptTransition, prefixed_id, timestamp_now};
 
-pub(in crate::store) fn insert_accepted_in_conn(
-    conn: &Connection,
-    inbox_id: &str,
-    strand_id: &str,
-    accepted_at: &str,
-) -> Result<(), String> {
-    conn.execute(
-        r#"
+struct Transition<'a> {
+    state: ReceiptState,
+    turn: Option<&'a str>,
+    incident: Option<&'a str>,
+    time: &'a str,
+}
+
+impl Database<'_> {
+    pub(in crate::store) fn insert_accepted(
+        &self,
+        inbox_id: &str,
+        strand_id: &str,
+        accepted_at: &str,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                r#"
         INSERT INTO inbox_receipts (id, strand_id, state, accepted_at, updated_at)
         VALUES (?1, ?2, 'accepted', ?3, ?3)
         "#,
-        params![inbox_id, strand_id, accepted_at],
-    )
-    .map_err(|error| error.to_string())?;
-    append_transition(
-        conn,
-        inbox_id,
-        ReceiptState::Accepted,
-        None,
-        None,
-        accepted_at,
-    )
-}
-
-pub(in crate::store) fn begin_turn_in_conn(
-    conn: &Connection,
-    strand_id: &str,
-    turn_id: &str,
-    drained_inbox_ids: &[String],
-    recovered_incident_id: Option<&str>,
-) -> Result<(), String> {
-    let mut receipt_ids = drained_inbox_ids.iter().cloned().collect::<BTreeSet<_>>();
-    let mut stmt = conn
-        .prepare("SELECT id FROM inbox_receipts WHERE strand_id = ?1 AND state = 'turn_failed'")
-        .map_err(|error| error.to_string())?;
-    let failed = stmt
-        .query_map(params![strand_id], |row| row.get::<_, String>(0))
-        .map_err(|error| error.to_string())?;
-    for receipt_id in failed {
-        receipt_ids.insert(receipt_id.map_err(|error| error.to_string())?);
+                params![inbox_id, strand_id, accepted_at],
+            )
+            .map_err(|error| error.to_string())?;
+        self.append_transition(
+            inbox_id,
+            Transition {
+                state: ReceiptState::Accepted,
+                turn: None,
+                incident: None,
+                time: accepted_at,
+            },
+        )
     }
-    drop(stmt);
 
-    let now = timestamp_now();
-    if let Some(incident_id) = recovered_incident_id {
-        for inbox_id in drained_inbox_ids {
-            set_state(conn, inbox_id, ReceiptState::MechanicallyRecovered, &now)?;
-            append_transition(
-                conn,
-                inbox_id,
-                ReceiptState::MechanicallyRecovered,
-                Some(turn_id),
-                Some(incident_id),
-                &now,
+    pub(in crate::store) fn begin_turn(
+        &self,
+        strand_id: &str,
+        turn_id: &str,
+        drained_inbox_ids: &[String],
+        recovered_incident_id: Option<&str>,
+    ) -> Result<(), String> {
+        let mut receipt_ids = drained_inbox_ids.iter().cloned().collect::<BTreeSet<_>>();
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM inbox_receipts WHERE strand_id = ?1 AND state = 'turn_failed'")
+            .map_err(|error| error.to_string())?;
+        let failed = stmt
+            .query_map(params![strand_id], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?;
+        for receipt_id in failed {
+            receipt_ids.insert(receipt_id.map_err(|error| error.to_string())?);
+        }
+        drop(stmt);
+
+        let now = timestamp_now();
+        if let Some(incident_id) = recovered_incident_id {
+            for inbox_id in drained_inbox_ids {
+                self.set_state(inbox_id, ReceiptState::MechanicallyRecovered, &now)?;
+                self.append_transition(
+                    inbox_id,
+                    Transition {
+                        state: ReceiptState::MechanicallyRecovered,
+                        turn: Some(turn_id),
+                        incident: Some(incident_id),
+                        time: &now,
+                    },
+                )?;
+            }
+        }
+        for inbox_id in receipt_ids {
+            self.set_state(&inbox_id, ReceiptState::Driving, &now)?;
+            self.append_transition(
+                &inbox_id,
+                Transition {
+                    state: ReceiptState::Driving,
+                    turn: Some(turn_id),
+                    incident: recovered_incident_id,
+                    time: &now,
+                },
             )?;
         }
+        Ok(())
     }
-    for inbox_id in receipt_ids {
-        set_state(conn, &inbox_id, ReceiptState::Driving, &now)?;
-        append_transition(
-            conn,
-            &inbox_id,
-            ReceiptState::Driving,
-            Some(turn_id),
-            recovered_incident_id,
-            &now,
-        )?;
+
+    pub(in crate::store) fn fail_turn(
+        &self,
+        turn_id: &str,
+        incident_id: Option<&str>,
+        occurred_at: &str,
+    ) -> Result<(), String> {
+        self.transition_turn_receipts(turn_id, ReceiptState::TurnFailed, incident_id, occurred_at)
     }
-    Ok(())
-}
 
-pub(in crate::store) fn fail_turn_in_conn(
-    conn: &Connection,
-    turn_id: &str,
-    incident_id: Option<&str>,
-    occurred_at: &str,
-) -> Result<(), String> {
-    transition_turn_receipts(
-        conn,
-        turn_id,
-        ReceiptState::TurnFailed,
-        incident_id,
-        occurred_at,
-    )
-}
+    pub(in crate::store) fn complete_turn(
+        &self,
+        turn_id: &str,
+        occurred_at: &str,
+    ) -> Result<(), String> {
+        self.transition_turn_receipts(turn_id, ReceiptState::Completed, None, occurred_at)
+    }
 
-pub(in crate::store) fn complete_turn_in_conn(
-    conn: &Connection,
-    turn_id: &str,
-    occurred_at: &str,
-) -> Result<(), String> {
-    transition_turn_receipts(conn, turn_id, ReceiptState::Completed, None, occurred_at)
-}
-
-fn transition_turn_receipts(
-    conn: &Connection,
-    turn_id: &str,
-    state: ReceiptState,
-    incident_id: Option<&str>,
-    occurred_at: &str,
-) -> Result<(), String> {
-    let mut stmt = conn
-        .prepare(
-            r#"
+    fn transition_turn_receipts(
+        &self,
+        turn_id: &str,
+        state: ReceiptState,
+        incident_id: Option<&str>,
+        occurred_at: &str,
+    ) -> Result<(), String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
             SELECT DISTINCT transition.inbox_id
             FROM receipt_transitions AS transition
             JOIN inbox_receipts AS receipt ON receipt.id = transition.inbox_id
@@ -118,71 +126,68 @@ fn transition_turn_receipts(
               AND transition.state = 'driving'
               AND receipt.state IN ('driving', 'mechanically_recovered')
             "#,
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map(params![turn_id], |row| row.get::<_, String>(0))
-        .map_err(|error| error.to_string())?;
-    let mut receipt_ids = Vec::new();
-    for row in rows {
-        receipt_ids.push(row.map_err(|error| error.to_string())?);
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map(params![turn_id], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?;
+        let mut receipt_ids = Vec::new();
+        for row in rows {
+            receipt_ids.push(row.map_err(|error| error.to_string())?);
+        }
+        drop(stmt);
+        for inbox_id in receipt_ids {
+            self.set_state(&inbox_id, state.clone(), occurred_at)?;
+            self.append_transition(
+                &inbox_id,
+                Transition {
+                    state: state.clone(),
+                    turn: Some(turn_id),
+                    incident: incident_id,
+                    time: occurred_at,
+                },
+            )?;
+        }
+        Ok(())
     }
-    drop(stmt);
-    for inbox_id in receipt_ids {
-        set_state(conn, &inbox_id, state.clone(), occurred_at)?;
-        append_transition(
-            conn,
-            &inbox_id,
-            state.clone(),
-            Some(turn_id),
-            incident_id,
-            occurred_at,
-        )?;
+
+    fn set_state(
+        &self,
+        inbox_id: &str,
+        state: ReceiptState,
+        updated_at: &str,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE inbox_receipts SET state = ?2, updated_at = ?3 WHERE id = ?1",
+                params![inbox_id, receipt_state_db(&state), updated_at],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
     }
-    Ok(())
-}
 
-fn set_state(
-    conn: &Connection,
-    inbox_id: &str,
-    state: ReceiptState,
-    updated_at: &str,
-) -> Result<(), String> {
-    conn.execute(
-        "UPDATE inbox_receipts SET state = ?2, updated_at = ?3 WHERE id = ?1",
-        params![inbox_id, receipt_state_db(&state), updated_at],
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-fn append_transition(
-    conn: &Connection,
-    inbox_id: &str,
-    state: ReceiptState,
-    turn_id: Option<&str>,
-    incident_id: Option<&str>,
-    occurred_at: &str,
-) -> Result<(), String> {
-    conn.execute(
-        r#"
+    fn append_transition(&self, inbox_id: &str, transition: Transition<'_>) -> Result<(), String> {
+        self.conn
+            .execute(
+                r#"
         INSERT INTO receipt_transitions (
           id, inbox_id, sequence, state, turn_id, incident_id, occurred_at
         )
         SELECT ?1, ?2, COALESCE(MAX(sequence), 0) + 1, ?3, ?4, ?5, ?6
         FROM receipt_transitions WHERE inbox_id = ?2
         "#,
-        params![
-            prefixed_id("rct"),
-            inbox_id,
-            receipt_state_db(&state),
-            turn_id,
-            incident_id,
-            occurred_at,
-        ],
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(())
+                params![
+                    prefixed_id("rct"),
+                    inbox_id,
+                    receipt_state_db(&transition.state),
+                    transition.turn,
+                    transition.incident,
+                    transition.time,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
 }
 
 impl SantiStore {
@@ -252,7 +257,7 @@ impl SantiStore {
                 },
             )
             .collect::<Result<Vec<_>, String>>()?;
-        let effects = for_receipt_in(&conn, &inbox_id)?;
+        let effects = Database::new(&conn).effects_for_receipt(&inbox_id)?;
         let im_deliveries = deliveries_for_receipt_in(&conn, &inbox_id)?;
         Ok(Some(ReceiptStatus {
             inbox_id,

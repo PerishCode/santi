@@ -1,5 +1,5 @@
 use axum::{Json, http::StatusCode, response::IntoResponse};
-use santi_core::{ErrorCategory, ErrorSource, SantiError, catalog, engine};
+use santi_core::{ErrorCategory, ErrorSource, SantiError, Signal, catalog, engine};
 
 use crate::webhook::WebhookError;
 
@@ -23,43 +23,43 @@ impl ApiError {
 
     pub fn internal(message: String) -> Self {
         eprintln!("santi-api: internal error: {message}");
-        Self::from_santi(engine().transient(
-            catalog::INTERNAL,
-            ErrorSource::new("santi-api", "http_boundary"),
-            None,
-            "internal error",
-            serde_json::Value::Null,
-        ))
+        Self::from_santi(engine().transient(Signal {
+            descriptor: catalog::INTERNAL,
+            source: ErrorSource::new("santi-api", "http_boundary"),
+            scope: None,
+            message: "internal error".to_string(),
+            context: serde_json::Value::Null,
+        }))
     }
 
     pub fn not_found(message: impl Into<String>) -> Self {
-        Self::from_santi(engine().transient(
-            catalog::NOT_FOUND,
-            ErrorSource::new("santi-api", "http_boundary"),
-            None,
-            message,
-            serde_json::Value::Null,
-        ))
+        Self::from_santi(engine().transient(Signal {
+            descriptor: catalog::NOT_FOUND,
+            source: ErrorSource::new("santi-api", "http_boundary"),
+            scope: None,
+            message: message.into(),
+            context: serde_json::Value::Null,
+        }))
     }
 
     pub fn bad_request(message: impl Into<String>) -> Self {
-        Self::from_santi(engine().transient(
-            catalog::INVALID_ARGUMENT,
-            ErrorSource::new("santi-api", "http_boundary"),
-            None,
-            message,
-            serde_json::Value::Null,
-        ))
+        Self::from_santi(engine().transient(Signal {
+            descriptor: catalog::INVALID_ARGUMENT,
+            source: ErrorSource::new("santi-api", "http_boundary"),
+            scope: None,
+            message: message.into(),
+            context: serde_json::Value::Null,
+        }))
     }
 
     pub fn unauthorized(message: impl Into<String>) -> Self {
-        Self::from_santi(engine().transient(
-            catalog::UNAUTHORIZED,
-            ErrorSource::new("santi-api", "http_boundary"),
-            None,
-            message,
-            serde_json::Value::Null,
-        ))
+        Self::from_santi(engine().transient(Signal {
+            descriptor: catalog::UNAUTHORIZED,
+            source: ErrorSource::new("santi-api", "http_boundary"),
+            scope: None,
+            message: message.into(),
+            context: serde_json::Value::Null,
+        }))
     }
 
     pub fn from_santi(error: SantiError) -> Self {

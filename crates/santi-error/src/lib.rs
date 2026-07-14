@@ -32,6 +32,14 @@ pub mod catalog {
         exposure: ErrorExposure::CALLER_AND_OPERATOR,
     };
 
+    pub const SOUL_MEMORY_INTERVENTION_REQUIRED: ErrorDescriptor = ErrorDescriptor {
+        code: "runtime.soul_memory.intervention_required",
+        category: ErrorCategory::ResourceExhausted,
+        severity: ErrorSeverity::Error,
+        retry: ErrorRetry::AfterChange,
+        exposure: ErrorExposure::OPERATOR_ONLY,
+    };
+
     pub const UPGRADE_FAILED: ErrorDescriptor = ErrorDescriptor {
         code: "runtime.upgrade.failed",
         category: ErrorCategory::Internal,
@@ -267,6 +275,15 @@ pub struct IncidentDraft {
     pub context: Value,
 }
 
+#[derive(Debug, Clone)]
+pub struct Signal {
+    pub descriptor: ErrorDescriptor,
+    pub source: ErrorSource,
+    pub scope: Option<ErrorScope>,
+    pub message: String,
+    pub context: Value,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorTransitionKind {
@@ -371,26 +388,19 @@ impl ErrorEngine {
         }
     }
 
-    pub fn transient(
-        &self,
-        descriptor: ErrorDescriptor,
-        source: ErrorSource,
-        scope: Option<ErrorScope>,
-        message: impl Into<String>,
-        context: Value,
-    ) -> SantiError {
+    pub fn transient(&self, signal: Signal) -> SantiError {
         SantiError {
             id: prefixed_id("error"),
             incident_id: None,
-            code: descriptor.code.to_string(),
-            message: message.into(),
-            category: descriptor.category,
-            severity: descriptor.severity,
-            retry: descriptor.retry,
-            exposure: descriptor.exposure,
-            source,
-            scope,
-            context,
+            code: signal.descriptor.code.to_string(),
+            message: signal.message,
+            category: signal.descriptor.category,
+            severity: signal.descriptor.severity,
+            retry: signal.descriptor.retry,
+            exposure: signal.descriptor.exposure,
+            source: signal.source,
+            scope: signal.scope,
+            context: signal.context,
         }
     }
 

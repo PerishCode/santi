@@ -1,24 +1,54 @@
-use std::{
-    io::Read,
-    path::PathBuf,
-    process::{Child, Command, Stdio},
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-};
+use std::{path::PathBuf, process::Stdio};
 
-use santi_provider::ProviderFunctionCall;
+use santi_provider::{ProviderFunctionCall, ProviderFunctionTool, ProviderTool};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::workspace;
 use crate::{
-    EffectState, EffectTransitionReason, SantiStreamPayload, WorkspaceRoot, parse_workspace_uri,
+    EffectState, EffectTransitionReason, SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI,
+    SantiStreamPayload, parse_workspace_uri, soul_memory_uri, strand_memory_uri,
 };
 
-use super::SantiService;
+use super::Service;
 
-impl SantiService {
+mod shell;
+
+pub(crate) fn provider_tools() -> Vec<ProviderTool> {
+    let soul_memory_uri = soul_memory_uri();
+    let strand_memory_uri = strand_memory_uri();
+    vec![ProviderTool::Function(ProviderFunctionTool {
+        name: "shell".to_string(),
+        description: format!(
+            "Run a shell command. By default commands run in the current execution workspace. Use cwd \"{SOUL_WORKSPACE_URI}\" to work in the current soul workspace, where {soul_memory_uri} is always rendered live in [santi-soul]. Use cwd \"{STRAND_WORKSPACE_URI}\" to work in the current strand workspace, where {strand_memory_uri} is always rendered live in [santi-strand]. Unix-like systems use bash by default; Windows uses pwsh by default."
+        ),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The shell command to execute."
+                },
+                "cwd": {
+                    "type": "string",
+                    "description": format!("Optional workspace URI. Supports {SOUL_WORKSPACE_URI}, {SOUL_WORKSPACE_URI}<path>, {STRAND_WORKSPACE_URI}, and {STRAND_WORKSPACE_URI}<path>.")
+                }
+            },
+            "required": ["command"],
+            "additionalProperties": false
+        }),
+    })]
+}
+
+struct Shell<'a> {
+    strand: &'a str,
+    turn: &'a str,
+    call: &'a ProviderFunctionCall,
+    effect: &'a str,
+    limit: Option<usize>,
+}
+
+impl Service {
     pub(super) fn handle_tool_call(
         &self,
         strand_id: &str,
@@ -26,19 +56,20 @@ impl SantiService {
         call: ProviderFunctionCall,
         output_limit: Option<usize>,
     ) -> Result<(), String> {
-        // Persist the provider's raw item + ids so the Responses adapter can
-        // replay the call verbatim; chat_completions rebuilds from name/args.
         let effect_type = (call.name == "shell").then_some("shell");
+        let provenance = crate::ToolCallProvenance {
+            provider_family: self.provider.metadata().provider.to_string(),
+            item: Some(call.item.clone()),
+            item_id: call.item_id.clone(),
+            response_id: Some(call.response_id.clone()),
+        };
         let (tool_call, effect) = self.store.append_effect_call(
-            turn_id,
-            &call.call_id,
-            &call.name,
-            &call.arguments,
-            &crate::ToolCallProvenance {
-                provider_family: self.provider.metadata().provider.to_string(),
-                item: Some(call.item.clone()),
-                item_id: call.item_id.clone(),
-                response_id: Some(call.response_id.clone()),
+            crate::Invocation {
+                turn: turn_id,
+                call: &call.call_id,
+                name: &call.name,
+                arguments: &call.arguments,
+                provenance: &provenance,
             },
             effect_type,
         )?;
@@ -49,7 +80,13 @@ impl SantiService {
             },
         );
         let result = if let Some(effect) = effect {
-            self.handle_shell_effect(strand_id, turn_id, &call, &effect.id, output_limit)?
+            self.handle_shell_effect(Shell {
+                strand: strand_id,
+                turn: turn_id,
+                call: &call,
+                effect: &effect.id,
+                limit: output_limit,
+            })?
         } else {
             self.store.append_tool_result(
                 &call.call_id,
@@ -69,46 +106,52 @@ impl SantiService {
         Ok(())
     }
 
-    fn handle_shell_effect(
-        &self,
-        strand_id: &str,
-        turn_id: &str,
-        call: &ProviderFunctionCall,
-        effect_id: &str,
-        output_limit: Option<usize>,
-    ) -> Result<crate::ToolResult, String> {
+    fn handle_shell_effect(&self, shell: Shell<'_>) -> Result<crate::ToolResult, String> {
+        let Shell {
+            strand: strand_id,
+            turn: turn_id,
+            call,
+            effect: effect_id,
+            limit: output_limit,
+        } = shell;
         let soul_id = self.store.soul_id_for_strand(strand_id)?;
-        let prepared = match parse_tool_args::<ShellArgs>(&call.arguments)
+        let prepared = match parse_tool_args::<shell::Args>(&call.arguments)
             .and_then(|args| self.prepare_shell(strand_id, turn_id, &soul_id, args))
         {
             Ok(prepared) => prepared,
             Err(error) => {
                 return self.store.append_effect_tool_result(
                     effect_id,
-                    &call.call_id,
-                    None,
-                    Some(bounded_tool_error(error, output_limit)),
-                    EffectState::NotDispatched,
+                    crate::store::Settlement {
+                        call: &call.call_id,
+                        output: None,
+                        error: Some(bounded_tool_error(error, output_limit)),
+                        state: EffectState::NotDispatched,
+                    },
                 );
             }
         };
         self.store.begin_effect_dispatch(effect_id)?;
-        match run_prepared_shell(prepared, output_limit) {
-            ShellDispatchOutcome::Captured(output) => self.store.append_effect_tool_result(
+        match shell::run_prepared_shell(prepared, output_limit) {
+            shell::Outcome::Captured(output) => self.store.append_effect_tool_result(
                 effect_id,
-                &call.call_id,
-                Some(output),
-                None,
-                EffectState::Confirmed,
+                crate::store::Settlement {
+                    call: &call.call_id,
+                    output: Some(output),
+                    error: None,
+                    state: EffectState::Confirmed,
+                },
             ),
-            ShellDispatchOutcome::NotDispatched(error) => self.store.append_effect_tool_result(
+            shell::Outcome::Failed(error) => self.store.append_effect_tool_result(
                 effect_id,
-                &call.call_id,
-                None,
-                Some(bounded_tool_error(error, output_limit)),
-                EffectState::NotDispatched,
+                crate::store::Settlement {
+                    call: &call.call_id,
+                    output: None,
+                    error: Some(bounded_tool_error(error, output_limit)),
+                    state: EffectState::NotDispatched,
+                },
             ),
-            ShellDispatchOutcome::Unknown(error) => {
+            shell::Outcome::Unknown(error) => {
                 self.store.mark_effect_unknown(
                     effect_id,
                     EffectTransitionReason::ResultCaptureFailed,
@@ -126,28 +169,25 @@ impl SantiService {
         strand_id: &str,
         turn_id: &str,
         soul_id: &str,
-        args: ShellArgs,
-    ) -> Result<PreparedShell, String> {
+        args: shell::Args,
+    ) -> Result<shell::Prepared, String> {
         std::fs::create_dir_all(self.soul_memory_dir(soul_id))
             .map_err(|error| error.to_string())?;
         std::fs::create_dir_all(self.strand_memory_dir(strand_id))
             .map_err(|error| error.to_string())?;
         let cwd = self.resolve_shell_cwd(strand_id, soul_id, args.cwd.as_deref())?;
         std::fs::create_dir_all(&cwd).map_err(|error| error.to_string())?;
-        let mut command = shell_command(&args.command);
+        let mut command = shell::shell_command(&args.command);
         command
             .current_dir(&cwd)
             .env("SANTI_SOUL_MEMORY_DIR", self.soul_memory_dir(soul_id))
             .env("SANTI_STRAND_MEMORY_DIR", self.strand_memory_dir(strand_id))
-            // Self-involved: the soul inherits its own domain, so `santi …` from
-            // its shell auto-scopes to itself + this strand (via the CLI's
-            // --soul/--strand env defaults). Ambient capability, not authorization.
             .env("SANTI_SOUL_ID", soul_id)
             .env("SANTI_STRAND_ID", strand_id)
             .env("SANTI_TURN_ID", turn_id)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        Ok(PreparedShell { command, cwd })
+        Ok(shell::Prepared { command, cwd })
     }
 
     fn resolve_shell_cwd(
@@ -161,8 +201,8 @@ impl SantiService {
         };
         let uri = parse_workspace_uri(cwd)?;
         let root = match uri.root {
-            WorkspaceRoot::Soul => self.soul_memory_dir(soul_id),
-            WorkspaceRoot::Strand => self.strand_memory_dir(strand_id),
+            workspace::Root::Soul => self.soul_memory_dir(soul_id),
+            workspace::Root::Strand => self.strand_memory_dir(strand_id),
         };
         Ok(root.join(uri.path))
     }
@@ -183,8 +223,6 @@ impl SantiService {
     }
 
     pub(super) fn soul_memory_file(&self, soul_id: &str) -> PathBuf {
-        // Delegate to the free function so offline ops (`santi doctor`) and the
-        // running service always resolve the same path.
         crate::store::soul_memory_file(self.runtime_root(), soul_id)
     }
 
@@ -199,181 +237,11 @@ impl SantiService {
         self.strand_memory_dir(strand_id).join("MEMORY.md")
     }
 
-    /// The `[santi]` constitution config file: `SANTI_CONSTITUTION_FILE` if set,
-    /// else `<runtime_root>/constitution.md`. Absent → the encoded default. It
-    /// is read per-turn (hot), so editing it takes effect on the next turn with
-    /// no restart — the observe→refine loop.
     pub(super) fn constitution_file(&self) -> PathBuf {
         std::env::var("SANTI_CONSTITUTION_FILE")
             .map(PathBuf::from)
             .unwrap_or_else(|_| self.runtime_root().join("constitution.md"))
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct ShellArgs {
-    command: String,
-    cwd: Option<String>,
-}
-
-struct PreparedShell {
-    command: Command,
-    cwd: PathBuf,
-}
-
-enum ShellDispatchOutcome {
-    Captured(Value),
-    NotDispatched(String),
-    Unknown(String),
-}
-
-fn run_prepared_shell(
-    prepared: PreparedShell,
-    output_limit: Option<usize>,
-) -> ShellDispatchOutcome {
-    let PreparedShell { mut command, cwd } = prepared;
-    let child = match command.spawn() {
-        Ok(child) => child,
-        Err(error) => {
-            return ShellDispatchOutcome::NotDispatched(format!(
-                "failed to spawn shell process: {error}"
-            ));
-        }
-    };
-    match output_limit {
-        None => match child.wait_with_output() {
-            Ok(output) => ShellDispatchOutcome::Captured(json!({
-                "exit_code": output.status.code().unwrap_or(-1),
-                "stdout": String::from_utf8_lossy(&output.stdout),
-                "stderr": String::from_utf8_lossy(&output.stderr),
-                "shell": default_shell_name(),
-                "cwd": cwd.display().to_string(),
-            })),
-            Err(error) => ShellDispatchOutcome::Unknown(format!(
-                "shell process was spawned but its result could not be captured: {error}"
-            )),
-        },
-        Some(limit) => wait_with_bounded_output(child, cwd, limit),
-    }
-}
-
-struct CapturedPipe {
-    bytes: Vec<u8>,
-    truncated: bool,
-}
-
-fn wait_with_bounded_output(mut child: Child, cwd: PathBuf, limit: usize) -> ShellDispatchOutcome {
-    let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
-        let _ = child.kill();
-        let _ = child.wait();
-        return ShellDispatchOutcome::Unknown(
-            "shell stdout or stderr pipe was unavailable".to_string(),
-        );
-    };
-    let remaining = Arc::new(AtomicUsize::new(limit));
-    let stdout_capture = spawn_pipe_capture(stdout, remaining.clone());
-    let stderr_capture = spawn_pipe_capture(stderr, remaining);
-    let status = child.wait().inspect_err(|_| {
-        let _ = child.kill();
-        let _ = child.wait();
-    });
-    let stdout = join_pipe_capture(stdout_capture, "stdout");
-    let stderr = join_pipe_capture(stderr_capture, "stderr");
-    let (status, stdout, stderr) = match (status, stdout, stderr) {
-        (Ok(status), Ok(stdout), Ok(stderr)) => (status, stdout, stderr),
-        (status, stdout, stderr) => {
-            return ShellDispatchOutcome::Unknown(format!(
-                "shell process was spawned but its bounded result could not be captured: status={}; stdout={}; stderr={}",
-                capture_status(status),
-                capture_status(stdout),
-                capture_status(stderr),
-            ));
-        }
-    };
-    let (stdout_text, stdout_text_truncated) = lossy_prefix(&stdout.bytes, limit);
-    let text_remaining = limit.saturating_sub(stdout_text.len());
-    let (stderr_text, stderr_text_truncated) = lossy_prefix(&stderr.bytes, text_remaining);
-    let output_truncated =
-        stdout.truncated || stderr.truncated || stdout_text_truncated || stderr_text_truncated;
-    ShellDispatchOutcome::Captured(json!({
-        "exit_code": status.code().unwrap_or(-1),
-        "stdout": stdout_text,
-        "stderr": stderr_text,
-        "shell": default_shell_name(),
-        "cwd": cwd.display().to_string(),
-        "output_truncated": output_truncated,
-        "output_limit_bytes": limit,
-    }))
-}
-
-fn spawn_pipe_capture<R>(
-    reader: R,
-    remaining: Arc<AtomicUsize>,
-) -> std::thread::JoinHandle<Result<CapturedPipe, String>>
-where
-    R: Read + Send + 'static,
-{
-    std::thread::spawn(move || capture_pipe(reader, &remaining))
-}
-
-fn capture_pipe(mut reader: impl Read, remaining: &AtomicUsize) -> Result<CapturedPipe, String> {
-    let mut bytes = Vec::new();
-    let mut truncated = false;
-    let mut chunk = [0u8; 8192];
-    loop {
-        let read = reader.read(&mut chunk).map_err(|error| error.to_string())?;
-        if read == 0 {
-            break;
-        }
-        let keep = reserve_capture_bytes(remaining, read);
-        bytes.extend_from_slice(&chunk[..keep]);
-        truncated |= keep < read;
-    }
-    Ok(CapturedPipe { bytes, truncated })
-}
-
-fn reserve_capture_bytes(remaining: &AtomicUsize, requested: usize) -> usize {
-    let mut available = remaining.load(Ordering::Acquire);
-    loop {
-        let reserved = available.min(requested);
-        match remaining.compare_exchange_weak(
-            available,
-            available - reserved,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
-            Ok(_) => return reserved,
-            Err(actual) => available = actual,
-        }
-    }
-}
-
-fn join_pipe_capture(
-    handle: std::thread::JoinHandle<Result<CapturedPipe, String>>,
-    name: &str,
-) -> Result<CapturedPipe, String> {
-    handle
-        .join()
-        .map_err(|_| format!("{name} capture thread panicked"))?
-}
-
-fn capture_status<T, E: std::fmt::Display>(result: Result<T, E>) -> String {
-    match result {
-        Ok(_) => "ok".to_string(),
-        Err(error) => error.to_string(),
-    }
-}
-
-fn lossy_prefix(bytes: &[u8], limit: usize) -> (String, bool) {
-    let text = String::from_utf8_lossy(bytes);
-    if text.len() <= limit {
-        return (text.into_owned(), false);
-    }
-    let mut end = limit;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    (text[..end].to_string(), true)
 }
 
 fn bounded_tool_error(error: String, limit: Option<usize>) -> String {
@@ -388,30 +256,6 @@ fn bounded_tool_error(error: String, limit: Option<usize>) -> String {
         end -= 1;
     }
     error[..end].to_string()
-}
-
-fn shell_command(command: &str) -> Command {
-    #[cfg(windows)]
-    {
-        let mut shell = Command::new("pwsh");
-        shell
-            .arg("-NoLogo")
-            .arg("-NoProfile")
-            .arg("-Command")
-            .arg(command);
-        shell
-    }
-
-    #[cfg(not(windows))]
-    {
-        let mut shell = Command::new("/bin/bash");
-        shell.arg("-lc").arg(command);
-        shell
-    }
-}
-
-fn default_shell_name() -> &'static str {
-    if cfg!(windows) { "pwsh" } else { "bash" }
 }
 
 fn parse_tool_args<T: for<'de> Deserialize<'de>>(value: &Value) -> Result<T, String> {

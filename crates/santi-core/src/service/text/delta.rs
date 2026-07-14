@@ -2,24 +2,24 @@ use crate::{
     ActorType, SantiStreamPayload, ThinkingCompletionReason, ThinkingSpan, TurnActivityState,
 };
 
-use super::{SantiService, timing::ProviderTurnTiming};
+use super::super::{Service, timing};
 
-pub(super) struct TextDeltaUpdate<'a, 'turn> {
-    pub(super) strand_id: &'a str,
-    pub(super) turn_id: &'a str,
-    pub(super) assistant_text: &'a mut String,
-    pub(super) round_assistant_text: &'a mut String,
-    pub(super) timing: &'a ProviderTurnTiming<'turn>,
-    pub(super) round: usize,
-    pub(super) current_thinking_span: &'a mut Option<ThinkingSpan>,
-    pub(super) active_provider_response_id: &'a Option<String>,
+pub(in crate::service) struct Update<'a, 'turn> {
+    pub(in crate::service) strand_id: &'a str,
+    pub(in crate::service) turn_id: &'a str,
+    pub(in crate::service) assistant_text: &'a mut String,
+    pub(in crate::service) round_assistant_text: &'a mut String,
+    pub(in crate::service) timing: &'a timing::Turn<'turn>,
+    pub(in crate::service) round: usize,
+    pub(in crate::service) current_thinking_span: &'a mut Option<ThinkingSpan>,
+    pub(in crate::service) active_provider_response_id: &'a Option<String>,
 }
 
-impl SantiService {
-    pub(super) fn handle_text_delta(
+impl Service {
+    pub(in crate::service) fn handle_text_delta(
         &self,
         delta: String,
-        update: TextDeltaUpdate<'_, '_>,
+        update: Update<'_, '_>,
     ) -> Result<(), String> {
         if update.assistant_text.is_empty() {
             update.timing.first_text_delta(update.round);

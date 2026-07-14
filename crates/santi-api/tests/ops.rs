@@ -1,9 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use santi_api::{
-    config::RuntimePaths,
-    ops::{doctor_at, im_reply_at, im_reply_turn_at, inbox_seed_at, inbox_seed_label_at},
-};
+use santi_api::config::RuntimePaths;
 
 fn paths_under(root: &Path) -> RuntimePaths {
     RuntimePaths {
@@ -22,7 +19,7 @@ fn doctor_reads_runtime() {
     std::fs::create_dir_all(memory.parent().unwrap()).unwrap();
     std::fs::write(&memory, "# memory").unwrap();
 
-    let report = doctor_at(&paths).expect("doctor");
+    let report = paths.doctor().expect("doctor");
     assert!(report.ok, "expected healthy: {report:?}");
     assert!(report.schema_ok);
     assert_eq!(report.schema_version, Some(santi_core::SCHEMA_VERSION));
@@ -39,7 +36,7 @@ fn doctor_rejects_stale() {
     conn.pragma_update(None, "user_version", 5u32).unwrap();
     drop(conn);
 
-    let report = doctor_at(&paths).expect("doctor");
+    let report = paths.doctor().expect("doctor");
     assert!(!report.ok);
     assert!(!report.schema_ok);
     assert_eq!(report.schema_version, Some(5));
@@ -50,7 +47,7 @@ fn doctor_handles_absence() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
     santi_core::SantiStore::open(&paths.database_path).expect("open store");
-    let report = doctor_at(&paths).expect("doctor");
+    let report = paths.doctor().expect("doctor");
     assert!(report.ok, "absent memory should be fine: {report:?}");
     assert!(!report.memory_present);
 
@@ -58,7 +55,7 @@ fn doctor_handles_absence() {
         database_path: temp.path().join("void").join("db"),
         ..paths
     };
-    let report = doctor_at(&missing).expect("doctor");
+    let report = missing.doctor().expect("doctor");
     assert!(!report.ok);
     assert_eq!(report.schema_version, None);
 }
@@ -68,7 +65,7 @@ fn doctor_serializes() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
     santi_core::SantiStore::open(&paths.database_path).expect("open store");
-    let report = doctor_at(&paths).expect("doctor");
+    let report = paths.doctor().expect("doctor");
     let json = serde_json::to_string(&report).expect("serialize");
     assert!(json.contains("\"schema_ok\""));
     assert!(json.contains("\"provider\":null"));
@@ -84,7 +81,7 @@ fn seed_drains_on_boot() {
         store.create_strand().expect("create strand").id
     };
 
-    let report = inbox_seed_at(&paths, &strand_id, "come look").unwrap();
+    let report = paths.inbox_seed(&strand_id, "come look").unwrap();
     assert!(report.accepted);
     let store = santi_core::SantiStore::open(&paths.database_path).expect("reopen");
     let started = store
@@ -106,13 +103,9 @@ fn labeled_seed_drains() {
     santi_core::SantiStore::open(&paths.database_path).expect("open");
     let label = "soul:soul_default:ops";
 
-    let report = inbox_seed_label_at(
-        &paths,
-        santi_core::DEFAULT_SOUL_ID,
-        label,
-        "upgrade finished",
-    )
-    .unwrap();
+    let report = paths
+        .inbox_seed_label(santi_core::DEFAULT_SOUL_ID, label, "upgrade finished")
+        .unwrap();
     assert!(report.accepted);
     let store = santi_core::SantiStore::open(&paths.database_path).expect("reopen");
     let strand = store.strand(&report.strand_id).unwrap().expect("strand");
@@ -137,7 +130,7 @@ fn im_reply_delivers() {
             .id
     };
 
-    let report = im_reply_at(&paths, &strand_id, "ok").unwrap();
+    let report = paths.im_reply(&strand_id, "ok").unwrap();
     assert_eq!(report.participant_id, "operator");
     let store = santi_core::SantiStore::open(&paths.database_path).expect("reopen");
     let entries = store.poll_im_inbox("operator", 0).unwrap();
@@ -154,7 +147,7 @@ fn im_reply_rejects_plain() {
         let store = santi_core::SantiStore::open(&paths.database_path).expect("open");
         store.create_strand().expect("create strand").id
     };
-    let error = im_reply_at(&paths, &strand_id, "x").unwrap_err();
+    let error = paths.im_reply(&strand_id, "x").unwrap_err();
     assert!(error.contains("not an IM conversation"), "got: {error}");
 }
 
@@ -183,14 +176,18 @@ fn turn_reply_deduplicates() {
         (strand.id, turn.id)
     };
 
-    let first = im_reply_turn_at(&paths, &strand_id, Some(&turn_id), "early").unwrap();
+    let first = paths
+        .im_reply_turn(&strand_id, Some(&turn_id), "early")
+        .unwrap();
     assert!(!first.deduplicated);
     assert_eq!(first.turn_id.as_deref(), Some(turn_id.as_str()));
     assert_eq!(
         first.delivery_mode,
         Some(santi_core::ImDeliveryMode::Explicit)
     );
-    let second = im_reply_turn_at(&paths, &strand_id, Some(&turn_id), "duplicate").unwrap();
+    let second = paths
+        .im_reply_turn(&strand_id, Some(&turn_id), "duplicate")
+        .unwrap();
     assert!(second.deduplicated);
     assert_eq!(second.seq, first.seq);
 }
@@ -201,7 +198,7 @@ fn seed_rejects_unknown() {
     let paths = paths_under(temp.path());
     santi_core::SantiStore::open(&paths.database_path).expect("open");
 
-    let error = inbox_seed_at(&paths, "ss_missing", "x").unwrap_err();
+    let error = paths.inbox_seed("ss_missing", "x").unwrap_err();
     assert!(error.contains("unknown strand"), "got: {error}");
     let store = santi_core::SantiStore::open(&paths.database_path).expect("reopen");
     assert!(store.strands_with_pending_requests().unwrap().is_empty());

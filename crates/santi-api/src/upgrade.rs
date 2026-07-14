@@ -1,31 +1,8 @@
-//! `santi upgrade` — self-upgrade orchestration (PHASE-07 STEP 4).
-//!
-//! Two faces, split by `--run`:
-//!
-//! - **launcher** (`santi upgrade <deb>`): what the operator — later Liberte —
-//!   invokes. It writes the request and kicks the shipped `santi-upgrade.service`
-//!   oneshot unit via `systemctl start --no-block`, then returns FAST with a
-//!   signal (监听 / 最长超时 Xmin / 日志位置). Because the real work runs as a
-//!   systemd unit under PID 1, it is OUTSIDE santi.service's cgroup, so stopping
-//!   santi does not kill the upgrader (the self-restart-from-own-cgroup problem).
-//! - **runner** (`santi upgrade --run <deb>`): what the oneshot unit executes.
-//!   It orchestrates the sequence below. The binary selected as FINAL records
-//!   canonical incidents and seeds a neutral wake before the final start.
-//!
-//! Sequence (`run_upgrade`): graceful-stop → snapshot → dpkg → resolve (install +
-//! a trial start/health probe + atomically retain the installed package) →
-//! auto-rollback on a CRISP failure → finalize terminal truth + wake (offline,
-//! with the FINAL binary) → start FINAL.
-//!
-//! The side effects live behind [`UpgradeHost`] so the orchestration LOGIC here
-//! is unit-tested with a fake; the real systemctl/dpkg shell is
-//! validated on a Debian box (PHASE-07 STEP 6), not in CI.
-
 mod artifacts;
 mod finalize;
 mod system;
 
-pub use finalize::{finalize, finalize_at, seed_attempt_handover_at, seed_come_look_at};
+pub use finalize::{finalize, finalize_at};
 pub use system::{launch, run};
 
 use std::env;
@@ -42,12 +19,8 @@ const HANDOVER_MAX_TOOL_CALLS: usize = 16;
 const HANDOVER_MAX_TOOL_OUTPUT_BYTES: usize = 40 * 1024;
 const HANDOVER_MAX_SHELL_OUTPUT_BYTES: usize = 16 * 1024;
 
-/// Apply the upgrade adaptor's attempt-label semantics to the generic core
-/// execution budget registry. This runs before boot recovery, so an offline
-/// handover seed is bounded from its first provider request without teaching
-/// core what an upgrade label means.
 pub fn register_attempt_handover_budgets(
-    service: &santi_core::SantiService,
+    service: &santi_core::service::Service,
 ) -> Result<usize, String> {
     let mut registered = 0;
     for strand in service.list_strands()? {
@@ -62,7 +35,7 @@ pub fn register_attempt_handover_budgets(
         }
         service.set_strand_execution_budget(
             &strand.id,
-            santi_core::StrandExecutionBudget {
+            santi_core::Execution {
                 profile: HANDOVER_BUDGET_PROFILE.to_string(),
                 max_provider_rounds: HANDOVER_MAX_PROVIDER_ROUNDS,
                 max_tool_calls: HANDOVER_MAX_TOOL_CALLS,
@@ -75,8 +48,6 @@ pub fn register_attempt_handover_budgets(
     Ok(registered)
 }
 
-/// Why the runner rolled back to the previous version. The detail is durable
-/// operator truth in the error incident; it is never projected into come-look.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "cause", content = "detail")]
 pub enum RollbackCause {
@@ -85,14 +56,10 @@ pub enum RollbackCause {
     ArtifactRetentionFailed(String),
 }
 
-/// The resolved outcome of an upgrade attempt.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "outcome")]
 pub enum Outcome {
-    /// The new version installed and came up; it is the final version. A
-    /// degraded runtime is still live and must not be rolled back implicitly.
     Upgraded { readiness: UpgradeReadiness },
-    /// A crisp pre-commit failure → restored to the previous version.
     RolledBack(RollbackCause),
 }
 
@@ -185,29 +152,22 @@ impl Outcome {
     }
 }
 
-/// What the runner did, for the log + the launcher's after-the-fact inspection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpgradeReport {
     pub attempt_id: String,
     pub outcome: Outcome,
-    /// Neutral wake occurrence. Error detail lives only in `errors`/incidents.
     pub record: String,
     pub seeded: bool,
-    /// The concrete strand that received the record. It is a materialized room;
-    /// the durable addressing anchor is a deterministic attempt-scoped label.
     pub seeded_strand_id: Option<String>,
-    /// Canonical execution and/or handover failures observed in this attempt.
     pub errors: Vec<santi_core::SantiError>,
 }
 
-/// The successful result of seeding a come-look record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SeedOutcome {
     pub strand_id: String,
     pub warnings: Vec<String>,
 }
 
-/// The launcher's fast return: "started listening, max timeout, log location".
 #[derive(Debug, Clone, Serialize)]
 pub struct UpgradeStarted {
     pub attempt_id: String,
@@ -220,41 +180,20 @@ pub struct UpgradeStarted {
     pub previous_sha256: String,
 }
 
-/// The side effects an upgrade needs, abstracted so the orchestration is
-/// testable. Every method is a discrete, ordered step; `run_upgrade` is the only
-/// place their order lives.
 pub trait UpgradeHost {
-    /// Ask the running service to gracefully quiesce + stop within `grace`
-    /// (SIGTERM; the service pauses consumption, drains the in-flight turn).
     fn graceful_stop(&mut self, grace: Duration) -> Result<(), String>;
-    /// Snapshot the whole runtime (db + souls) so a rollback can restore it.
     fn snapshot(&mut self) -> Result<(), String>;
-    /// `dpkg -i` the new package. `Err` ⟺ the install itself failed.
     fn install(&mut self, deb: &str) -> Result<(), String>;
-    /// Start the newly-installed version and probe whether it CAME UP (the crisp
-    /// soul-deep-adjacent gate: process up + schema migrated + memory readable),
-    /// then stop it again so the final start is uniform. Degraded means the
-    /// process is live but canonical incidents still require intervention.
     fn trial_probe(&mut self) -> Result<UpgradeReadiness, String>;
-    /// Atomically make the installed candidate the durable rollback source for
-    /// the next upgrade. Failure is still pre-commit and routes to rollback.
     fn retain_candidate(&mut self) -> Result<(), String>;
-    /// Restore the snapshot + reinstall the previous version (the final = OLD).
     fn rollback(&mut self) -> Result<(), String>;
-    /// Ask the binary currently installed on disk (the FINAL version) to record
-    /// terminal incidents and optionally seed the neutral wake occurrence.
     fn finalize(
         &mut self,
         request: &UpgradeFinalizeRequest,
     ) -> Result<UpgradeFinalizeReport, String>;
-    /// Start the FINAL version for real (boot recovery then drains the seed).
     fn start(&mut self) -> Result<(), String>;
 }
 
-/// Orchestrate one upgrade over `host`. Pure control flow — no I/O of its own —
-/// so the branching (success / install-fail / did-not-come-up), the ordering
-/// (snapshot before dpkg; seed before the final start), and the record content
-/// are all exercised in tests with a fake host.
 pub fn run_upgrade<H: UpgradeHost>(
     host: &mut H,
     deb: &str,
@@ -294,8 +233,6 @@ pub(super) fn run_upgrade_attempt<H: UpgradeHost>(
         return Err(record_fatal(host, &attempt_id, deb, failure));
     }
 
-    // Resolve the final version. A crisp failure (install error, or the new
-    // version does not come up) routes to rollback; anything else is Upgraded.
     let outcome = match host.install(deb) {
         Err(error) => Outcome::RolledBack(RollbackCause::InstallFailed(error)),
         Ok(()) => match host.trial_probe() {
@@ -303,8 +240,6 @@ pub(super) fn run_upgrade_attempt<H: UpgradeHost>(
                 Ok(()) => Outcome::Upgraded { readiness },
                 Err(error) => Outcome::RolledBack(RollbackCause::ArtifactRetentionFailed(error)),
             },
-            // A probe that could not prove the process came up routes to a
-            // conservative rollback. Explicit degraded readiness does not.
             Err(error) => Outcome::RolledBack(RollbackCause::DidNotComeUp(error)),
         },
     };
@@ -368,8 +303,6 @@ pub(super) fn run_upgrade_attempt<H: UpgradeHost>(
     })
 }
 
-/// A wake occurrence, not an error projection. The model independently checks
-/// the runtime and may audit canonical incidents/operator logs when needed.
 pub fn compose_record(attempt_id: &str) -> String {
     format!(
         "A santi self-upgrade attempt (`{attempt_id}`) reached handover. Perform a bounded \

@@ -1556,6 +1556,7 @@ dependencies = [
  "santi-api",
  "santi-core",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
 ]

@@ -1,4 +1,5 @@
 use super::support::*;
+use santi_core::service::{self, Service};
 
 #[derive(Clone)]
 enum BudgetProviderStep {
@@ -103,8 +104,8 @@ fn execution_budget(
     max_tool_calls: usize,
     max_tool_output_bytes: usize,
     max_shell_output_bytes: usize,
-) -> santi_core::StrandExecutionBudget {
-    santi_core::StrandExecutionBudget {
+) -> santi_core::Execution {
+    santi_core::Execution {
         profile: "test_budget".to_string(),
         max_provider_rounds,
         max_tool_calls,
@@ -116,13 +117,13 @@ fn execution_budget(
 fn budget_service(
     temp: &tempfile::TempDir,
     steps: Vec<BudgetProviderStep>,
-) -> (SantiService, Arc<BudgetProvider>) {
+) -> (Service, Arc<BudgetProvider>) {
     let provider = Arc::new(BudgetProvider {
         requests: Arc::new(Mutex::new(Vec::new())),
         steps: Arc::new(steps),
     });
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: temp.path().join("santi.sqlite").display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -141,8 +142,8 @@ async fn dispatches_tools() {
         request_tool: true,
         ..FakeProvider::default()
     });
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: temp.path().join("santi.sqlite").display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -169,7 +170,9 @@ async fn dispatches_tools() {
         accepted_turn(&response).status,
         santi_core::TurnStatus::Running
     );
-    let runtime = wait_for_completed_turn(&service, &strand.id, &accepted_turn(&response).id).await;
+    let runtime = Probe::new(&service)
+        .completed_turn(&strand.id, &accepted_turn(&response).id)
+        .await;
     assert!(
         runtime
             .messages
@@ -193,8 +196,6 @@ async fn dispatches_tools() {
         .join(&strand.id)
         .join("memory");
     assert!(stdout.contains(&strand_memory_dir.display().to_string()));
-    // Self-involved env: the soul's shell inherits its own soul_id + strand_id,
-    // so `santi …` from the shell auto-scopes to itself.
     assert!(
         stdout.contains("soul_default"),
         "SANTI_SOUL_ID in shell env: {stdout}"
@@ -262,8 +263,6 @@ async fn dispatches_tools() {
     let requests = provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
     assert!(requests[1].previous_response_id.is_none());
-    // Round 2 re-derives input from the timeline: the prior tool call + result
-    // are replayed as items (no function_call_outputs side-channel).
     assert!(
         requests[1]
             .input
@@ -304,7 +303,9 @@ async fn rejects_tool_batch() {
         .await
         .expect("send");
 
-    let runtime = wait_for_failed_turn(&service, &strand.id, &accepted_turn(&response).id).await;
+    let runtime = Probe::new(&service)
+        .failed_turn(&strand.id, &accepted_turn(&response).id)
+        .await;
     assert!(runtime.tool_calls.is_empty());
     assert!(runtime.effects.is_empty());
     let incident = runtime
@@ -349,7 +350,9 @@ async fn reserves_followup_round() {
         .await
         .expect("send");
 
-    let runtime = wait_for_failed_turn(&service, &strand.id, &accepted_turn(&response).id).await;
+    let runtime = Probe::new(&service)
+        .failed_turn(&strand.id, &accepted_turn(&response).id)
+        .await;
     assert_eq!(runtime.tool_calls.len(), 1);
     assert_eq!(runtime.effects.len(), 1);
     let incident = runtime
@@ -395,7 +398,9 @@ async fn bounds_shell_capture() {
         .await
         .expect("send");
 
-    let runtime = wait_for_completed_turn(&service, &strand.id, &accepted_turn(&response).id).await;
+    let runtime = Probe::new(&service)
+        .completed_turn(&strand.id, &accepted_turn(&response).id)
+        .await;
     assert_eq!(runtime.tool_results.len(), 2);
     let captured_bytes = runtime
         .tool_results
@@ -451,7 +456,9 @@ async fn preserves_retry_usage() {
         )
         .await
         .expect("first send");
-    wait_for_failed_turn(&service, &strand.id, &accepted_turn(&first).id).await;
+    Probe::new(&service)
+        .failed_turn(&strand.id, &accepted_turn(&first).id)
+        .await;
 
     let retry = service
         .send_strand(
@@ -464,7 +471,9 @@ async fn preserves_retry_usage() {
         )
         .await
         .expect("retry send");
-    let runtime = wait_for_failed_turn(&service, &strand.id, &accepted_turn(&retry).id).await;
+    let runtime = Probe::new(&service)
+        .failed_turn(&strand.id, &accepted_turn(&retry).id)
+        .await;
     assert_eq!(runtime.tool_calls.len(), 1);
     let incident = runtime
         .errors

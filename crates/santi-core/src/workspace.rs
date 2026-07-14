@@ -5,14 +5,14 @@ pub const STRAND_WORKSPACE_URI: &str = "strand://";
 pub const MEMORY_FILE: &str = "MEMORY.md";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WorkspaceRoot {
+pub enum Root {
     Soul,
     Strand,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkspaceUri {
-    pub root: WorkspaceRoot,
+pub struct Uri {
+    pub root: Root,
     pub path: PathBuf,
 }
 
@@ -31,16 +31,16 @@ pub fn workspace_uri(root: &str, path: &str) -> String {
     format!("{root}{}", path.trim_start_matches('/'))
 }
 
-pub fn parse_workspace_uri(value: &str) -> Result<WorkspaceUri, String> {
+pub fn parse_workspace_uri(value: &str) -> Result<Uri, String> {
     if let Some(path) = value.strip_prefix(SOUL_WORKSPACE_URI) {
-        return Ok(WorkspaceUri {
-            root: WorkspaceRoot::Soul,
+        return Ok(Uri {
+            root: Root::Soul,
             path: safe_relative_path(path, SOUL_WORKSPACE_URI)?,
         });
     }
     if let Some(path) = value.strip_prefix(STRAND_WORKSPACE_URI) {
-        return Ok(WorkspaceUri {
-            root: WorkspaceRoot::Strand,
+        return Ok(Uri {
+            root: Root::Strand,
             path: safe_relative_path(path, STRAND_WORKSPACE_URI)?,
         });
     }

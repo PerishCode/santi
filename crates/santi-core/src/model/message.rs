@@ -4,12 +4,6 @@ use utoipa::ToSchema;
 
 use super::Timestamp;
 
-/// No user/account actor: santi is individual-first, not multi-tenant. All
-/// inbound (a CLI send, a webhook event) arrives as `System` — the sender's
-/// identity is metainfo carried in the content, opaque to core, not a distinct
-/// actor kind. `(actor, message_kind)` is the full marker at the provider
-/// boundary (see `message_to_provider_item`): Soul→assistant, System+Text→user
-/// (world-inbound), System+SantiSystem→system (runtime-meta, not user speech).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ActorType {
@@ -68,10 +62,6 @@ impl MessageContent {
     }
 }
 
-/// Whether an appended message is a REQUEST addressed to the soul (a user send /
-/// webhook event → wakes the soul / drives a turn) or a RECORD of something that
-/// happened (the soul's own output, a failure notice, a future compact → does not
-/// wake). The drive trigger keys off this; see PHASE-04 (M3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageIntake {
     Request,

@@ -54,14 +54,20 @@ impl ConfigService {
     }
 
     fn config_path(&self) -> String {
-        trim_optional_string(&self.cli.config)
+        self.cli
+            .config
+            .as_deref()
+            .and_then(trim_string)
             .or_else(|| optional_env("SANTI_CONFIG"))
             .unwrap_or_else(|| santi_home().join(APP_CONFIG_PATH).display().to_string())
     }
 
     fn selected_provider(&self, config: &AppConfigFile) -> String {
-        trim_optional_string(&self.cli.provider)
-            .or_else(|| trim_optional_string(&config.provider))
+        self.cli
+            .provider
+            .as_deref()
+            .and_then(trim_string)
+            .or_else(|| config.provider.as_deref().and_then(trim_string))
             .or_else(|| optional_env("SANTI_PROVIDER"))
             .unwrap_or_else(|| "openai".to_string())
     }
@@ -141,7 +147,7 @@ pub struct ChatCompletionsConfig {
 struct AppConfigFile {
     #[serde(default)]
     provider: Option<String>,
-    providers: BTreeMap<String, RawProviderProfile>,
+    providers: BTreeMap<String, Profile>,
 }
 
 impl AppConfigFile {
@@ -155,7 +161,7 @@ impl AppConfigFile {
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum RawProviderProfile {
+enum Profile {
     OpenaiResponses {
         #[serde(default)]
         api_key: Option<String>,
@@ -190,18 +196,15 @@ enum RawProviderProfile {
     },
 }
 
-fn resolve_provider_config(
-    provider: &str,
-    profile: &RawProviderProfile,
-) -> Result<ProviderConfig, String> {
+fn resolve_provider_config(provider: &str, profile: &Profile) -> Result<ProviderConfig, String> {
     match profile {
-        RawProviderProfile::OpenaiResponses { .. } => resolve_openai(provider, profile),
-        RawProviderProfile::ChatCompletions { .. } => resolve_chat_completions(provider, profile),
+        Profile::OpenaiResponses { .. } => resolve_openai(provider, profile),
+        Profile::ChatCompletions { .. } => resolve_chat_completions(provider, profile),
     }
 }
 
-fn resolve_openai(provider: &str, profile: &RawProviderProfile) -> Result<ProviderConfig, String> {
-    let RawProviderProfile::OpenaiResponses {
+fn resolve_openai(provider: &str, profile: &Profile) -> Result<ProviderConfig, String> {
+    let Profile::OpenaiResponses {
         api_key,
         model,
         base_url,
@@ -233,11 +236,8 @@ fn resolve_openai(provider: &str, profile: &RawProviderProfile) -> Result<Provid
     }))
 }
 
-fn resolve_chat_completions(
-    provider: &str,
-    profile: &RawProviderProfile,
-) -> Result<ProviderConfig, String> {
-    let RawProviderProfile::ChatCompletions {
+fn resolve_chat_completions(provider: &str, profile: &Profile) -> Result<ProviderConfig, String> {
+    let Profile::ChatCompletions {
         api_key,
         model,
         base_url,
@@ -296,18 +296,12 @@ fn optional_profile_string(
     resolve_value(value, provider, field)
 }
 
-/// Resolve a config value that may be an `env://VAR` reference. A plain value is
-/// used literally; `env://VAR` reads VAR from the environment. This is the same
-/// `scheme://locator` vocabulary as the `strand://` / `soul://` workspace URIs —
-/// one indirection convention, so a toml can carry secrets as `env://` references
-/// while the real values live only in the process environment. Fail-closed: an
-/// `env://` reference to an unset/empty variable is an error, never silently empty.
 fn resolve_value(
     value: &Option<String>,
     provider: &str,
     field: &str,
 ) -> Result<Option<String>, String> {
-    let Some(raw) = trim_optional_string(value) else {
+    let Some(raw) = value.as_deref().and_then(trim_string) else {
         return Ok(None);
     };
     let Some(var) = raw.strip_prefix("env://") else {
@@ -328,9 +322,6 @@ fn optional_env(name: &str) -> Option<String> {
     env::var(name).ok().and_then(|value| trim_string(&value))
 }
 
-/// The santi home directory: `SANTI_HOME` if set, else `~/.santi`. It anchors
-/// the default config path and runtime/execution/db locations, so santi runs
-/// with zero explicit configuration. Explicit flags/env always override.
 pub(crate) fn santi_home() -> PathBuf {
     if let Some(home) = optional_env("SANTI_HOME") {
         return expand_home(&home);
@@ -341,10 +332,6 @@ pub(crate) fn santi_home() -> PathBuf {
     PathBuf::from(base).join(".santi")
 }
 
-/// The runtime data locations, all anchored on `santi_home()` unless an explicit
-/// env overrides. Pure computation — creating the dirs is the caller's job (the
-/// offline ops paths read without creating; `serve` creates). Shared by `serve`,
-/// `santi doctor`, and `santi inbox seed` so they never drift.
 #[derive(Debug, Clone)]
 pub struct RuntimePaths {
     pub database_path: PathBuf,
@@ -374,10 +361,6 @@ fn expand_home(path: &str) -> PathBuf {
         return PathBuf::from(home).join(rest);
     }
     PathBuf::from(path)
-}
-
-fn trim_optional_string(value: &Option<String>) -> Option<String> {
-    value.as_ref().and_then(|value| trim_string(value))
 }
 
 fn trim_string(value: &str) -> Option<String> {

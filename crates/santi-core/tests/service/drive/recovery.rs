@@ -1,5 +1,6 @@
 use super::super::support::*;
 use rusqlite::Connection;
+use santi_core::service::{self, Service};
 
 #[tokio::test]
 async fn failed_receipt_redrives() {
@@ -8,8 +9,8 @@ async fn failed_receipt_redrives() {
         fail_for_requests: Some(1),
         ..FakeProvider::default()
     });
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: temp.path().join("santi.sqlite").display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -30,14 +31,18 @@ async fn failed_receipt_redrives() {
         )
         .await
         .expect("send strand");
-    wait_for_failed_turn(&service, &strand.id, &accepted_turn(&failed).id).await;
+    Probe::new(&service)
+        .failed_turn(&strand.id, &accepted_turn(&failed).id)
+        .await;
 
     let driven = service
         .drive_strand(&strand.id)
         .expect("explicit failed-receipt redrive");
     assert_eq!(driven.state, santi_core::DriveStrandState::Started);
     let recovered_turn = driven.turn.expect("recovery turn");
-    let runtime = wait_for_completed_turn(&service, &strand.id, &recovered_turn.id).await;
+    let runtime = Probe::new(&service)
+        .completed_turn(&strand.id, &recovered_turn.id)
+        .await;
 
     assert_eq!(provider.requests.lock().unwrap().len(), 2);
     assert_eq!(count_messages(&runtime, "one durable obligation"), 1);
@@ -66,8 +71,8 @@ async fn failed_receipt_redrives() {
 async fn drive_failure_recovers() {
     let temp = tempfile::tempdir().expect("temp dir");
     let database_path = temp.path().join("santi.sqlite");
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: database_path.display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -147,7 +152,9 @@ async fn drive_failure_recovers() {
     let driven = service.drive_strand(&strand.id).expect("operator redrive");
     assert_eq!(driven.state, santi_core::DriveStrandState::Started);
     let turn = driven.turn.expect("redrive turn");
-    let runtime = wait_for_completed_turn(&service, &strand.id, &turn.id).await;
+    let runtime = Probe::new(&service)
+        .completed_turn(&strand.id, &turn.id)
+        .await;
     assert!(!service.is_drive_degraded());
     assert_eq!(pending_count(&conn, &strand.id), 0);
     assert_eq!(runtime.errors.len(), 1);
@@ -208,14 +215,14 @@ async fn drive_failure_recovers() {
 async fn cold_start_recovers() {
     let temp = tempfile::tempdir().expect("temp dir");
     let database_path = temp.path().join("santi.sqlite");
-    let config = SantiServiceConfig {
+    let config = service::Config {
         database_path: database_path.display().to_string(),
         runtime_root: temp.path().join("runtime").display().to_string(),
         execution_root: temp.path().join("execution").display().to_string(),
         bind_addr: Some("127.0.0.1:0".to_string()),
     };
-    let service = SantiService::open(config.clone(), Arc::new(FakeProvider::default()))
-        .expect("open service");
+    let service =
+        Service::open(config.clone(), Arc::new(FakeProvider::default())).expect("open service");
     let strand = service.create_strand().expect("create strand").strand;
     service.begin_shutdown();
     let accepted = service
@@ -245,8 +252,8 @@ async fn cold_start_recovers() {
     )
     .expect("install failure trigger");
 
-    let restarted = SantiService::open(config, Arc::new(FakeProvider::default()))
-        .expect("open restarted service");
+    let restarted =
+        Service::open(config, Arc::new(FakeProvider::default())).expect("open restarted service");
     restarted
         .resume_pending()
         .expect("strand-local drive failure should permit degraded startup");
@@ -282,7 +289,9 @@ async fn cold_start_recovers() {
         .drive_strand(&strand.id)
         .expect("operator redrive");
     let turn = driven.turn.expect("redrive turn");
-    let runtime = wait_for_completed_turn(&restarted, &strand.id, &turn.id).await;
+    let runtime = Probe::new(&restarted)
+        .completed_turn(&strand.id, &turn.id)
+        .await;
     assert!(!restarted.is_drive_degraded());
     assert_eq!(pending_count(&conn, &strand.id), 0);
     assert_eq!(

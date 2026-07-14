@@ -4,19 +4,10 @@ use serde_json::json;
 
 use super::{
     SantiStore,
-    db::{
-        compacts_for_strand, message_record_by_id, message_seq_in_strand, message_to_provider_item,
-        regenerable_replay_material, thinking_span_by_id, tool_call_by_id, tool_result_by_id,
-    },
+    db::{Database, message_to_provider_item},
 };
 
 impl SantiStore {
-    /// Project the soul-strand's assembled view into the provider's typed-item
-    /// input: the immutable spine (r_strand_entries) MERGED at read with
-    /// this strand's compact overlay. Each compact collapses its covered
-    /// `[start,end]` range into one summary item; the spine itself is never
-    /// touched (immutable, compact-unaware, fork-shareable). The turn loop
-    /// re-derives input from here each round.
     pub fn assembly_input(&self, strand_id: &str) -> Result<Vec<ProviderItem>, String> {
         let conn = self.conn.lock().unwrap();
         assembly_input_in_conn(&conn, strand_id)
@@ -42,13 +33,13 @@ impl SantiStore {
         assembly_input_with_preview(
             &conn,
             strand_id,
-            Some(PreviewCompact {
+            Some(Preview {
                 start_seq: response.start_seq,
                 end_seq: response.end_seq,
                 absorbed: response.absorbed.as_slice(),
                 content: render_compact_for_provider(
                     &preview,
-                    CompactRenderRange {
+                    Range {
                         start_seq: response.start_seq,
                         end_seq: response.end_seq,
                         collapsed_count: response.collapsed_count,
@@ -66,14 +57,14 @@ pub(super) fn assembly_input_in_conn(
     assembly_input_with_preview(conn, strand_id, None)
 }
 
-struct PreviewCompact<'a> {
+struct Preview<'a> {
     start_seq: i64,
     end_seq: i64,
     absorbed: &'a [String],
     content: String,
 }
 
-struct AssemblyOverlay {
+struct Overlay {
     start_seq: i64,
     end_seq: i64,
     content: String,
@@ -82,11 +73,11 @@ struct AssemblyOverlay {
 fn assembly_input_with_preview(
     conn: &rusqlite::Connection,
     strand_id: &str,
-    preview: Option<PreviewCompact<'_>>,
+    preview: Option<Preview<'_>>,
 ) -> Result<Vec<ProviderItem>, String> {
-    // Resolve the compact overlay to seq ranges, sorted (disjoint by policy).
-    let mut overlay: Vec<AssemblyOverlay> = Vec::new();
-    for compact in compacts_for_strand(conn, strand_id)? {
+    let mut overlay: Vec<Overlay> = Vec::new();
+    let database = Database::new(conn);
+    for compact in database.compacts_for_strand(strand_id)? {
         if preview
             .as_ref()
             .is_some_and(|preview| preview.absorbed.iter().any(|id| id == &compact.id))
@@ -94,15 +85,15 @@ fn assembly_input_with_preview(
             continue;
         }
         if let (Some(from_seq), Some(to_seq)) = (
-            message_seq_in_strand(conn, strand_id, &compact.start_message_id)?,
-            message_seq_in_strand(conn, strand_id, &compact.end_message_id)?,
+            database.message_seq_in_strand(strand_id, &compact.start_message_id)?,
+            database.message_seq_in_strand(strand_id, &compact.end_message_id)?,
         ) {
-            overlay.push(AssemblyOverlay {
+            overlay.push(Overlay {
                 start_seq: from_seq,
                 end_seq: to_seq,
                 content: render_compact_for_provider(
                     &compact,
-                    CompactRenderRange {
+                    Range {
                         start_seq: from_seq,
                         end_seq: to_seq,
                         collapsed_count: to_seq.saturating_sub(from_seq).saturating_add(1),
@@ -112,7 +103,7 @@ fn assembly_input_with_preview(
         }
     }
     if let Some(preview) = preview {
-        overlay.push(AssemblyOverlay {
+        overlay.push(Overlay {
             start_seq: preview.start_seq,
             end_seq: preview.end_seq,
             content: preview.content,
@@ -144,12 +135,10 @@ fn assembly_input_with_preview(
     let mut overlay_emitted = false;
     for row in rows {
         let (seq, target_type, target_id) = row.map_err(|error| error.to_string())?;
-        // Advance past compacts whose range ends before this seq.
         while overlay_index < overlay.len() && overlay[overlay_index].end_seq < seq {
             overlay_index += 1;
             overlay_emitted = false;
         }
-        // Covered by a compact → emit its summary once, skip the underlying.
         if overlay_index < overlay.len() && overlay[overlay_index].start_seq <= seq {
             if !overlay_emitted {
                 input.push(ProviderItem::Message {
@@ -160,73 +149,88 @@ fn assembly_input_with_preview(
             }
             continue;
         }
-        match target_type.as_str() {
-            "message" => {
-                if let Some(message) = message_record_by_id(conn, &target_id)?
-                    && let Some(item) = message_to_provider_item(&message)
-                {
-                    input.push(item);
-                }
-            }
-            "thinking" => {
-                // Reasoning is a first-class item; adapters currently drop it
-                // (DC5). Emit only when there is real summary text.
-                if let Some(thinking) = thinking_span_by_id(conn, &target_id)?
-                    && let Some(summary) = thinking.summary.filter(|text| !text.trim().is_empty())
-                {
-                    input.push(ProviderItem::Reasoning {
-                        id: thinking.provider_response_id,
-                        content: summary,
-                    });
-                }
-            }
-            "tool_call" => {
-                if let Some(tool_call) = tool_call_by_id(conn, &target_id)? {
-                    // The raw wire item is adaptor-owned advisory replay
-                    // material, side-stored — the neutral tool_call carries
-                    // no provider plumbing. The adaptor validates it and
-                    // regenerates from the neutral fields if it is invalid.
-                    let (item, item_id) = regenerable_replay_material(conn, &tool_call.id)?;
-                    input.push(ProviderItem::FunctionCall {
-                        call_id: tool_call.id,
-                        name: tool_call.tool_name,
-                        arguments_raw: serde_json::to_string(&tool_call.arguments)
-                            .map_err(|error| error.to_string())?,
-                        item,
-                        item_id,
-                    });
-                }
-            }
-            "tool_result" => {
-                if let Some(tool_result) = tool_result_by_id(conn, &target_id)? {
-                    let output = serde_json::to_string(&json!({
-                        "ok": tool_result.error_text.is_none(),
-                        "output": tool_result.output,
-                        "error": tool_result.error_text,
-                    }))
-                    .map_err(|error| error.to_string())?;
-                    input.push(ProviderItem::FunctionCallOutput {
-                        call_id: tool_result.tool_call_id,
-                        output,
-                    });
-                }
-            }
-            _ => {}
+        if let Some(item) = database.provider_item(&target_type, &target_id)? {
+            input.push(item);
         }
     }
     Ok(input)
 }
 
-struct CompactRenderRange {
+impl Database<'_> {
+    fn provider_item(
+        &self,
+        target_type: &str,
+        target_id: &str,
+    ) -> Result<Option<ProviderItem>, String> {
+        match target_type {
+            "message" => self.message_item(target_id),
+            "thinking" => self.thinking_item(target_id),
+            "tool_call" => self.tool_call_item(target_id),
+            "tool_result" => self.tool_result_item(target_id),
+            _ => Ok(None),
+        }
+    }
+
+    fn message_item(&self, target_id: &str) -> Result<Option<ProviderItem>, String> {
+        let Some(message) = self.message_record_by_id(target_id)? else {
+            return Ok(None);
+        };
+        Ok(message_to_provider_item(&message))
+    }
+
+    fn thinking_item(&self, target_id: &str) -> Result<Option<ProviderItem>, String> {
+        let Some(thinking) = self.thinking_span_by_id(target_id)? else {
+            return Ok(None);
+        };
+        let Some(content) = thinking.summary.filter(|text| !text.trim().is_empty()) else {
+            return Ok(None);
+        };
+        Ok(Some(ProviderItem::Reasoning {
+            id: thinking.provider_response_id,
+            content,
+        }))
+    }
+
+    fn tool_call_item(&self, target_id: &str) -> Result<Option<ProviderItem>, String> {
+        let Some(tool_call) = self.tool_call_by_id(target_id)? else {
+            return Ok(None);
+        };
+        let (item, item_id) = self.regenerable_replay_material(&tool_call.id)?;
+        let arguments_raw =
+            serde_json::to_string(&tool_call.arguments).map_err(|error| error.to_string())?;
+        Ok(Some(ProviderItem::FunctionCall {
+            call_id: tool_call.id,
+            name: tool_call.tool_name,
+            arguments_raw,
+            item,
+            item_id,
+        }))
+    }
+
+    fn tool_result_item(&self, target_id: &str) -> Result<Option<ProviderItem>, String> {
+        let Some(tool_result) = self.tool_result_by_id(target_id)? else {
+            return Ok(None);
+        };
+        let output = serde_json::to_string(&json!({
+            "ok": tool_result.error_text.is_none(),
+            "output": tool_result.output,
+            "error": tool_result.error_text,
+        }))
+        .map_err(|error| error.to_string())?;
+        Ok(Some(ProviderItem::FunctionCallOutput {
+            call_id: tool_result.tool_call_id,
+            output,
+        }))
+    }
+}
+
+struct Range {
     start_seq: i64,
     end_seq: i64,
     collapsed_count: i64,
 }
 
-fn render_compact_for_provider(
-    compact: &crate::Compact,
-    fallback_range: CompactRenderRange,
-) -> String {
+fn render_compact_for_provider(compact: &crate::Compact, fallback_range: Range) -> String {
     let metadata = compact.metadata.as_ref();
     let is_capsule = metadata
         .and_then(|metadata| metadata.get("schema"))

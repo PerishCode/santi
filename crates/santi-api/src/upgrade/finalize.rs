@@ -16,17 +16,17 @@ pub(super) fn persistence_error(
     operation: &str,
     detail: impl Into<String>,
 ) -> santi_core::SantiError {
-    santi_core::engine().transient(
-        santi_core::catalog::ERROR_ENGINE_PERSISTENCE_FAILED,
-        santi_core::ErrorSource::new("santi-api", operation),
-        Some(santi_core::ErrorScope::new("runtime", RUNTIME_SCOPE_ID)),
-        "error engine could not persist self-upgrade terminal truth",
-        json!({
+    santi_core::engine().transient(santi_core::Signal {
+        descriptor: santi_core::catalog::ERROR_ENGINE_PERSISTENCE_FAILED,
+        source: santi_core::ErrorSource::new("santi-api", operation),
+        scope: Some(santi_core::ErrorScope::new("runtime", RUNTIME_SCOPE_ID)),
+        message: "error engine could not persist self-upgrade terminal truth".to_string(),
+        context: json!({
             "attempt_id": attempt_id,
             "artifact": bounded_detail(deb),
             "detail": bounded_detail(&detail.into()),
         }),
-    )
+    })
 }
 
 fn bounded_detail(value: &str) -> String {
@@ -53,14 +53,16 @@ pub fn finalize_at(
 ) -> Result<UpgradeFinalizeReport, Box<santi_core::SantiError>> {
     if request.protocol_version != FINALIZE_PROTOCOL_VERSION {
         return Err(Box::new(santi_core::engine().transient(
-            santi_core::catalog::INVALID_ARGUMENT,
-            santi_core::ErrorSource::new("santi-api", "upgrade.finalize"),
-            Some(santi_core::ErrorScope::new("runtime", RUNTIME_SCOPE_ID)),
-            "unsupported upgrade finalization protocol",
-            json!({
-                "expected": FINALIZE_PROTOCOL_VERSION,
-                "actual": request.protocol_version,
-            }),
+            santi_core::Signal {
+                descriptor: santi_core::catalog::INVALID_ARGUMENT,
+                source: santi_core::ErrorSource::new("santi-api", "upgrade.finalize"),
+                scope: Some(santi_core::ErrorScope::new("runtime", RUNTIME_SCOPE_ID)),
+                message: "unsupported upgrade finalization protocol".to_string(),
+                context: json!({
+                    "expected": FINALIZE_PROTOCOL_VERSION,
+                    "actual": request.protocol_version,
+                }),
+            },
         )));
     }
 
@@ -72,7 +74,6 @@ pub fn finalize_at(
             error,
         ))
     })?;
-    let scope = santi_core::ErrorScope::new("runtime", RUNTIME_SCOPE_ID);
     let mut errors = Vec::new();
 
     match &request.terminal {
@@ -85,9 +86,7 @@ pub fn finalize_at(
             } else {
                 "failed"
             };
-            errors.push(open_execution_failure(
-                &store, &scope, &request, failure, terminal,
-            )?);
+            errors.push(open_execution_failure(&store, &request, failure, terminal)?);
         }
     }
 
@@ -136,7 +135,6 @@ fn resolve_upgrade(
 
 fn open_execution_failure(
     store: &santi_core::SantiStore,
-    scope: &santi_core::ErrorScope,
     request: &UpgradeFinalizeRequest,
     failure: &super::UpgradeFailure,
     terminal: &str,
@@ -145,7 +143,7 @@ fn open_execution_failure(
         .open_error_incident(santi_core::IncidentDraft {
             incident_key: UPGRADE_INCIDENT_KEY.to_string(),
             descriptor: santi_core::catalog::UPGRADE_FAILED,
-            scope: scope.clone(),
+            scope: santi_core::ErrorScope::new("runtime", RUNTIME_SCOPE_ID),
             source: santi_core::ErrorSource::new("santi-api", failure.stage.operation()),
             message: format!("self-upgrade failed during {}", failure.stage.operation()),
             context: json!({
@@ -174,8 +172,7 @@ fn finalize_handover(
     mut errors: Vec<santi_core::SantiError>,
 ) -> Result<UpgradeFinalizeReport, Box<santi_core::SantiError>> {
     let record = compose_record(&request.attempt_id);
-    let seed = seed_attempt_handover_at(
-        paths,
+    let seed = paths.seed_attempt_handover(
         &request.soul_id,
         &request.attempt_id,
         request.configured_strand_id.as_deref(),
@@ -249,103 +246,93 @@ fn self_ops_label(soul_id: &str) -> String {
     format!("soul:{soul_id}:ops")
 }
 
-/// Preserve the original stable-label seed helper for callers that explicitly
-/// want one long-lived ops room. Upgrade finalization uses the attempt-scoped
-/// variant below so audit scratch output cannot accumulate across releases.
-pub fn seed_come_look_at(
-    paths: &RuntimePaths,
-    soul_id: &str,
-    configured_strand: Option<&str>,
-    text: &str,
-) -> Result<SeedOutcome, String> {
-    seed_handover_label_at(
-        paths,
-        soul_id,
-        &self_ops_label(soul_id),
-        configured_strand,
-        text,
-    )
-}
+impl RuntimePaths {
+    pub fn seed_come_look(
+        &self,
+        soul_id: &str,
+        configured_strand: Option<&str>,
+        text: &str,
+    ) -> Result<SeedOutcome, String> {
+        self.seed_handover_label(soul_id, &self_ops_label(soul_id), configured_strand, text)
+    }
 
-pub fn seed_attempt_handover_at(
-    paths: &RuntimePaths,
-    soul_id: &str,
-    attempt_id: &str,
-    configured_strand: Option<&str>,
-    text: &str,
-) -> Result<SeedOutcome, String> {
-    seed_handover_label_at(
-        paths,
-        soul_id,
-        &attempt_ops_label(soul_id, attempt_id),
-        configured_strand,
-        text,
-    )
-}
-
-fn seed_handover_label_at(
-    paths: &RuntimePaths,
-    soul_id: &str,
-    label: &str,
-    configured_strand: Option<&str>,
-    text: &str,
-) -> Result<SeedOutcome, String> {
-    let configured_strand = configured_strand
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-
-    match crate::ops::inbox_seed_label_at(paths, soul_id, label, text) {
-        Ok(report) if report.accepted => Ok(SeedOutcome {
-            strand_id: report.strand_id,
-            warnings: Vec::new(),
-        }),
-        Ok(report) => seed_via_configured_strand(
-            paths,
+    pub fn seed_attempt_handover(
+        &self,
+        soul_id: &str,
+        attempt_id: &str,
+        configured_strand: Option<&str>,
+        text: &str,
+    ) -> Result<SeedOutcome, String> {
+        self.seed_handover_label(
+            soul_id,
+            &attempt_ops_label(soul_id, attempt_id),
             configured_strand,
             text,
-            format!(
-                "self-ops label {label} rejected the come-look seed: {}",
+        )
+    }
+
+    fn seed_handover_label(
+        &self,
+        soul_id: &str,
+        label: &str,
+        configured_strand: Option<&str>,
+        text: &str,
+    ) -> Result<SeedOutcome, String> {
+        let configured_strand = configured_strand
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+
+        match self.inbox_seed_label(soul_id, label, text) {
+            Ok(report) if report.accepted => Ok(SeedOutcome {
+                strand_id: report.strand_id,
+                warnings: Vec::new(),
+            }),
+            Ok(report) => self.seed_via_configured_strand(
+                configured_strand,
+                text,
+                format!(
+                    "self-ops label {label} rejected the come-look seed: {}",
+                    report
+                        .error
+                        .map(|error| error.to_string())
+                        .unwrap_or_else(|| "seed rejected".to_string())
+                ),
+            ),
+            Err(error) => self.seed_via_configured_strand(
+                configured_strand,
+                text,
+                format!("self-ops label {label} could not receive the come-look seed: {error}"),
+            ),
+        }
+    }
+
+    fn seed_via_configured_strand(
+        &self,
+        configured_strand: Option<&str>,
+        text: &str,
+        label_error: String,
+    ) -> Result<SeedOutcome, String> {
+        let Some(strand_id) = configured_strand else {
+            return Err(label_error);
+        };
+
+        match self.inbox_seed(strand_id, text) {
+            Ok(report) if report.accepted => Ok(SeedOutcome {
+                strand_id: report.strand_id,
+                warnings: vec![format!(
+                    "{label_error}; fell back to configured SANTI_STRAND_ID {strand_id}"
+                )],
+            }),
+            Ok(report) => Err(format!(
+                "{label_error}; configured SANTI_STRAND_ID {strand_id} also rejected the come-look seed: {}",
                 report
                     .error
                     .map(|error| error.to_string())
                     .unwrap_or_else(|| "seed rejected".to_string())
-            ),
-        ),
-        Err(error) => seed_via_configured_strand(
-            paths,
-            configured_strand,
-            text,
-            format!("self-ops label {label} could not receive the come-look seed: {error}"),
-        ),
-    }
-}
-
-fn seed_via_configured_strand(
-    paths: &RuntimePaths,
-    configured_strand: Option<&str>,
-    text: &str,
-    label_error: String,
-) -> Result<SeedOutcome, String> {
-    let Some(strand_id) = configured_strand else {
-        return Err(label_error);
-    };
-
-    match crate::ops::inbox_seed_at(paths, strand_id, text) {
-        Ok(report) if report.accepted => Ok(SeedOutcome {
-            strand_id: report.strand_id,
-            warnings: vec![format!(
-                "{label_error}; fell back to configured SANTI_STRAND_ID {strand_id}"
-            )],
-        }),
-        Ok(report) => Err(format!(
-            "{label_error}; configured SANTI_STRAND_ID {strand_id} also rejected the come-look seed: {}",
-            report
-                .error
-                .map(|error| error.to_string())
-                .unwrap_or_else(|| "seed rejected".to_string())
-        )),
-        Err(error) => Err(format!(
-            "{label_error}; configured SANTI_STRAND_ID {strand_id} also could not receive the come-look seed: {error}"
-        )),
+            )),
+            Err(error) => Err(format!(
+                "{label_error}; configured SANTI_STRAND_ID {strand_id} also could not receive the come-look seed: {error}"
+            )),
+        }
     }
 }

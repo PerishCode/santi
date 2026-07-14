@@ -5,12 +5,13 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
+use santi_core::service::Service;
 use santi_core::{
     CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSoulRequest,
     CreateStrandResponse, CreateWebhookRequest, DriveStrandResponse, ForkStrandResponse,
-    HealthResponse, MaterialRequest, ReceiptStatus, SantiError, SantiService,
-    SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand, StrandBudgetSnapshot,
-    StrandDetail, StrandMaterial, StrandRuntimeSnapshot, WebhookSubscription,
+    HealthResponse, MaterialRequest, ReceiptStatus, SantiError, SendStrandAcceptedResponse,
+    SendStrandRequest, Soul, Strand, StrandBudgetSnapshot, StrandDetail, StrandMaterial,
+    StrandRuntimeSnapshot, WebhookSubscription,
 };
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -24,7 +25,7 @@ use super::{
     sse::{error_events, strand_events},
 };
 
-pub(super) fn router(service: SantiService) -> Router {
+pub(super) fn router(service: Service) -> Router {
     let api = Router::new()
         .route("/api/v1/openapi.json", get(openapi))
         .route("/api/v1/strands", post(create_strand).get(list_strands))
@@ -57,8 +58,6 @@ pub(super) fn router(service: SantiService) -> Router {
         )
         .route("/api/v1/compacts/{compact_id}", get(compact_query))
         .route("/api/v1/strands/{strand_id}/runtime", get(runtime_snapshot))
-        // IM layer (orthogonal to the runtime; shares the server for cold-start):
-        // send into a soul's IM conversation, poll a participant's passive inbox.
         .route("/api/v1/im/send", post(super::im::send_im))
         .route("/api/v1/im/inbox/{participant_id}", get(super::im::poll_im))
         .route(
@@ -88,7 +87,7 @@ pub(super) fn router(service: SantiService) -> Router {
         (status = 503, body = HealthResponse)
     )
 )]
-pub async fn health(State(service): State<SantiService>) -> impl IntoResponse {
+pub async fn health(State(service): State<Service>) -> impl IntoResponse {
     let active_drive_incidents = service.active_drive_incident_count();
     let degraded = service.is_drive_degraded() || active_drive_incidents > 0;
     let status = if degraded {
@@ -118,7 +117,7 @@ pub async fn health(State(service): State<SantiService>) -> impl IntoResponse {
     )
 )]
 pub async fn receipt_status(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Path(inbox_id): Path<String>,
 ) -> Result<Json<ReceiptStatus>, ApiError> {
     service
@@ -134,7 +133,7 @@ pub async fn receipt_status(
     responses((status = 200, body = CreateStrandResponse), (status = 500, body = SantiError))
 )]
 pub(super) async fn create_strand(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
 ) -> Result<Json<CreateStrandResponse>, ApiError> {
     service
         .create_strand()
@@ -148,7 +147,7 @@ pub(super) async fn create_strand(
     responses((status = 200, body = [Strand]), (status = 500, body = SantiError))
 )]
 pub(super) async fn list_strands(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
 ) -> Result<Json<Vec<Strand>>, ApiError> {
     service
         .list_strands()
@@ -163,7 +162,7 @@ pub(super) async fn list_strands(
     responses((status = 200, body = Soul), (status = 500, body = SantiError))
 )]
 pub(super) async fn create_soul(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Json(request): Json<CreateSoulRequest>,
 ) -> Result<Json<Soul>, ApiError> {
     service
@@ -178,7 +177,7 @@ pub(super) async fn create_soul(
     responses((status = 200, body = [Soul]), (status = 500, body = SantiError))
 )]
 pub(super) async fn list_souls(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
 ) -> Result<Json<Vec<Soul>>, ApiError> {
     service
         .list_souls()
@@ -197,7 +196,7 @@ pub(super) async fn list_souls(
     )
 )]
 pub(super) async fn get_soul(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Path(soul_id): Path<String>,
 ) -> Result<Json<Soul>, ApiError> {
     match service.soul(&soul_id).map_err(ApiError::from_service)? {
@@ -213,7 +212,7 @@ pub(super) async fn get_soul(
     responses((status = 200, body = WebhookSubscription), (status = 500, body = SantiError))
 )]
 pub(super) async fn create_webhook(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Json(request): Json<CreateWebhookRequest>,
 ) -> Result<Json<WebhookSubscription>, ApiError> {
     service
@@ -228,7 +227,7 @@ pub(super) async fn create_webhook(
     responses((status = 200, body = [WebhookSubscription]), (status = 500, body = SantiError))
 )]
 pub(super) async fn list_webhooks(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
 ) -> Result<Json<Vec<WebhookSubscription>>, ApiError> {
     service
         .list_webhooks()
@@ -247,7 +246,7 @@ pub(super) async fn list_webhooks(
     )
 )]
 pub(super) async fn get_strand(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Path(strand_id): Path<String>,
 ) -> Result<Json<StrandDetail>, ApiError> {
     service
@@ -268,7 +267,7 @@ pub(super) async fn get_strand(
     )
 )]
 pub(super) async fn list_messages(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Path(strand_id): Path<String>,
 ) -> Result<Json<Vec<santi_core::StrandMessage>>, ApiError> {
     service
@@ -290,7 +289,7 @@ pub(super) async fn list_messages(
     )
 )]
 pub(super) async fn strand_material(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Path(strand_id): Path<String>,
     Json(request): Json<MaterialRequest>,
 ) -> Result<Json<StrandMaterial>, ApiError> {
@@ -314,7 +313,7 @@ pub(super) async fn strand_material(
     )
 )]
 pub async fn send_strand(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Path(strand_id): Path<String>,
     Json(request): Json<SendStrandRequest>,
 ) -> Result<Json<SendStrandAcceptedResponse>, ApiError> {
@@ -338,7 +337,7 @@ pub async fn send_strand(
     )
 )]
 pub async fn drive_strand(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Path(strand_id): Path<String>,
 ) -> Result<Json<DriveStrandResponse>, ApiError> {
     service
@@ -358,7 +357,7 @@ pub async fn drive_strand(
     )
 )]
 pub(super) async fn fork_strand(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Path(strand_id): Path<String>,
 ) -> Result<Json<ForkStrandResponse>, ApiError> {
     service
@@ -380,7 +379,7 @@ pub(super) async fn fork_strand(
     )
 )]
 pub(super) async fn compact_exec(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Path(strand_id): Path<String>,
     Json(request): Json<CompactExecRequest>,
 ) -> Result<Json<CompactExecResponse>, ApiError> {
@@ -406,7 +405,7 @@ pub(super) async fn compact_exec(
     )
 )]
 pub(super) async fn compact_query(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Path(compact_id): Path<String>,
     Query(params): Query<CompactQueryParams>,
 ) -> Result<Json<CompactQueryResponse>, ApiError> {
@@ -440,7 +439,7 @@ pub(super) struct CompactQueryParams {
     )
 )]
 pub(super) async fn runtime_snapshot(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Path(strand_id): Path<String>,
 ) -> Result<Json<StrandRuntimeSnapshot>, ApiError> {
     service
@@ -461,7 +460,7 @@ pub(super) async fn runtime_snapshot(
     )
 )]
 pub(super) async fn strand_budget(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Path(strand_id): Path<String>,
 ) -> Result<Json<StrandBudgetSnapshot>, ApiError> {
     service

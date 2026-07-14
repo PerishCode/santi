@@ -1,8 +1,3 @@
-//! IM layer store methods — the plain messenger's own persistence, conceptually
-//! ORTHOGONAL to the runtime (souls/strands/turns). See `schema.rs` (im_* tables)
-//! and PHASE-08 CONVERGED MODEL v4. `source` addressing lives entirely here (the
-//! IM's envelope), never in the runtime primitive or `strand_inbox`.
-
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{
@@ -11,9 +6,15 @@ use crate::{
 
 use super::SantiStore;
 
+pub struct Reply<'a> {
+    pub strand: &'a str,
+    pub turn: &'a str,
+    pub message: Option<&'a str>,
+    pub content: &'a str,
+    pub mode: ImDeliveryMode,
+}
+
 impl SantiStore {
-    /// Find-or-create a persistent IM participant, idempotent on the
-    /// caller-declared stable `id`. `kind` is 'human' or 'soul'.
     pub fn ensure_im_participant(&self, id: &str, kind: &str) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         let now = timestamp_now();
@@ -29,9 +30,6 @@ impl SantiStore {
         Ok(())
     }
 
-    /// Deliver a message into a (human/CLI) participant's passive inbox — the
-    /// outbound crossing. Returns the stored entry with its cursor `seq`.
-    /// `from_ref` is the soul strand that replied.
     pub fn enqueue_im_inbox(
         &self,
         participant_id: &str,
@@ -62,36 +60,14 @@ impl SantiStore {
         })
     }
 
-    /// Deliver at most one participant reply for a concrete provider attempt.
-    /// The turn id is the idempotency key shared by explicit early replies and
-    /// the automatic turn-completion fallback.
-    #[allow(clippy::too_many_arguments)]
-    pub fn enqueue_turn_reply(
-        &self,
-        strand_id: &str,
-        turn_id: &str,
-        message_id: Option<&str>,
-        content: &str,
-        mode: ImDeliveryMode,
-    ) -> Result<(ImInboxEntry, bool), String> {
+    pub fn enqueue_turn_reply(&self, reply: Reply<'_>) -> Result<(ImInboxEntry, bool), String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let outcome = enqueue_turn_in(
-            &tx,
-            strand_id,
-            turn_id,
-            message_id,
-            content,
-            mode,
-            &timestamp_now(),
-        )?;
+        let outcome = enqueue_turn_in(&tx, reply, &timestamp_now())?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(outcome)
     }
 
-    /// Poll a participant's inbox for entries past the caller's cursor `since`
-    /// (0 = from the beginning). Read-only, no ack — the caller's high-water
-    /// `seq` IS the ack. Ordered by `seq` ascending.
     pub fn poll_im_inbox(
         &self,
         participant_id: &str,
@@ -133,9 +109,6 @@ impl SantiStore {
         Ok(out)
     }
 
-    /// The reply-routing correlation: resolve a strand's IM participant from its
-    /// `im:<id>` external label. A soul replying in an IM conversation strand
-    /// reaches this participant. `None` if the strand is not an IM conversation.
     pub fn im_participant_for_strand(&self, strand_id: &str) -> Result<Option<String>, String> {
         let conn = self.conn.lock().unwrap();
         let label: Option<Option<String>> = conn
@@ -152,16 +125,18 @@ impl SantiStore {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn enqueue_turn_in(
     conn: &Connection,
-    strand_id: &str,
-    turn_id: &str,
-    message_id: Option<&str>,
-    content: &str,
-    mode: ImDeliveryMode,
-    occurred_at: &str,
+    reply: Reply<'_>,
+    at: &str,
 ) -> Result<(ImInboxEntry, bool), String> {
+    let Reply {
+        strand,
+        turn,
+        message,
+        content,
+        mode,
+    } = reply;
     let (turn_strand, external_label): (String, Option<String>) = conn
         .query_row(
             r#"
@@ -170,28 +145,28 @@ pub(super) fn enqueue_turn_in(
             JOIN strands AS strand ON strand.id = turn.strand_id
             WHERE turn.id = ?1
             "#,
-            params![turn_id],
+            params![turn],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("unknown turn {turn_id}"))?;
-    if turn_strand != strand_id {
+        .ok_or_else(|| format!("unknown turn {turn}"))?;
+    if turn_strand != strand {
         return Err(format!(
-            "turn {turn_id} belongs to strand {turn_strand}, not {strand_id}"
+            "turn {turn} belongs to strand {turn_strand}, not {strand}"
         ));
     }
     let participant_id = external_label
         .as_deref()
         .and_then(|label| label.strip_prefix(IM_LABEL_PREFIX))
-        .ok_or_else(|| format!("strand {strand_id} is not an IM conversation"))?;
+        .ok_or_else(|| format!("strand {strand} is not an IM conversation"))?;
     conn.execute(
         r#"
         INSERT INTO im_participants (id, kind, created_at)
         VALUES (?1, 'human', ?2)
         ON CONFLICT(id) DO NOTHING
         "#,
-        params![participant_id, occurred_at],
+        params![participant_id, at],
     )
     .map_err(|error| error.to_string())?;
     let id = prefixed_id("imx");
@@ -206,20 +181,20 @@ pub(super) fn enqueue_turn_in(
             params![
                 id,
                 participant_id,
-                strand_id,
-                turn_id,
-                message_id,
+                strand,
+                turn,
+                message,
                 im_delivery_mode_db(&mode),
                 content,
-                occurred_at,
+                at,
             ],
         )
         .map_err(|error| error.to_string())?
         == 1;
-    let entry = reply_for_turn_in(conn, turn_id)?
-        .ok_or_else(|| format!("IM reply for turn {turn_id} missing after insert"))?;
-    if entry.participant_id != participant_id || entry.from_ref.as_deref() != Some(strand_id) {
-        return Err(format!("IM reply idempotency collision for turn {turn_id}"));
+    let entry = reply_for_turn_in(conn, turn)?
+        .ok_or_else(|| format!("IM reply for turn {turn} missing after insert"))?;
+    if entry.participant_id != participant_id || entry.from_ref.as_deref() != Some(strand) {
+        return Err(format!("IM reply idempotency collision for turn {turn}"));
     }
     Ok((entry, inserted))
 }

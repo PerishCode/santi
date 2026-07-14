@@ -1,7 +1,8 @@
-mod chat_completions;
+mod chat;
 mod openai;
 mod provider;
+mod sse;
 
-pub use chat_completions::{ChatCompletionsProvider, ChatCompletionsProviderConfig};
+pub use chat::completions::{ChatCompletionsProvider, ChatCompletionsProviderConfig};
 pub use openai::{OpenAIProvider, OpenAIProviderConfig};
 pub use provider::*;

@@ -1,13 +1,12 @@
 use rusqlite::{Connection, params};
 use serde_json::json;
 
-use super::{active_in_conn, open_incident_in_conn, resolve_in_conn as resolve_error_in_conn};
-use crate::store::SantiStore;
+use crate::store::{SantiStore, db::Database};
 use crate::{ErrorScope, ErrorSource, IncidentDraft, SantiError, catalog};
 
 const DRIVE_DETAIL_BYTES: usize = 4096;
 
-pub(crate) struct DriveFailureInput<'a> {
+pub(crate) struct Input<'a> {
     pub operation: &'a str,
     pub trigger_type: &'a str,
     pub accepted_inbox_id: Option<&'a str>,
@@ -23,24 +22,26 @@ pub(in crate::store) fn repeat_active_in_conn(
     strand_id: &str,
     operation: &str,
 ) -> Result<Option<SantiError>, String> {
-    if active_in_conn(conn, &drive_incident_key(strand_id))?.is_none() {
+    let database = Database::new(conn);
+    if database
+        .active_incident(&drive_incident_key(strand_id))?
+        .is_none()
+    {
         return Ok(None);
     }
     let pending = pending_count(conn, strand_id)?;
-    open_incident_in_conn(
-        conn,
-        drive_draft(
+    database
+        .open_incident(drive_draft(
             strand_id,
-            DriveFailureInput {
+            Input {
                 operation,
                 trigger_type: "admission_guard",
                 accepted_inbox_id: None,
                 detail: "strand driver recovery is still required",
             },
             pending,
-        ),
-    )
-    .map(Some)
+        ))
+        .map(Some)
 }
 
 pub(in crate::store) fn resolve_in_conn(
@@ -49,10 +50,11 @@ pub(in crate::store) fn resolve_in_conn(
     turn_id: &str,
     drained_count: usize,
 ) -> Result<Option<String>, String> {
-    let incident_id =
-        active_in_conn(conn, &drive_incident_key(strand_id))?.map(|incident| incident.id);
-    resolve_error_in_conn(
-        conn,
+    let database = Database::new(conn);
+    let incident_id = database
+        .active_incident(&drive_incident_key(strand_id))?
+        .map(|incident| incident.id);
+    database.resolve_incident(
         &drive_incident_key(strand_id),
         "strand.drive_started",
         json!({
@@ -81,12 +83,12 @@ impl SantiStore {
     pub(crate) fn record_drive_failure(
         &self,
         strand_id: &str,
-        input: DriveFailureInput<'_>,
+        input: Input<'_>,
     ) -> Result<SantiError, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let pending = pending_count(&tx, strand_id)?;
-        let error = open_incident_in_conn(&tx, drive_draft(strand_id, input, pending))?;
+        let error = Database::new(&tx).open_incident(drive_draft(strand_id, input, pending))?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(error)
     }
@@ -102,7 +104,7 @@ impl SantiStore {
     }
 }
 
-fn drive_draft(strand_id: &str, input: DriveFailureInput<'_>, pending: i64) -> IncidentDraft {
+fn drive_draft(strand_id: &str, input: Input<'_>, pending: i64) -> IncidentDraft {
     IncidentDraft {
         incident_key: drive_incident_key(strand_id),
         descriptor: catalog::STRAND_DRIVE_FAILED,

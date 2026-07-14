@@ -8,11 +8,6 @@ use crate::{
     strand_memory_uri, timestamp_from_system_time,
 };
 
-/// The `[santi]` constitution: santi's invariant physics, describing itself.
-/// This is the code-ENCODED default — a config file (see `constitution_path`)
-/// overrides it, and it is read per-turn (hot) to serve the observe→refine
-/// loop. It carries NO product/role vocabulary (a soul's role is a seed it
-/// grows in its own memory, never a runtime value).
 const SANTI_CONSTITUTION: &str = "\
 santi is an agent runtime: a container that keeps souls and runs their strands. Nothing here is a product. This [santi] block is santi's invariant physics — it describes itself, and it does not change; your memory is what changes.
 - soul: you are a cyber-individual first. Any role you serve is a seed you grow in your own memory, not a fixed function you were built for.
@@ -23,30 +18,25 @@ santi is an agent runtime: a container that keeps souls and runs their strands. 
 - memory: your memory is your mutable self, and it pairs with this invariant [santi] — [santi] is what you cannot change, memory is what you make of yourself.
 santi grows by what actually happens, never by a claim that something went well.";
 
-/// The code-ENCODED default `[santi-soul]` memory, rendered (read-through, per
-/// turn) only for the DEFAULT soul when its own memory file is still empty.
-/// Deliberately role-NEUTRAL: baking a specific role (a "secretary", etc.) into
-/// the core binary would put product vocabulary in code. A real role is seeded
-/// per-instance via the soul's own memory file, which — being non-empty — wins.
 const SANTI_DEFAULT_SOUL_MEMORY: &str = "\
 Your memory is still empty. You are a soul — a cyber-individual — and this file is your self. Nothing here is fixed yet: write who you are as you come to act. Any role you are given is a seed to grow, not a cage.";
 
 pub(crate) struct SystemPromptRequest<'a> {
     pub strand_id: &'a str,
     pub strand: &'a Strand,
-    /// Path to the `[santi]` constitution config file. Absent/empty → the
-    /// encoded default. Read per-turn (hot).
     pub constitution_path: PathBuf,
     pub soul_memory_path: PathBuf,
     pub strand_memory_path: PathBuf,
-    /// This strand's soul is the runtime's default soul, so an empty soul
-    /// memory falls back to the encoded default (read-through, per turn).
+    pub soul_memory_allowance_bytes: usize,
     pub is_default_soul: bool,
 }
 
 pub(crate) fn render_system_prompt(request: SystemPromptRequest<'_>) -> Result<String, String> {
     let constitution = render_constitution(&request.constitution_path)?;
-    let soul_memory = read_soul_memory(&request.soul_memory_path, request.is_default_soul)?;
+    let soul_memory = project_soul_memory(
+        read_soul_memory(&request.soul_memory_path, request.is_default_soul)?,
+        request.soul_memory_allowance_bytes,
+    );
     let strand_memory = read_memory_material(&request.strand_memory_path)?;
     let soul_source = soul_memory_uri();
     let strand_source = strand_memory_uri();
@@ -64,9 +54,6 @@ pub(crate) fn render_system_prompt(request: SystemPromptRequest<'_>) -> Result<S
     if let Some(fork_topology) = render_fork_topology(&request) {
         sections.push(fork_topology);
     }
-    // Reply-capability meta: only for an IM conversation strand, and only here
-    // (not a runtime concept). Announces the ambient egress; the address is the
-    // conversation itself (this strand) — never body-text the soul must copy.
     if let Some(capability) = render_im_reply_capability(&request) {
         sections.push(capability);
     }
@@ -83,10 +70,6 @@ pub(crate) fn render_system_prompt(request: SystemPromptRequest<'_>) -> Result<S
     Ok(sections.join("\n\n"))
 }
 
-/// The IM delivery block — present ONLY when this strand is an IM conversation
-/// (`im:` label). Normal final speech is delivered transactionally; the ambient
-/// offline command remains available for an early reply without exposing an
-/// address in body text.
 fn render_im_reply_capability(request: &SystemPromptRequest<'_>) -> Option<String> {
     let label = request.strand.external_label.as_deref()?;
     if !label.starts_with(IM_LABEL_PREFIX) {
@@ -105,7 +88,6 @@ fn render_im_reply_capability(request: &SystemPromptRequest<'_>) -> Option<Strin
     )
 }
 
-/// The `[santi]` block: a config file override, else the encoded default.
 fn render_constitution(path: &Path) -> Result<String, String> {
     let body = match fs::read_to_string(path) {
         Ok(text) if !text.trim().is_empty() => text,
@@ -128,8 +110,6 @@ fn render_system_message_description() -> String {
 }
 
 fn render_meta(request: &SystemPromptRequest<'_>) -> String {
-    // Slim: instance identity only. No channel (santi is not multi-channel),
-    // no soul_name (a name is memory, not a runtime fact — [santi-soul]).
     [
         "[santi-meta]".to_string(),
         format!("soul_id: {}", request.strand.soul_id),
@@ -151,7 +131,7 @@ fn render_fork_topology(request: &SystemPromptRequest<'_>) -> Option<String> {
     )
 }
 
-fn render_memory_section(name: &str, source: &str, memory: &MemoryMaterial) -> String {
+fn render_memory_section(name: &str, source: &str, memory: &Material) -> String {
     [
         format!("[{name}]"),
         format!("source: {source}"),
@@ -165,10 +145,7 @@ fn render_memory_section(name: &str, source: &str, memory: &MemoryMaterial) -> S
     .join("\n")
 }
 
-/// Read a soul's memory, applying the default-soul read-through: for the
-/// default soul, an empty/absent file renders the encoded default (per turn),
-/// never a write — a soul that has authored its own memory always wins.
-fn read_soul_memory(path: &Path, is_default_soul: bool) -> Result<MemoryMaterial, String> {
+fn read_soul_memory(path: &Path, is_default_soul: bool) -> Result<Material, String> {
     let mut material = read_memory_material(path)?;
     if is_default_soul && material.content.trim().is_empty() {
         material.content = SANTI_DEFAULT_SOUL_MEMORY.to_string();
@@ -176,7 +153,36 @@ fn read_soul_memory(path: &Path, is_default_soul: bool) -> Result<MemoryMaterial
     Ok(material)
 }
 
-fn read_memory_material(path: &Path) -> Result<MemoryMaterial, String> {
+fn project_soul_memory(mut material: Material, allowance_bytes: usize) -> Material {
+    let source_bytes = material.content.len();
+    if source_bytes <= allowance_bytes {
+        return material;
+    }
+
+    let mut prefix_end = allowance_bytes.min(source_bytes);
+    while prefix_end > 0 && !material.content.is_char_boundary(prefix_end) {
+        prefix_end -= 1;
+    }
+    let marker = [
+        "<system_message>".to_string(),
+        "kind: soul_memory_projection".to_string(),
+        format!("source: {}", soul_memory_uri()),
+        "truncated: true".to_string(),
+        format!("source_bytes: {source_bytes}"),
+        format!("visible_prefix_bytes: {prefix_end}"),
+        format!("allowance_bytes: {allowance_bytes}"),
+        format!(
+            "summary: Provider-visible memory is a bounded prefix. The full source remains unchanged and available through {}.",
+            soul_memory_uri()
+        ),
+        "</system_message>".to_string(),
+    ]
+    .join("\n");
+    material.content = format!("{}\n\n{marker}", &material.content[..prefix_end]);
+    material
+}
+
+fn read_memory_material(path: &Path) -> Result<Material, String> {
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -190,13 +196,13 @@ fn read_memory_material(path: &Path) -> Result<MemoryMaterial, String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.to_string()),
     };
-    Ok(MemoryMaterial {
+    Ok(Material {
         content,
         updated_at,
     })
 }
 
-struct MemoryMaterial {
+struct Material {
     content: String,
     updated_at: Option<Timestamp>,
 }

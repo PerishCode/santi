@@ -8,14 +8,16 @@ use axum::{
     },
 };
 use futures_core::Stream;
+use santi_core::service::Service;
 use santi_core::{
-    ErrorTransition, SantiService, SantiStreamEvent, SantiStreamPayload, prefixed_id, timestamp_now,
+    ErrorTransition, SantiStreamEvent, SantiStreamPayload, prefixed_id, timestamp_now,
 };
+use tokio::sync::broadcast;
 
 use super::ApiError;
 
 pub(super) async fn strand_events(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Path(strand_id): Path<String>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
     let strand = service
@@ -34,13 +36,8 @@ pub(super) async fn strand_events(
             payload: SantiStreamPayload::StreamOpen,
         }));
 
-        loop {
-            match receiver.recv().await {
-                Ok(event) if event.strand_id == strand_id => yield Ok(sse_event(event)),
-                Ok(_) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
+        while let Some(event) = receive_strand(&mut receiver, &strand_id).await {
+            yield Ok(sse_event(event));
         }
     };
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
@@ -52,19 +49,37 @@ pub(super) async fn strand_events(
     responses((status = 200, description = "Canonical global error lifecycle stream"))
 )]
 pub(super) async fn error_events(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let mut receiver = service.subscribe_error_transitions();
     let stream = async_stream::stream! {
-        loop {
-            match receiver.recv().await {
-                Ok(transition) => yield Ok(error_sse_event(transition)),
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
+        while let Some(transition) = receive(&mut receiver).await {
+            yield Ok(error_sse_event(transition));
         }
     };
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+async fn receive_strand(
+    receiver: &mut broadcast::Receiver<SantiStreamEvent>,
+    strand_id: &str,
+) -> Option<SantiStreamEvent> {
+    loop {
+        let event = receive(receiver).await?;
+        if event.strand_id == strand_id {
+            return Some(event);
+        }
+    }
+}
+
+async fn receive<T: Clone>(receiver: &mut broadcast::Receiver<T>) -> Option<T> {
+    loop {
+        match receiver.recv().await {
+            Ok(event) => return Some(event),
+            Err(broadcast::error::RecvError::Lagged(_)) => {}
+            Err(broadcast::error::RecvError::Closed) => return None,
+        }
+    }
 }
 
 fn error_sse_event(transition: ErrorTransition) -> Event {

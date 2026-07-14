@@ -7,10 +7,10 @@ mod openapi;
 mod routes;
 mod sse;
 
+use santi_core::service::{self, Service};
 use std::{env, fs, net::SocketAddr};
 
 use crate::{config, provider};
-use santi_core::{SantiService, SantiServiceConfig};
 
 pub use effects::{ResolveEffectRequest, effect_status, resolve_effect};
 pub use error::ApiError;
@@ -22,17 +22,14 @@ pub fn export_openapi_json() -> Result<String, String> {
 
 pub async fn serve(config: config::ConfigService) -> Result<(), String> {
     let provider = provider::from_config(config.provider_config()?);
-    // Paths anchor on the santi home (`SANTI_HOME`, else `~/.santi`); explicit env
-    // always overrides (see `resolve_runtime_paths`). The data dirs are created
-    // here so a zero-config run works (the offline ops paths only read).
     let paths = config::resolve_runtime_paths();
     if let Some(parent) = paths.database_path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     fs::create_dir_all(&paths.runtime_root).map_err(|error| error.to_string())?;
     fs::create_dir_all(&paths.execution_root).map_err(|error| error.to_string())?;
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: paths.database_path.display().to_string(),
             runtime_root: paths.runtime_root.display().to_string(),
             execution_root: paths.execution_root.display().to_string(),
@@ -47,18 +44,8 @@ pub async fn serve(config: config::ConfigService) -> Result<(), String> {
     let listener = tokio::net::TcpListener::bind(address)
         .await
         .map_err(|error| error.to_string())?;
-    // santi carries NO auth of its own: access control lives entirely at the edge
-    // (authentik forward-auth in front of the window nginx; on-box callers reach
-    // 127.0.0.1 directly). The only in-process gate is webhook signature
-    // verification (per subscription), which is independent of this and untouched.
-    // Liveness: re-drive any requests stranded by a previous crash.
     service.resume_pending()?;
     println!("santi-api listening on http://{address}");
-    // Graceful shutdown (PHASE-07): on SIGTERM/Ctrl-C, latch the service so no
-    // new turns start (inbox consumption pauses; ingest still enqueues durably),
-    // let axum drain in-flight HTTP, then wait out the in-flight turn before
-    // exiting. The external upgrade flow owns the hard bound (SIGKILL after its
-    // timeout); this is the cooperative half.
     let shutdown_signal = {
         let service = service.clone();
         async move {
@@ -77,7 +64,6 @@ pub async fn serve(config: config::ConfigService) -> Result<(), String> {
     Ok(())
 }
 
-/// Resolve on the shutdown signal: SIGTERM (systemd/`systemctl stop`) or Ctrl-C.
 async fn wait_for_shutdown_signal() {
     #[cfg(unix)]
     {
@@ -100,9 +86,6 @@ async fn wait_for_shutdown_signal() {
     }
 }
 
-/// How long the service waits for the in-flight turn to finish on shutdown.
-/// `SANTI_SHUTDOWN_GRACE_SECS`, default 600s (turns can run minutes). The systemd
-/// unit's `TimeoutStopSec` must be at least this so systemd does not SIGKILL first.
 fn shutdown_grace() -> std::time::Duration {
     let secs = env::var("SANTI_SHUTDOWN_GRACE_SECS")
         .ok()

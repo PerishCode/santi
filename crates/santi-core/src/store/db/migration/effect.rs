@@ -17,18 +17,13 @@ struct LegacyEffect {
     updated_at: String,
 }
 
-pub(super) fn migrate_v25_to_v26(conn: &Connection) -> Result<(), String> {
+pub(in crate::store::db) fn migrate_v25_to_v26(conn: &Connection) -> Result<(), String> {
     if !table_exists(conn, "strand_effects")? {
-        // Some early beta fixtures and partial databases never materialized the
-        // unused v25 table. The canonical schema is installed after migrations.
         return Ok(());
     }
     if column_exists(conn, "strand_effects", "turn_id")?
         && column_exists(conn, "strand_effects", "state")?
     {
-        // A database whose version marker was lowered for an orthogonal
-        // migration test can already carry the v26 effect shape. Do not try to
-        // reinterpret current attempts as the legacy idempotency contract.
         return Ok(());
     }
 

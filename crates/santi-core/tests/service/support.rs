@@ -2,12 +2,13 @@ pub(crate) use async_trait::async_trait;
 pub(crate) use futures_util::stream;
 #[cfg(unix)]
 pub(crate) use rusqlite::{Connection, params};
+use santi_core::service::Service;
 pub(crate) use santi_core::{
-    ActorType, CreateSoulRequest, EffectState, EffectTransitionReason, InboxSource, MaterialKind,
-    MaterialRequest, MessageContent, MessageIntake, MessageKind, MessagePart, MessageState,
-    ObjectBucket, ObjectUri, SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, SantiService,
-    SantiServiceConfig, SantiStore, SendStrandAcceptedResponse, SendStrandRequest,
-    ToolCallProvenance, soul_memory_uri, strand_memory_uri,
+    ActorType, CreateSoulRequest, Draft, EffectState, EffectTransitionReason, InboxSource,
+    Invocation, MaterialKind, MaterialRequest, MessageContent, MessageIntake, MessageKind,
+    MessagePart, MessageState, ObjectBucket, ObjectUri, SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI,
+    SantiStore, SendStrandAcceptedResponse, SendStrandRequest, ToolCallProvenance, soul_memory_uri,
+    strand_memory_uri,
 };
 
 pub(crate) fn accepted_turn(response: &SendStrandAcceptedResponse) -> &santi_core::Turn {
@@ -233,49 +234,114 @@ fn probe_command() -> &'static str {
     }
 }
 
-pub(crate) async fn wait_any_completed(
-    service: &SantiService,
-    strand_id: &str,
-) -> santi_core::StrandRuntimeSnapshot {
-    for _ in 0..50 {
-        let runtime = service
-            .runtime_snapshot(strand_id)
-            .expect("runtime snapshot")
-            .expect("strand runtime");
-        if runtime
-            .turns
-            .iter()
-            .any(|turn| turn.status == santi_core::TurnStatus::Completed)
-        {
-            return runtime;
-        }
-        sleep(Duration::from_millis(20)).await;
-    }
-    panic!("no turn completed");
+pub(crate) struct Probe<'a> {
+    service: &'a Service,
 }
 
-pub(crate) async fn wait_completed_count(
-    service: &SantiService,
-    strand_id: &str,
-    count: usize,
-) -> santi_core::StrandRuntimeSnapshot {
-    for _ in 0..50 {
-        let runtime = service
+impl<'a> Probe<'a> {
+    pub(crate) fn new(service: &'a Service) -> Self {
+        Self { service }
+    }
+
+    async fn snapshot(&self, strand_id: &str) -> santi_core::StrandRuntimeSnapshot {
+        self.service
             .runtime_snapshot(strand_id)
             .expect("runtime snapshot")
-            .expect("strand runtime");
-        if runtime
-            .turns
-            .iter()
-            .filter(|turn| turn.status == santi_core::TurnStatus::Completed)
-            .count()
-            >= count
-        {
-            return runtime;
-        }
-        sleep(Duration::from_millis(20)).await;
+            .expect("strand runtime")
     }
-    panic!("{count} turns did not complete");
+
+    pub(crate) async fn any_completed(&self, strand_id: &str) -> santi_core::StrandRuntimeSnapshot {
+        for _ in 0..50 {
+            let runtime = self.snapshot(strand_id).await;
+            if runtime
+                .turns
+                .iter()
+                .any(|turn| turn.status == santi_core::TurnStatus::Completed)
+            {
+                return runtime;
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+        panic!("no turn completed");
+    }
+
+    pub(crate) async fn completed_count(
+        &self,
+        strand_id: &str,
+        count: usize,
+    ) -> santi_core::StrandRuntimeSnapshot {
+        for _ in 0..50 {
+            let runtime = self.snapshot(strand_id).await;
+            if runtime
+                .turns
+                .iter()
+                .filter(|turn| turn.status == santi_core::TurnStatus::Completed)
+                .count()
+                >= count
+            {
+                return runtime;
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+        panic!("{count} turns did not complete");
+    }
+
+    pub(crate) async fn completed_turn(
+        &self,
+        strand_id: &str,
+        turn_id: &str,
+    ) -> santi_core::StrandRuntimeSnapshot {
+        for _ in 0..50 {
+            let runtime = self.snapshot(strand_id).await;
+            if runtime
+                .turns
+                .iter()
+                .any(|turn| turn.id == turn_id && turn.status == santi_core::TurnStatus::Completed)
+            {
+                return runtime;
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+        panic!("turn did not complete");
+    }
+
+    pub(crate) async fn failed_turn(
+        &self,
+        strand_id: &str,
+        turn_id: &str,
+    ) -> santi_core::StrandRuntimeSnapshot {
+        for _ in 0..50 {
+            let runtime = self.snapshot(strand_id).await;
+            if runtime
+                .turns
+                .iter()
+                .any(|turn| turn.id == turn_id && turn.status == santi_core::TurnStatus::Failed)
+            {
+                return runtime;
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+        panic!("turn did not fail");
+    }
+
+    pub(crate) async fn message_containing(
+        &self,
+        strand_id: &str,
+        needle: &str,
+    ) -> santi_core::StrandRuntimeSnapshot {
+        for _ in 0..50 {
+            let runtime = self.snapshot(strand_id).await;
+            if runtime
+                .messages
+                .iter()
+                .any(|message| message.content_text.contains(needle))
+            {
+                return runtime;
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+        panic!("message containing {needle:?} did not appear");
+    }
 }
 
 pub(crate) fn count_messages(runtime: &santi_core::StrandRuntimeSnapshot, text: &str) -> usize {
@@ -295,70 +361,4 @@ pub(crate) fn provider_messages(request: &ProviderRequest) -> Vec<(&str, &str)> 
             _ => None,
         })
         .collect()
-}
-
-pub(crate) async fn wait_for_completed_turn(
-    service: &SantiService,
-    strand_id: &str,
-    turn_id: &str,
-) -> santi_core::StrandRuntimeSnapshot {
-    for _ in 0..50 {
-        let runtime = service
-            .runtime_snapshot(strand_id)
-            .expect("runtime snapshot")
-            .expect("strand runtime");
-        if runtime
-            .turns
-            .iter()
-            .any(|turn| turn.id == turn_id && turn.status == santi_core::TurnStatus::Completed)
-        {
-            return runtime;
-        }
-        sleep(Duration::from_millis(20)).await;
-    }
-    panic!("turn did not complete");
-}
-
-pub(crate) async fn wait_for_failed_turn(
-    service: &SantiService,
-    strand_id: &str,
-    turn_id: &str,
-) -> santi_core::StrandRuntimeSnapshot {
-    for _ in 0..50 {
-        let runtime = service
-            .runtime_snapshot(strand_id)
-            .expect("runtime snapshot")
-            .expect("strand runtime");
-        if runtime
-            .turns
-            .iter()
-            .any(|turn| turn.id == turn_id && turn.status == santi_core::TurnStatus::Failed)
-        {
-            return runtime;
-        }
-        sleep(Duration::from_millis(20)).await;
-    }
-    panic!("turn did not fail");
-}
-
-pub(crate) async fn wait_for_message_containing(
-    service: &SantiService,
-    strand_id: &str,
-    needle: &str,
-) -> santi_core::StrandRuntimeSnapshot {
-    for _ in 0..50 {
-        let runtime = service
-            .runtime_snapshot(strand_id)
-            .expect("runtime snapshot")
-            .expect("strand runtime");
-        if runtime
-            .messages
-            .iter()
-            .any(|message| message.content_text.contains(needle))
-        {
-            return runtime;
-        }
-        sleep(Duration::from_millis(20)).await;
-    }
-    panic!("message containing {needle:?} did not appear");
 }

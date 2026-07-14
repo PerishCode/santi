@@ -23,7 +23,13 @@ fn v24_backfills_receipts() {
         .expect("started")
         .turn;
     store
-        .complete_turn(&turn.id, None, "fake", "fake-model", None)
+        .complete_turn(Completion {
+            turn: &turn.id,
+            sequence: None,
+            provider: "fake",
+            model: "fake-model",
+            response: None,
+        })
         .expect("complete");
     let pending_id = match store
         .enqueue_inbox(

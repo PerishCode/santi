@@ -1,18 +1,16 @@
-//! Library implementation for the `santi` runtime and HTTP client binary.
-
 pub mod auth;
 pub mod cli;
 pub mod client;
-pub mod text_source;
+mod text;
 pub mod watch;
 
 use anyhow::Result;
 use clap::Parser;
 
-use auth::resolve_edge_bearer;
+use auth::{Credentials, resolve_edge_bearer};
 use cli::{Cli, ClientDefaults, Command, ImCommand, InboxCommand};
 use client::run_client;
-use text_source::{read_im_reply_text, read_inbox_seed_text};
+pub use text::source::{read_im_reply_text, read_inbox_seed_text};
 
 pub async fn run() -> Result<()> {
     dotenvy::dotenv_override().ok();
@@ -27,8 +25,6 @@ pub async fn run() -> Result<()> {
             run,
             finalize,
         } => run_upgrade(deb, previous_deb, run, finalize),
-        // The soul's optional early IM reply is an offline store write (like
-        // `inbox seed`) — no HTTP, so it never re-enters the turn-holding server.
         Command::Im(ImCommand::Reply { text, file, stdin }) => {
             let text = read_im_reply_text(text, file, stdin)?;
             run_im_reply(text, cli.strand)
@@ -38,24 +34,22 @@ pub async fn run() -> Result<()> {
                 strand: cli.strand,
                 soul: cli.soul,
             };
-            let bearer = resolve_edge_bearer(
-                cli.auth_token_url.as_deref(),
-                cli.auth_client_id.as_deref(),
-                cli.auth_username.as_deref(),
-                cli.auth_password.as_deref(),
-                cli.api_key.as_deref(),
-            )
+            let bearer = resolve_edge_bearer(Credentials {
+                endpoint: cli.auth_token_url.as_deref(),
+                identity: cli.auth_client_id.as_deref(),
+                username: cli.auth_username.as_deref(),
+                password: cli.auth_password.as_deref(),
+                key: cli.api_key.as_deref(),
+            })
             .await?;
             run_client(&cli.base_url, bearer.as_deref(), &defaults, other).await
         }
     }
 }
 
-/// Offline pre-check (local ops, no HTTP). Prints the report as JSON to stdout
-/// and exits non-zero when unhealthy, so a caller (the upgrade flow) can gate.
 fn run_doctor(storage_only: bool) -> Result<()> {
     let report = if storage_only {
-        santi_api::ops::doctor_at(&santi_api::config::resolve_runtime_paths())
+        santi_api::config::resolve_runtime_paths().doctor()
     } else {
         santi_api::ops::doctor()
     }
@@ -67,9 +61,6 @@ fn run_doctor(storage_only: bool) -> Result<()> {
     Ok(())
 }
 
-/// Offline inbox producer (local ops, no HTTP). Resolves the strand from
-/// --strand/SANTI_STRAND_ID and seeds a durable record; exits non-zero if the
-/// inbox gate rejects it, so the upgrade flow notices a badly-behind strand.
 fn run_inbox(command: InboxCommand, default_strand: Option<String>) -> Result<()> {
     match command {
         InboxCommand::Seed { text, file, stdin } => {
@@ -95,9 +86,6 @@ fn run_inbox(command: InboxCommand, default_strand: Option<String>) -> Result<()
     }
 }
 
-/// The soul's optional early IM reply (local ops, no HTTP). Resolves the current
-/// conversation from --strand/SANTI_STRAND_ID and shares SANTI_TURN_ID with the
-/// automatic completion path, making the two delivery paths idempotent.
 fn run_im_reply(text: String, default_strand: Option<String>) -> Result<()> {
     let strand_id = default_strand
         .map(|id| id.trim().to_string())
@@ -111,9 +99,6 @@ fn run_im_reply(text: String, default_strand: Option<String>) -> Result<()> {
     Ok(())
 }
 
-/// Self-upgrade (local ops, no HTTP). `--run` executes the orchestration (what
-/// the oneshot unit calls); otherwise it launches that unit detached and returns
-/// the fast signal (监听 / 最长超时 Xmin / 日志位置).
 fn run_upgrade(
     deb: Option<String>,
     previous_deb: Option<String>,
@@ -162,7 +147,6 @@ fn run_upgrade(
     }
 }
 
-/// Run the runtime server in-process via `santi-api`.
 async fn run_service(args: Vec<String>) -> Result<()> {
     let argv = std::iter::once("santi".to_string()).chain(args);
     let config = santi_api::config::ConfigService::from_args(argv)

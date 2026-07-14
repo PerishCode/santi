@@ -1,10 +1,11 @@
 use super::support::*;
+use santi_core::service::{self, Service};
 
 #[tokio::test]
 async fn bucket_objects_are_scoped() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: temp.path().join("santi.sqlite").display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -58,8 +59,8 @@ async fn bucket_objects_are_scoped() {
 #[tokio::test]
 async fn bucket_rejects_unsafe_keys() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: temp.path().join("santi.sqlite").display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),

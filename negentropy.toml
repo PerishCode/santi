@@ -1,0 +1,24 @@
+[scan]
+include = ["crates/**/*.rs"]
+exclude = ["**/target/**"]
+
+[module]
+roots = [
+  "crates/*/src",
+  "crates/*/tests",
+]
+
+[limit]
+block = 4
+path = 4
+param = 4
+
+[comment]
+allow = false
+
+[word]
+single = true
+
+[[grant]]
+syntax = "test"
+paths = ["crates/*/tests/**/*.rs"]

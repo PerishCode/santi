@@ -6,36 +6,36 @@ fn fork_copies_prefix() {
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let parent = store.create_strand().expect("create parent");
     let first = store
-        .append_message(
-            &parent.id,
-            ActorType::System,
-            store.system_actor_id(),
-            MessageContent::text("first"),
-            MessageState::Fixed,
-            MessageIntake::Record,
-        )
+        .append_message(Draft {
+            strand: &parent.id,
+            actor: ActorType::System,
+            id: store.system_actor_id(),
+            content: MessageContent::text("first"),
+            state: MessageState::Fixed,
+            intake: MessageIntake::Record,
+        })
         .expect("append first")
         .strand_message;
     let second = store
-        .append_message(
-            &parent.id,
-            ActorType::System,
-            store.system_actor_id(),
-            MessageContent::text("second"),
-            MessageState::Fixed,
-            MessageIntake::Record,
-        )
+        .append_message(Draft {
+            strand: &parent.id,
+            actor: ActorType::System,
+            id: store.system_actor_id(),
+            content: MessageContent::text("second"),
+            state: MessageState::Fixed,
+            intake: MessageIntake::Record,
+        })
         .expect("append second")
         .strand_message;
     let third = store
-        .append_message(
-            &parent.id,
-            ActorType::System,
-            store.system_actor_id(),
-            MessageContent::text("third"),
-            MessageState::Fixed,
-            MessageIntake::Record,
-        )
+        .append_message(Draft {
+            strand: &parent.id,
+            actor: ActorType::System,
+            id: store.system_actor_id(),
+            content: MessageContent::text("third"),
+            state: MessageState::Fixed,
+            intake: MessageIntake::Record,
+        })
         .expect("append third")
         .strand_message;
 
@@ -70,14 +70,14 @@ fn fork_copies_inner_compacts() {
     for text in ["one", "two", "three", "four"] {
         messages.push(
             store
-                .append_message(
-                    &parent.id,
-                    ActorType::System,
-                    store.system_actor_id(),
-                    MessageContent::text(text),
-                    MessageState::Fixed,
-                    MessageIntake::Record,
-                )
+                .append_message(Draft {
+                    strand: &parent.id,
+                    actor: ActorType::System,
+                    id: store.system_actor_id(),
+                    content: MessageContent::text(text),
+                    state: MessageState::Fixed,
+                    intake: MessageIntake::Record,
+                })
                 .expect("append")
                 .strand_message,
         );
@@ -138,14 +138,14 @@ fn fork_reuses_tools() {
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let parent = store.create_strand().expect("create parent");
     let user = store
-        .append_message(
-            &parent.id,
-            ActorType::System,
-            store.system_actor_id(),
-            MessageContent::text("run"),
-            MessageState::Fixed,
-            MessageIntake::Request,
-        )
+        .append_message(Draft {
+            strand: &parent.id,
+            actor: ActorType::System,
+            id: store.system_actor_id(),
+            content: MessageContent::text("run"),
+            state: MessageState::Fixed,
+            intake: MessageIntake::Request,
+        })
         .expect("append user")
         .strand_message;
     let turn = store
@@ -153,18 +153,18 @@ fn fork_reuses_tools() {
         .expect("start turn")
         .turn;
     store
-        .append_tool_call(
-            &turn.id,
-            "call_fork",
-            "shell",
-            &serde_json::json!({ "command": "echo fork" }),
-            &ToolCallProvenance {
+        .append_tool_call(Invocation {
+            turn: &turn.id,
+            call: "call_fork",
+            name: "shell",
+            arguments: &serde_json::json!({ "command": "echo fork" }),
+            provenance: &ToolCallProvenance {
                 provider_family: "openai".to_string(),
                 item: Some(serde_json::json!({ "type": "function_call", "id": "fc_fork" })),
                 item_id: Some("fc_fork".to_string()),
                 response_id: Some("resp_fork".to_string()),
             },
-        )
+        })
         .expect("append tool call");
     store
         .append_tool_result(
@@ -221,13 +221,13 @@ fn fork_drops_external_state() {
         .expect("start turn")
         .turn;
     store
-        .complete_turn(
-            &turn.id,
-            None,
-            "fake-provider",
-            "fake-model",
-            Some("resp_parent".to_string()),
-        )
+        .complete_turn(Completion {
+            turn: &turn.id,
+            sequence: None,
+            provider: "fake-provider",
+            model: "fake-model",
+            response: Some("resp_parent".to_string()),
+        })
         .expect("complete turn");
     let parent = store
         .strand(&parent.id)

@@ -1,13 +1,21 @@
 //! `runseal :guard` — the local validation suite the pre-commit hook runs.
 //!
-//! Mirrors the CI repo + Rust checks (flavor and cargo, all `--locked` like CI)
+//! Mirrors the CI repo + Rust checks (Negentropy and cargo, all `--locked` like CI)
 //! so "green locally" means "green in CI", plus the Deno checks for the
 //! `.runseal/` wrappers that CI does not cover. Runnable on demand as well as
 //! from the hook.
 
 import { run } from "@/lib/std/cmd.ts";
 import { join } from "@/lib/std/fs.ts";
+import { verify as verifyNegentropy } from "@/lib/negentropy.ts";
 import { repoRoot } from "@/lib/std/repo.ts";
+import {
+  classifiedScan,
+  formatReport,
+  lawLines,
+  loadBaseline,
+  ratchet,
+} from "@/lib/word/report.ts";
 
 interface Step {
   title: string;
@@ -29,12 +37,40 @@ export async function guard(argv: string[]): Promise<number> {
   const wrappers = wrapperFiles(repo);
   const config = ".runseal/deno.json";
 
+  console.log("==> pinned negentropy");
+  try {
+    await verifyNegentropy(repo);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    return 1;
+  }
+
+  console.log("==> negentropy");
+  try {
+    const { report, raw, notes } = await classifiedScan(repo);
+    for (const line of lawLines(raw)) {
+      console.log(line);
+    }
+    for (const note of notes) {
+      console.log(note);
+    }
+    console.log(formatReport(report));
+    const baseline = await loadBaseline(repo);
+    const result = ratchet(report, baseline);
+    for (const message of result.messages) {
+      console.log(message);
+    }
+    if (result.code !== 0) {
+      console.error(":guard: word-debt gate failed");
+      return result.code;
+    }
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    console.error(":guard: negentropy / word-debt failed");
+    return 1;
+  }
+
   const steps: Step[] = [
-    {
-      title: "flavor check",
-      command: "flavor",
-      args: ["check", "--root", ".", "--config", "flavor.toml"],
-    },
     { title: "cargo fmt", command: "cargo", args: ["fmt", "--all", "--check"] },
     {
       title: "cargo clippy",
@@ -48,6 +84,7 @@ export async function guard(argv: string[]): Promise<number> {
       args: ["fmt", "--config", config, "--check", ".runseal"],
     },
     { title: "deno lint", command: "deno", args: ["lint", "--config", config, ".runseal"] },
+    { title: "deno test", command: "deno", args: ["test", "--config", config, ".runseal/lib"] },
     { title: "deno check", command: "deno", args: ["check", "--config", config, ...wrappers] },
   ];
 
@@ -66,7 +103,7 @@ export async function guard(argv: string[]): Promise<number> {
 function usage(): void {
   console.log("Usage: runseal :guard");
   console.log("");
-  console.log("Run the local flavor, Rust, and runseal validation suite used before landing.");
+  console.log("Run the local Negentropy, Rust, and runseal validation suite used before landing.");
 }
 
 /** Discover wrapper entrypoints so `deno check` covers them (and their libs). */

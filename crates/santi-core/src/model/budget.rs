@@ -27,10 +27,8 @@ pub struct StrandBudgetSnapshot {
     pub active_incident: Option<ErrorIncident>,
 }
 
-/// A runtime-enforced envelope for one strand. The boundary adaptor decides
-/// which strands receive a budget; core only enforces the registered limits.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StrandExecutionBudget {
+pub struct Execution {
     pub profile: String,
     pub max_provider_rounds: usize,
     pub max_tool_calls: usize,
@@ -38,7 +36,7 @@ pub struct StrandExecutionBudget {
     pub max_shell_output_bytes: usize,
 }
 
-impl StrandExecutionBudget {
+impl Execution {
     pub fn validate(&self) -> Result<(), String> {
         if self.profile.trim().is_empty() {
             return Err("execution budget profile must not be empty".to_string());
@@ -66,7 +64,7 @@ impl StrandExecutionBudget {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct StrandExecutionUsage {
+pub struct Usage {
     pub tool_calls: usize,
     pub tool_output_bytes: usize,
 }

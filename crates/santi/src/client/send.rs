@@ -2,44 +2,46 @@ use anyhow::{Context, Result};
 
 use super::REQUEST_TIMEOUT;
 use crate::cli::WatchFormat;
-use crate::watch::watch_until_idle;
+use crate::watch::{Watch, watch_until_idle};
 
-/// POST a send, then optionally watch the stream until the strand is idle.
-pub async fn send(
-    client: &reqwest::Client,
-    base: &str,
-    strand_id: &str,
-    body: serde_json::Value,
-    watch: bool,
-    watch_format: WatchFormat,
-) -> Result<()> {
-    let url = format!("{base}/api/v1/strands/{strand_id}/send");
-    let response = client
+pub struct Request<'a> {
+    pub client: &'a reqwest::Client,
+    pub base: &'a str,
+    pub strand: &'a str,
+    pub body: serde_json::Value,
+    pub watch: bool,
+    pub format: WatchFormat,
+}
+
+pub async fn send(request: Request<'_>) -> Result<()> {
+    let url = format!("{}/api/v1/strands/{}/send", request.base, request.strand);
+    let response = request
+        .client
         .post(&url)
         .timeout(REQUEST_TIMEOUT)
-        .json(&body)
+        .json(&request.body)
         .send()
         .await
         .with_context(|| format!("POST {url}"))?;
     let status = response.status();
     let text = response.text().await.context("read response body")?;
     let accepted = serde_json::from_str::<serde_json::Value>(&text).ok();
-    if !watch {
+    if !request.watch {
         print_response(accepted.as_ref(), &text)?;
     }
     if !status.is_success() {
-        if watch {
+        if request.watch {
             println!("{text}");
         }
         anyhow::bail!("request failed with status {status}");
     }
     if let Some(warning) = accepted_warning(accepted.as_ref()) {
-        if watch {
+        if request.watch {
             print_response(accepted.as_ref(), &text)?;
         }
         return Err(accepted_warning_error(warning));
     }
-    if !watch {
+    if !request.watch {
         return Ok(());
     }
     let seed_turn = accepted
@@ -48,7 +50,14 @@ pub async fn send(
         .and_then(|turn| turn.get("id"))
         .and_then(serde_json::Value::as_str)
         .map(str::to_string);
-    watch_until_idle(client, base, strand_id, seed_turn, watch_format).await
+    watch_until_idle(Watch {
+        client: request.client,
+        base: request.base,
+        strand: request.strand,
+        initial: seed_turn,
+        format: request.format,
+    })
+    .await
 }
 
 pub(super) fn accepted_warning(value: Option<&serde_json::Value>) -> Option<&serde_json::Value> {

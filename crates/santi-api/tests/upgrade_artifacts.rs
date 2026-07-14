@@ -6,24 +6,24 @@ use tempfile::tempdir;
 #[path = "../src/upgrade/artifacts.rs"]
 mod artifacts;
 
-use artifacts::{ArtifactStore, DpkgProbe, PackageIdentity, PackageProbe};
+use artifacts::{Dpkg, Identity, Probe, Store};
 
 struct FakeProbe {
     installed_version: &'static str,
 }
 
-impl PackageProbe for FakeProbe {
-    fn inspect_deb(&self, path: &Path) -> Result<PackageIdentity, String> {
+impl Probe for FakeProbe {
+    fn inspect_deb(&self, path: &Path) -> Result<Identity, String> {
         let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
         let mut fields = content.splitn(3, '|');
-        Ok(PackageIdentity {
+        Ok(Identity {
             package: fields.next().unwrap_or_default().to_string(),
             version: fields.next().unwrap_or_default().to_string(),
         })
     }
 
-    fn installed(&self) -> Result<PackageIdentity, String> {
-        Ok(PackageIdentity {
+    fn installed(&self) -> Result<Identity, String> {
+        Ok(Identity {
             package: "santi".to_string(),
             version: self.installed_version.to_string(),
         })
@@ -36,7 +36,7 @@ fn package(path: &Path, version: &str, payload: &str) {
 
 #[test]
 fn dpkg_probe_fails_closed() {
-    let probe = DpkgProbe;
+    let probe = Dpkg;
     let error = probe
         .inspect_deb(Path::new("definitely-missing-santi-package.deb"))
         .unwrap_err();
@@ -46,7 +46,7 @@ fn dpkg_probe_fails_closed() {
 #[test]
 fn bootstrap_reuses_and_promotes() {
     let temp = tempdir().unwrap();
-    let store = ArtifactStore::new(temp.path());
+    let store = Store::new(temp.path());
     let previous = temp.path().join("previous.deb");
     let candidate = temp.path().join("candidate.deb");
     package(&previous, "1.0.0", "previous");
@@ -77,7 +77,7 @@ fn bootstrap_reuses_and_promotes() {
 #[test]
 fn rejects_identity_and_tampering() {
     let temp = tempdir().unwrap();
-    let store = ArtifactStore::new(temp.path());
+    let store = Store::new(temp.path());
     let wrong = temp.path().join("wrong.deb");
     package(&wrong, "0.9.0", "wrong");
     let probe = FakeProbe {
@@ -114,7 +114,7 @@ fn rejects_identity_and_tampering() {
 #[test]
 fn interruption_preserves_manifest() {
     let temp = tempdir().unwrap();
-    let store = ArtifactStore::new(temp.path());
+    let store = Store::new(temp.path());
     let previous = temp.path().join("previous.deb");
     let candidate = temp.path().join("candidate.deb");
     package(&previous, "1.0.0", "previous");
@@ -139,7 +139,7 @@ fn interruption_preserves_manifest() {
 #[test]
 fn prune_cleans_orphans() {
     let temp = tempdir().unwrap();
-    let store = ArtifactStore::new(temp.path());
+    let store = Store::new(temp.path());
     let probe = FakeProbe {
         installed_version: "1.0.0",
     };

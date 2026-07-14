@@ -4,7 +4,8 @@ use axum::{
     http::{StatusCode, header},
     response::Response,
 };
-use santi_core::{SantiError, SantiService};
+use santi_core::SantiError;
+use santi_core::service::Service;
 
 use crate::ApiError;
 
@@ -24,7 +25,7 @@ use crate::ApiError;
     )
 )]
 pub(crate) async fn get_bucket_object(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Path((soul_id, strand_id, key)): Path<(String, String, String)>,
 ) -> Result<Response, ApiError> {
     let payload = service

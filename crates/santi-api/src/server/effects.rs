@@ -2,7 +2,8 @@ use axum::{
     Json,
     extract::{Path, State},
 };
-use santi_core::{EffectResolutionOutcome, EffectStatus, SantiError, SantiService};
+use santi_core::service::Service;
+use santi_core::{EffectResolutionOutcome, EffectStatus, SantiError};
 
 use super::ApiError;
 
@@ -23,7 +24,7 @@ pub struct ResolveEffectRequest {
     )
 )]
 pub async fn effect_status(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Path(effect_id): Path<String>,
 ) -> Result<Json<EffectStatus>, ApiError> {
     service
@@ -46,7 +47,7 @@ pub async fn effect_status(
     )
 )]
 pub async fn resolve_effect(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Path(effect_id): Path<String>,
     Json(request): Json<ResolveEffectRequest>,
 ) -> Result<Json<EffectStatus>, ApiError> {

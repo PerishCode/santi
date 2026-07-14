@@ -1,5 +1,6 @@
 use santi_core::{
-    DEFAULT_SOUL_ID, ImDeliveryMode, IngestOutcome, MessageContent, MessageKind, SantiStore,
+    Completion, DEFAULT_SOUL_ID, ImDeliveryMode, IngestOutcome, MessageContent, MessageKind,
+    SantiStore,
 };
 
 fn store() -> (SantiStore, tempfile::TempDir) {
@@ -83,23 +84,23 @@ fn turn_reply_deduplicates() {
         .turn;
 
     let (early, inserted) = store
-        .enqueue_turn_reply(
-            &strand.id,
-            &turn.id,
-            None,
-            "early",
-            ImDeliveryMode::Explicit,
-        )
+        .enqueue_turn_reply(santi_core::Reply {
+            strand: &strand.id,
+            turn: &turn.id,
+            message: None,
+            content: "early",
+            mode: ImDeliveryMode::Explicit,
+        })
         .unwrap();
     assert!(inserted);
     let (same, inserted) = store
-        .enqueue_turn_reply(
-            &strand.id,
-            &turn.id,
-            Some("msg_final"),
-            "final",
-            ImDeliveryMode::Automatic,
-        )
+        .enqueue_turn_reply(santi_core::Reply {
+            strand: &strand.id,
+            turn: &turn.id,
+            message: Some("msg_final"),
+            content: "final",
+            mode: ImDeliveryMode::Automatic,
+        })
         .unwrap();
     assert!(!inserted);
     assert_eq!(same.id, early.id);
@@ -107,7 +108,13 @@ fn turn_reply_deduplicates() {
     assert_eq!(same.delivery_mode, Some(ImDeliveryMode::Explicit));
 
     store
-        .complete_turn(&turn.id, None, "fake", "fake-model", None)
+        .complete_turn(Completion {
+            turn: &turn.id,
+            sequence: None,
+            provider: "fake",
+            model: "fake-model",
+            response: None,
+        })
         .unwrap();
     let status = store
         .receipt_status(&receipt.inbox_id)

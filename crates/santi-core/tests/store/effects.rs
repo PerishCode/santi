@@ -27,11 +27,13 @@ fn start_effect(store: &SantiStore) -> StartedEffect {
     let tool_call_id = "call_effect".to_string();
     let (_, effect) = store
         .append_effect_call(
-            &turn.id,
-            &tool_call_id,
-            "shell",
-            &json!({"command": "printf external"}),
-            &ToolCallProvenance::default(),
+            Invocation {
+                turn: &turn.id,
+                call: &tool_call_id,
+                name: "shell",
+                arguments: &json!({"command": "printf external"}),
+                provenance: &ToolCallProvenance::default(),
+            },
             Some("shell"),
         )
         .expect("append effect intent");
@@ -87,11 +89,13 @@ fn restart_ambiguity() {
         .expect("open dispatch window");
     let (_, prepared) = store
         .append_effect_call(
-            &started.turn_id,
-            "call_still_prepared",
-            "shell",
-            &json!({"command": "printf prepared"}),
-            &ToolCallProvenance::default(),
+            Invocation {
+                turn: &started.turn_id,
+                call: "call_still_prepared",
+                name: "shell",
+                arguments: &json!({"command": "printf prepared"}),
+                provenance: &ToolCallProvenance::default(),
+            },
             Some("shell"),
         )
         .expect("append second effect");
@@ -209,11 +213,13 @@ fn intent_atomicity() {
     assert!(
         store
             .append_effect_call(
-                &turn.id,
-                "call_atomic",
-                "shell",
-                &json!({"command": "printf atomic"}),
-                &ToolCallProvenance::default(),
+                Invocation {
+                    turn: &turn.id,
+                    call: "call_atomic",
+                    name: "shell",
+                    arguments: &json!({"command": "printf atomic"}),
+                    provenance: &ToolCallProvenance::default(),
+                },
                 Some("shell"),
             )
             .is_err()

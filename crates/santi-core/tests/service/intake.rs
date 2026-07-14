@@ -1,11 +1,12 @@
 use super::support::*;
+use santi_core::service::{self, Service};
 
 #[tokio::test]
 async fn external_ingest_turn() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FakeProvider::default());
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: temp.path().join("santi.sqlite").display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -25,9 +26,7 @@ async fn external_ingest_turn() {
     };
     let strand_id = receipt.strand_id;
 
-    // The webhook event is a REQUEST → it wakes the soul on a label-anchored
-    // strand. Wait for the system-triggered turn to complete.
-    let runtime = wait_any_completed(&service, &strand_id).await;
+    let runtime = Probe::new(&service).any_completed(&strand_id).await;
     assert!(
         runtime
             .turns
@@ -47,7 +46,6 @@ async fn external_ingest_turn() {
             .any(|message| message.content_text == "hi from runtime")
     );
 
-    // A second event on the same label coalesces onto the same strand, not a new one.
     let santi_core::IngestOutcome::Accepted {
         receipt: receipt_again,
     } = service
@@ -59,8 +57,6 @@ async fn external_ingest_turn() {
     let strand_id_again = receipt_again.strand_id;
     assert_eq!(strand_id_again, strand_id);
 
-    // A doorbell is a runtime-authored santi_system fact, not user speech — it
-    // reaches the provider as a system-role message (see message_to_provider_item).
     let requests = provider.requests.lock().unwrap();
     assert!(requests.iter().any(|request| {
         request.input.iter().any(|item| {
@@ -76,8 +72,8 @@ async fn external_ingest_turn() {
 #[tokio::test]
 async fn completion_delivers() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: temp.path().join("santi.sqlite").display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -93,7 +89,7 @@ async fn completion_delivers() {
     let santi_core::IngestOutcome::Accepted { receipt } = outcome else {
         panic!("IM send rejected");
     };
-    let runtime = wait_any_completed(&service, &receipt.strand_id).await;
+    let runtime = Probe::new(&service).any_completed(&receipt.strand_id).await;
     let turn = runtime
         .turns
         .iter()
@@ -128,8 +124,8 @@ async fn completion_delivers() {
 async fn delivery_failure_rolls_back() {
     let temp = tempfile::tempdir().expect("temp dir");
     let database_path = temp.path().join("santi.sqlite");
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: database_path.display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -183,15 +179,10 @@ async fn delivery_failure_rolls_back() {
     );
 }
 
-/// Boot recovery drains the inbox: content that an adaptor durably enqueued
-/// but that never got drained before a crash (nobody called `ingest`'s poke —
-/// simulated here by writing straight to the store, bypassing the service)
-/// still drives a turn once a fresh service opens against the same db and
-/// calls `resume_pending`.
 #[tokio::test]
 async fn boot_drains_inbox() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let config = SantiServiceConfig {
+    let config = service::Config {
         database_path: temp.path().join("santi.sqlite").display().to_string(),
         runtime_root: temp.path().join("runtime").display().to_string(),
         execution_root: temp.path().join("execution").display().to_string(),
@@ -200,13 +191,10 @@ async fn boot_drains_inbox() {
     let provider = Arc::new(FakeProvider::default());
 
     let strand_id = {
-        let service = SantiService::open(config.clone(), provider.clone()).expect("open service");
+        let service = Service::open(config.clone(), provider.clone()).expect("open service");
         service.create_strand().expect("create strand").strand.id
     };
 
-    // Simulate an adaptor that enqueued content and then the process crashed
-    // before any poke ever drained it: write directly to the inbox, bypassing
-    // SantiService::ingest/send_strand entirely.
     let store = SantiStore::open(&config.database_path).expect("open store directly");
     store
         .enqueue_inbox(
@@ -217,11 +205,10 @@ async fn boot_drains_inbox() {
         .expect("enqueue inbox");
     drop(store);
 
-    // A fresh service against the SAME db, as after a restart.
-    let service = SantiService::open(config, provider.clone()).expect("reopen service");
+    let service = Service::open(config, provider.clone()).expect("reopen service");
     service.resume_pending().expect("resume pending");
 
-    let runtime = wait_any_completed(&service, &strand_id).await;
+    let runtime = Probe::new(&service).any_completed(&strand_id).await;
     assert!(
         runtime
             .messages
@@ -236,14 +223,10 @@ async fn boot_drains_inbox() {
     );
 }
 
-/// Graceful shutdown pauses inbox CONSUMPTION (no new turns start) while ingest
-/// keeps PRODUCING durably; a later fresh boot then drains what queued up. This
-/// is the enabling behavior for self-upgrade: quiesce → stop → swap → start →
-/// boot recovery wakes the soul on whatever queued during the window (PHASE-07).
 #[tokio::test]
 async fn shutdown_pauses_consumption() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let config = SantiServiceConfig {
+    let config = service::Config {
         database_path: temp.path().join("santi.sqlite").display().to_string(),
         runtime_root: temp.path().join("runtime").display().to_string(),
         execution_root: temp.path().join("execution").display().to_string(),
@@ -251,9 +234,8 @@ async fn shutdown_pauses_consumption() {
     };
     let provider = Arc::new(FakeProvider::default());
 
-    // A quiescing service: it accepts (durably enqueues) but starts NO turn.
     let strand_id = {
-        let service = SantiService::open(config.clone(), provider.clone()).expect("open service");
+        let service = Service::open(config.clone(), provider.clone()).expect("open service");
         service.begin_shutdown();
         assert!(service.is_shutting_down());
         let outcome = service
@@ -269,8 +251,6 @@ async fn shutdown_pauses_consumption() {
         }
     };
 
-    // Consumption paused: no turn was started. Production intact: the record is
-    // durably queued (exactly what boot recovery scans for).
     let store = SantiStore::open(&config.database_path).expect("open store directly");
     assert_eq!(
         store.running_turn_count().expect("count"),
@@ -286,10 +266,9 @@ async fn shutdown_pauses_consumption() {
     );
     drop(store);
 
-    // A fresh service (not shutting down) drains the backlog on boot.
-    let service = SantiService::open(config, provider.clone()).expect("reopen service");
+    let service = Service::open(config, provider.clone()).expect("reopen service");
     service.resume_pending().expect("resume pending");
-    let runtime = wait_any_completed(&service, &strand_id).await;
+    let runtime = Probe::new(&service).any_completed(&strand_id).await;
     assert!(
         runtime
             .messages
@@ -302,8 +281,8 @@ async fn shutdown_pauses_consumption() {
 async fn send_targets_soul() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FakeProvider::default());
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: temp.path().join("santi.sqlite").display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -321,10 +300,6 @@ async fn send_targets_soul() {
         .expect("create soul");
     assert_ne!(secretary.id, default_soul);
 
-    // `create_strand` (client-facing, no label) always binds the default soul —
-    // multi-soul-per-strand is gone, so a non-default soul is reached only via a
-    // label-anchored strand (e.g. ingest_external_event), not by picking a soul
-    // at send time.
     let strand = service.create_strand().expect("create strand").strand;
     assert_eq!(strand.soul_id, default_soul);
     let response = service
@@ -340,7 +315,6 @@ async fn send_targets_soul() {
         .expect("send strand");
     assert_eq!(response.strand.soul_id, default_soul);
 
-    // A label-anchored strand can be owned by a non-default soul (via ingest).
     let santi_core::IngestOutcome::Accepted {
         receipt: secretary_receipt,
     } = service
@@ -367,7 +341,6 @@ async fn send_targets_soul() {
         .expect("send strand");
     assert_eq!(secretary_response.strand.soul_id, secretary.id);
 
-    // An unknown strand id is rejected cleanly, not a 500.
     let error = service
         .send_strand(
             "ss_does_not_exist",

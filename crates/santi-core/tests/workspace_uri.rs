@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use santi_core::{
-    SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, WorkspaceRoot, parse_workspace_uri, soul_memory_uri,
+    SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, parse_workspace_uri, soul_memory_uri,
     strand_memory_uri, workspace_uri,
 };
 
@@ -22,11 +22,11 @@ fn builds_memory_uris() {
 #[test]
 fn parses_workspace_roots() {
     let soul = parse_workspace_uri(SOUL_WORKSPACE_URI).expect("soul root");
-    assert_eq!(soul.root, WorkspaceRoot::Soul);
+    assert_eq!(soul.root, santi_core::workspace::Root::Soul);
     assert_eq!(soul.path, PathBuf::new());
 
     let strand = parse_workspace_uri("strand://notes/today.md").expect("strand path");
-    assert_eq!(strand.root, WorkspaceRoot::Strand);
+    assert_eq!(strand.root, santi_core::workspace::Root::Strand);
     assert_eq!(strand.path, PathBuf::from("notes/today.md"));
 }
 

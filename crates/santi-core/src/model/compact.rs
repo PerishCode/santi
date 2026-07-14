@@ -4,9 +4,6 @@ use utoipa::ToSchema;
 
 use super::{ContextEstimate, StrandTargetType, Timestamp};
 
-/// A compact is a pure projection overlay over a strand's spine. It
-/// self-describes its coverage by message-id boundaries and carries the
-/// operator-authored summary while originals remain queryable.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Compact {
     pub id: String,

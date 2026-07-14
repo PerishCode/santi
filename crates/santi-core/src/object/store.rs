@@ -36,6 +36,13 @@ pub struct LocalObjectStore {
     root: PathBuf,
 }
 
+struct Walk<'a> {
+    bucket: &'a ObjectBucket,
+    root: &'a Path,
+    prefix: &'a str,
+    objects: &'a mut Vec<ObjectMeta>,
+}
+
 impl ObjectBucket {
     pub fn new(soul_id: impl Into<String>, strand_id: impl Into<String>) -> Result<Self, String> {
         let bucket = Self {
@@ -158,36 +165,35 @@ impl LocalObjectStore {
         if !bucket_root.exists() {
             return Ok(objects);
         }
-        self.collect_objects(bucket, &bucket_root, &bucket_root, prefix, &mut objects)?;
+        let mut walk = Walk {
+            bucket,
+            root: &bucket_root,
+            prefix,
+            objects: &mut objects,
+        };
+        self.collect_objects(&mut walk, &bucket_root)?;
         objects.sort_by(|left, right| left.uri.key.cmp(&right.uri.key));
         Ok(objects)
     }
 
-    fn collect_objects(
-        &self,
-        bucket: &ObjectBucket,
-        bucket_root: &Path,
-        dir: &Path,
-        prefix: &str,
-        objects: &mut Vec<ObjectMeta>,
-    ) -> Result<(), String> {
+    fn collect_objects(&self, walk: &mut Walk<'_>, dir: &Path) -> Result<(), String> {
         for entry in fs::read_dir(dir).map_err(|error| error.to_string())? {
             let entry = entry.map_err(|error| error.to_string())?;
             let path = entry.path();
             let metadata = entry.metadata().map_err(|error| error.to_string())?;
             if metadata.is_dir() {
-                self.collect_objects(bucket, bucket_root, &path, prefix, objects)?;
+                self.collect_objects(walk, &path)?;
             } else if metadata.is_file() {
                 let key = path
-                    .strip_prefix(bucket_root)
+                    .strip_prefix(walk.root)
                     .map_err(|error| error.to_string())?
                     .to_string_lossy()
                     .replace('\\', "/");
-                if !key.starts_with(prefix) {
+                if !key.starts_with(walk.prefix) {
                     continue;
                 }
-                objects.push(ObjectMeta {
-                    uri: ObjectUri::new(bucket.clone(), key)?,
+                walk.objects.push(ObjectMeta {
+                    uri: ObjectUri::new(walk.bucket.clone(), key)?,
                     len: metadata.len(),
                     modified_at: metadata.modified().ok(),
                 });

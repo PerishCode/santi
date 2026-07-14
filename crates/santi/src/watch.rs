@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::io::Write as _;
+use std::io::Write;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -9,18 +9,18 @@ use crate::cli::WatchFormat;
 
 const WATCH_IDLE_GRACE: Duration = Duration::from_millis(1500);
 
-/// Follow the strand's SSE stream, tracking which turns are in flight, and
-/// return once none remain (the strand has caught up). Filtered mode prints
-/// milestone lines; raw mode preserves the prior compact JSON-line stream.
-pub(crate) async fn watch_until_idle(
-    client: &reqwest::Client,
-    base: &str,
-    strand_id: &str,
-    seed_turn: Option<String>,
-    format: WatchFormat,
-) -> Result<()> {
-    let url = format!("{base}/api/v1/strands/{strand_id}/events");
-    let response = client
+pub(crate) struct Watch<'a> {
+    pub(crate) client: &'a reqwest::Client,
+    pub(crate) base: &'a str,
+    pub(crate) strand: &'a str,
+    pub(crate) initial: Option<String>,
+    pub(crate) format: WatchFormat,
+}
+
+pub(crate) async fn watch_until_idle(watch: Watch<'_>) -> Result<()> {
+    let url = format!("{}/api/v1/strands/{}/events", watch.base, watch.strand);
+    let response = watch
+        .client
         .get(&url)
         .send()
         .await
@@ -33,15 +33,12 @@ pub(crate) async fn watch_until_idle(
     let mut buffer = String::new();
     let mut inflight: HashSet<String> = HashSet::new();
     let mut seeded = false;
-    if let Some(turn) = seed_turn {
+    if let Some(turn) = watch.initial {
         inflight.insert(turn);
         seeded = true;
     }
     let mut stdout = std::io::stdout();
     loop {
-        // Once nothing is in flight, allow only a short grace for a coalesced
-        // follow-on turn before declaring idle. Before seeding (no known turn),
-        // wait without a deadline so we don't exit before the turn appears.
         let frame = if seeded && inflight.is_empty() {
             match tokio::time::timeout(WATCH_IDLE_GRACE, next_sse_frame(&mut stream, &mut buffer))
                 .await
@@ -53,37 +50,41 @@ pub(crate) async fn watch_until_idle(
             next_sse_frame(&mut stream, &mut buffer).await?
         };
         let Some((event, data)) = frame else {
-            break; // stream closed
+            break;
         };
-        match format {
-            WatchFormat::Raw if event != "stream_open" => {
-                writeln!(stdout, "{data}").ok();
-                stdout.flush().ok();
-            }
-            WatchFormat::Filtered => {
-                if let Some(line) = render_watch_event(&event, &data) {
-                    writeln!(stdout, "{line}").ok();
-                    stdout.flush().ok();
-                }
-            }
-            _ => {}
-        }
-        match event.as_str() {
-            "turn_started" => {
-                if let Some(id) = json_field(&data, &["payload", "turn", "id"]) {
-                    inflight.insert(id);
-                    seeded = true;
-                }
-            }
-            "turn_completed" | "turn_failed" => {
-                if let Some(id) = json_field(&data, &["payload", "turn_id"]) {
-                    inflight.remove(&id);
-                }
-            }
-            _ => {}
-        }
+        write_frame(&mut stdout, watch.format, &event, &data);
+        track_frame(&event, &data, &mut inflight, &mut seeded);
     }
     Ok(())
+}
+
+fn write_frame(stdout: &mut impl Write, format: WatchFormat, event: &str, data: &str) {
+    let line = match format {
+        WatchFormat::Raw if event != "stream_open" => Some(data.to_string()),
+        WatchFormat::Filtered => render_watch_event(event, data),
+        _ => None,
+    };
+    if let Some(line) = line {
+        writeln!(stdout, "{line}").ok();
+        stdout.flush().ok();
+    }
+}
+
+fn track_frame(event: &str, data: &str, inflight: &mut HashSet<String>, seeded: &mut bool) {
+    match event {
+        "turn_started" => {
+            if let Some(id) = json_field(data, &["payload", "turn", "id"]) {
+                inflight.insert(id);
+                *seeded = true;
+            }
+        }
+        "turn_completed" | "turn_failed" => {
+            if let Some(id) = json_field(data, &["payload", "turn_id"]) {
+                inflight.remove(&id);
+            }
+        }
+        _ => {}
+    }
 }
 
 pub fn render_watch_event(event: &str, data: &str) -> Option<String> {
@@ -278,9 +279,6 @@ pub fn snippet(text: &str, limit: usize) -> String {
     out
 }
 
-/// Pull the next complete SSE frame, returning its `(event, data)` lines.
-/// Comment-only frames (keep-alives) and frames without an event are skipped.
-/// Returns `Ok(None)` when the stream ends.
 pub async fn next_sse_frame<B: AsRef<[u8]>>(
     stream: &mut (impl Stream<Item = reqwest::Result<B>> + Unpin),
     buffer: &mut String,
@@ -302,8 +300,6 @@ pub async fn next_sse_frame<B: AsRef<[u8]>>(
     }
 }
 
-/// Parse one SSE frame into `(event, data)`. Returns None if it has no event
-/// line (e.g. a `:` keep-alive comment).
 pub fn parse_sse_frame(frame: &str) -> Option<(String, String)> {
     let mut event = None;
     let mut data = String::new();
@@ -320,7 +316,6 @@ pub fn parse_sse_frame(frame: &str) -> Option<(String, String)> {
     event.map(|event| (event, data))
 }
 
-/// Read a nested string field from a compact JSON document by key path.
 pub fn json_field(data: &str, path: &[&str]) -> Option<String> {
     let mut value = serde_json::from_str::<serde_json::Value>(data).ok()?;
     for key in path {

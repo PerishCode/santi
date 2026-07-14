@@ -23,8 +23,6 @@ pub struct HealthResponse {
     pub ok: bool,
     pub service: String,
     pub degraded: bool,
-    /// Aggregate only: `/health` is public and must never expose strand,
-    /// receipt, or incident locators.
     pub active_drive_incidents: i64,
 }
 
@@ -55,10 +53,6 @@ pub struct MaterialUpdated {
     pub updated_at: Timestamp,
 }
 
-/// A soul is a cyber-individual, keyed by id alone. It has no name/avatar/desc
-/// column: identity is the mutable self, and it lives entirely in the soul's
-/// memory (rendered live into `[santi-soul]`), not in a profile row. The
-/// timestamps are pure provenance.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Soul {
     pub id: String,
@@ -70,8 +64,6 @@ pub struct Soul {
 pub struct Strand {
     pub id: String,
     pub soul_id: String,
-    /// Opaque external anchor (e.g. a webhook thread key). Unique per soul;
-    /// absent for strands reached only by id (e.g. CLI-created ones).
     pub external_label: Option<String>,
     pub strand_memory: String,
     pub provider_state: Option<Value>,
@@ -122,14 +114,8 @@ pub struct ToolCall {
     pub created_at: Timestamp,
 }
 
-/// Provider provenance captured for a tool call so the call can be replayed
-/// faithfully (the Responses adapter echoes the raw `item`). All optional —
-/// chat_completions and older rows may have none.
 #[derive(Debug, Clone, Default)]
 pub struct ToolCallProvenance {
-    /// The provider FAMILY this material belongs to (from `ProviderMetadata::
-    /// provider`). Persisted so an adaptor can refuse to replay material minted
-    /// for a different provider (PHASE-09 decision #9: unusable on mismatch).
     pub provider_family: String,
     pub item: Option<Value>,
     pub item_id: Option<String>,
@@ -194,22 +180,12 @@ pub struct StrandEntry {
     pub created_at: Timestamp,
 }
 
-/// Create a new soul (an individual). Souls are API-managed, never config.
-/// A soul is id-only; its identity is its memory, so the only thing to supply
-/// at creation is the initial `[santi-soul]` memory to seed (empty/absent → a
-/// blank soul that will author its own).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CreateSoulRequest {
     #[serde(default)]
     pub memory: Option<String>,
 }
 
-/// An API-managed webhook subscription: how an external source reaches a soul.
-/// `adaptor` selects the boundary normalizer (integration knowledge); `soul_id`
-/// is who receives the resulting turn; `strand_strategy` picks where the thread
-/// lives (`per_thread` = one strand per adaptor-derived label, `single` = one
-/// strand per subscription); `secret_env` names the env var holding the signing
-/// secret (the secret itself is never stored). The `name` is the URL path segment.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct WebhookSubscription {
     pub name: String,
@@ -226,7 +202,6 @@ pub struct CreateWebhookRequest {
     pub name: String,
     pub adaptor: String,
     pub soul_id: String,
-    /// `per_thread` (default) or `single`.
     #[serde(default)]
     pub strand_strategy: Option<String>,
     pub secret_env: String,
@@ -267,10 +242,6 @@ pub struct SendStrandAcceptedResponse {
     pub strand: Strand,
     pub receipt: IngestReceipt,
     pub turn: Option<Turn>,
-    /// The content this send just enqueued, once the driver has actually
-    /// committed it to the timeline. Absent when this send coalesced into an
-    /// already-running turn — durably enqueued, but the driver has not drained
-    /// it yet (it will, when that turn completes and re-pokes).
     pub user_message: Option<StrandMessage>,
 }
 
@@ -281,9 +252,6 @@ pub struct IngestReceipt {
     pub warning: Option<Box<SantiError>>,
 }
 
-/// Current durable responsibility state for one accepted inbox item. A
-/// mechanically-recovered transition can be immediately followed by `driving`
-/// in the same transaction; callers inspect `transitions` for that evidence.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiptState {
@@ -301,8 +269,6 @@ pub struct ReceiptTransition {
     pub state: ReceiptState,
     pub turn_id: Option<String>,
     pub incident_id: Option<String>,
-    /// Present only when schema migration reconstructed this evidence from a
-    /// durable v24 source row. Live transitions leave it unset.
     pub reconstructed_from: Option<String>,
     pub occurred_at: Timestamp,
 }
@@ -315,11 +281,7 @@ pub struct ReceiptStatus {
     pub accepted_at: Timestamp,
     pub updated_at: Timestamp,
     pub transitions: Vec<ReceiptTransition>,
-    /// Per-attempt shell effects reached by any turn carrying this receipt.
-    /// Completion alone does not imply that any listed external effect applied.
     pub effects: Vec<StrandEffect>,
-    /// Runtime-owned IM replies delivered by any attempt carrying this receipt.
-    /// Contents remain in the participant inbox and are intentionally omitted.
     pub im_deliveries: Vec<ImDelivery>,
 }
 
@@ -339,30 +301,18 @@ pub struct DriveStrandResponse {
     pub turn: Option<Turn>,
 }
 
-/// How an ingest adaptor addresses a strand. Resolution is atomic (see
-/// `SantiStore::resolve_strand_selector`) — the STRATEGY is the adaptor's: the
-/// operator addresses an already-existing strand by id; a webhook addresses
-/// one by an opaque label, scoped to its soul (find-or-create).
 #[derive(Debug, Clone)]
 pub enum StrandSelector {
     ById(String),
     ByLabel { soul_id: String, label: String },
 }
 
-/// The result of `ingest` — the one inbound path (a send, a webhook event).
-/// `Accepted` confirms durable enqueue only, not that a turn/message now
-/// exists (the driver may still be draining a running turn's inbox later).
-/// `Rejected` is a quick-fail boundary result. The canonical error carries the
-/// incident identity when durable operator intervention is required.
 #[derive(Debug, Clone)]
 pub enum IngestOutcome {
     Accepted { receipt: IngestReceipt },
     Rejected { error: Box<SantiError> },
 }
 
-/// Bounded provenance for an inbound item at the moment it is enqueued. This is
-/// runtime evidence, not model-visible message content: provider assembly reads
-/// `messages`, while this metadata is carried only into drain/audit diagnostics.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct InboxSource {
     pub source_type: String,
@@ -393,11 +343,6 @@ impl InboxSource {
 pub fn timestamp_now() -> Timestamp {
     use jiff::fmt::temporal::DateTimePrinter;
 
-    // RFC3339 / ISO 8601 UTC with fixed millisecond precision. Fixed-width
-    // fractional digits keep the string lexicographically sortable, which the
-    // store and the browser projection both rely on (timestamps are used as
-    // `ORDER BY` / `localeCompare` sort keys). A `jiff::Timestamp` is UTC, so
-    // the printed form ends in `Z`.
     let now = jiff::Timestamp::now();
     let mut buf = String::new();
     DateTimePrinter::new()

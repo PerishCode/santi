@@ -2,7 +2,8 @@ use axum::{
     Json,
     extract::{Path, Query, State},
 };
-use santi_core::{ErrorIncident, ErrorScope, SantiError, SantiService};
+use santi_core::service::Service;
+use santi_core::{ErrorIncident, ErrorScope, SantiError};
 
 use super::ApiError;
 
@@ -25,7 +26,7 @@ pub(super) struct ErrorQueryParams {
     )
 )]
 pub(super) async fn strand_errors(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Path(strand_id): Path<String>,
     Query(params): Query<ErrorQueryParams>,
 ) -> Result<Json<Vec<ErrorIncident>>, ApiError> {
@@ -50,7 +51,7 @@ pub(super) async fn strand_errors(
     )
 )]
 pub(super) async fn errors(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Path((scope_kind, scope_id)): Path<(String, String)>,
     Query(params): Query<ErrorQueryParams>,
 ) -> Result<Json<Vec<ErrorIncident>>, ApiError> {

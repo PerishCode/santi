@@ -1,11 +1,12 @@
 use super::support::*;
+use santi_core::service::{self, Service};
 
 #[test]
 fn fork_syncs_workspace() {
     let temp = tempfile::tempdir().expect("temp dir");
     let runtime_root = temp.path().join("runtime");
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: temp.path().join("santi.sqlite").display().to_string(),
             runtime_root: runtime_root.display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -44,8 +45,8 @@ fn fork_rejects_symlink() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     let runtime_root = temp.path().join("runtime");
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: db.display().to_string(),
             runtime_root: runtime_root.display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -58,25 +59,25 @@ fn fork_rejects_symlink() {
     {
         let store = SantiStore::open(&db).expect("open store directly");
         let first = store
-            .append_message(
-                &parent.id,
-                ActorType::System,
-                store.system_actor_id(),
-                MessageContent::text("first"),
-                MessageState::Fixed,
-                MessageIntake::Record,
-            )
+            .append_message(Draft {
+                strand: &parent.id,
+                actor: ActorType::System,
+                id: store.system_actor_id(),
+                content: MessageContent::text("first"),
+                state: MessageState::Fixed,
+                intake: MessageIntake::Record,
+            })
             .expect("append first")
             .strand_message;
         let second = store
-            .append_message(
-                &parent.id,
-                ActorType::System,
-                store.system_actor_id(),
-                MessageContent::text("second"),
-                MessageState::Fixed,
-                MessageIntake::Record,
-            )
+            .append_message(Draft {
+                strand: &parent.id,
+                actor: ActorType::System,
+                id: store.system_actor_id(),
+                content: MessageContent::text("second"),
+                state: MessageState::Fixed,
+                intake: MessageIntake::Record,
+            })
             .expect("append second")
             .strand_message;
         store
@@ -148,8 +149,8 @@ fn fork_rejects_symlink() {
 #[test]
 fn fork_prompt_topology() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: temp.path().join("santi.sqlite").display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),

@@ -1,10 +1,10 @@
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{OptionalExtension, Row, params};
 use santi_error::{
     ErrorCategory, ErrorIncident, ErrorOutbox, ErrorRetry, ErrorScope, ErrorSeverity, ErrorSource,
     ErrorTransition, IncidentDraft, IncidentMutation, IncidentStatus, SantiError, engine,
 };
 
-use super::SantiStore;
+use super::{SantiStore, db::Database};
 use crate::timestamp_now;
 
 pub(crate) mod drive;
@@ -17,73 +17,77 @@ const INCIDENT_COLUMNS: &str = r#"
     last_seen_at, resolved_at, resolved_by
 "#;
 
-pub(super) fn open_incident_in_conn(
-    conn: &Connection,
-    draft: IncidentDraft,
-) -> Result<SantiError, String> {
-    let existing = active_in_conn(conn, &draft.incident_key)?;
-    let mutation = engine().open_incident(existing.as_ref(), draft, timestamp_now());
-    persist_mutation(conn, &mutation)?;
-    Ok(mutation.error)
-}
+impl Database<'_> {
+    pub(in crate::store) fn open_incident(
+        &self,
+        draft: IncidentDraft,
+    ) -> Result<SantiError, String> {
+        let existing = self.active_incident(&draft.incident_key)?;
+        let mutation = engine().open_incident(existing.as_ref(), draft, timestamp_now());
+        self.persist_mutation(&mutation)?;
+        Ok(mutation.error)
+    }
 
-pub(super) fn resolve_in_conn(
-    conn: &Connection,
-    incident_key: &str,
-    resolved_by: &str,
-    context: serde_json::Value,
-) -> Result<bool, String> {
-    let Some(active) = active_in_conn(conn, incident_key)? else {
-        return Ok(false);
-    };
-    let mutation = engine().resolve_incident(&active, resolved_by, context, timestamp_now());
-    persist_mutation(conn, &mutation)?;
-    Ok(true)
-}
+    pub(in crate::store) fn resolve_incident(
+        &self,
+        incident_key: &str,
+        resolved_by: &str,
+        context: serde_json::Value,
+    ) -> Result<bool, String> {
+        let Some(active) = self.active_incident(incident_key)? else {
+            return Ok(false);
+        };
+        let mutation = engine().resolve_incident(&active, resolved_by, context, timestamp_now());
+        self.persist_mutation(&mutation)?;
+        Ok(true)
+    }
 
-pub(super) fn active_in_conn(
-    conn: &Connection,
-    incident_key: &str,
-) -> Result<Option<ErrorIncident>, String> {
-    conn.query_row(
-        &format!(
-            "SELECT {INCIDENT_COLUMNS} FROM error_incidents WHERE incident_key = ?1 AND status = 'active' LIMIT 1"
-        ),
-        params![incident_key],
-        map_incident_row,
-    )
-    .optional()
-    .map_err(|error| error.to_string())
-}
+    pub(in crate::store) fn active_incident(
+        &self,
+        incident_key: &str,
+    ) -> Result<Option<ErrorIncident>, String> {
+        self.conn
+            .query_row(
+                &format!(
+                    "SELECT {INCIDENT_COLUMNS} FROM error_incidents WHERE incident_key = ?1 AND status = 'active' LIMIT 1"
+                ),
+                params![incident_key],
+                map_incident_row,
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+    }
 
-pub(super) fn list_in_conn(
-    conn: &Connection,
-    scope_kind: &str,
-    scope_id: &str,
-    limit: i64,
-) -> Result<Vec<ErrorIncident>, String> {
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {INCIDENT_COLUMNS} FROM error_incidents \
-             WHERE scope_kind = ?1 AND scope_id = ?2 \
-             ORDER BY first_seen_at DESC, id DESC LIMIT ?3"
-        ))
-        .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map(
-            params![scope_kind, scope_id, limit.clamp(1, 1000)],
-            map_incident_row,
-        )
-        .map_err(|error| error.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())
+    pub(in crate::store) fn list_incidents(
+        &self,
+        scope_kind: &str,
+        scope_id: &str,
+        limit: i64,
+    ) -> Result<Vec<ErrorIncident>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!(
+                "SELECT {INCIDENT_COLUMNS} FROM error_incidents \
+                 WHERE scope_kind = ?1 AND scope_id = ?2 \
+                 ORDER BY first_seen_at DESC, id DESC LIMIT ?3"
+            ))
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map(
+                params![scope_kind, scope_id, limit.clamp(1, 1000)],
+                map_incident_row,
+            )
+            .map_err(|error| error.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())
+    }
 }
 
 impl SantiStore {
     pub fn open_error_incident(&self, draft: IncidentDraft) -> Result<SantiError, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let error = open_incident_in_conn(&tx, draft)?;
+        let error = Database::new(&tx).open_incident(draft)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(error)
     }
@@ -96,7 +100,7 @@ impl SantiStore {
     ) -> Result<bool, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let resolved = resolve_in_conn(&tx, incident_key, resolved_by, context)?;
+        let resolved = Database::new(&tx).resolve_incident(incident_key, resolved_by, context)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(resolved)
     }
@@ -107,7 +111,7 @@ impl SantiStore {
         limit: i64,
     ) -> Result<Vec<ErrorIncident>, String> {
         let conn = self.conn.lock().unwrap();
-        list_in_conn(&conn, &scope.kind, &scope.id, limit)
+        Database::new(&conn).list_incidents(&scope.kind, &scope.id, limit)
     }
 
     pub(crate) fn active_error_incident(
@@ -115,7 +119,7 @@ impl SantiStore {
         incident_key: &str,
     ) -> Result<Option<ErrorIncident>, String> {
         let conn = self.conn.lock().unwrap();
-        active_in_conn(&conn, incident_key)
+        Database::new(&conn).active_incident(incident_key)
     }
 
     pub(crate) fn error_incidents_for_strand(
@@ -165,10 +169,12 @@ impl ErrorOutbox for SantiStore {
     }
 }
 
-fn persist_mutation(conn: &Connection, mutation: &IncidentMutation) -> Result<(), String> {
-    let incident = &mutation.incident;
-    conn.execute(
-        r#"
+impl Database<'_> {
+    fn persist_mutation(&self, mutation: &IncidentMutation) -> Result<(), String> {
+        let incident = &mutation.incident;
+        self.conn
+            .execute(
+                r#"
         INSERT INTO error_incidents (
           id, incident_key, code, status, category, severity, retry, exposure,
           scope_kind, scope_id, source_component, source_operation,
@@ -191,54 +197,57 @@ fn persist_mutation(conn: &Connection, mutation: &IncidentMutation) -> Result<()
           resolved_at = excluded.resolved_at,
           resolved_by = excluded.resolved_by
         "#,
-        params![
-            incident.id,
-            incident.incident_key,
-            incident.code,
-            incident_status_db(&incident.status),
-            category_db(incident.category),
-            severity_db(incident.severity),
-            retry_db(incident.retry),
-            serde_json::to_string(&incident.exposure).map_err(|error| error.to_string())?,
-            incident.scope.kind,
-            incident.scope.id,
-            incident.source.component,
-            incident.source.operation,
-            incident.latest_source.component,
-            incident.latest_source.operation,
-            incident.message,
-            incident.latest_message,
-            serde_json::to_string(&incident.context).map_err(|error| error.to_string())?,
-            serde_json::to_string(&incident.latest_context).map_err(|error| error.to_string())?,
-            incident.occurrence_count,
-            incident.revision,
-            incident.first_seen_at,
-            incident.last_seen_at,
-            incident.resolved_at,
-            incident.resolved_by,
-        ],
-    )
-    .map_err(|error| error.to_string())?;
+                params![
+                    incident.id,
+                    incident.incident_key,
+                    incident.code,
+                    incident_status_db(&incident.status),
+                    category_db(incident.category),
+                    severity_db(incident.severity),
+                    retry_db(incident.retry),
+                    serde_json::to_string(&incident.exposure).map_err(|error| error.to_string())?,
+                    incident.scope.kind,
+                    incident.scope.id,
+                    incident.source.component,
+                    incident.source.operation,
+                    incident.latest_source.component,
+                    incident.latest_source.operation,
+                    incident.message,
+                    incident.latest_message,
+                    serde_json::to_string(&incident.context).map_err(|error| error.to_string())?,
+                    serde_json::to_string(&incident.latest_context)
+                        .map_err(|error| error.to_string())?,
+                    incident.occurrence_count,
+                    incident.revision,
+                    incident.first_seen_at,
+                    incident.last_seen_at,
+                    incident.resolved_at,
+                    incident.resolved_by,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
 
-    if let Some(transition) = mutation.transition.as_ref() {
-        conn.execute(
-            r#"
+        if let Some(transition) = mutation.transition.as_ref() {
+            self.conn
+                .execute(
+                    r#"
             INSERT INTO error_transitions (
               id, incident_id, revision, kind, payload, created_at, delivered_at
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)
             "#,
-            params![
-                transition.id,
-                transition.incident_id,
-                transition.revision,
-                transition_kind_db(&transition.kind),
-                serde_json::to_string(transition).map_err(|error| error.to_string())?,
-                transition.occurred_at,
-            ],
-        )
-        .map_err(|error| error.to_string())?;
+                    params![
+                        transition.id,
+                        transition.incident_id,
+                        transition.revision,
+                        transition_kind_db(&transition.kind),
+                        serde_json::to_string(transition).map_err(|error| error.to_string())?,
+                        transition.occurred_at,
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 fn map_incident_row(row: &Row<'_>) -> rusqlite::Result<ErrorIncident> {

@@ -54,8 +54,6 @@ async fn flattens_tool_items() {
     ])
     .await;
 
-    // Reasoning is dropped (DC5); the function call flattens to an assistant
-    // message with null content + tool_calls, followed by the tool result.
     assert_eq!(body["messages"][2]["role"], "assistant");
     assert!(body["messages"][2]["content"].is_null());
     assert_eq!(body["messages"][2]["tool_calls"][0]["id"], "call_shell");

@@ -2,9 +2,8 @@ use axum::{
     Json,
     extract::{Path, Query, State},
 };
-use santi_core::{
-    ImInboxEntry, ImSendRequest, ImSendResponse, IngestOutcome, SantiError, SantiService,
-};
+use santi_core::service::Service;
+use santi_core::{ImInboxEntry, ImSendRequest, ImSendResponse, IngestOutcome, SantiError};
 
 use super::ApiError;
 
@@ -20,7 +19,7 @@ use super::ApiError;
     )
 )]
 pub(super) async fn send_im(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Json(request): Json<ImSendRequest>,
 ) -> Result<Json<ImSendResponse>, ApiError> {
     let outcome = service
@@ -48,7 +47,7 @@ pub(super) async fn send_im(
     )
 )]
 pub(super) async fn poll_im(
-    State(service): State<SantiService>,
+    State(service): State<Service>,
     Path(participant_id): Path<String>,
     Query(params): Query<ImPollParams>,
 ) -> Result<Json<Vec<ImInboxEntry>>, ApiError> {

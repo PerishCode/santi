@@ -1,18 +1,19 @@
 use rusqlite::params;
 use serde_json::Value;
 
-use super::{
-    SantiStore,
-    db::{
-        append_entry_in_tx, call_soul_id, message_by_id, thinking_span_by_id, tool_call_by_id,
-        tool_result_by_id, turn_strand_id,
-    },
-    effects::{find_in, insert_prepared_in},
-};
+use super::{SantiStore, db::Database, effects::Prepared};
 use crate::{
     StrandEffect, StrandTargetType, ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState,
-    ToolCall, ToolResult, prefixed_id, timestamp_now,
+    ToolCall, ToolCallProvenance, ToolResult, prefixed_id, timestamp_now,
 };
+
+pub struct Invocation<'a> {
+    pub turn: &'a str,
+    pub call: &'a str,
+    pub name: &'a str,
+    pub arguments: &'a Value,
+    pub provenance: &'a ToolCallProvenance,
+}
 
 impl SantiStore {
     pub fn append_thinking_span(
@@ -24,7 +25,8 @@ impl SantiStore {
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let thinking_id = prefixed_id("thinking");
         let now = timestamp_now();
-        let strand_id = turn_strand_id(&tx, turn_id)?;
+        let database = Database::new(&tx);
+        let strand_id = database.turn_strand_id(turn_id)?;
         tx.execute(
             r#"
             INSERT INTO thinking_spans (
@@ -36,9 +38,10 @@ impl SantiStore {
             params![thinking_id, turn_id, provider_response_id, now],
         )
         .map_err(|error| error.to_string())?;
-        append_entry_in_tx(&tx, &strand_id, StrandTargetType::Thinking, &thinking_id)?;
+        database.append_entry_in_tx(&strand_id, StrandTargetType::Thinking, &thinking_id)?;
         tx.commit().map_err(|error| error.to_string())?;
-        thinking_span_by_id(&conn, &thinking_id)?
+        Database::new(&conn)
+            .thinking_span_by_id(&thinking_id)?
             .ok_or_else(|| "created thinking_span missing".to_string())
     }
 
@@ -59,7 +62,7 @@ impl SantiStore {
             params![thinking_span_id, provider_response_id, now],
         )
         .map_err(|error| error.to_string())?;
-        thinking_span_by_id(&conn, thinking_span_id)
+        Database::new(&conn).thinking_span_by_id(thinking_span_id)
     }
 
     pub fn update_thinking_span_summary(
@@ -79,7 +82,7 @@ impl SantiStore {
             params![thinking_span_id, summary, now],
         )
         .map_err(|error| error.to_string())?;
-        thinking_span_by_id(&conn, thinking_span_id)
+        Database::new(&conn).thinking_span_by_id(thinking_span_id)
     }
 
     pub fn complete_thinking_span(
@@ -108,65 +111,45 @@ impl SantiStore {
         )
     }
 
-    pub fn append_tool_call(
-        &self,
-        turn_id: &str,
-        tool_call_id: &str,
-        tool_name: &str,
-        arguments: &Value,
-        provenance: &crate::ToolCallProvenance,
-    ) -> Result<ToolCall, String> {
-        self.append_effect_call(
-            turn_id,
-            tool_call_id,
-            tool_name,
-            arguments,
-            provenance,
-            None,
-        )
-        .map(|(tool_call, _)| tool_call)
+    pub fn append_tool_call(&self, invocation: Invocation<'_>) -> Result<ToolCall, String> {
+        self.append_effect_call(invocation, None)
+            .map(|(tool_call, _)| tool_call)
     }
 
     pub fn append_effect_call(
         &self,
-        turn_id: &str,
-        tool_call_id: &str,
-        tool_name: &str,
-        arguments: &Value,
-        provenance: &crate::ToolCallProvenance,
-        effect_type: Option<&str>,
+        invocation: Invocation<'_>,
+        effect: Option<&str>,
     ) -> Result<(ToolCall, Option<StrandEffect>), String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let now = timestamp_now();
-        let strand_id = turn_strand_id(&tx, turn_id)?;
-        // Neutral occurrence: no provider plumbing (PHASE-09 decision #9).
+        let database = Database::new(&tx);
+        let strand_id = database.turn_strand_id(invocation.turn)?;
         tx.execute(
             r#"
             INSERT INTO tool_calls (id, turn_id, tool_name, arguments, created_at)
             VALUES (?1, ?2, ?3, ?4, ?5)
             "#,
             params![
-                tool_call_id,
-                turn_id,
-                tool_name,
-                serde_json::to_string(arguments).map_err(|error| error.to_string())?,
+                invocation.call,
+                invocation.turn,
+                invocation.name,
+                serde_json::to_string(invocation.arguments).map_err(|error| error.to_string())?,
                 now
             ],
         )
         .map_err(|error| error.to_string())?;
-        // Adaptor-owned replay material, side-stored. A function_call's raw item
-        // is REGENERABLE (the adaptor can synthesize it from the neutral fields),
-        // so a bad blob is a droppable cache-miss, never a durable poison.
-        let provider_item_text = provenance
+        let provider_item_text = invocation
+            .provenance
             .item
             .as_ref()
             .map(serde_json::to_string)
             .transpose()
             .map_err(|error| error.to_string())?;
         if provider_item_text.is_some()
-            || provenance.item_id.is_some()
-            || provenance.response_id.is_some()
+            || invocation.provenance.item_id.is_some()
+            || invocation.provenance.response_id.is_some()
         {
             tx.execute(
                 r#"
@@ -175,29 +158,36 @@ impl SantiStore {
                 VALUES (?1, ?2, 'regenerable', ?3, ?4, ?5, ?6, ?7)
                 "#,
                 params![
-                    tool_call_id,
-                    provenance.provider_family,
+                    invocation.call,
+                    invocation.provenance.provider_family,
                     provider_item_text,
-                    provenance.item_id,
-                    provenance.response_id,
+                    invocation.provenance.item_id,
+                    invocation.provenance.response_id,
                     crate::SCHEMA_VERSION,
                     now
                 ],
             )
             .map_err(|error| error.to_string())?;
         }
-        append_entry_in_tx(&tx, &strand_id, StrandTargetType::ToolCall, tool_call_id)?;
-        let effect_id = effect_type
-            .map(|effect_type| {
-                insert_prepared_in(&tx, &strand_id, turn_id, tool_call_id, effect_type, &now)
+        database.append_entry_in_tx(&strand_id, StrandTargetType::ToolCall, invocation.call)?;
+        let effect_id = effect
+            .map(|kind| {
+                Database::new(&tx).insert_prepared(Prepared {
+                    strand: &strand_id,
+                    turn: invocation.turn,
+                    call: invocation.call,
+                    kind,
+                    time: &now,
+                })
             })
             .transpose()?;
         tx.commit().map_err(|error| error.to_string())?;
-        let tool_call = tool_call_by_id(&conn, tool_call_id)?
+        let tool_call = Database::new(&conn)
+            .tool_call_by_id(invocation.call)?
             .ok_or_else(|| "created tool_call missing".to_string())?;
         let effect = effect_id
             .as_deref()
-            .map(|effect_id| find_in(&conn, effect_id))
+            .map(|effect_id| Database::new(&conn).find_effect(effect_id))
             .transpose()?
             .flatten();
         Ok((tool_call, effect))
@@ -213,7 +203,8 @@ impl SantiStore {
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let tool_result_id = prefixed_id("tool_result");
         let now = timestamp_now();
-        let strand_id = call_soul_id(&tx, tool_call_id)?;
+        let database = Database::new(&tx);
+        let strand_id = database.call_soul_id(tool_call_id)?;
         let output_text = output
             .as_ref()
             .map(serde_json::to_string)
@@ -227,21 +218,13 @@ impl SantiStore {
             params![tool_result_id, tool_call_id, output_text, error_text, now],
         )
         .map_err(|error| error.to_string())?;
-        append_entry_in_tx(
-            &tx,
-            &strand_id,
-            StrandTargetType::ToolResult,
-            &tool_result_id,
-        )?;
+        database.append_entry_in_tx(&strand_id, StrandTargetType::ToolResult, &tool_result_id)?;
         tx.commit().map_err(|error| error.to_string())?;
-        tool_result_by_id(&conn, &tool_result_id)?
+        Database::new(&conn)
+            .tool_result_by_id(&tool_result_id)?
             .ok_or_else(|| "created tool_result missing".to_string())
     }
 
-    /// Append a per-round assistant text segment to the strand's timeline. This
-    /// is the soul's speech in this round — the interleaved replay log (DC4b/DC6)
-    /// AND the operator-visible conversational projection are the SAME entry now
-    /// that both read `r_strand_entries` (no separate lumped end-of-turn record).
     pub fn append_soul_assistant_text(
         &self,
         strand_id: &str,
@@ -271,9 +254,11 @@ impl SantiStore {
             params![message_id, soul_id, content_json, now],
         )
         .map_err(|error| error.to_string())?;
-        append_entry_in_tx(&tx, strand_id, StrandTargetType::Message, &message_id)?;
+        Database::new(&tx).append_entry_in_tx(strand_id, StrandTargetType::Message, &message_id)?;
         tx.commit().map_err(|error| error.to_string())?;
-        message_by_id(&conn, &message_id)?.ok_or_else(|| "created message missing".to_string())
+        Database::new(&conn)
+            .message_by_id(&message_id)?
+            .ok_or_else(|| "created message missing".to_string())
     }
 
     fn finish_thinking_span(
@@ -297,15 +282,15 @@ impl SantiStore {
             "#,
             params![
                 thinking_span_id,
-                super::rows::thinking_span_state_db(&state),
+                state.encode(),
                 completion_reason
                     .as_ref()
-                    .map(super::rows::thinking_completion_reason_db),
+                    .map(ThinkingCompletionReason::encode),
                 error_text,
                 now
             ],
         )
         .map_err(|error| error.to_string())?;
-        thinking_span_by_id(&conn, thinking_span_id)
+        Database::new(&conn).thinking_span_by_id(thinking_span_id)
     }
 }

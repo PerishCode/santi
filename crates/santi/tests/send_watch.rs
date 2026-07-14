@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use santi::cli::WatchFormat;
-use santi::client::send;
+use santi::client::{Request, send};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -137,14 +137,14 @@ async fn posts_once_on_complete() {
     let server = spawn_server(FakeEventsResponse::CompletesSeedTurn).await;
     let client = reqwest::Client::new();
 
-    send(
-        &client,
-        &server.base_url,
-        "ss_cli",
-        serde_json::json!({"content":[{"type":"text","text":"hello"}]}),
-        true,
-        WatchFormat::Raw,
-    )
+    send(Request {
+        client: &client,
+        base: &server.base_url,
+        strand: "ss_cli",
+        body: serde_json::json!({"content":[{"type":"text","text":"hello"}]}),
+        watch: true,
+        format: WatchFormat::Raw,
+    })
     .await
     .expect("send --watch succeeds");
 
@@ -157,14 +157,14 @@ async fn posts_once_stream_close() {
     let server = spawn_server(FakeEventsResponse::ClosesImmediately).await;
     let client = reqwest::Client::new();
 
-    send(
-        &client,
-        &server.base_url,
-        "ss_cli",
-        serde_json::json!({"content":[{"type":"text","text":"hello"}]}),
-        true,
-        WatchFormat::Raw,
-    )
+    send(Request {
+        client: &client,
+        base: &server.base_url,
+        strand: "ss_cli",
+        body: serde_json::json!({"content":[{"type":"text","text":"hello"}]}),
+        watch: true,
+        format: WatchFormat::Raw,
+    })
     .await
     .expect("closed watch stream is not retried as a send");
 
@@ -177,14 +177,14 @@ async fn posts_once_watch_error() {
     let server = spawn_server(FakeEventsResponse::Status500).await;
     let client = reqwest::Client::new();
 
-    let error = send(
-        &client,
-        &server.base_url,
-        "ss_cli",
-        serde_json::json!({"content":[{"type":"text","text":"hello"}]}),
-        true,
-        WatchFormat::Raw,
-    )
+    let error = send(Request {
+        client: &client,
+        base: &server.base_url,
+        strand: "ss_cli",
+        body: serde_json::json!({"content":[{"type":"text","text":"hello"}]}),
+        watch: true,
+        format: WatchFormat::Raw,
+    })
     .await
     .expect_err("watch failure should surface to caller");
 
@@ -198,14 +198,14 @@ async fn warning_stops_watch() {
     let server = spawn_server(FakeEventsResponse::AcceptedWarning).await;
     let client = reqwest::Client::new();
 
-    let error = send(
-        &client,
-        &server.base_url,
-        "ss_cli",
-        serde_json::json!({"content":[{"type":"text","text":"hello"}]}),
-        true,
-        WatchFormat::Raw,
-    )
+    let error = send(Request {
+        client: &client,
+        base: &server.base_url,
+        strand: "ss_cli",
+        body: serde_json::json!({"content":[{"type":"text","text":"hello"}]}),
+        watch: true,
+        format: WatchFormat::Raw,
+    })
     .await
     .expect_err("accepted driver warning must require explicit recovery");
 

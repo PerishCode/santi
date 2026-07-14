@@ -1,7 +1,6 @@
 //! Release version resolver. The remote `<channel>/latest/metadata.json` in R2
 //! is the source of truth; the next version is computed from it plus the
-//! workspace Cargo.toml version, with strict monotonic rules. Ported from
-//! flavor's beta.py / stable.py.
+//! workspace Cargo.toml version, with strict monotonic rules.
 
 import { fail, publicUrl, writeOutput } from "@/lib/release/env.ts";
 

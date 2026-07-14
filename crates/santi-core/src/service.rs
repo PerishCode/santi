@@ -1,10 +1,13 @@
+mod bucket;
 mod compact;
+mod drive;
+mod error;
 mod flow;
 mod fork;
 mod im;
 mod materials;
-mod runtime_notice;
-mod text_delta;
+mod notice;
+mod text;
 mod thinking;
 mod timing;
 mod tools;
@@ -22,89 +25,37 @@ use tokio::sync::broadcast;
 
 use crate::{
     CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, EffectResolutionOutcome,
-    EffectStatus, ErrorEventSink, ErrorIncident, ErrorScope, ErrorTransition, MaterialKind,
-    ReceiptStatus, SantiError, SantiStore, SantiStreamEvent, SantiStreamPayload, Soul, Strand,
-    StrandBudgetSnapshot, StrandDetail, StrandExecutionBudget, StrandMaterial, StrandMessage,
-    StrandRuntimeSnapshot, Turn, WebhookSubscription, engine, prefixed_id, timestamp_now,
+    EffectStatus, ErrorIncident, ErrorScope, ErrorTransition, Execution, ReceiptStatus, SantiStore,
+    SantiStreamEvent, SantiStreamPayload, Soul, Strand, StrandBudgetSnapshot, StrandDetail,
+    StrandMaterial, StrandRuntimeSnapshot, WebhookSubscription, engine, prefixed_id, timestamp_now,
 };
-use runtime_notice::RuntimeNoticeBus;
 
 #[derive(Clone)]
-pub struct SantiService {
+pub struct Service {
     pub(crate) store: SantiStore,
     provider: Arc<dyn ProviderClient>,
-    pub(crate) config: SantiServiceConfig,
-    material_cache: Arc<Mutex<HashMap<MaterialCacheKey, StrandMaterial>>>,
+    pub(crate) config: Config,
+    material_cache: Arc<Mutex<HashMap<materials::Key, StrandMaterial>>>,
     stream_events: broadcast::Sender<SantiStreamEvent>,
     error_events: broadcast::Sender<ErrorTransition>,
-    runtime_notices: RuntimeNoticeBus,
-    execution_budgets: Arc<Mutex<HashMap<String, StrandExecutionBudget>>>,
-    /// Graceful-shutdown latch (PHASE-07): once set, `poke` refuses to START new
-    /// turns, so inbox CONSUMPTION pauses while ingest keeps durably enqueuing
-    /// (the inbox is an MQ — we stop consuming, never producing). The in-flight
-    /// turn is left to finish; `drain_running_turns` waits it out.
+    runtime_notices: notice::Bus,
+    execution_budgets: Arc<Mutex<HashMap<String, Execution>>>,
+    memory_pressure_lock: Arc<Mutex<()>>,
     shutting_down: Arc<AtomicBool>,
     drive_degraded: Arc<AtomicBool>,
 }
 
-type MaterialCacheKey = (String, MaterialKind);
-/// The complete result of one driver poke, including normal no-start states and
-/// canonical holds/failures that transports must surface without losing the
-/// durable enqueue truth.
-pub(crate) enum DriveOutcome {
-    Started(Turn, Vec<StrandMessage>),
-    Running(Turn),
-    Idle,
-    Held(SantiError),
-    Paused,
-    Failed(SantiError),
-}
-
-const NO_ERROR_EVENT_SUBSCRIBERS: &str = "error event bus has no subscribers";
-
-struct StreamErrorSink<'a> {
-    service: &'a SantiService,
-}
-
-impl ErrorEventSink for StreamErrorSink<'_> {
-    fn publish_error_transition(&self, transition: &ErrorTransition) -> Result<(), String> {
-        let strand_delivered = transition.incident.scope.kind == "strand"
-            && self
-                .service
-                .send_stream(
-                    &transition.incident.scope.id,
-                    SantiStreamPayload::ErrorTransition {
-                        transition: Box::new(transition.clone()),
-                    },
-                )
-                .is_ok();
-        let global_delivered = self.service.error_events.send(transition.clone()).is_ok();
-        if strand_delivered || global_delivered {
-            Ok(())
-        } else {
-            Err(NO_ERROR_EVENT_SUBSCRIBERS.to_string())
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
-pub struct SantiServiceConfig {
+pub struct Config {
     pub database_path: String,
     pub runtime_root: String,
     pub execution_root: String,
     pub bind_addr: Option<String>,
 }
 
-impl SantiService {
-    pub fn open(
-        config: SantiServiceConfig,
-        provider: Arc<dyn ProviderClient>,
-    ) -> Result<Self, String> {
+impl Service {
+    pub fn open(config: Config, provider: Arc<dyn ProviderClient>) -> Result<Self, String> {
         let store = SantiStore::open(&config.database_path)?;
-        // Boot recovery (honest occurrence): any turn still `running` is orphaned
-        // by the restart — reconcile it to an interrupted terminal so the soul
-        // sees the truth and its strand is idle again. Re-driving stranded
-        // requests is liveness; call `resume_pending` once inside the runtime.
         store.reconcile_orphaned_turns()?;
         let drive_degraded = store.active_drive_incident_count()? > 0;
         Ok(Self {
@@ -114,20 +65,18 @@ impl SantiService {
             material_cache: Arc::new(Mutex::new(HashMap::new())),
             stream_events: broadcast::channel(1024).0,
             error_events: broadcast::channel(1024).0,
-            runtime_notices: RuntimeNoticeBus::new(),
+            runtime_notices: notice::Bus::new(),
             execution_budgets: Arc::new(Mutex::new(HashMap::new())),
+            memory_pressure_lock: Arc::new(Mutex::new(())),
             shutting_down: Arc::new(AtomicBool::new(false)),
             drive_degraded: Arc::new(AtomicBool::new(drive_degraded)),
         })
     }
 
-    /// Register a generic execution envelope before a strand is driven. The
-    /// caller owns strand classification; core deliberately does not interpret
-    /// external labels.
     pub fn set_strand_execution_budget(
         &self,
         strand_id: &str,
-        budget: StrandExecutionBudget,
+        budget: Execution,
     ) -> Result<(), String> {
         budget.validate()?;
         if self.store.strand(strand_id)?.is_none() {
@@ -140,10 +89,7 @@ impl SantiService {
         Ok(())
     }
 
-    pub(in crate::service) fn strand_execution_budget(
-        &self,
-        strand_id: &str,
-    ) -> Option<StrandExecutionBudget> {
+    pub(in crate::service) fn strand_execution_budget(&self, strand_id: &str) -> Option<Execution> {
         self.execution_budgets
             .lock()
             .unwrap()
@@ -151,8 +97,6 @@ impl SantiService {
             .cloned()
     }
 
-    /// Begin a graceful shutdown: stop consuming the inbox (no new turns start).
-    /// Idempotent. Ingest still durably enqueues; the in-flight turn finishes.
     pub fn begin_shutdown(&self) {
         self.shutting_down.store(true, Ordering::SeqCst);
     }
@@ -161,44 +105,33 @@ impl SantiService {
         self.shutting_down.load(Ordering::SeqCst)
     }
 
-    /// Wait until no turn is `running` (the in-flight turn finished), or until
-    /// `cap` elapses. Called after the HTTP server has stopped accepting, so no
-    /// new turns can appear once shutdown has begun. On cap-timeout it returns
-    /// anyway: the still-running turn will be reconciled to `interrupted` on the
-    /// next boot (honest occurrence), and the external upgrade flow's own bound
-    /// (SIGKILL) is the hard stop.
     pub async fn drain_running_turns(&self, cap: Duration) {
         let start = Instant::now();
         loop {
-            match self.store.running_turn_count() {
+            let remaining = match self.store.running_turn_count() {
                 Ok(0) => return,
-                Ok(remaining) => {
-                    if start.elapsed() >= cap {
-                        eprintln!(
-                            "santi: shutdown drain cap reached with {remaining} turn(s) still running; leaving them to boot-recovery"
-                        );
-                        return;
-                    }
-                    tokio::time::sleep(Duration::from_millis(200)).await;
-                }
+                Ok(remaining) => remaining,
                 Err(error) => {
                     eprintln!("santi: shutdown drain scan failed: {error}");
                     return;
                 }
+            };
+            if start.elapsed() >= cap {
+                eprintln!(
+                    "santi: shutdown drain cap reached with {remaining} turn(s) still running; leaving them to boot-recovery"
+                );
+                return;
             }
+            tokio::time::sleep(Duration::from_millis(200)).await;
         }
     }
 
-    /// Re-drive strands left "behind" by a crash (their inbox durably holds
-    /// content nobody ever drained). Liveness only — no retry of
-    /// attempted/failed turns. Call once at server startup (inside the tokio
-    /// runtime).
     pub fn resume_pending(&self) -> Result<(), String> {
         self.dispatch_error_events();
         let pending = self.store.strands_with_pending_requests()?;
         for strand_id in pending {
             let outcome = self.poke(&strand_id, "strand_send", None, "cold_start_resume");
-            if let DriveOutcome::Failed(error) = outcome
+            if let drive::Outcome::Failed(error) = outcome
                 && error.code == crate::catalog::ERROR_ENGINE_PERSISTENCE_FAILED.code
             {
                 return Err(format!(
@@ -257,10 +190,6 @@ impl SantiService {
         })
     }
 
-    /// Create a soul and seed its initial `[santi-soul]` memory. A soul is
-    /// id-only; its identity IS its memory, so creation optionally carries the
-    /// starting memory to write into the soul's memory file (absent → a blank
-    /// soul that will author its own).
     pub fn create_soul(&self, request: CreateSoulRequest) -> Result<Soul, String> {
         let soul = self.store.create_soul()?;
         if let Some(memory) = request
@@ -315,8 +244,13 @@ impl SantiService {
         if !matches!(strand_strategy, "per_thread" | "single") {
             return Err("strand_strategy must be 'per_thread' or 'single'".to_string());
         }
-        self.store
-            .create_webhook(name, adaptor, soul_id, strand_strategy, secret_env)
+        self.store.create_webhook(CreateWebhookRequest {
+            name: name.to_string(),
+            adaptor: adaptor.to_string(),
+            soul_id: soul_id.to_string(),
+            strand_strategy: Some(strand_strategy.to_string()),
+            secret_env: secret_env.to_string(),
+        })
     }
 
     pub fn list_webhooks(&self) -> Result<Vec<WebhookSubscription>, String> {
@@ -410,9 +344,9 @@ impl SantiService {
     }
 
     pub(in crate::service) fn dispatch_error_events(&self) {
-        let sink = StreamErrorSink { service: self };
+        let sink = error::Sink { service: self };
         if let Err(error) = engine().dispatch_outbox(&self.store, &sink, 256)
-            && error != NO_ERROR_EVENT_SUBSCRIBERS
+            && error != error::NO_ERROR_EVENT_SUBSCRIBERS
         {
             eprintln!("santi: error outbox dispatch failed: {error}");
         }

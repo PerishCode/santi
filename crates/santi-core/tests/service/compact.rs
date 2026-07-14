@@ -1,11 +1,12 @@
 use super::support::*;
+use santi_core::service::{self, Service};
 
 #[test]
 fn capsule_dry_run_header() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: db.display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -17,24 +18,24 @@ fn capsule_dry_run_header() {
     let strand = service.create_strand().expect("create strand").strand;
     let store = SantiStore::open(&db).expect("open store directly");
     store
-        .append_message(
-            &strand.id,
-            ActorType::System,
-            store.system_actor_id(),
-            MessageContent::text("old user detail"),
-            MessageState::Fixed,
-            MessageIntake::Request,
-        )
+        .append_message(Draft {
+            strand: &strand.id,
+            actor: ActorType::System,
+            id: store.system_actor_id(),
+            content: MessageContent::text("old user detail"),
+            state: MessageState::Fixed,
+            intake: MessageIntake::Request,
+        })
         .expect("append user");
     store
-        .append_message(
-            &strand.id,
-            ActorType::Soul,
-            store.default_soul_id(),
-            MessageContent::text("old assistant detail"),
-            MessageState::Fixed,
-            MessageIntake::Record,
-        )
+        .append_message(Draft {
+            strand: &strand.id,
+            actor: ActorType::Soul,
+            id: store.default_soul_id(),
+            content: MessageContent::text("old assistant detail"),
+            state: MessageState::Fixed,
+            intake: MessageIntake::Record,
+        })
         .expect("append assistant");
 
     let capsule = santi_core::CompactCapsuleOptions {
@@ -121,8 +122,8 @@ fn capsule_dry_run_header() {
 fn system_boundary_compacts() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: db.display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -141,14 +142,14 @@ fn system_boundary_compacts() {
         )
         .expect("append system record");
     store
-        .append_message(
-            &strand.id,
-            ActorType::Soul,
-            store.default_soul_id(),
-            MessageContent::text("upgrade checked"),
-            MessageState::Fixed,
-            MessageIntake::Record,
-        )
+        .append_message(Draft {
+            strand: &strand.id,
+            actor: ActorType::Soul,
+            id: store.default_soul_id(),
+            content: MessageContent::text("upgrade checked"),
+            state: MessageState::Fixed,
+            intake: MessageIntake::Record,
+        })
         .expect("append assistant record");
 
     let preview = service
@@ -174,8 +175,8 @@ fn system_boundary_compacts() {
 fn capsule_seq_boundary() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: db.display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -187,14 +188,14 @@ fn capsule_seq_boundary() {
     let strand = service.create_strand().expect("create strand").strand;
     let store = SantiStore::open(&db).expect("open store directly");
     let user = store
-        .append_message(
-            &strand.id,
-            ActorType::System,
-            store.system_actor_id(),
-            MessageContent::text("run tool"),
-            MessageState::Fixed,
-            MessageIntake::Request,
-        )
+        .append_message(Draft {
+            strand: &strand.id,
+            actor: ActorType::System,
+            id: store.system_actor_id(),
+            content: MessageContent::text("run tool"),
+            state: MessageState::Fixed,
+            intake: MessageIntake::Request,
+        })
         .expect("append user")
         .strand_message;
     let turn = store
@@ -202,18 +203,18 @@ fn capsule_seq_boundary() {
         .expect("start turn")
         .turn;
     store
-        .append_tool_call(
-            &turn.id,
-            "call_seq_boundary",
-            "shell",
-            &json!({ "command": "echo nope" }),
-            &ToolCallProvenance {
+        .append_tool_call(Invocation {
+            turn: &turn.id,
+            call: "call_seq_boundary",
+            name: "shell",
+            arguments: &json!({ "command": "echo nope" }),
+            provenance: &ToolCallProvenance {
                 provider_family: "fake-provider".to_string(),
                 item: None,
                 item_id: None,
                 response_id: None,
             },
-        )
+        })
         .expect("append tool call");
 
     let err = service

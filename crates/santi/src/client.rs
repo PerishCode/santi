@@ -8,17 +8,40 @@ use crate::cli::{
     ClientDefaults, Command, CompactCommand, EffectCommand, ImCommand, StrandCommand, WatchFormat,
     split_send_args,
 };
-use crate::text_source::read_summary_file;
+use crate::text::source::read_summary_file;
 use crate::watch::{next_sse_frame, render_watch_event};
 
 mod send;
 
-pub use send::send;
+pub use send::{Request, send};
 use send::{accepted_warning, accepted_warning_error};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Transport-only HTTP client against a running server.
+struct Capsule<'a> {
+    from: Option<String>,
+    to: Option<String>,
+    start: Option<i64>,
+    end: Option<i64>,
+    summary: Option<String>,
+    file: Option<String>,
+    source: String,
+    reason: String,
+    risk: String,
+    queryability: String,
+    preview: bool,
+    soul: Option<&'a str>,
+}
+
+struct Delivery<'a> {
+    client: &'a reqwest::Client,
+    base: &'a str,
+    body: serde_json::Value,
+    participant: &'a str,
+    reply: bool,
+    wait: u64,
+}
+
 pub(crate) async fn run_client(
     base_url: &str,
     bearer: Option<&str>,
@@ -26,37 +49,38 @@ pub(crate) async fn run_client(
     command: Command,
 ) -> Result<()> {
     let client = build_client(bearer)?;
+    let http = Http { client: &client };
     let base = base_url.trim_end_matches('/').to_string();
     match command {
         Command::Service { .. } => unreachable!("service is handled before the client path"),
         Command::Doctor { .. } => unreachable!("doctor is handled before the client path"),
         Command::Inbox(_) => unreachable!("inbox is handled before the client path"),
         Command::Upgrade { .. } => unreachable!("upgrade is handled before the client path"),
-        Command::Health => get(&client, &format!("{base}/api/v1/health")).await,
+        Command::Health => http.get(&format!("{base}/api/v1/health")).await,
         Command::Errors {
             scope_kind,
             scope_id,
             limit,
         } => {
-            get(
-                &client,
-                &format!("{base}/api/v1/errors/{scope_kind}/{scope_id}?limit={limit}"),
-            )
+            http.get(&format!(
+                "{base}/api/v1/errors/{scope_kind}/{scope_id}?limit={limit}"
+            ))
             .await
         }
         Command::Receipt { inbox_id } => {
-            get(&client, &format!("{base}/api/v1/receipts/{inbox_id}")).await
+            http.get(&format!("{base}/api/v1/receipts/{inbox_id}"))
+                .await
         }
         Command::Effect(EffectCommand::Query { effect_id }) => {
-            get(&client, &format!("{base}/api/v1/effects/{effect_id}")).await
+            http.get(&format!("{base}/api/v1/effects/{effect_id}"))
+                .await
         }
         Command::Effect(EffectCommand::Resolve {
             effect_id,
             outcome,
             evidence,
         }) => {
-            post(
-                &client,
+            http.post(
                 &format!("{base}/api/v1/effects/{effect_id}/resolve"),
                 Some(serde_json::json!({
                     "outcome": outcome.as_api_str(),
@@ -66,42 +90,42 @@ pub(crate) async fn run_client(
             .await
         }
         Command::Strand(StrandCommand::Create) => {
-            post(&client, &format!("{base}/api/v1/strands"), None).await
+            http.post(&format!("{base}/api/v1/strands"), None).await
         }
-        Command::Strand(StrandCommand::List) => {
-            get(&client, &format!("{base}/api/v1/strands")).await
-        }
+        Command::Strand(StrandCommand::List) => http.get(&format!("{base}/api/v1/strands")).await,
         Command::Strand(StrandCommand::Get { id }) => {
             let id = defaults.resolve_strand(id)?;
-            get(&client, &format!("{base}/api/v1/strands/{id}")).await
+            http.get(&format!("{base}/api/v1/strands/{id}")).await
         }
         Command::Strand(StrandCommand::Messages { id }) => {
             let id = defaults.resolve_strand(id)?;
-            get(&client, &format!("{base}/api/v1/strands/{id}/messages")).await
+            http.get(&format!("{base}/api/v1/strands/{id}/messages"))
+                .await
         }
         Command::Strand(StrandCommand::Runtime { id }) => {
             let id = defaults.resolve_strand(id)?;
-            get(&client, &format!("{base}/api/v1/strands/{id}/runtime")).await
+            http.get(&format!("{base}/api/v1/strands/{id}/runtime"))
+                .await
         }
         Command::Strand(StrandCommand::Budget { id }) => {
             let id = defaults.resolve_strand(id)?;
-            get(&client, &format!("{base}/api/v1/strands/{id}/budget")).await
+            http.get(&format!("{base}/api/v1/strands/{id}/budget"))
+                .await
         }
         Command::Strand(StrandCommand::Errors { id, limit }) => {
             let id = defaults.resolve_strand(id)?;
-            get(
-                &client,
-                &format!("{base}/api/v1/strands/{id}/errors?limit={limit}"),
-            )
-            .await
+            http.get(&format!("{base}/api/v1/strands/{id}/errors?limit={limit}"))
+                .await
         }
         Command::Strand(StrandCommand::Fork { id }) => {
             let id = defaults.resolve_strand(id)?;
-            post(&client, &format!("{base}/api/v1/strands/{id}/fork"), None).await
+            http.post(&format!("{base}/api/v1/strands/{id}/fork"), None)
+                .await
         }
         Command::Strand(StrandCommand::Drive { id }) => {
             let id = defaults.resolve_strand(id)?;
-            post(&client, &format!("{base}/api/v1/strands/{id}/drive"), None).await
+            http.post(&format!("{base}/api/v1/strands/{id}/drive"), None)
+                .await
         }
         Command::Strand(StrandCommand::Send {
             args,
@@ -109,22 +133,21 @@ pub(crate) async fn run_client(
             watch_format,
         }) => {
             let (id, text) = split_send_args(args, defaults)?;
-            let mut content = serde_json::json!({
-                "content": [{ "type": "text", "text": text }]
-            });
-            if let Some(soul) = defaults.soul() {
-                content["soul_id"] = serde_json::Value::from(soul);
-            }
-            send(&client, &base, &id, content, watch, watch_format).await
+            let content = strand_send_body(text, defaults.soul());
+            send(Request {
+                client: &client,
+                base: &base,
+                strand: &id,
+                body: content,
+                watch,
+                format: watch_format,
+            })
+            .await
         }
         Command::Strand(StrandCommand::Events { id, format }) => {
             let id = defaults.resolve_strand(id)?;
-            follow(
-                &client,
-                &format!("{base}/api/v1/strands/{id}/events"),
-                format,
-            )
-            .await
+            http.follow(&format!("{base}/api/v1/strands/{id}/events"), format)
+                .await
         }
         Command::Im(ImCommand::Send {
             text,
@@ -140,13 +163,20 @@ pub(crate) async fn run_client(
                 "participant_id": participant,
                 "content": text,
             });
-            im_send(&client, &base, body, &participant, reply, reply_timeout).await
+            im_send(Delivery {
+                client: &client,
+                base: &base,
+                body,
+                participant: &participant,
+                reply,
+                wait: reply_timeout,
+            })
+            .await
         }
         Command::Im(ImCommand::Poll { participant, since }) => {
-            get(
-                &client,
-                &format!("{base}/api/v1/im/inbox/{participant}?since={since}"),
-            )
+            http.get(&format!(
+                "{base}/api/v1/im/inbox/{participant}?since={since}"
+            ))
             .await
         }
         Command::Im(ImCommand::Reply { .. }) => {
@@ -171,8 +201,7 @@ pub(crate) async fn run_client(
             if let Some(soul) = defaults.soul() {
                 body["soul_id"] = serde_json::Value::from(soul);
             }
-            post(
-                &client,
+            http.post(
                 &format!("{base}/api/v1/strands/{strand}/compact"),
                 Some(body),
             )
@@ -191,23 +220,22 @@ pub(crate) async fn run_client(
             queryability,
             dry_run,
         }) => {
-            let body = compact_capsule_body(
+            let body = compact_capsule_body(Capsule {
                 from,
                 to,
-                from_seq,
-                to_seq,
+                start: from_seq,
+                end: to_seq,
                 summary,
-                summary_file,
+                file: summary_file,
                 source,
                 reason,
                 risk,
                 queryability,
-                dry_run,
-                defaults.soul(),
-            )?;
+                preview: dry_run,
+                soul: defaults.soul(),
+            })?;
             let strand = defaults.resolve_strand(None)?;
-            post(
-                &client,
+            http.post(
                 &format!("{base}/api/v1/strands/{strand}/compact"),
                 Some(body),
             )
@@ -225,26 +253,26 @@ pub(crate) async fn run_client(
             if let Some(keyword) = keyword.filter(|k| !k.is_empty()) {
                 url.push_str(&format!("&keyword={}", urlencoding_encode(&keyword)));
             }
-            get(&client, &url).await
+            http.get(&url).await
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn compact_capsule_body(
-    from: Option<String>,
-    to: Option<String>,
-    from_seq: Option<i64>,
-    to_seq: Option<i64>,
-    summary: Option<String>,
-    summary_file: Option<String>,
-    source: String,
-    reason: String,
-    risk: String,
-    queryability: String,
-    dry_run: bool,
-    soul: Option<&str>,
-) -> Result<serde_json::Value> {
+fn compact_capsule_body(capsule: Capsule<'_>) -> Result<serde_json::Value> {
+    let Capsule {
+        from,
+        to,
+        start: from_seq,
+        end: to_seq,
+        summary,
+        file: summary_file,
+        source,
+        reason,
+        risk,
+        queryability,
+        preview: dry_run,
+        soul,
+    } = capsule;
     let summary = match summary_file {
         Some(path) => read_summary_file(&path)?,
         None => summary.expect("clap requires summary or summary_file"),
@@ -282,7 +310,6 @@ fn urlencoding_encode(value: &str) -> String {
     out
 }
 
-/// Build an HTTP client that attaches a configured bearer to every request.
 fn build_client(bearer: Option<&str>) -> Result<reqwest::Client> {
     let mut builder = reqwest::Client::builder();
     if let Some(token) = bearer {
@@ -296,26 +323,85 @@ fn build_client(bearer: Option<&str>) -> Result<reqwest::Client> {
     builder.build().context("build http client")
 }
 
-async fn get(client: &reqwest::Client, url: &str) -> Result<()> {
-    let response = client
-        .get(url)
-        .timeout(REQUEST_TIMEOUT)
-        .send()
-        .await
-        .with_context(|| format!("GET {url}"))?;
-    print_json(response).await
+struct Http<'a> {
+    client: &'a reqwest::Client,
 }
 
-async fn post(client: &reqwest::Client, url: &str, body: Option<serde_json::Value>) -> Result<()> {
-    let mut request = client.post(url).timeout(REQUEST_TIMEOUT);
-    if let Some(body) = body {
-        request = request.json(&body);
+impl Http<'_> {
+    async fn get(&self, url: &str) -> Result<()> {
+        let response = self
+            .client
+            .get(url)
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .with_context(|| format!("GET {url}"))?;
+        print_json(response).await
     }
-    let response = request
-        .send()
-        .await
-        .with_context(|| format!("POST {url}"))?;
-    print_json(response).await
+
+    async fn post(&self, url: &str, body: Option<serde_json::Value>) -> Result<()> {
+        let mut request = self.client.post(url).timeout(REQUEST_TIMEOUT);
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        let response = request
+            .send()
+            .await
+            .with_context(|| format!("POST {url}"))?;
+        print_json(response).await
+    }
+
+    async fn follow(&self, url: &str, format: WatchFormat) -> Result<()> {
+        let response = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .with_context(|| format!("GET {url}"))?;
+        let status = response.status();
+        if !status.is_success() {
+            anyhow::bail!("request failed with status {status}");
+        }
+        let mut stream = response.bytes_stream();
+        let mut stdout = std::io::stdout();
+        match format {
+            WatchFormat::Raw => {
+                while let Some(chunk) = stream.next().await {
+                    let chunk = chunk.context("read event stream")?;
+                    stdout.write_all(&chunk).context("write event chunk")?;
+                    stdout.flush().ok();
+                }
+            }
+            WatchFormat::Filtered => {
+                let mut buffer = String::new();
+                while let Some((event, data)) = next_sse_frame(&mut stream, &mut buffer).await? {
+                    print_watch_line(&mut stdout, &event, &data);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn high_water(&self, base: &str, participant: &str) -> Result<i64> {
+        let url = format!("{base}/api/v1/im/inbox/{participant}?since=0");
+        let entries: serde_json::Value = self
+            .client
+            .get(&url)
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .with_context(|| format!("GET {url}"))?
+            .json()
+            .await
+            .context("parse inbox")?;
+        Ok(entries
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry.get("seq").and_then(serde_json::Value::as_i64))
+            .max()
+            .unwrap_or(0))
+    }
 }
 
 async fn print_json(response: reqwest::Response) -> Result<()> {
@@ -331,55 +417,17 @@ async fn print_json(response: reqwest::Response) -> Result<()> {
     Ok(())
 }
 
-/// Stream a server-sent-event endpoint. Raw mode writes bytes through as before;
-/// filtered mode parses frames and prints human-readable milestone lines.
-async fn follow(client: &reqwest::Client, url: &str, format: WatchFormat) -> Result<()> {
-    let response = client
-        .get(url)
-        .send()
-        .await
-        .with_context(|| format!("GET {url}"))?;
-    let status = response.status();
-    if !status.is_success() {
-        anyhow::bail!("request failed with status {status}");
-    }
-    let mut stream = response.bytes_stream();
-    let mut stdout = std::io::stdout();
-    match format {
-        WatchFormat::Raw => {
-            while let Some(chunk) = stream.next().await {
-                let chunk = chunk.context("read event stream")?;
-                stdout.write_all(&chunk).context("write event chunk")?;
-                stdout.flush().ok();
-            }
-        }
-        WatchFormat::Filtered => {
-            let mut buffer = String::new();
-            while let Some((event, data)) = next_sse_frame(&mut stream, &mut buffer).await? {
-                if let Some(line) = render_watch_event(&event, &data) {
-                    writeln!(stdout, "{line}").ok();
-                    stdout.flush().ok();
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-/// IM send: POST the message, then (with --reply) poll the participant's inbox
-/// for the soul's reply until it arrives or the timeout elapses. Baselines the
-/// inbox high-water BEFORE sending so only the NEW reply is shown; on silence it
-/// returns (the reply may still arrive later — the caller can poll it).
-async fn im_send(
-    client: &reqwest::Client,
-    base: &str,
-    body: serde_json::Value,
-    participant: &str,
-    reply: bool,
-    reply_timeout: u64,
-) -> Result<()> {
+async fn im_send(delivery: Delivery<'_>) -> Result<()> {
+    let Delivery {
+        client,
+        base,
+        body,
+        participant,
+        reply,
+        wait: reply_timeout,
+    } = delivery;
     let baseline = if reply {
-        im_inbox_high_water(client, base, participant).await?
+        Http { client }.high_water(base, participant).await?
     } else {
         0
     };
@@ -416,7 +464,6 @@ async fn im_send(
         }
         return Ok(());
     }
-    // Poll for the reply. A real turn runs minutes; poll gently past the baseline.
     let inbox_url = format!("{base}/api/v1/im/inbox/{participant}?since={baseline}");
     let deadline = Instant::now() + Duration::from_secs(reply_timeout);
     loop {
@@ -433,14 +480,7 @@ async fn im_send(
             .as_array()
             .is_some_and(|entries| !entries.is_empty())
         {
-            let output = match accepted.as_ref() {
-                Some(send) => serde_json::json!({
-                    "send": send,
-                    "replies": entries,
-                }),
-                None => entries,
-            };
-            println!("{}", serde_json::to_string_pretty(&output)?);
+            print_im_replies(accepted.as_ref(), entries)?;
             return Ok(());
         }
         if Instant::now() >= deadline {
@@ -453,28 +493,34 @@ async fn im_send(
     }
 }
 
-/// The current max `seq` in a participant's inbox — the baseline a `--reply` send
-/// polls past, so it shows only the new reply, not the conversation history.
-async fn im_inbox_high_water(
-    client: &reqwest::Client,
-    base: &str,
-    participant: &str,
-) -> Result<i64> {
-    let url = format!("{base}/api/v1/im/inbox/{participant}?since=0");
-    let entries: serde_json::Value = client
-        .get(&url)
-        .timeout(REQUEST_TIMEOUT)
-        .send()
-        .await
-        .with_context(|| format!("GET {url}"))?
-        .json()
-        .await
-        .context("parse inbox")?;
-    Ok(entries
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| entry.get("seq").and_then(serde_json::Value::as_i64))
-        .max()
-        .unwrap_or(0))
+fn strand_send_body(text: String, soul: Option<&str>) -> serde_json::Value {
+    let mut content = serde_json::json!({
+        "content": [{ "type": "text", "text": text }]
+    });
+    if let Some(soul) = soul {
+        content["soul_id"] = serde_json::Value::from(soul);
+    }
+    content
+}
+
+fn print_watch_line(stdout: &mut impl std::io::Write, event: &str, data: &str) {
+    if let Some(line) = render_watch_event(event, data) {
+        writeln!(stdout, "{line}").ok();
+        stdout.flush().ok();
+    }
+}
+
+fn print_im_replies(
+    accepted: Option<&serde_json::Value>,
+    entries: serde_json::Value,
+) -> Result<()> {
+    let output = match accepted {
+        Some(send) => serde_json::json!({
+            "send": send,
+            "replies": entries,
+        }),
+        None => entries,
+    };
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
 }

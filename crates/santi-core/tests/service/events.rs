@@ -1,11 +1,12 @@
 use super::support::*;
+use santi_core::service::{self, Service};
 
 #[tokio::test]
 async fn emits_turn_completed() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FakeProvider::default());
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: temp.path().join("santi.sqlite").display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -15,7 +16,6 @@ async fn emits_turn_completed() {
     )
     .expect("open service");
 
-    // Subscribe before sending so no lifecycle event is missed.
     let mut events = service.subscribe_stream();
     let strand = service.create_strand().expect("create strand").strand;
     let response = service
@@ -30,8 +30,6 @@ async fn emits_turn_completed() {
         .await
         .expect("send strand");
 
-    // The CLI `--watch` idle check relies on a terminal turn event carrying the
-    // same turn_id the send landed on. Drain the stream until it arrives.
     let turn_id = accepted_turn(&response).id.clone();
     let completed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -50,8 +48,8 @@ async fn emits_turn_completed() {
 async fn runtime_outbox_reaches_bus() {
     let temp = tempfile::tempdir().expect("temp dir");
     let database_path = temp.path().join("santi.sqlite");
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: database_path.display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
@@ -96,8 +94,8 @@ async fn runtime_outbox_reaches_bus() {
 async fn global_bus_sees_strands() {
     let temp = tempfile::tempdir().expect("temp dir");
     let database_path = temp.path().join("santi.sqlite");
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: database_path.display().to_string(),
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),

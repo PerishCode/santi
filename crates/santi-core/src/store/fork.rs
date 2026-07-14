@@ -1,9 +1,6 @@
 use rusqlite::params;
 
-use super::{
-    SantiStore,
-    db::{compacts_for_strand, message_seq_in_strand, strand_by_id},
-};
+use super::{SantiStore, db::Database};
 use crate::{Strand, prefixed_id, timestamp_now};
 
 impl SantiStore {
@@ -13,7 +10,9 @@ impl SantiStore {
         }
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let parent = strand_by_id(&tx, parent_strand_id)?
+        let database = Database::new(&tx);
+        let parent = database
+            .strand_by_id(parent_strand_id)?
             .ok_or_else(|| "parent strand not found".to_string())?;
         let parent_last_seq = parent.next_seq - 1;
         if fork_point > parent_last_seq {
@@ -83,14 +82,14 @@ impl SantiStore {
             .map_err(|error| error.to_string())?;
         }
 
-        for compact in compacts_for_strand(&tx, parent_strand_id)? {
+        for compact in database.compacts_for_strand(parent_strand_id)? {
             let Some(start_seq) =
-                message_seq_in_strand(&tx, parent_strand_id, &compact.start_message_id)?
+                database.message_seq_in_strand(parent_strand_id, &compact.start_message_id)?
             else {
                 continue;
             };
             let Some(end_seq) =
-                message_seq_in_strand(&tx, parent_strand_id, &compact.end_message_id)?
+                database.message_seq_in_strand(parent_strand_id, &compact.end_message_id)?
             else {
                 continue;
             };
@@ -117,13 +116,16 @@ impl SantiStore {
         }
 
         tx.commit().map_err(|error| error.to_string())?;
-        strand_by_id(&conn, &child_id)?.ok_or_else(|| "forked strand missing".to_string())
+        Database::new(&conn)
+            .strand_by_id(&child_id)?
+            .ok_or_else(|| "forked strand missing".to_string())
     }
 
     pub(crate) fn delete_fork_child_strand(&self, child_strand_id: &str) -> Result<(), String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let child = strand_by_id(&tx, child_strand_id)?
+        let child = Database::new(&tx)
+            .strand_by_id(child_strand_id)?
             .ok_or_else(|| "fork child not found".to_string())?;
         if child.parent_strand_id.is_none() {
             return Err("refusing to delete a non-fork strand".to_string());

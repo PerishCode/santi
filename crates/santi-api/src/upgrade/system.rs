@@ -7,7 +7,7 @@ use std::{env, fs, thread};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::artifacts::{ArtifactStore, DpkgProbe, PackageArtifact, write_json_atomic};
+use super::artifacts::{Artifact, Dpkg, Store, write_json_atomic};
 use super::finalize::{FINALIZE_PROTOCOL_VERSION, finalize_at, persistence_error};
 use super::{
     RecoveryStatus, UpgradeFailure, UpgradeFinalizeReport, UpgradeFinalizeRequest, UpgradeHost,
@@ -25,18 +25,17 @@ const UPGRADE_SERVICE: &str = "santi-upgrade.service";
 const UPGRADE_REQUEST_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct UpgradeLaunchRequest {
+struct Launch {
     protocol_version: u32,
     attempt_id: String,
-    candidate: PackageArtifact,
-    previous: PackageArtifact,
+    candidate: Artifact,
+    previous: Artifact,
 }
 
 fn request_path(paths: &RuntimePaths) -> PathBuf {
     paths.runtime_root.join("upgrade.request")
 }
 
-/// Record the request and kick the detached oneshot unit, then return fast.
 pub fn launch(
     deb: &str,
     previous_deb: Option<&str>,
@@ -44,16 +43,15 @@ pub fn launch(
     let paths = config::resolve_runtime_paths();
     let attempt_id = format!("upgrade_{}", Uuid::new_v4().simple());
     ensure_upgrade_idle()
-        .map_err(|detail| record_failure(&paths, &attempt_id, deb, UpgradeStage::Launch, detail))?;
+        .map_err(|detail| paths.record_failure(&attempt_id, deb, UpgradeStage::Launch, detail))?;
     let previous_deb = supplied_previous(previous_deb);
     let request_body = prepare_request(&paths, &attempt_id, deb, previous_deb.as_deref())
-        .map_err(|detail| record_failure(&paths, &attempt_id, deb, UpgradeStage::Launch, detail))?;
+        .map_err(|detail| paths.record_failure(&attempt_id, deb, UpgradeStage::Launch, detail))?;
     let status = Command::new("sudo")
         .args(["-n", "systemctl", "start", "--no-block", UPGRADE_SERVICE])
         .status()
         .map_err(|error| {
-            record_failure(
-                &paths,
+            paths.record_failure(
                 &attempt_id,
                 deb,
                 UpgradeStage::Launch,
@@ -61,8 +59,7 @@ pub fn launch(
             )
         })?;
     if !status.success() {
-        return Err(record_failure(
-            &paths,
+        return Err(paths.record_failure(
             &attempt_id,
             deb,
             UpgradeStage::Launch,
@@ -81,7 +78,6 @@ pub fn launch(
     })
 }
 
-/// Resolve a direct artifact or detached request, then run the orchestration.
 pub fn run(
     deb: Option<String>,
     previous_deb: Option<String>,
@@ -93,21 +89,14 @@ pub fn run(
             let previous_deb = supplied_previous(previous_deb.as_deref());
             prepare_request(&paths, &attempt_id, &deb, previous_deb.as_deref()).map_err(
                 |detail| {
-                    record_failure(
-                        &paths,
-                        &attempt_id,
-                        &deb,
-                        UpgradeStage::ResolveRequest,
-                        detail,
-                    )
+                    paths.record_failure(&attempt_id, &deb, UpgradeStage::ResolveRequest, detail)
                 },
             )?
         }
         None => read_request(&paths)?,
     };
     if request.protocol_version != UPGRADE_REQUEST_VERSION {
-        return Err(record_failure(
-            &paths,
+        return Err(paths.record_failure(
             &request.attempt_id,
             "<retained-candidate>",
             UpgradeStage::ResolveRequest,
@@ -117,11 +106,10 @@ pub fn run(
             ),
         ));
     }
-    let store = ArtifactStore::new(&paths.runtime_root);
-    let probe = DpkgProbe;
+    let store = Store::new(&paths.runtime_root);
+    let probe = Dpkg;
     let durable_previous = store.resolve_previous(None, &probe).map_err(|detail| {
-        record_failure(
-            &paths,
+        paths.record_failure(
             &request.attempt_id,
             "<retained-candidate>",
             UpgradeStage::ResolveRequest,
@@ -129,8 +117,7 @@ pub fn run(
         )
     })?;
     if durable_previous != request.previous {
-        return Err(record_failure(
-            &paths,
+        return Err(paths.record_failure(
             &request.attempt_id,
             "<retained-candidate>",
             UpgradeStage::ResolveRequest,
@@ -139,8 +126,7 @@ pub fn run(
         ));
     }
     let candidate_path = store.verify(&request.candidate, &probe).map_err(|detail| {
-        record_failure(
-            &paths,
+        paths.record_failure(
             &request.attempt_id,
             "<retained-candidate>",
             UpgradeStage::ResolveRequest,
@@ -148,8 +134,7 @@ pub fn run(
         )
     })?;
     store.verify(&request.previous, &probe).map_err(|detail| {
-        record_failure(
-            &paths,
+        paths.record_failure(
             &request.attempt_id,
             "<retained-candidate>",
             UpgradeStage::ResolveRequest,
@@ -157,15 +142,14 @@ pub fn run(
         )
     })?;
     let candidate_path = candidate_path.to_str().ok_or_else(|| {
-        record_failure(
-            &paths,
+        paths.record_failure(
             &request.attempt_id,
             "<retained-candidate>",
             UpgradeStage::ResolveRequest,
             "retained candidate package path is not valid UTF-8".to_string(),
         )
     })?;
-    let mut host = SystemHost::new(
+    let mut host = Host::new(
         paths,
         store,
         request.candidate.clone(),
@@ -184,12 +168,12 @@ fn prepare_request(
     attempt_id: &str,
     deb: &str,
     previous_deb: Option<&str>,
-) -> Result<UpgradeLaunchRequest, String> {
-    let store = ArtifactStore::new(&paths.runtime_root);
-    let probe = DpkgProbe;
+) -> Result<Launch, String> {
+    let store = Store::new(&paths.runtime_root);
+    let probe = Dpkg;
     let previous = store.resolve_previous(previous_deb.map(Path::new), &probe)?;
     let candidate = store.stage(Path::new(deb), &probe)?;
-    let request = UpgradeLaunchRequest {
+    let request = Launch {
         protocol_version: UPGRADE_REQUEST_VERSION,
         attempt_id: attempt_id.to_string(),
         candidate,
@@ -220,11 +204,10 @@ fn ensure_upgrade_idle() -> Result<(), String> {
     }
 }
 
-fn read_request(paths: &RuntimePaths) -> Result<UpgradeLaunchRequest, Box<santi_core::SantiError>> {
+fn read_request(paths: &RuntimePaths) -> Result<Launch, Box<santi_core::SantiError>> {
     let attempt_id = format!("upgrade_{}", Uuid::new_v4().simple());
     let raw = fs::read(request_path(paths)).map_err(|error| {
-        record_failure(
-            paths,
+        paths.record_failure(
             &attempt_id,
             "<unresolved>",
             UpgradeStage::ResolveRequest,
@@ -232,8 +215,7 @@ fn read_request(paths: &RuntimePaths) -> Result<UpgradeLaunchRequest, Box<santi_
         )
     })?;
     serde_json::from_slice(&raw).map_err(|error| {
-        record_failure(
-            paths,
+        paths.record_failure(
             &attempt_id,
             "<unresolved>",
             UpgradeStage::ResolveRequest,
@@ -257,57 +239,54 @@ fn supplied_previous(value: Option<&str>) -> Option<String> {
     })
 }
 
-fn record_failure(
-    paths: &RuntimePaths,
-    attempt_id: &str,
-    deb: &str,
-    stage: UpgradeStage,
-    detail: String,
-) -> Box<santi_core::SantiError> {
-    let finalize_request = UpgradeFinalizeRequest {
-        protocol_version: FINALIZE_PROTOCOL_VERSION,
-        attempt_id: attempt_id.to_string(),
-        deb: deb.to_string(),
-        terminal: UpgradeTerminal::Failed {
-            failure: UpgradeFailure {
-                stage,
-                detail,
-                recovery: RecoveryStatus::Unknown,
+impl RuntimePaths {
+    fn record_failure(
+        &self,
+        attempt_id: &str,
+        deb: &str,
+        stage: UpgradeStage,
+        detail: String,
+    ) -> Box<santi_core::SantiError> {
+        let finalize_request = UpgradeFinalizeRequest {
+            protocol_version: FINALIZE_PROTOCOL_VERSION,
+            attempt_id: attempt_id.to_string(),
+            deb: deb.to_string(),
+            terminal: UpgradeTerminal::Failed {
+                failure: UpgradeFailure {
+                    stage,
+                    detail,
+                    recovery: RecoveryStatus::Unknown,
+                },
             },
-        },
-        readiness: UpgradeReadiness::Ready,
-        wake: false,
-        soul_id: santi_core::DEFAULT_SOUL_ID.to_string(),
-        configured_strand_id: None,
-    };
-    match finalize_at(paths, finalize_request) {
-        Ok(report) => Box::new(report.errors.into_iter().next().unwrap_or_else(|| {
-            persistence_error(
-                attempt_id,
-                deb,
-                stage.operation(),
-                "finalizer returned no launch failure incident",
-            )
-        })),
-        Err(error) => error,
+            readiness: UpgradeReadiness::Ready,
+            wake: false,
+            soul_id: santi_core::DEFAULT_SOUL_ID.to_string(),
+            configured_strand_id: None,
+        };
+        match finalize_at(self, finalize_request) {
+            Ok(report) => Box::new(report.errors.into_iter().next().unwrap_or_else(|| {
+                persistence_error(
+                    attempt_id,
+                    deb,
+                    stage.operation(),
+                    "finalizer returned no launch failure incident",
+                )
+            })),
+            Err(error) => error,
+        }
     }
 }
 
-struct SystemHost {
+struct Host {
     paths: RuntimePaths,
     backup: PathBuf,
-    store: ArtifactStore,
-    candidate: PackageArtifact,
-    previous: PackageArtifact,
+    store: Store,
+    candidate: Artifact,
+    previous: Artifact,
 }
 
-impl SystemHost {
-    fn new(
-        paths: RuntimePaths,
-        store: ArtifactStore,
-        candidate: PackageArtifact,
-        previous: PackageArtifact,
-    ) -> Self {
+impl Host {
+    fn new(paths: RuntimePaths, store: Store, candidate: Artifact, previous: Artifact) -> Self {
         let backup = paths
             .runtime_root
             .with_file_name("santi-runtime-backup.tar.gz");
@@ -338,7 +317,12 @@ impl SystemHost {
     }
 }
 
-impl UpgradeHost for SystemHost {
+fn probe_readiness(binary: &Path) -> Result<Option<UpgradeReadiness>, String> {
+    probe_final_version_storage(binary)?;
+    probe_runtime_readiness(binary)
+}
+
+impl UpgradeHost for Host {
     fn graceful_stop(&mut self, _grace: Duration) -> Result<(), String> {
         self.systemctl("stop")
     }
@@ -372,15 +356,10 @@ impl UpgradeHost for SystemHost {
         let mut last_detail = "service health was not reachable".to_string();
         let binary = final_version_binary();
         let readiness = loop {
-            match probe_final_version_storage(&binary) {
-                Ok(()) => match probe_runtime_readiness(&binary) {
-                    Ok(Some(readiness)) => break Ok(readiness),
-                    Ok(None) => {}
-                    Err(error) => last_detail = error,
-                },
-                Err(error) => {
-                    last_detail = error;
-                }
+            match probe_readiness(&binary) {
+                Ok(Some(readiness)) => break Ok(readiness),
+                Ok(None) => {}
+                Err(error) => last_detail = error,
             }
             if Instant::now() >= deadline {
                 break Err(format!("trial probe timed out: {last_detail}"));
@@ -399,13 +378,13 @@ impl UpgradeHost for SystemHost {
     }
 
     fn retain_candidate(&mut self) -> Result<(), String> {
-        let probe = DpkgProbe;
+        let probe = Dpkg;
         self.store.commit_installed(&self.candidate, &probe)?;
         self.store.prune(&[&self.candidate, &self.previous])
     }
 
     fn rollback(&mut self) -> Result<(), String> {
-        let probe = DpkgProbe;
+        let probe = Dpkg;
         let previous_deb = self.store.verify(&self.previous, &probe)?;
         let previous_deb = previous_deb
             .to_str()

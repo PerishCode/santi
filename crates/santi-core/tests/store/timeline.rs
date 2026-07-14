@@ -6,14 +6,14 @@ fn appends_relations_in_order() {
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let strand = store.create_strand().expect("create strand");
     let user = store
-        .append_message(
-            &strand.id,
-            ActorType::System,
-            store.system_actor_id(),
-            MessageContent::text("hello ordering"),
-            MessageState::Fixed,
-            MessageIntake::Request,
-        )
+        .append_message(Draft {
+            strand: &strand.id,
+            actor: ActorType::System,
+            id: store.system_actor_id(),
+            content: MessageContent::text("hello ordering"),
+            state: MessageState::Fixed,
+            intake: MessageIntake::Request,
+        })
         .expect("append user")
         .strand_message;
 
@@ -54,14 +54,14 @@ fn thinking_becomes_reasoning() {
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let strand = store.create_strand().expect("create strand");
     let user = store
-        .append_message(
-            &strand.id,
-            ActorType::System,
-            store.system_actor_id(),
-            MessageContent::text("hello thinking"),
-            MessageState::Fixed,
-            MessageIntake::Request,
-        )
+        .append_message(Draft {
+            strand: &strand.id,
+            actor: ActorType::System,
+            id: store.system_actor_id(),
+            content: MessageContent::text("hello thinking"),
+            state: MessageState::Fixed,
+            intake: MessageIntake::Request,
+        })
         .expect("append user")
         .strand_message;
     let turn = store
@@ -99,8 +99,6 @@ fn thinking_becomes_reasoning() {
         Some(ThinkingCompletionReason::FirstTextDelta)
     );
 
-    // Reasoning is now a first-class timeline item (adapters drop it per DC5,
-    // but the projection includes it when there is real summary text).
     let input = store.assembly_input(&strand.id).expect("assembly input");
     assert_eq!(input.len(), 2);
     assert_text(&input[0], "user", "hello thinking");
@@ -119,17 +117,15 @@ fn timeline_interleaves() {
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let strand = store.create_strand().expect("create strand");
 
-    // A turn with a shell tool roundtrip and per-round assistant text: the
-    // replay timeline interleaves user, function call, result, assistant text.
     let user = store
-        .append_message(
-            &strand.id,
-            ActorType::System,
-            store.system_actor_id(),
-            MessageContent::text("run a command"),
-            MessageState::Fixed,
-            MessageIntake::Request,
-        )
+        .append_message(Draft {
+            strand: &strand.id,
+            actor: ActorType::System,
+            id: store.system_actor_id(),
+            content: MessageContent::text("run a command"),
+            state: MessageState::Fixed,
+            intake: MessageIntake::Request,
+        })
         .expect("append user")
         .strand_message;
     let turn = store
@@ -137,18 +133,18 @@ fn timeline_interleaves() {
         .expect("start turn")
         .turn;
     store
-        .append_tool_call(
-            &turn.id,
-            "call_1",
-            "shell",
-            &serde_json::json!({ "command": "echo hi" }),
-            &ToolCallProvenance {
+        .append_tool_call(Invocation {
+            turn: &turn.id,
+            call: "call_1",
+            name: "shell",
+            arguments: &serde_json::json!({ "command": "echo hi" }),
+            provenance: &ToolCallProvenance {
                 provider_family: "openai".to_string(),
                 item: Some(serde_json::json!({ "type": "function_call", "id": "fc_1" })),
                 item_id: Some("fc_1".to_string()),
                 response_id: Some("resp_1".to_string()),
             },
-        )
+        })
         .expect("append tool call");
     store
         .append_tool_result(
@@ -157,8 +153,6 @@ fn timeline_interleaves() {
             None,
         )
         .expect("append tool result");
-    // The final assistant text is a soul-only timeline item (DC4b); the lumped
-    // strand-visible reply is stored separately by the service.
     store
         .append_soul_assistant_text(&strand.id, "done")
         .expect("append soul assistant text");
@@ -177,7 +171,6 @@ fn timeline_interleaves() {
             assert_eq!(call_id, "call_1");
             assert_eq!(name, "shell");
             assert!(arguments_raw.contains("echo hi"));
-            // The raw provider item + id round-trip for faithful Responses replay.
             assert_eq!(item_id.as_deref(), Some("fc_1"));
             assert_eq!(item.as_ref().expect("raw item")["id"], "fc_1");
         }

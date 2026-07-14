@@ -6,8 +6,6 @@ use super::super::UpgradeReadiness;
 
 const DEFAULT_FINAL_VERSION_BINARY: &str = "/usr/bin/santi";
 
-// dpkg replaces the runner's inode, so current_exe() may resolve to a deleted
-// path after install. Probes and finalization must execute the installed binary.
 pub(super) fn final_version_binary() -> PathBuf {
     let configured = env::var("SANTI_UPGRADE_FINALIZER_BIN").ok();
     resolve_final_version_binary(configured.as_deref())

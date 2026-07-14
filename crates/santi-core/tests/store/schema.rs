@@ -36,8 +36,6 @@ fn schema_matches_runtime() {
             .expect("table lookup");
         assert_eq!(exists, 1, "missing table {table}");
     }
-    // The discarded tables keep their historical (pre-rename) names — these
-    // are the OLD session-era tables that must NOT exist in the clean schema.
     for table in [
         "accounts",
         "soul_profiles",
@@ -65,15 +63,11 @@ fn soul_label_anchoring() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
 
-    // Souls are API-managed individuals, id-only; a created soul is distinct
-    // from default and shows up in the roster.
     let soul = store.create_soul().expect("create soul");
     assert_ne!(soul.id, store.default_soul_id());
     assert!(store.list_souls().expect("list").len() >= 2);
     assert!(store.soul(&soul.id).expect("soul").is_some());
 
-    // External label anchors a strand (scoped to its soul): same label → same
-    // strand; new → new; a different soul on the same label gets its own strand.
     let s1 = store
         .find_labeled_strand(&soul.id, "github:issue:49")
         .expect("label strand");
@@ -93,7 +87,6 @@ fn soul_label_anchoring() {
         .expect("same label, default soul");
     assert_ne!(default_strand.id, s1.id);
 
-    // An unknown soul cannot anchor a new label.
     assert!(
         store
             .find_labeled_strand("soul_does_not_exist", "github:issue:99")
@@ -464,8 +457,6 @@ fn schema_read_matches_open() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
 
-    // A DB stamped at a stale version: the probe reports it AS-IS and, crucially,
-    // does NOT migrate/wipe it (unlike SantiStore::open).
     {
         let conn = Connection::open(&db).expect("open sqlite");
         conn.pragma_update(None, "user_version", 5u32)
@@ -482,7 +473,6 @@ fn schema_read_matches_open() {
         "a second probe still sees the stale version — the first was read-only"
     );
 
-    // Opening the store DOES migrate to the runtime's version.
     let store = SantiStore::open(&db).expect("open store");
     drop(store);
     assert_eq!(

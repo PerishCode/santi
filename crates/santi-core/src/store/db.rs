@@ -1,8 +1,6 @@
-mod effect_migration;
-mod im_migration;
 mod inbox;
 mod lifecycle;
-mod receipt_migration;
+mod migration;
 mod receipts;
 mod timeline;
 
@@ -17,62 +15,70 @@ use crate::{
 use super::rows::*;
 pub(super) use inbox::drain_inbox_in_tx;
 pub use lifecycle::{read_schema_version, soul_memory_file};
-pub(in crate::store) use receipts::{
-    begin_turn_in_conn, complete_turn_in_conn, fail_turn_in_conn, insert_accepted_in_conn,
-};
-pub(super) use timeline::*;
 
-pub(super) fn append_entry_in_tx(
-    conn: &Connection,
-    strand_id: &str,
-    target_type: StrandTargetType,
-    target_id: &str,
-) -> Result<StrandEntry, String> {
-    let now = timestamp_now();
-    let allocated_seq = conn
-        .query_row(
-            r#"
+pub(super) struct Database<'a> {
+    pub(super) conn: &'a Connection,
+}
+
+impl<'a> Database<'a> {
+    pub(super) fn new(conn: &'a Connection) -> Self {
+        Self { conn }
+    }
+
+    pub(super) fn append_entry_in_tx(
+        &self,
+        strand_id: &str,
+        target_type: StrandTargetType,
+        target_id: &str,
+    ) -> Result<StrandEntry, String> {
+        let now = timestamp_now();
+        let allocated_seq = self
+            .conn
+            .query_row(
+                r#"
             UPDATE strands
             SET next_seq = next_seq + 1, updated_at = ?2
             WHERE id = ?1
             RETURNING next_seq - 1
             "#,
-            params![strand_id, now],
-            |row| row.get::<_, i64>(0),
-        )
-        .map_err(|error| error.to_string())?;
-    conn.execute(
-        r#"
+                params![strand_id, now],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| error.to_string())?;
+        self.conn
+            .execute(
+                r#"
         INSERT INTO r_strand_entries (
           strand_id, target_type, target_id, strand_seq, created_at
         )
         VALUES (?1, ?2, ?3, ?4, ?5)
         "#,
-        params![
-            strand_id,
-            entry_type_db(&target_type),
-            target_id,
-            allocated_seq,
-            now
-        ],
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(StrandEntry {
-        strand_id: strand_id.to_string(),
-        target_type,
-        target_id: target_id.to_string(),
-        strand_seq: allocated_seq,
-        created_at: now,
-    })
-}
+                params![
+                    strand_id,
+                    target_type.encode(),
+                    target_id,
+                    allocated_seq,
+                    now
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(StrandEntry {
+            strand_id: strand_id.to_string(),
+            target_type,
+            target_id: target_id.to_string(),
+            strand_seq: allocated_seq,
+            created_at: now,
+        })
+    }
 
-pub(super) fn message_events_for_strand(
-    conn: &Connection,
-    strand_id: &str,
-) -> Result<Vec<MessageEvent>, String> {
-    let mut stmt = conn
-        .prepare(
-            r#"
+    pub(super) fn message_events_for_strand(
+        &self,
+        strand_id: &str,
+    ) -> Result<Vec<MessageEvent>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
             SELECT e.id, e.message_id, e.action, e.actor_type, e.actor_id,
                    e.base_version, e.payload, e.created_at
             FROM message_events e
@@ -80,89 +86,91 @@ pub(super) fn message_events_for_strand(
             WHERE r.strand_id = ?1
             ORDER BY r.strand_seq ASC, e.created_at ASC, e.id ASC
             "#,
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map(params![strand_id], map_message_event_row)
-        .map_err(|error| error.to_string())?;
-    collect_rows(rows)
-}
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map(params![strand_id], MessageEvent::decode)
+            .map_err(|error| error.to_string())?;
+        collect_rows(rows)
+    }
 
-pub(super) fn soul_by_id(conn: &Connection, soul_id: &str) -> Result<Option<Soul>, String> {
-    conn.query_row(
-        r#"
+    pub(super) fn soul_by_id(&self, soul_id: &str) -> Result<Option<Soul>, String> {
+        self.conn
+            .query_row(
+                r#"
         SELECT id, created_at, updated_at
         FROM souls
         WHERE id = ?1
         LIMIT 1
         "#,
-        params![soul_id],
-        map_soul_row,
-    )
-    .optional()
-    .map_err(|error| error.to_string())
-}
+                params![soul_id],
+                Soul::decode,
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+    }
 
-pub(super) fn webhook_by_name(
-    conn: &Connection,
-    name: &str,
-) -> Result<Option<WebhookSubscription>, String> {
-    conn.query_row(
-        r#"
+    pub(super) fn webhook_by_name(
+        &self,
+        name: &str,
+    ) -> Result<Option<WebhookSubscription>, String> {
+        self.conn
+            .query_row(
+                r#"
         SELECT name, adaptor, soul_id, strand_strategy, secret_env, created_at, updated_at
         FROM webhooks
         WHERE name = ?1
         LIMIT 1
         "#,
-        params![name],
-        map_webhook_row,
-    )
-    .optional()
-    .map_err(|error| error.to_string())
-}
+                params![name],
+                WebhookSubscription::decode,
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+    }
 
-pub(super) fn strand_by_id(conn: &Connection, strand_id: &str) -> Result<Option<Strand>, String> {
-    conn.query_row(
-        r#"
+    pub(super) fn strand_by_id(&self, strand_id: &str) -> Result<Option<Strand>, String> {
+        self.conn
+            .query_row(
+                r#"
         SELECT id, soul_id, external_label, strand_memory, provider_state, next_seq,
                last_seen_strand_seq, parent_strand_id, fork_point, created_at, updated_at
         FROM strands
         WHERE id = ?1
         LIMIT 1
         "#,
-        params![strand_id],
-        map_strand_row,
-    )
-    .optional()
-    .map_err(|error| error.to_string())
-}
+                params![strand_id],
+                Strand::decode,
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+    }
 
-pub(super) fn strand_by_label(
-    conn: &Connection,
-    soul_id: &str,
-    label: &str,
-) -> Result<Option<Strand>, String> {
-    conn.query_row(
-        r#"
+    pub(super) fn strand_by_label(
+        &self,
+        soul_id: &str,
+        label: &str,
+    ) -> Result<Option<Strand>, String> {
+        self.conn
+            .query_row(
+                r#"
         SELECT id, soul_id, external_label, strand_memory, provider_state, next_seq,
                last_seen_strand_seq, parent_strand_id, fork_point, created_at, updated_at
         FROM strands
         WHERE soul_id = ?1 AND external_label = ?2
         LIMIT 1
         "#,
-        params![soul_id, label],
-        map_strand_row,
-    )
-    .optional()
-    .map_err(|error| error.to_string())
-}
+                params![soul_id, label],
+                Strand::decode,
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+    }
 
-pub(super) fn message_by_id(
-    conn: &Connection,
-    message_id: &str,
-) -> Result<Option<StrandMessage>, String> {
-    conn.query_row(
-        r#"
+    pub(super) fn message_by_id(&self, message_id: &str) -> Result<Option<StrandMessage>, String> {
+        self.conn
+            .query_row(
+                r#"
         SELECT r.strand_id, r.target_id, r.strand_seq, r.created_at,
                m.id, m.actor_type, m.actor_id, m.message_kind, m.content, m.state, m.version,
                m.deleted_at, m.created_at, m.updated_at
@@ -171,42 +179,38 @@ pub(super) fn message_by_id(
         WHERE r.target_type = 'message' AND r.target_id = ?1
         LIMIT 1
         "#,
-        params![message_id],
-        map_strand_message_row,
-    )
-    .optional()
-    .map_err(|error| error.to_string())
-}
+                params![message_id],
+                StrandMessage::decode,
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+    }
 
-/// Fetch a message's content by id directly from `messages`, independent of any
-/// strand relation — so the assembly projection can render both timeline-visible
-/// messages and strand-only assistant text items uniformly.
-pub(super) fn message_record_by_id(
-    conn: &Connection,
-    message_id: &str,
-) -> Result<Option<crate::Message>, String> {
-    conn.query_row(
-        r#"
+    pub(super) fn message_record_by_id(
+        &self,
+        message_id: &str,
+    ) -> Result<Option<crate::Message>, String> {
+        self.conn
+            .query_row(
+                r#"
         SELECT id, actor_type, actor_id, message_kind, content, state, version,
                deleted_at, created_at, updated_at
         FROM messages
         WHERE id = ?1
         LIMIT 1
         "#,
-        params![message_id],
-        map_message_row,
-    )
-    .optional()
-    .map_err(|error| error.to_string())
-}
+                params![message_id],
+                crate::Message::decode,
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+    }
 
-pub(super) fn strand_messages(
-    conn: &Connection,
-    strand_id: &str,
-) -> Result<Vec<StrandMessage>, String> {
-    let mut stmt = conn
-        .prepare(
-            r#"
+    pub(super) fn strand_messages(&self, strand_id: &str) -> Result<Vec<StrandMessage>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
             SELECT r.strand_id, r.target_id, r.strand_seq, r.created_at,
                    m.id, m.actor_type, m.actor_id, m.message_kind, m.content, m.state, m.version,
                    m.deleted_at, m.created_at, m.updated_at
@@ -215,17 +219,18 @@ pub(super) fn strand_messages(
             WHERE r.strand_id = ?1 AND r.target_type = 'message' AND m.deleted_at IS NULL
             ORDER BY r.strand_seq ASC
             "#,
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map(params![strand_id], map_strand_message_row)
-        .map_err(|error| error.to_string())?;
-    collect_rows(rows)
-}
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map(params![strand_id], StrandMessage::decode)
+            .map_err(|error| error.to_string())?;
+        collect_rows(rows)
+    }
 
-pub(super) fn turn_by_id(conn: &Connection, turn_id: &str) -> Result<Option<Turn>, String> {
-    conn.query_row(
-        r#"
+    pub(super) fn turn_by_id(&self, turn_id: &str) -> Result<Option<Turn>, String> {
+        self.conn
+            .query_row(
+                r#"
         SELECT id, strand_id, trigger_type, trigger_ref,
                base_strand_seq, end_strand_seq, status, error_text,
                created_at, updated_at, finished_at
@@ -233,191 +238,177 @@ pub(super) fn turn_by_id(conn: &Connection, turn_id: &str) -> Result<Option<Turn
         WHERE id = ?1
         LIMIT 1
         "#,
-        params![turn_id],
-        map_turn_row,
-    )
-    .optional()
-    .map_err(|error| error.to_string())
-}
+                params![turn_id],
+                Turn::decode,
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+    }
 
-pub(super) fn compact_by_id(
-    conn: &Connection,
-    compact_id: &str,
-) -> Result<Option<Compact>, String> {
-    conn.query_row(
-        r#"
+    pub(super) fn compact_by_id(&self, compact_id: &str) -> Result<Option<Compact>, String> {
+        self.conn
+            .query_row(
+                r#"
         SELECT id, strand_id, summary, start_message_id, end_message_id, created_at, metadata
         FROM compacts WHERE id = ?1 LIMIT 1
         "#,
-        params![compact_id],
-        map_compact_row,
-    )
-    .optional()
-    .map_err(|error| error.to_string())
-}
+                params![compact_id],
+                Compact::decode,
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+    }
 
-pub(super) fn turn_strand_id(conn: &Connection, turn_id: &str) -> Result<String, String> {
-    conn.query_row(
-        "SELECT strand_id FROM turns WHERE id = ?1 LIMIT 1",
-        params![turn_id],
-        |row| row.get(0),
-    )
-    .map_err(|error| error.to_string())
-}
+    pub(super) fn turn_strand_id(&self, turn_id: &str) -> Result<String, String> {
+        self.conn
+            .query_row(
+                "SELECT strand_id FROM turns WHERE id = ?1 LIMIT 1",
+                params![turn_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())
+    }
 
-pub(super) fn call_soul_id(conn: &Connection, tool_call_id: &str) -> Result<String, String> {
-    conn.query_row(
-        r#"
+    pub(super) fn call_soul_id(&self, tool_call_id: &str) -> Result<String, String> {
+        self.conn
+            .query_row(
+                r#"
         SELECT t.strand_id
         FROM tool_calls c
         JOIN turns t ON t.id = c.turn_id
         WHERE c.id = ?1
         LIMIT 1
         "#,
-        params![tool_call_id],
-        |row| row.get(0),
-    )
-    .map_err(|error| error.to_string())
-}
+                params![tool_call_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())
+    }
 
-pub(super) fn tool_call_by_id(
-    conn: &Connection,
-    tool_call_id: &str,
-) -> Result<Option<ToolCall>, String> {
-    conn.query_row(
+    pub(super) fn tool_call_by_id(&self, tool_call_id: &str) -> Result<Option<ToolCall>, String> {
+        self.conn.query_row(
         "SELECT id, turn_id, tool_name, arguments, created_at FROM tool_calls WHERE id = ?1 LIMIT 1",
         params![tool_call_id],
-        map_tool_call_row,
+        ToolCall::decode,
     )
     .optional()
     .map_err(|error| error.to_string())
-}
+    }
 
-/// Load a tool_call's REGENERABLE provider replay material (raw wire item +
-/// item_id), if any. The blob is advisory: the caller (an adaptor) still
-/// validates it and, if invalid, regenerates from the neutral tool_call fields.
-/// Irreplaceable material is deliberately NOT returned here — it must never be
-/// treated as regenerable (PHASE-09 decision #9).
-pub(super) fn regenerable_replay_material(
-    conn: &Connection,
-    tool_call_id: &str,
-) -> Result<(Option<serde_json::Value>, Option<String>), String> {
-    conn.query_row(
-        "SELECT blob, item_id FROM provider_replay_material \
+    pub(super) fn regenerable_replay_material(
+        &self,
+        tool_call_id: &str,
+    ) -> Result<(Option<serde_json::Value>, Option<String>), String> {
+        self.conn
+            .query_row(
+                "SELECT blob, item_id FROM provider_replay_material \
          WHERE tool_call_id = ?1 AND kind = 'regenerable' LIMIT 1",
-        params![tool_call_id],
-        |row| {
-            let blob: Option<String> = row.get(0)?;
-            let item_id: Option<String> = row.get(1)?;
-            Ok((blob, item_id))
-        },
-    )
-    .optional()
-    .map_err(|error| error.to_string())
-    .map(|found| match found {
-        Some((blob, item_id)) => (blob.and_then(|b| serde_json::from_str(&b).ok()), item_id),
-        None => (None, None),
-    })
-}
+                params![tool_call_id],
+                |row| {
+                    let blob: Option<String> = row.get(0)?;
+                    let item_id: Option<String> = row.get(1)?;
+                    Ok((blob, item_id))
+                },
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+            .map(|found| match found {
+                Some((blob, item_id)) => {
+                    (blob.and_then(|b| serde_json::from_str(&b).ok()), item_id)
+                }
+                None => (None, None),
+            })
+    }
 
-pub(super) fn tool_result_by_id(
-    conn: &Connection,
-    tool_result_id: &str,
-) -> Result<Option<ToolResult>, String> {
-    conn.query_row(
+    pub(super) fn tool_result_by_id(
+        &self,
+        tool_result_id: &str,
+    ) -> Result<Option<ToolResult>, String> {
+        self.conn.query_row(
         "SELECT id, tool_call_id, output, error_text, created_at FROM tool_results WHERE id = ?1 LIMIT 1",
         params![tool_result_id],
-        map_tool_result_row,
+        ToolResult::decode,
     )
     .optional()
     .map_err(|error| error.to_string())
-}
+    }
 
-pub(super) fn thinking_span_by_id(
-    conn: &Connection,
-    thinking_span_id: &str,
-) -> Result<Option<ThinkingSpan>, String> {
-    conn.query_row(
-        r#"
+    pub(super) fn thinking_span_by_id(
+        &self,
+        thinking_span_id: &str,
+    ) -> Result<Option<ThinkingSpan>, String> {
+        self.conn
+            .query_row(
+                r#"
         SELECT id, turn_id, provider_response_id, state, summary, completion_reason,
                error_text, created_at, updated_at, finished_at
         FROM thinking_spans
         WHERE id = ?1
         LIMIT 1
         "#,
-        params![thinking_span_id],
-        map_thinking_span_row,
-    )
-    .optional()
-    .map_err(|error| error.to_string())
-}
+                params![thinking_span_id],
+                ThinkingSpan::decode,
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+    }
 
-/// Position of a message in a strand's spine (its ref's strand_seq),
-/// or None if the message is not part of that strand. This is the one
-/// axis compaction operates on — message_id in, strand_seq out.
-pub(super) fn message_seq_in_strand(
-    conn: &Connection,
-    strand_id: &str,
-    message_id: &str,
-) -> Result<Option<i64>, String> {
-    conn.query_row(
-        r#"
+    pub(super) fn message_seq_in_strand(
+        &self,
+        strand_id: &str,
+        message_id: &str,
+    ) -> Result<Option<i64>, String> {
+        self.conn
+            .query_row(
+                r#"
         SELECT strand_seq FROM r_strand_entries
         WHERE strand_id = ?1 AND target_type = 'message' AND target_id = ?2
         LIMIT 1
         "#,
-        params![strand_id, message_id],
-        |row| row.get::<_, i64>(0),
-    )
-    .optional()
-    .map_err(|error| error.to_string())
-}
+                params![strand_id, message_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+    }
 
-pub(super) fn compacts_for_strand(
-    conn: &Connection,
-    strand_id: &str,
-) -> Result<Vec<Compact>, String> {
-    let mut stmt = conn
-        .prepare(
-            r#"
+    pub(super) fn compacts_for_strand(&self, strand_id: &str) -> Result<Vec<Compact>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
             SELECT id, strand_id, summary, start_message_id, end_message_id, created_at, metadata
             FROM compacts
             WHERE strand_id = ?1
             "#,
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map(params![strand_id], map_compact_row)
-        .map_err(|error| error.to_string())?;
-    collect_rows(rows)
-}
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map(params![strand_id], Compact::decode)
+            .map_err(|error| error.to_string())?;
+        collect_rows(rows)
+    }
 
-pub(super) fn strand_effects(
-    conn: &Connection,
-    strand_id: &str,
-) -> Result<Vec<StrandEffect>, String> {
-    let mut stmt = conn
-        .prepare(
-            r#"
+    pub(super) fn strand_effects(&self, strand_id: &str) -> Result<Vec<StrandEffect>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
             SELECT id, strand_id, turn_id, tool_call_id, effect_type, state,
                    result_ref, error_text, created_at, updated_at, dispatched_at, settled_at
             FROM strand_effects
             WHERE strand_id = ?1
             ORDER BY created_at ASC
             "#,
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map(params![strand_id], map_strand_effect_row)
-        .map_err(|error| error.to_string())?;
-    collect_rows(rows)
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map(params![strand_id], StrandEffect::decode)
+            .map_err(|error| error.to_string())?;
+        collect_rows(rows)
+    }
 }
 
-/// The provider boundary: `(actor, message_kind)` is the whole marker, no
-/// separate column. Soul always speaks as `assistant`. System splits by kind:
-/// `Text` is opaque world-inbound content (a CLI send, a webhook event) → the
-/// provider hears it as `user`; `SantiSystem` is a runtime-authored fact about
-/// this strand (not user speech, see the `<system_message>` prompt copy) → `system`.
 pub(super) fn message_to_provider_item(
     message: &crate::Message,
 ) -> Option<santi_provider::ProviderItem> {

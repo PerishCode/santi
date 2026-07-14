@@ -2,28 +2,29 @@ use crate::{
     SantiStreamPayload, ThinkingCompletionReason, ThinkingSpan, TurnActivity, TurnActivityState,
 };
 
-use super::SantiService;
+use super::Service;
 
-impl SantiService {
-    pub(super) fn ensure_thinking_span(
-        &self,
-        strand_id: &str,
-        turn_id: &str,
-        current: &mut Option<ThinkingSpan>,
-        summary_target: &mut Option<ThinkingSpan>,
-        provider_response_id: Option<String>,
-    ) -> Result<(), String> {
-        if let Some(thinking) = current {
-            if provider_response_id.is_some()
-                && thinking.provider_response_id != provider_response_id
+pub(super) struct Progress<'a> {
+    pub strand: &'a str,
+    pub turn: &'a str,
+    pub current: &'a mut Option<ThinkingSpan>,
+    pub summary: &'a mut Option<ThinkingSpan>,
+    pub response: Option<String>,
+}
+
+impl Service {
+    pub(super) fn ensure_thinking_span(&self, progress: Progress<'_>) -> Result<(), String> {
+        if let Some(thinking) = progress.current {
+            if progress.response.is_some()
+                && thinking.provider_response_id != progress.response
                 && let Some(updated) = self
                     .store
-                    .update_thinking_span_response(&thinking.id, provider_response_id)?
+                    .update_thinking_span_response(&thinking.id, progress.response)?
             {
                 *thinking = updated.clone();
-                *summary_target = Some(updated.clone());
+                *progress.summary = Some(updated.clone());
                 self.publish_stream(
-                    strand_id,
+                    progress.strand,
                     SantiStreamPayload::ThinkingUpdated { thinking: updated },
                 );
             }
@@ -32,15 +33,15 @@ impl SantiService {
 
         let thinking = self
             .store
-            .append_thinking_span(turn_id, provider_response_id)?;
+            .append_thinking_span(progress.turn, progress.response)?;
         self.publish_stream(
-            strand_id,
+            progress.strand,
             SantiStreamPayload::ThinkingCreated {
                 thinking: thinking.clone(),
             },
         );
-        *summary_target = Some(thinking.clone());
-        *current = Some(thinking);
+        *progress.summary = Some(thinking.clone());
+        *progress.current = Some(thinking);
         Ok(())
     }
 

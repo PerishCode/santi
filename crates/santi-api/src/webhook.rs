@@ -1,6 +1,3 @@
-//! Webhook adaptors normalize authenticated external doorbells into runtime
-//! occurrences. Provider-specific transport knowledge stays in child modules.
-
 use axum::http::HeaderMap;
 use serde_json::Value;
 

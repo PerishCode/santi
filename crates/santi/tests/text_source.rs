@@ -1,6 +1,6 @@
 use clap::Parser;
 use santi::cli::{Cli, Command, ImCommand, InboxCommand};
-use santi::text_source::{read_im_reply_text, read_inbox_seed_text};
+use santi::{read_im_reply_text, read_inbox_seed_text};
 
 #[test]
 fn im_reply_accepts_source() {

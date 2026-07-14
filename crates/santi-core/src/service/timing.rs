@@ -5,7 +5,7 @@ use std::{
 
 use santi_provider::{ProviderEvent, ProviderStreamTrace};
 
-pub(super) struct ProviderTurnTiming<'a> {
+pub(super) struct Turn<'a> {
     turn_id: &'a str,
     turn_started: Instant,
     round_started: Option<Instant>,
@@ -17,7 +17,7 @@ pub(super) struct ProviderTurnTiming<'a> {
     seen_raw_types: HashSet<String>,
 }
 
-impl<'a> ProviderTurnTiming<'a> {
+impl<'a> Turn<'a> {
     pub(super) fn new(turn_id: &'a str) -> Self {
         let timing = Self {
             turn_id,

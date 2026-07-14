@@ -7,11 +7,11 @@ use santi_api::{
     config::RuntimePaths,
     upgrade::{
         RecoveryStatus, UpgradeFailure, UpgradeFinalizeRequest, UpgradeReadiness, UpgradeStage,
-        UpgradeTerminal, finalize_at, register_attempt_handover_budgets, seed_attempt_handover_at,
-        seed_come_look_at,
+        UpgradeTerminal, finalize_at, register_attempt_handover_budgets,
     },
 };
-use santi_core::{ErrorScope, IncidentStatus, SantiService, SantiServiceConfig, SantiStore};
+use santi_core::service::{self, Service};
+use santi_core::{ErrorScope, IncidentStatus, SantiStore};
 use santi_provider::{
     ProviderClient, ProviderEvent, ProviderMetadata, ProviderRequest, ProviderStream,
 };
@@ -58,32 +58,32 @@ fn attempt_labels_isolate_rooms() {
     let paths = paths_under(temp.path());
     SantiStore::open(&paths.database_path).expect("open");
 
-    let outcome = seed_attempt_handover_at(
-        &paths,
-        santi_core::DEFAULT_SOUL_ID,
-        "upgrade_one",
-        Some("ss_stale"),
-        "come look",
-    )
-    .expect("seed via attempt label");
+    let outcome = paths
+        .seed_attempt_handover(
+            santi_core::DEFAULT_SOUL_ID,
+            "upgrade_one",
+            Some("ss_stale"),
+            "come look",
+        )
+        .expect("seed via attempt label");
     assert!(outcome.warnings.is_empty());
-    let retry = seed_attempt_handover_at(
-        &paths,
-        santi_core::DEFAULT_SOUL_ID,
-        "upgrade_one",
-        Some("ss_stale"),
-        "come look again",
-    )
-    .expect("repeat seed via attempt label");
+    let retry = paths
+        .seed_attempt_handover(
+            santi_core::DEFAULT_SOUL_ID,
+            "upgrade_one",
+            Some("ss_stale"),
+            "come look again",
+        )
+        .expect("repeat seed via attempt label");
     assert_eq!(retry.strand_id, outcome.strand_id);
-    let other = seed_attempt_handover_at(
-        &paths,
-        santi_core::DEFAULT_SOUL_ID,
-        "upgrade_two",
-        Some("ss_stale"),
-        "other attempt",
-    )
-    .expect("seed other attempt");
+    let other = paths
+        .seed_attempt_handover(
+            santi_core::DEFAULT_SOUL_ID,
+            "upgrade_two",
+            Some("ss_stale"),
+            "other attempt",
+        )
+        .expect("seed other attempt");
     assert_ne!(other.strand_id, outcome.strand_id);
 
     let store = SantiStore::open(&paths.database_path).expect("reopen");
@@ -114,7 +114,8 @@ fn stable_helper_preserves_label() {
     let paths = paths_under(temp.path());
     SantiStore::open(&paths.database_path).expect("open");
 
-    let outcome = seed_come_look_at(&paths, santi_core::DEFAULT_SOUL_ID, None, "stable wake")
+    let outcome = paths
+        .seed_come_look(santi_core::DEFAULT_SOUL_ID, None, "stable wake")
         .expect("seed stable label");
     let store = SantiStore::open(&paths.database_path).expect("reopen");
     let strand = store.strand(&outcome.strand_id).unwrap().expect("strand");
@@ -128,23 +129,24 @@ fn stable_helper_preserves_label() {
 fn registers_attempt_rooms() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
-    seed_attempt_handover_at(
-        &paths,
-        santi_core::DEFAULT_SOUL_ID,
-        "upgrade_budgeted",
-        None,
-        "bounded wake",
-    )
-    .expect("seed attempt room");
-    seed_come_look_at(&paths, santi_core::DEFAULT_SOUL_ID, None, "stable wake")
+    paths
+        .seed_attempt_handover(
+            santi_core::DEFAULT_SOUL_ID,
+            "upgrade_budgeted",
+            None,
+            "bounded wake",
+        )
+        .expect("seed attempt room");
+    paths
+        .seed_come_look(santi_core::DEFAULT_SOUL_ID, None, "stable wake")
         .expect("seed stable room");
     SantiStore::open(&paths.database_path)
         .expect("open store")
         .create_strand()
         .expect("create unlabeled room");
 
-    let service = SantiService::open(
-        SantiServiceConfig {
+    let service = Service::open(
+        service::Config {
             database_path: paths.database_path.display().to_string(),
             runtime_root: paths.runtime_root.display().to_string(),
             execution_root: paths.execution_root.display().to_string(),
@@ -223,14 +225,14 @@ fn success_resolves_incident() {
 fn full_handover_is_idempotent() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
-    let seeded = seed_attempt_handover_at(
-        &paths,
-        santi_core::DEFAULT_SOUL_ID,
-        "upgrade_test",
-        None,
-        "existing wake",
-    )
-    .expect("initial seed");
+    let seeded = paths
+        .seed_attempt_handover(
+            santi_core::DEFAULT_SOUL_ID,
+            "upgrade_test",
+            None,
+            "existing wake",
+        )
+        .expect("initial seed");
     let store = SantiStore::open(&paths.database_path).expect("open store");
     let conn = rusqlite::Connection::open(&paths.database_path).expect("open sqlite");
     conn.execute(

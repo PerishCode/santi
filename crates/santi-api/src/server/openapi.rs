@@ -148,6 +148,8 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 12] = [
         super::routes::runtime_snapshot,
         super::im::send_im,
         super::im::poll_im,
+        super::window::send_window,
+        super::window::transcript_window,
         crate::bucket::get_bucket_object
     ),
     components(schemas(
@@ -164,6 +166,11 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 12] = [
         santi_core::DriveStrandResponse,
         santi_core::DriveStrandState,
         santi_core::IngestReceipt,
+        santi_core::WindowSendRequest,
+        santi_core::WindowSendAccepted,
+        santi_core::WindowTranscript,
+        santi_core::WindowTranscriptEntry,
+        santi_core::WindowAuthor,
         santi_core::ReceiptState,
         santi_core::ReceiptStatus,
         santi_core::ReceiptTransition,

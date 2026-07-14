@@ -16,6 +16,8 @@ mod intake;
 mod objects;
 #[path = "service/tools.rs"]
 mod tools;
+#[path = "service/window.rs"]
+mod window;
 
 #[path = "service/support.rs"]
 mod support;

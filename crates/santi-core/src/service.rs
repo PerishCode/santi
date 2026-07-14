@@ -12,6 +12,7 @@ mod text;
 mod thinking;
 mod timing;
 mod tools;
+pub mod window;
 
 use santi_provider::ProviderClient;
 use std::{
@@ -42,6 +43,7 @@ pub struct Service {
     runtime_notices: notice::Bus,
     execution_budgets: Arc<Mutex<HashMap<String, Execution>>>,
     memory_pressure_lock: Arc<Mutex<()>>,
+    window_rates: Arc<Mutex<HashMap<String, window::Pace>>>,
     shutting_down: Arc<AtomicBool>,
     drive_degraded: Arc<AtomicBool>,
 }
@@ -69,6 +71,7 @@ impl Service {
             runtime_notices: notice::Bus::new(),
             execution_budgets: Arc::new(Mutex::new(HashMap::new())),
             memory_pressure_lock: Arc::new(Mutex::new(())),
+            window_rates: Arc::new(Mutex::new(HashMap::new())),
             shutting_down: Arc::new(AtomicBool::new(false)),
             drive_degraded: Arc::new(AtomicBool::new(drive_degraded)),
         })

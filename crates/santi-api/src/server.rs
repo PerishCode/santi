@@ -6,6 +6,7 @@ mod ingress;
 mod openapi;
 mod routes;
 mod sse;
+mod window;
 
 use santi_core::service::{self, Service};
 use std::{env, fs, net::SocketAddr};
@@ -15,6 +16,9 @@ use crate::{config, provider};
 pub use effects::{ResolveEffectRequest, effect_status, resolve_effect};
 pub use error::ApiError;
 pub use routes::{drive_strand, health, receipt_status, send_strand};
+pub use window::{
+    TranscriptQuery, send_window as window_send, transcript_window as window_transcript,
+};
 
 pub fn export_openapi_json() -> Result<String, String> {
     serde_json::to_string_pretty(&openapi::document()).map_err(|error| error.to_string())

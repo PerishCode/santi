@@ -21,8 +21,9 @@ mod runtime;
 mod schema;
 mod span;
 mod turns;
+mod window;
 
-pub(crate) use budget::{Ingress, Launch, execution_budget_incident_key};
+pub(crate) use budget::{Ingress, Launch, Reservation, execution_budget_incident_key};
 pub(crate) use compact::Collapse;
 use db::*;
 pub use db::{read_schema_version, soul_memory_file};
@@ -32,7 +33,7 @@ use rows::{Decode, collect_rows};
 pub use runtime::Invocation;
 pub use turns::Completion;
 
-pub const SCHEMA_VERSION: u32 = 27;
+pub const SCHEMA_VERSION: u32 = 28;
 pub const DEFAULT_SOUL_ID: &str = "soul_default";
 const SANTI_SYSTEM_ACTOR_ID: &str = "santi";
 const STRAND_INBOX_GATE: i64 = 500;
@@ -287,6 +288,7 @@ impl SantiStore {
             content,
             source,
             admission: None,
+            window: None,
         })
     }
 

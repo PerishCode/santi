@@ -119,6 +119,46 @@ pub mod catalog {
         retry: ErrorRetry::Later,
         exposure: ErrorExposure::OPERATOR_ONLY,
     };
+
+    pub const WINDOW_IDENTITY_MISSING: ErrorDescriptor = ErrorDescriptor {
+        code: "window.identity.missing",
+        category: ErrorCategory::Unauthorized,
+        severity: ErrorSeverity::Error,
+        retry: ErrorRetry::AfterResolution,
+        exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    };
+
+    pub const WINDOW_CONTENT_INVALID: ErrorDescriptor = ErrorDescriptor {
+        code: "window.content.invalid",
+        category: ErrorCategory::InvalidInput,
+        severity: ErrorSeverity::Error,
+        retry: ErrorRetry::AfterResolution,
+        exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    };
+
+    pub const WINDOW_CONTENT_OVERSIZE: ErrorDescriptor = ErrorDescriptor {
+        code: "window.content.oversize",
+        category: ErrorCategory::InvalidInput,
+        severity: ErrorSeverity::Error,
+        retry: ErrorRetry::AfterResolution,
+        exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    };
+
+    pub const WINDOW_RATE_LIMITED: ErrorDescriptor = ErrorDescriptor {
+        code: "window.rate.limited",
+        category: ErrorCategory::ResourceExhausted,
+        severity: ErrorSeverity::Error,
+        retry: ErrorRetry::Later,
+        exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    };
+
+    pub const WINDOW_MESSAGE_CONFLICT: ErrorDescriptor = ErrorDescriptor {
+        code: "window.message.conflict",
+        category: ErrorCategory::InvalidInput,
+        severity: ErrorSeverity::Error,
+        retry: ErrorRetry::AfterResolution,
+        exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    };
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]

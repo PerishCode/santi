@@ -65,6 +65,10 @@ impl ApiError {
     pub fn from_santi(error: SantiError) -> Self {
         let status = if error.code == catalog::CONTEXT_BUDGET_EXCEEDED.code {
             StatusCode::LOCKED
+        } else if error.code == catalog::WINDOW_MESSAGE_CONFLICT.code {
+            StatusCode::CONFLICT
+        } else if error.code == catalog::WINDOW_CONTENT_OVERSIZE.code {
+            StatusCode::PAYLOAD_TOO_LARGE
         } else {
             match error.category {
                 ErrorCategory::Internal => StatusCode::INTERNAL_SERVER_ERROR,
@@ -111,6 +115,17 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {
-        (self.status, Json(self.error)).into_response()
+        let retry_after = self
+            .error
+            .context
+            .get("retry_after_seconds")
+            .and_then(serde_json::Value::as_u64);
+        let mut response = (self.status, Json(self.error)).into_response();
+        if let Some(seconds) = retry_after
+            && let Ok(value) = axum::http::HeaderValue::from_str(&seconds.to_string())
+        {
+            response.headers_mut().insert("retry-after", value);
+        }
+        response
     }
 }

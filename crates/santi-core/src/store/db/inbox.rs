@@ -1,4 +1,4 @@
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
 use super::Database;
@@ -46,7 +46,15 @@ pub(in crate::store) fn drain_inbox_in_tx(
     let mut drained = Vec::with_capacity(pending.len());
     let mut inbox_ids = Vec::with_capacity(pending.len());
     for pending_entry in pending {
-        let message_id = prefixed_id("msg");
+        let reserved: Option<String> = conn
+            .query_row(
+                "SELECT message_id FROM window_messages WHERE inbox_id = ?1",
+                params![pending_entry.id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        let message_id = reserved.unwrap_or_else(|| prefixed_id("msg"));
         conn.execute(
             r#"
             INSERT INTO messages (
@@ -74,6 +82,11 @@ pub(in crate::store) fn drain_inbox_in_tx(
             turn: committing_turn_id,
             at: &now,
         })?;
+        conn.execute(
+            "UPDATE window_messages SET cursor = ?1 WHERE inbox_id = ?2",
+            params![relation.strand_seq, pending_entry.id],
+        )
+        .map_err(|error| error.to_string())?;
         conn.execute(
             "DELETE FROM strand_inbox WHERE id = ?1",
             params![pending_entry.id],

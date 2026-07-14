@@ -388,33 +388,41 @@ impl SantiStore {
         let version = conn
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .map_err(|error| error.to_string())?;
-        if version == 21 && SCHEMA_VERSION == 27 {
+        if version == 21 && SCHEMA_VERSION == 28 {
             migrate_v21_to_v22(&conn)?;
             migrate_v22_to_v23(&conn)?;
             migrate_v23_to_v24(&conn)?;
             super::migration::receipt::migrate_v24_to_v25(&conn)?;
             super::migration::effect::migrate_v25_to_v26(&conn)?;
             super::migration::im::migrate_v26_to_v27(&conn)?;
-        } else if version == 22 && SCHEMA_VERSION == 27 {
+            super::migration::window::migrate_v27_to_v28(&conn)?;
+        } else if version == 22 && SCHEMA_VERSION == 28 {
             migrate_v22_to_v23(&conn)?;
             migrate_v23_to_v24(&conn)?;
             super::migration::receipt::migrate_v24_to_v25(&conn)?;
             super::migration::effect::migrate_v25_to_v26(&conn)?;
             super::migration::im::migrate_v26_to_v27(&conn)?;
-        } else if version == 23 && SCHEMA_VERSION == 27 {
+            super::migration::window::migrate_v27_to_v28(&conn)?;
+        } else if version == 23 && SCHEMA_VERSION == 28 {
             migrate_v23_to_v24(&conn)?;
             super::migration::receipt::migrate_v24_to_v25(&conn)?;
             super::migration::effect::migrate_v25_to_v26(&conn)?;
             super::migration::im::migrate_v26_to_v27(&conn)?;
-        } else if version == 24 && SCHEMA_VERSION == 27 {
+            super::migration::window::migrate_v27_to_v28(&conn)?;
+        } else if version == 24 && SCHEMA_VERSION == 28 {
             super::migration::receipt::migrate_v24_to_v25(&conn)?;
             super::migration::effect::migrate_v25_to_v26(&conn)?;
             super::migration::im::migrate_v26_to_v27(&conn)?;
-        } else if version == 25 && SCHEMA_VERSION == 27 {
+            super::migration::window::migrate_v27_to_v28(&conn)?;
+        } else if version == 25 && SCHEMA_VERSION == 28 {
             super::migration::effect::migrate_v25_to_v26(&conn)?;
             super::migration::im::migrate_v26_to_v27(&conn)?;
-        } else if version == 26 && SCHEMA_VERSION == 27 {
+            super::migration::window::migrate_v27_to_v28(&conn)?;
+        } else if version == 26 && SCHEMA_VERSION == 28 {
             super::migration::im::migrate_v26_to_v27(&conn)?;
+            super::migration::window::migrate_v27_to_v28(&conn)?;
+        } else if version == 27 && SCHEMA_VERSION == 28 {
+            super::migration::window::migrate_v27_to_v28(&conn)?;
         } else if version != SCHEMA_VERSION {
             conn.execute_batch(
                 r#"
@@ -428,6 +436,7 @@ impl SantiStore {
                 DROP TABLE IF EXISTS receipt_transitions;
                 DROP TABLE IF EXISTS inbox_receipts;
                 DROP TABLE IF EXISTS effect_transitions;
+                DROP TABLE IF EXISTS window_messages;
                 DROP TABLE IF EXISTS im_inbox;
                 DROP TABLE IF EXISTS im_participants;
                 DROP TABLE IF EXISTS compacts;

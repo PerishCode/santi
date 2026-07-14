@@ -60,6 +60,11 @@ pub(super) fn router(service: Service) -> Router {
         .route("/api/v1/strands/{strand_id}/runtime", get(runtime_snapshot))
         .route("/api/v1/im/send", post(super::im::send_im))
         .route("/api/v1/im/inbox/{participant_id}", get(super::im::poll_im))
+        .route("/api/v1/window/im/send", post(super::window::send_window))
+        .route(
+            "/api/v1/window/im/transcript",
+            get(super::window::transcript_window),
+        )
         .route(
             "/api/v1/bucket/{soul_id}/{strand_id}/{*key}",
             get(crate::bucket::get_bucket_object),

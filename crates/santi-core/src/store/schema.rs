@@ -336,4 +336,15 @@ CREATE INDEX IF NOT EXISTS idx_im_inbox_participant_seq ON im_inbox (participant
 CREATE UNIQUE INDEX IF NOT EXISTS idx_im_inbox_turn
 ON im_inbox(turn_id)
 WHERE turn_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS window_messages (
+    participant_id TEXT NOT NULL,
+    client_message_id TEXT NOT NULL,
+    inbox_id TEXT NOT NULL UNIQUE,
+    message_id TEXT NOT NULL UNIQUE,
+    content_hash TEXT NOT NULL,
+    cursor INTEGER,
+    received_at TEXT NOT NULL,
+    PRIMARY KEY (participant_id, client_message_id)
+);
 "#;

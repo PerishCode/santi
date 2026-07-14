@@ -1,4 +1,4 @@
-use crate::store::{Ingress, Launch, StartTurnOutcome, errors::drive::Input};
+use crate::store::{Ingress, Launch, Reservation, StartTurnOutcome, errors::drive::Input};
 use crate::{
     DriveStrandResponse, DriveStrandState, ErrorScope, ErrorSource, InboxSource, IngestOutcome,
     MessageContent, MessageKind, SantiError, SantiStreamPayload, SendStrandAcceptedResponse,
@@ -13,6 +13,7 @@ pub(in crate::service) struct Ingest<'a> {
     pub(in crate::service) kind: MessageKind,
     pub(in crate::service) trigger: &'a str,
     pub(in crate::service) source: Option<InboxSource>,
+    pub(in crate::service) window: Option<Reservation<'a>>,
 }
 
 struct Audit {
@@ -62,6 +63,7 @@ impl Service {
                 kind,
                 trigger: trigger_type,
                 source: None,
+                window: None,
             },
         )
     }
@@ -119,6 +121,7 @@ impl Service {
             content: input.content,
             source: input.source,
             admission: admission.as_ref(),
+            window: input.window,
         })?;
         self.dispatch_error_events();
         if let IngestOutcome::Rejected { error } = &outcome {
@@ -174,6 +177,7 @@ impl Service {
                 kind: MessageKind::SantiSystem,
                 trigger: "system",
                 source,
+                window: None,
             },
         )?;
         Ok(outcome)
@@ -213,6 +217,7 @@ impl Service {
                     kind: MessageKind::Text,
                     trigger: "strand_send",
                     source: Some(InboxSource::new("strand_send").with_ref(strand.id.clone())),
+                    window: None,
                 },
             )
             .map_err(|message| send_error(catalog::INTERNAL, strand_id, message))?;

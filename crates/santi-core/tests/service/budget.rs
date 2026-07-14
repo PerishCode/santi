@@ -480,3 +480,57 @@ async fn compact_resolves_incident() {
         "open and resolve are the only lifecycle events"
     );
 }
+
+#[tokio::test]
+async fn budget_raise_clears_hold_on_ingest() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let held = service_with_budget(
+        &temp,
+        Arc::new(FakeProvider {
+            input_budget_bytes: Some(1),
+            ..FakeProvider::default()
+        }),
+    );
+    let rejected = held
+        .im_send(santi_core::DEFAULT_SOUL_ID, "operator", "over budget")
+        .expect("im send");
+    let santi_core::IngestOutcome::Rejected { error } = rejected else {
+        panic!("first send should open the hold");
+    };
+    assert_eq!(error.code, "context.budget.exceeded");
+    let repeat = held
+        .im_send(santi_core::DEFAULT_SOUL_ID, "operator", "still held")
+        .expect("im send repeat");
+    let santi_core::IngestOutcome::Rejected {
+        error: repeat_error,
+    } = repeat
+    else {
+        panic!("held strand must keep rejecting before the raise");
+    };
+    assert_eq!(repeat_error.code, "context.budget.exceeded");
+    drop(held);
+
+    let raised = service_with_budget(
+        &temp,
+        Arc::new(FakeProvider {
+            input_budget_bytes: Some(500_000),
+            ..FakeProvider::default()
+        }),
+    );
+    let outcome = raised
+        .im_send(santi_core::DEFAULT_SOUL_ID, "operator", "after the raise")
+        .expect("im send after raise");
+    let santi_core::IngestOutcome::Accepted { receipt } = outcome else {
+        panic!("under-budget hold must auto-clear on ingest remeasure");
+    };
+    let runtime = raised
+        .runtime_snapshot(&receipt.strand_id)
+        .expect("runtime")
+        .expect("strand");
+    let incident = runtime
+        .errors
+        .iter()
+        .find(|incident| incident.code == "context.budget.exceeded")
+        .expect("context incident recorded");
+    assert_eq!(incident.status, santi_core::IncidentStatus::Resolved);
+}

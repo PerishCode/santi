@@ -79,7 +79,7 @@ pub(super) async fn ingest_webhook(
             "strand_strategy": subscription.strand_strategy,
             "event_label": event.label,
             "materialized_label": label,
-            "event": event.source_metadata,
+            "event": event.metadata,
         }));
     match service
         .ingest_external_source(

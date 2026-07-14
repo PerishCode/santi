@@ -95,7 +95,7 @@ impl WebhookAdaptor for FeishuAdaptor {
             return Ok(WebhookOutcome::Event(NormalizedEvent {
                 santi_system_text: String::new(),
                 label: format!("feishu:{webhook_name}:{event_type}"),
-                source_metadata: None,
+                metadata: None,
                 in_scope: false,
                 self_authored: false,
             }));
@@ -119,7 +119,7 @@ impl WebhookAdaptor for FeishuAdaptor {
             "[feishu] im.message.receive_v1 in chat {chat_id} ({chat_type})\nmessage_id: {message_id}\nevent_id: {event_id}"
         );
         let label = format!("feishu:{webhook_name}:chat:{chat_id}");
-        let source_metadata = json!({
+        let metadata = json!({
             "adaptor": "feishu",
             "webhook_name": webhook_name,
             "event_type": event_type,
@@ -134,7 +134,7 @@ impl WebhookAdaptor for FeishuAdaptor {
         Ok(WebhookOutcome::Event(NormalizedEvent {
             santi_system_text,
             label,
-            source_metadata: Some(source_metadata),
+            metadata: Some(metadata),
             in_scope,
             self_authored: false,
         }))

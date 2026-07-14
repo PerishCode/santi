@@ -11,7 +11,7 @@ use github::GithubAdaptor;
 pub struct NormalizedEvent {
     pub santi_system_text: String,
     pub label: String,
-    pub source_metadata: Option<Value>,
+    pub metadata: Option<Value>,
     pub in_scope: bool,
     pub self_authored: bool,
 }

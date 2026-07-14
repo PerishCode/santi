@@ -77,7 +77,7 @@ impl WebhookAdaptor for GithubAdaptor {
             return Ok(WebhookOutcome::Event(NormalizedEvent {
                 santi_system_text: String::new(),
                 label: format!("github:{webhook_name}:{event_type}"),
-                source_metadata: None,
+                metadata: None,
                 in_scope: false,
                 self_authored: false,
             }));
@@ -114,7 +114,7 @@ impl WebhookAdaptor for GithubAdaptor {
             "[github] {event_type}.{action} on {repo}#{number}\nurl: {url}\ndelivery: {delivery}"
         );
         let label = format!("github:{webhook_name}:issue:{repo}#{number}");
-        let source_metadata = json!({
+        let metadata = json!({
             "adaptor": "github",
             "webhook_name": webhook_name,
             "event_type": event_type,
@@ -129,7 +129,7 @@ impl WebhookAdaptor for GithubAdaptor {
         Ok(WebhookOutcome::Event(NormalizedEvent {
             santi_system_text,
             label,
-            source_metadata: Some(source_metadata),
+            metadata: Some(metadata),
             in_scope,
             self_authored,
         }))

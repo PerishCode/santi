@@ -7,11 +7,10 @@ use santi_provider::ProviderItem;
 
 use crate::{MessageContent, MessageIntake, SantiStreamPayload};
 
-use super::Service;
+use super::{Service, address::Address};
 
 pub(super) struct Observation<'a> {
-    pub(super) strand_id: &'a str,
-    pub(super) turn_id: &'a str,
+    pub(super) address: Address<&'a str>,
     pub(super) round: usize,
     pub(super) provider: &'a str,
     pub(super) model: &'a str,
@@ -30,7 +29,7 @@ pub(super) enum Event {
 impl Event {
     fn turn_id(&self) -> &str {
         match self {
-            Self::Observed(event) => &event.turn_id,
+            Self::Observed(event) => &event.address.turn_id,
         }
     }
 
@@ -43,8 +42,7 @@ impl Event {
 
 #[derive(Debug, Clone)]
 pub(super) struct Observed {
-    pub(super) strand_id: String,
-    pub(super) turn_id: String,
+    pub(super) address: Address<String>,
     pub(super) round: usize,
     pub(super) provider: String,
     pub(super) model: String,
@@ -68,7 +66,7 @@ impl Observed {
         self.should_remind().then(|| {
             format!(
                 "compact_reminder:{}:{}:{}",
-                self.strand_id, self.reference_threshold_bytes, self.band
+                self.address.strand_id, self.reference_threshold_bytes, self.band
             )
         })
     }
@@ -146,8 +144,7 @@ impl Service {
         let input_bytes = provider_input_bytes(observation.input);
         let instructions_bytes = observation.instructions.map_or(0, str::len);
         let event = Observed {
-            strand_id: observation.strand_id.to_string(),
-            turn_id: observation.turn_id.to_string(),
+            address: observation.address.owned(),
             round: observation.round,
             provider: observation.provider.to_string(),
             model: observation.model.to_string(),
@@ -180,12 +177,12 @@ impl Service {
         }
         let content = compact_reminder_message(&event);
         let message = self.store.append_santi_system_message(
-            &event.strand_id,
+            &event.address.strand_id,
             content,
             MessageIntake::Record,
         )?;
         self.publish_stream(
-            &event.strand_id,
+            &event.address.strand_id,
             SantiStreamPayload::MessageCreated {
                 message: message.strand_message,
             },
@@ -202,7 +199,7 @@ fn compact_reminder_message(event: &Observed) -> MessageContent {
             "scope: strand_local".to_string(),
             "wake: false".to_string(),
             "obligation: false".to_string(),
-            format!("trigger_turn_id: {}", event.turn_id),
+            format!("trigger_turn_id: {}", event.address.turn_id),
             format!("round: {}", event.round),
             format!("provider: {}", event.provider),
             format!("model: {}", event.model),

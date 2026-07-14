@@ -9,7 +9,8 @@ use crate::{
 };
 
 use super::super::{
-    Service, notice::Observation, text::delta, timing, timing::provider_event_name,
+    Service, address::Address, notice::Observation, text::delta, timing,
+    timing::provider_event_name,
 };
 use super::budget::Verdict;
 use super::failure::{Admission, Failure, Metadata, Operation, Persistence, Stage};
@@ -23,8 +24,7 @@ struct Output {
 
 struct Driver<'a, 'turn> {
     service: &'a Service,
-    strand_id: &'a str,
-    turn_id: &'a str,
+    address: Address<&'a str>,
     number: usize,
     provider_family: &'a str,
     request_model: &'a str,
@@ -72,7 +72,7 @@ impl Driver<'_, '_> {
             Err(error) => {
                 self.timing.failed(self.number, "sse_event", &error);
                 let result = self.service.fail_current_thinking_span(
-                    self.strand_id,
+                    self.address.strand_id,
                     &mut self.current_thinking_span,
                     error.clone(),
                 );
@@ -129,16 +129,16 @@ impl Driver<'_, '_> {
         let result = self
             .service
             .ensure_thinking_span(crate::service::thinking::Progress {
-                strand: self.strand_id,
-                turn: self.turn_id,
+                strand: self.address.strand_id,
+                turn: self.address.turn_id,
                 current: &mut self.current_thinking_span,
                 summary: &mut self.summary_thinking_span,
                 response: provider_response_id.clone(),
             });
         self.runtime(Operation::Persistence(Persistence::Thinking), result)?;
         self.service.publish_turn_activity(
-            self.strand_id,
-            self.turn_id,
+            self.address.strand_id,
+            self.address.turn_id,
             TurnActivityState::Thinking,
             provider_response_id,
         );
@@ -147,7 +147,7 @@ impl Driver<'_, '_> {
 
     fn persist_reasoning_summary(&mut self) -> Result<(), Failure> {
         let result = self.service.update_thinking_span_summary(
-            self.strand_id,
+            self.address.strand_id,
             &mut self.summary_thinking_span,
             self.reasoning_summary.clone(),
         );
@@ -156,8 +156,7 @@ impl Driver<'_, '_> {
 
     fn text_delta(&mut self, delta: String) -> Result<(), Failure> {
         let update = delta::Update {
-            strand_id: self.strand_id,
-            turn_id: self.turn_id,
+            address: self.address.clone(),
             assistant_text: self.assistant_text,
             round_assistant_text: &mut self.round_assistant_text,
             timing: self.timing,
@@ -172,14 +171,14 @@ impl Driver<'_, '_> {
     fn function_call_requested(&mut self, call: ProviderFunctionCall) -> Result<(), Failure> {
         self.timing.function_call_requested(self.number, &call.name);
         let result = self.service.complete_current_thinking_span(
-            self.strand_id,
+            self.address.strand_id,
             &mut self.current_thinking_span,
             ThinkingCompletionReason::ToolCallRequested,
         );
         self.runtime(Operation::Persistence(Persistence::Thinking), result)?;
         self.service.publish_turn_activity(
-            self.strand_id,
-            self.turn_id,
+            self.address.strand_id,
+            self.address.turn_id,
             TurnActivityState::CallingTool,
             self.active_provider_response_id.clone(),
         );
@@ -191,7 +190,7 @@ impl Driver<'_, '_> {
         self.timing.completed(self.number);
         self.active_provider_response_id = provider_response_id.clone();
         let result = self.service.complete_current_thinking_span(
-            self.strand_id,
+            self.address.strand_id,
             &mut self.current_thinking_span,
             ThinkingCompletionReason::ProviderCompleted,
         );
@@ -203,7 +202,7 @@ impl Driver<'_, '_> {
     fn failed(&mut self, error: String) -> Failure {
         self.timing.failed(self.number, "provider_response", &error);
         let result = self.service.fail_current_thinking_span(
-            self.strand_id,
+            self.address.strand_id,
             &mut self.current_thinking_span,
             error.clone(),
         );
@@ -353,8 +352,7 @@ impl Service {
                 request.instructions.as_ref().map_or(0, |text| text.len()),
             );
             self.observe_provider_input(Observation {
-                strand_id,
-                turn_id,
+                address: Address { strand_id, turn_id },
                 round,
                 provider: &provider_family,
                 model: &request.model,
@@ -389,8 +387,7 @@ impl Service {
                 assistant_text: round_assistant_text,
             } = Driver {
                 service: self,
-                strand_id,
-                turn_id,
+                address: Address { strand_id, turn_id },
                 number: round,
                 provider_family: &provider_family,
                 request_model: &request_model,

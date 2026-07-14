@@ -1,3 +1,4 @@
+mod address;
 mod bucket;
 mod compact;
 mod drive;

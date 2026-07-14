@@ -19,6 +19,7 @@ mod im;
 mod rows;
 mod runtime;
 mod schema;
+mod span;
 mod turns;
 
 pub(crate) use budget::{Ingress, Launch, execution_budget_incident_key};

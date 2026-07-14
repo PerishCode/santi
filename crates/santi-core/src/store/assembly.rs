@@ -5,6 +5,7 @@ use serde_json::json;
 use super::{
     SantiStore,
     db::{Database, message_to_provider_item},
+    span::Span,
 };
 
 impl SantiStore {
@@ -34,14 +35,18 @@ impl SantiStore {
             &conn,
             strand_id,
             Some(Preview {
-                start_seq: response.start_seq,
-                end_seq: response.end_seq,
+                span: Span {
+                    start_seq: response.start_seq,
+                    end_seq: response.end_seq,
+                },
                 absorbed: response.absorbed.as_slice(),
                 content: render_compact_for_provider(
                     &preview,
                     Range {
-                        start_seq: response.start_seq,
-                        end_seq: response.end_seq,
+                        span: Span {
+                            start_seq: response.start_seq,
+                            end_seq: response.end_seq,
+                        },
                         collapsed_count: response.collapsed_count,
                     },
                 ),
@@ -58,15 +63,13 @@ pub(super) fn assembly_input_in_conn(
 }
 
 struct Preview<'a> {
-    start_seq: i64,
-    end_seq: i64,
+    span: Span,
     absorbed: &'a [String],
     content: String,
 }
 
 struct Overlay {
-    start_seq: i64,
-    end_seq: i64,
+    span: Span,
     content: String,
 }
 
@@ -89,13 +92,17 @@ fn assembly_input_with_preview(
             database.message_seq_in_strand(strand_id, &compact.end_message_id)?,
         ) {
             overlay.push(Overlay {
-                start_seq: from_seq,
-                end_seq: to_seq,
+                span: Span {
+                    start_seq: from_seq,
+                    end_seq: to_seq,
+                },
                 content: render_compact_for_provider(
                     &compact,
                     Range {
-                        start_seq: from_seq,
-                        end_seq: to_seq,
+                        span: Span {
+                            start_seq: from_seq,
+                            end_seq: to_seq,
+                        },
                         collapsed_count: to_seq.saturating_sub(from_seq).saturating_add(1),
                     },
                 ),
@@ -104,12 +111,14 @@ fn assembly_input_with_preview(
     }
     if let Some(preview) = preview {
         overlay.push(Overlay {
-            start_seq: preview.start_seq,
-            end_seq: preview.end_seq,
+            span: Span {
+                start_seq: preview.span.start_seq,
+                end_seq: preview.span.end_seq,
+            },
             content: preview.content,
         });
     }
-    overlay.sort_by_key(|overlay| overlay.start_seq);
+    overlay.sort_by_key(|overlay| overlay.span.start_seq);
 
     let mut stmt = conn
         .prepare(
@@ -135,11 +144,11 @@ fn assembly_input_with_preview(
     let mut overlay_emitted = false;
     for row in rows {
         let (seq, target_type, target_id) = row.map_err(|error| error.to_string())?;
-        while overlay_index < overlay.len() && overlay[overlay_index].end_seq < seq {
+        while overlay_index < overlay.len() && overlay[overlay_index].span.end_seq < seq {
             overlay_index += 1;
             overlay_emitted = false;
         }
-        if overlay_index < overlay.len() && overlay[overlay_index].start_seq <= seq {
+        if overlay_index < overlay.len() && overlay[overlay_index].span.start_seq <= seq {
             if !overlay_emitted {
                 input.push(ProviderItem::Message {
                     role: "system".to_string(),
@@ -225,8 +234,7 @@ impl Database<'_> {
 }
 
 struct Range {
-    start_seq: i64,
-    end_seq: i64,
+    span: Span,
     collapsed_count: i64,
 }
 
@@ -274,8 +282,8 @@ fn render_compact_for_provider(compact: &crate::Compact, fallback_range: Range) 
             "end_message_id": compact.end_message_id,
         },
         "covered_strand_seq": {
-            "start_seq": start_seq.unwrap_or(fallback_range.start_seq),
-            "end_seq": end_seq.unwrap_or(fallback_range.end_seq),
+            "start_seq": start_seq.unwrap_or(fallback_range.span.start_seq),
+            "end_seq": end_seq.unwrap_or(fallback_range.span.end_seq),
         },
         "collapsed_entries": collapsed_count.unwrap_or(fallback_range.collapsed_count),
         "reason": metadata_str(metadata, "reason").unwrap_or("not_declared"),

@@ -6,11 +6,10 @@ use crate::{
     MessageState, StrandTargetType, prefixed_id, timestamp_now,
 };
 
-use super::{SantiStore, db::Database};
+use super::{SantiStore, db::Database, span::Span};
 
 struct Plan {
-    start_seq: i64,
-    end_seq: i64,
+    span: Span,
     absorbed: Vec<String>,
     collapsed_count: i64,
 }
@@ -82,8 +81,8 @@ impl SantiStore {
             compact_id,
             start_message_id: from.to_string(),
             end_message_id: to.to_string(),
-            start_seq: plan.start_seq,
-            end_seq: plan.end_seq,
+            start_seq: plan.span.start_seq,
+            end_seq: plan.span.end_seq,
             absorbed: plan.absorbed,
             collapsed_count: plan.collapsed_count,
             dry_run: false,
@@ -106,8 +105,8 @@ impl SantiStore {
             compact_id: prefixed_id("cmp_preview"),
             start_message_id: from_message_id.to_string(),
             end_message_id: to_message_id.to_string(),
-            start_seq: plan.start_seq,
-            end_seq: plan.end_seq,
+            start_seq: plan.span.start_seq,
+            end_seq: plan.span.end_seq,
             absorbed: plan.absorbed,
             collapsed_count: plan.collapsed_count,
             dry_run: true,
@@ -279,8 +278,7 @@ fn plan_compact_in_tx(
         .map_err(|error| error.to_string())?;
 
     Ok(Plan {
-        start_seq,
-        end_seq,
+        span: Span { start_seq, end_seq },
         absorbed,
         collapsed_count,
     })

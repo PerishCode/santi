@@ -14,6 +14,7 @@ export interface Evidence {
   schema: string;
   digest: string;
   components: string[];
+  properties: Record<string, string[]>;
 }
 
 export const EVIDENCE_FILE = ".runseal/wire-schema.json";
@@ -21,6 +22,7 @@ export const EVIDENCE_FILE = ".runseal/wire-schema.json";
 export interface Contract {
   digest: string;
   components: string[];
+  properties: Record<string, string[]>;
 }
 
 /** Freshly export the OpenAPI document and derive digest + component list. */
@@ -44,7 +46,36 @@ export async function exportContract(root: string): Promise<Contract> {
   if (!schemas || typeof schemas !== "object") {
     throw new Error("export-openapi: document has no components.schemas");
   }
-  return { digest, components: Object.keys(schemas).sort() };
+  const components = Object.keys(schemas).sort();
+  const properties: Record<string, string[]> = {};
+  for (const name of components) {
+    properties[name] = propertyNames(schemas[name]);
+  }
+  return { digest, components, properties };
+}
+
+function propertyNames(schema: unknown): string[] {
+  const names = new Set<string>();
+  const visit = (node: unknown) => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    const record = node as Record<string, unknown>;
+    const own = record.properties;
+    if (own && typeof own === "object") {
+      for (const key of Object.keys(own)) {
+        names.add(key);
+      }
+    }
+    for (const branch of ["oneOf", "allOf", "anyOf"]) {
+      const variants = record[branch];
+      if (Array.isArray(variants)) {
+        variants.forEach(visit);
+      }
+    }
+  };
+  visit(schema);
+  return [...names].sort();
 }
 
 export async function loadEvidence(root: string): Promise<Evidence> {
@@ -54,9 +85,10 @@ export async function loadEvidence(root: string): Promise<Evidence> {
 
 export async function writeEvidence(root: string, contract: Contract): Promise<void> {
   const evidence: Evidence = {
-    schema: "santi.wire_schema.v1",
+    schema: "santi.wire_schema.v2",
     digest: contract.digest,
     components: contract.components,
+    properties: contract.properties,
   };
   const path = join(root, EVIDENCE_FILE);
   const tmp = `${path}.tmp`;
@@ -83,6 +115,11 @@ export function verifyEvidence(evidence: Evidence, contract: Contract): string[]
   if (evidence.components.join("\n") !== contract.components.join("\n")) {
     problems.push(
       `${EVIDENCE_FILE} is stale: recorded component list differs from the fresh contract`,
+    );
+  }
+  if (JSON.stringify(evidence.properties ?? null) !== JSON.stringify(contract.properties)) {
+    problems.push(
+      `${EVIDENCE_FILE} is stale: recorded property lists differ from the fresh contract`,
     );
   }
   if (problems.length > 0) {
@@ -119,4 +156,106 @@ async function sha256(text: string): Promise<string> {
   return Array.from(new Uint8Array(hash))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+}
+
+export interface FieldVerdict {
+  lift: boolean;
+  component?: string;
+  reason: string;
+}
+
+/**
+ * Live owner-aware binding (W3 slice 2): the finding at `line` lifts only if
+ * a recognized component's brace-balanced declaration span contains it, the
+ * token is that component's contract property, and the line is an unrenamed
+ * `pub` field declaration. Everything else stays internal.
+ */
+export function fieldBinding(
+  source: string,
+  components: string[],
+  properties: Record<string, string[]>,
+  token: string,
+  line: number,
+): FieldVerdict {
+  const containing = componentSpans(source, components).filter(
+    (span) => span.start <= line && line <= span.end,
+  );
+  if (containing.length === 0) {
+    return { lift: false, reason: "outside any component declaration span" };
+  }
+  if (containing.length > 1) {
+    return {
+      lift: false,
+      component: containing[0].component,
+      reason: `line ${line} sits in ${containing.length} overlapping owner spans (ambiguous)`,
+    };
+  }
+  const owner = containing[0];
+  if (!(properties[owner.component] ?? []).includes(token)) {
+    return {
+      lift: false,
+      component: owner.component,
+      reason: `${token} is not a contract property of ${owner.component}`,
+    };
+  }
+  const lines = source.split("\n");
+  const text = lines[line - 1] ?? "";
+  if (!new RegExp(`pub ${token}\\s*:`).test(text)) {
+    return {
+      lift: false,
+      component: owner.component,
+      reason: `line ${line} is not a pub field declaration of ${token}`,
+    };
+  }
+  for (let index = line - 2; index >= 0; index -= 1) {
+    const above = lines[index].trim();
+    if (!above.startsWith("#[")) {
+      break;
+    }
+    if (above.includes("rename")) {
+      return {
+        lift: false,
+        component: owner.component,
+        reason:
+          `${owner.component}.${token} carries a serde rename; Rust spelling is not the wire spelling`,
+      };
+    }
+  }
+  return {
+    lift: true,
+    component: owner.component,
+    reason: `${owner.component}.${token} = contract property (identity binding)`,
+  };
+}
+
+function componentSpans(
+  source: string,
+  components: string[],
+): Array<{ component: string; start: number; end: number }> {
+  const spans: Array<{ component: string; start: number; end: number }> = [];
+  const lines = source.split("\n");
+  const wanted = new Set(components);
+  for (let index = 0; index < lines.length; index += 1) {
+    const declared = lines[index].match(/\b(?:struct|enum)\s+(\w+)/);
+    if (!declared || !wanted.has(declared[1])) {
+      continue;
+    }
+    let depth = 0;
+    let opened = false;
+    for (let scan = index; scan < lines.length; scan += 1) {
+      for (const char of lines[scan]) {
+        if (char === "{") {
+          depth += 1;
+          opened = true;
+        } else if (char === "}") {
+          depth -= 1;
+        }
+      }
+      if (opened && depth === 0) {
+        spans.push({ component: declared[1], start: index + 1, end: scan + 1 });
+        break;
+      }
+    }
+  }
+  return spans;
 }

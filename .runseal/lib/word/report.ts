@@ -8,6 +8,7 @@ import {
   Evidence,
   EVIDENCE_FILE,
   exportContract,
+  fieldBinding,
   loadEvidence,
 } from "@/lib/word/schema.ts";
 import { classify, Track, TRACKS } from "@/lib/word/tracks.ts";
@@ -144,22 +145,24 @@ export async function classifiedScan(
     throw error;
   }
   assertFresh(evidence, contract);
-  const notes = await applyWireEvidence(root, report, evidence.components);
+  const notes = await applyWireEvidence(root, report, evidence);
   return { report, raw, notes };
 }
 
 /**
- * Reclassify core rows whose token exactly matches an OpenAPI component and
- * whose Rust declaration is unique in the workspace. Ambiguous spellings
- * decline the override and stay core — loudly.
+ * Reclassify rows carrying contract identity bindings: PascalCase tokens that
+ * ARE components (unique declaration), and snake field declarations that ARE
+ * component properties (live owner-span verification, W3 slice 2). Ambiguity
+ * declines loudly; locals, methods, and renamed fields never lift.
  */
 export async function applyWireEvidence(
   root: string,
   report: Report,
-  components: string[],
+  evidence: Evidence,
   countDeclarations: (root: string, token: string) => Promise<number> = declarationCount,
+  readSource: (path: string) => Promise<string> = (path) => Deno.readTextFile(join(root, path)),
 ): Promise<string[]> {
-  const set = new Set(components);
+  const set = new Set(evidence.components);
   const notes: string[] = [];
   const candidates = [
     ...new Set(
@@ -189,6 +192,83 @@ export async function applyWireEvidence(
       );
     }
   }
+
+  const propertyTokens = new Set(Object.values(evidence.properties).flat());
+  const groups = new Map<string, Finding[]>();
+  for (const finding of report.findings) {
+    if (finding.track === "internal" && finding.line > 0 && propertyTokens.has(finding.token)) {
+      const key = `${finding.path}\u0000${finding.token}`;
+      groups.set(key, [...(groups.get(key) ?? []), finding]);
+    }
+  }
+  const sources = new Map<string, string>();
+  for (const rows of groups.values()) {
+    let source = sources.get(rows[0].path);
+    if (source === undefined) {
+      source = await readSource(rows[0].path);
+      sources.set(rows[0].path, source);
+    }
+    const verdicts = rows.map((finding) => ({
+      finding,
+      verdict: fieldBinding(
+        source as string,
+        evidence.components,
+        evidence.properties,
+        finding.token,
+        finding.line,
+      ),
+    }));
+    const anyOwned = verdicts.some((entry) => entry.verdict.component !== undefined);
+    const failures = verdicts.filter((entry) => !entry.verdict.lift);
+    if (failures.length > 0) {
+      if (anyOwned) {
+        for (const entry of failures) {
+          notes.push(
+            `field evidence declined at ${entry.finding.path}:${entry.finding.line}: ${entry.verdict.reason}; group stays internal`,
+          );
+        }
+        for (const entry of verdicts.filter((each) => each.verdict.lift)) {
+          notes.push(
+            `field evidence declined at ${entry.finding.path}:${entry.finding.line}: another ${entry.finding.token} row in this file failed verification; group stays internal`,
+          );
+        }
+      }
+      continue;
+    }
+    const components = [...new Set(verdicts.map((entry) => entry.verdict.component ?? ""))];
+    if (components.length !== verdicts.length) {
+      for (const entry of verdicts) {
+        notes.push(
+          `field evidence declined at ${entry.finding.path}:${entry.finding.line}: two rows resolve to the same owner (not injective); group stays internal`,
+        );
+      }
+      continue;
+    }
+    let owned = true;
+    for (const component of components) {
+      const owners = await countDeclarations(root, component);
+      if (owners !== 1) {
+        owned = false;
+        for (const entry of verdicts) {
+          notes.push(
+            `field evidence declined at ${entry.finding.path}:${entry.finding.line}: ${owners} workspace declarations of ${component}; group stays internal`,
+          );
+        }
+        break;
+      }
+    }
+    if (!owned) {
+      continue;
+    }
+    for (const entry of verdicts) {
+      entry.finding.track = "wire";
+      notes.push(
+        `field evidence: ${entry.verdict.reason}; internal -> wire (${entry.finding.path}:${entry.finding.line})`,
+      );
+    }
+    changed = true;
+  }
+
   if (changed) {
     report.tracks = trackStats(report.findings);
   }

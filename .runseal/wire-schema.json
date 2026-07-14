@@ -1,5 +1,5 @@
 {
-  "schema": "santi.wire_schema.v1",
+  "schema": "santi.wire_schema.v2",
   "digest": "1eddef8da1e8109e1017d8cff356c50876384384f3a24fd462806ff90e5691ed",
   "components": [
     "ActorType",
@@ -78,5 +78,427 @@
     "TurnStatus",
     "TurnTriggerType",
     "WebhookSubscription"
-  ]
+  ],
+  "properties": {
+    "ActorType": [],
+    "Compact": [
+      "created_at",
+      "end_message_id",
+      "id",
+      "metadata",
+      "start_message_id",
+      "strand_id",
+      "summary"
+    ],
+    "CompactCapsuleOptions": [
+      "queryability",
+      "reason",
+      "risk",
+      "source"
+    ],
+    "CompactExecRequest": [
+      "capsule",
+      "dry_run",
+      "from_message_id",
+      "from_seq",
+      "summary",
+      "to_message_id",
+      "to_seq"
+    ],
+    "CompactExecResponse": [
+      "absorbed",
+      "active_incident_resolved",
+      "collapsed_count",
+      "compact_id",
+      "compression_ratio",
+      "dry_run",
+      "end_message_id",
+      "end_seq",
+      "post_estimate",
+      "pre_estimate",
+      "start_message_id",
+      "start_seq"
+    ],
+    "CompactQueryEntry": [
+      "strand_seq",
+      "target_id",
+      "target_type",
+      "text"
+    ],
+    "CompactQueryResponse": [
+      "compact_id",
+      "end_message_id",
+      "entries",
+      "page_index",
+      "page_size",
+      "start_message_id",
+      "total"
+    ],
+    "ContextBudget": [
+      "input_budget_bytes",
+      "source"
+    ],
+    "ContextEstimate": [
+      "estimator",
+      "input_bytes",
+      "input_items",
+      "instructions_bytes",
+      "tools_bytes",
+      "total_bytes"
+    ],
+    "CreateSoulRequest": [
+      "memory"
+    ],
+    "CreateStrandResponse": [
+      "strand"
+    ],
+    "CreateWebhookRequest": [
+      "adaptor",
+      "name",
+      "secret_env",
+      "soul_id",
+      "strand_strategy"
+    ],
+    "DriveStrandResponse": [
+      "state",
+      "strand_id",
+      "turn"
+    ],
+    "DriveStrandState": [],
+    "EffectResolutionOutcome": [],
+    "EffectState": [],
+    "EffectStatus": [
+      "effect",
+      "receipt_ids",
+      "transitions"
+    ],
+    "EffectTransition": [
+      "evidence",
+      "id",
+      "occurred_at",
+      "reason",
+      "sequence",
+      "state"
+    ],
+    "EffectTransitionReason": [],
+    "ErrorCategory": [],
+    "ErrorExposure": [
+      "caller",
+      "model",
+      "operator"
+    ],
+    "ErrorIncident": [
+      "category",
+      "code",
+      "context",
+      "exposure",
+      "first_seen_at",
+      "id",
+      "incident_key",
+      "last_seen_at",
+      "latest_context",
+      "latest_message",
+      "latest_source",
+      "message",
+      "occurrence_count",
+      "resolved_at",
+      "resolved_by",
+      "retry",
+      "revision",
+      "scope",
+      "severity",
+      "source",
+      "status"
+    ],
+    "ErrorRetry": [],
+    "ErrorScope": [
+      "id",
+      "kind"
+    ],
+    "ErrorSeverity": [],
+    "ErrorSource": [
+      "component",
+      "operation"
+    ],
+    "ErrorTransition": [
+      "id",
+      "incident",
+      "incident_id",
+      "kind",
+      "occurred_at",
+      "revision"
+    ],
+    "ErrorTransitionKind": [],
+    "ForkStrandResponse": [
+      "strand"
+    ],
+    "HealthResponse": [
+      "active_drive_incidents",
+      "degraded",
+      "ok",
+      "service"
+    ],
+    "ImDelivery": [
+      "created_at",
+      "delivery_mode",
+      "id",
+      "message_id",
+      "participant_id",
+      "seq",
+      "strand_id",
+      "turn_id"
+    ],
+    "ImDeliveryMode": [],
+    "ImInboxEntry": [
+      "content",
+      "created_at",
+      "delivery_mode",
+      "from_ref",
+      "id",
+      "message_id",
+      "participant_id",
+      "seq",
+      "turn_id"
+    ],
+    "ImParticipant": [
+      "created_at",
+      "id",
+      "kind"
+    ],
+    "ImSendRequest": [
+      "content",
+      "participant_id",
+      "soul_id"
+    ],
+    "ImSendResponse": [
+      "participant_id",
+      "receipt"
+    ],
+    "IncidentStatus": [],
+    "IngestReceipt": [
+      "inbox_id",
+      "strand_id",
+      "warning"
+    ],
+    "MaterialKind": [],
+    "MaterialRequest": [
+      "kind"
+    ],
+    "MaterialUpdated": [
+      "kind",
+      "strand_id",
+      "updated_at"
+    ],
+    "Message": [
+      "actor_id",
+      "actor_type",
+      "content",
+      "created_at",
+      "deleted_at",
+      "id",
+      "message_kind",
+      "state",
+      "updated_at",
+      "version"
+    ],
+    "MessageContent": [
+      "parts"
+    ],
+    "MessageEvent": [
+      "action",
+      "actor_id",
+      "actor_type",
+      "base_version",
+      "created_at",
+      "id",
+      "message_id",
+      "payload"
+    ],
+    "MessageKind": [],
+    "MessagePart": [
+      "data_base64",
+      "mime_type",
+      "text",
+      "type"
+    ],
+    "MessageState": [],
+    "ReceiptState": [],
+    "ReceiptStatus": [
+      "accepted_at",
+      "effects",
+      "im_deliveries",
+      "inbox_id",
+      "state",
+      "strand_id",
+      "transitions",
+      "updated_at"
+    ],
+    "ReceiptTransition": [
+      "id",
+      "incident_id",
+      "occurred_at",
+      "reconstructed_from",
+      "sequence",
+      "state",
+      "turn_id"
+    ],
+    "ResolveEffectRequest": [
+      "evidence",
+      "outcome"
+    ],
+    "SantiError": [
+      "category",
+      "code",
+      "context",
+      "exposure",
+      "id",
+      "incident_id",
+      "message",
+      "retry",
+      "scope",
+      "severity",
+      "source"
+    ],
+    "SendStrandAcceptedResponse": [
+      "receipt",
+      "strand",
+      "turn",
+      "user_message"
+    ],
+    "SendStrandRequest": [
+      "content"
+    ],
+    "Soul": [
+      "created_at",
+      "id",
+      "updated_at"
+    ],
+    "Strand": [
+      "created_at",
+      "external_label",
+      "fork_point",
+      "id",
+      "last_seen_strand_seq",
+      "next_seq",
+      "parent_strand_id",
+      "provider_state",
+      "soul_id",
+      "strand_memory",
+      "updated_at"
+    ],
+    "StrandBudgetSnapshot": [
+      "active_incident",
+      "budget",
+      "estimate",
+      "strand_id"
+    ],
+    "StrandDetail": [
+      "messages",
+      "strand"
+    ],
+    "StrandEffect": [
+      "created_at",
+      "dispatched_at",
+      "effect_type",
+      "error_text",
+      "id",
+      "result_ref",
+      "settled_at",
+      "state",
+      "strand_id",
+      "tool_call_id",
+      "turn_id",
+      "updated_at"
+    ],
+    "StrandMaterial": [
+      "content_type",
+      "kind",
+      "strand_id",
+      "text",
+      "updated_at"
+    ],
+    "StrandMessage": [
+      "content_text",
+      "message",
+      "relation"
+    ],
+    "StrandMessageRef": [
+      "created_at",
+      "message_id",
+      "strand_id",
+      "strand_seq"
+    ],
+    "StrandRuntimeSnapshot": [
+      "compacts",
+      "effects",
+      "errors",
+      "message_events",
+      "messages",
+      "strand",
+      "thinking_spans",
+      "tool_calls",
+      "tool_results",
+      "turns"
+    ],
+    "StrandTargetType": [],
+    "String": [],
+    "ThinkingCompletionReason": [],
+    "ThinkingSpan": [
+      "completion_reason",
+      "created_at",
+      "error_text",
+      "finished_at",
+      "id",
+      "provider_response_id",
+      "state",
+      "summary",
+      "turn_id",
+      "updated_at"
+    ],
+    "ThinkingSpanState": [],
+    "ToolCall": [
+      "arguments",
+      "created_at",
+      "id",
+      "tool_name",
+      "turn_id"
+    ],
+    "ToolResult": [
+      "created_at",
+      "error_text",
+      "id",
+      "output",
+      "tool_call_id"
+    ],
+    "Turn": [
+      "base_strand_seq",
+      "created_at",
+      "end_strand_seq",
+      "error_text",
+      "finished_at",
+      "id",
+      "status",
+      "strand_id",
+      "trigger_ref",
+      "trigger_type",
+      "updated_at"
+    ],
+    "TurnActivity": [
+      "provider_response_id",
+      "state",
+      "turn_id"
+    ],
+    "TurnActivityState": [],
+    "TurnStatus": [],
+    "TurnTriggerType": [],
+    "WebhookSubscription": [
+      "adaptor",
+      "created_at",
+      "name",
+      "secret_env",
+      "soul_id",
+      "strand_strategy",
+      "updated_at"
+    ]
+  }
 }

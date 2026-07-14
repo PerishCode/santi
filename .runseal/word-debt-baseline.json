@@ -4,16 +4,16 @@
   "total": 2048,
   "tracks": {
     "wire": {
-      "occurrences": 713,
-      "unique": 512
+      "occurrences": 735,
+      "unique": 531
     },
     "test": {
       "occurrences": 491,
       "unique": 401
     },
     "internal": {
-      "occurrences": 844,
-      "unique": 681
+      "occurrences": 822,
+      "unique": 673
     }
   }
 }

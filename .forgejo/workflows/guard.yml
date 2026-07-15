@@ -10,10 +10,40 @@ on:
 jobs:
   guard:
     runs-on: docker
+    # REGISTRY-DRIFT GATE, not a pinned container (Liberte CI-image
+    # amendment, 2026-07-15): this Forge version rejects digest-qualified
+    # job containers before dispatch, so the selector stays on the tag and
+    # the first/last guard steps verify the registry's current manifest for
+    # exactly this tag against the reviewed authority in
+    # .forgejo/ci-image.digest — ADDRESS-BOUND: the Forge exposes no stable
+    # runner identity to jobs (runner.name is empty), so the member is
+    # selected from the runner-injected /etc/hosts mapping of the registry
+    # hostname to the hosting appliance's own address, and every request is
+    # forced to that address (curl --resolve, TLS verified, redirects
+    # refused, effective peer checked). This is an operator-managed
+    # registry-endpoint identity, not machine attestation; drift on either
+    # member — including one member serving the other's approved image — is
+    # a loud reviewed event. Sunset: restore a genuine digest reference once
+    # the Forge supports it or CI publishes never-reused versioned tags.
     container: mirror.perish.lan/ci/deno
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Registry drift gate
+        run: |
+          set -eu
+          deno run --allow-run=curl --allow-read=.,/etc/hosts,/tmp --allow-write=/tmp --allow-env=RUNSEAL_PROFILE_PATH,RUNNER_TEMP --config .runseal/deno.json .runseal/wrappers/image.ts initial
+
+      - name: Web toolchain pins
+        run: |
+          set -eu
+          pin=$(cat web/.node-version)
+          actual=$(node --version)
+          [ "$actual" = "v$pin" ] || { echo "node $actual != pinned v$pin"; exit 1; }
+          npm install -g pnpm@11.13.0
+          got=$(pnpm --version)
+          [ "$got" = "11.13.0" ] || { echo "pnpm $got != pinned 11.13.0"; exit 1; }
 
       - name: Install pinned Negentropy
         run: |
@@ -28,6 +58,11 @@ jobs:
           set -eu
           export PATH="$HOME/.local/bin:$PATH"
           deno run --allow-all --config .runseal/deno.json .runseal/wrappers/guard.ts
+
+      - name: Registry drift gate (terminal)
+        run: |
+          set -eu
+          deno run --allow-run=curl --allow-read=.,/etc/hosts,/tmp --allow-write=/tmp --allow-env=RUNSEAL_PROFILE_PATH,RUNNER_TEMP --config .runseal/deno.json .runseal/wrappers/image.ts terminal
 
       - name: sccache statistics
         if: ${{ always() }}

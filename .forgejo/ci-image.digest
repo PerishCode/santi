@@ -1,0 +1,18 @@
+{
+  "schema": "santi.ci_image.v3",
+  "registry": "mirror.perish.lan",
+  "repository": "ci/deno",
+  "tag": "latest",
+  "media": "application/vnd.docker.distribution.manifest.v2+json",
+  "platform": "linux/amd64",
+  "members": {
+    "hk-01-heavy": {
+      "address": "43.251.225.113",
+      "digest": "sha256:2d60b029b8ff336d99b5f6c553cd8faee70f5887511af343800ffdc8df3273e8"
+    },
+    "hk-04-heavy": {
+      "address": "38.76.202.208",
+      "digest": "sha256:1cb896ad03bbc246329efe714ce103e4be6c9580e17561e97664034382423630"
+    }
+  }
+}

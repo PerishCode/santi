@@ -1,0 +1,20 @@
+{
+  "schema": "santi.web_digest_vectors.v1",
+  "algorithm": "sha256-tree-v1",
+  "note": "shared conformance vectors: the deno manifest generator and the rust embed check must both reproduce these digests; computed independently with sha256sum",
+  "vectors": [
+    {
+      "name": "empty tree",
+      "files": [],
+      "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "two files, nested path, unsorted input",
+      "files": [
+        { "path": "b/c.txt", "text": "beta" },
+        { "path": "a.txt", "text": "alpha\n" }
+      ],
+      "digest": "54763268145255634f28e276b759525b806ecbc44b6e91d77a820e2e16f63b85"
+    }
+  ]
+}

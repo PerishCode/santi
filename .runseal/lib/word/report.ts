@@ -11,6 +11,7 @@ import {
   fieldBinding,
   loadEvidence,
 } from "@/lib/word/schema.ts";
+import { loadSeat, sources, spellings, sweep, verifySeat } from "@/lib/word/seat.ts";
 import { classify, Track, TRACKS } from "@/lib/word/tracks.ts";
 
 export interface Finding {
@@ -126,11 +127,13 @@ function trackStats(findings: Finding[]): Record<Track, TrackStats> {
 /**
  * Scan, then verify the checked-in OpenAPI wire-type evidence against a fresh
  * contract export and apply identity bindings (W3 slice 1). Fails closed with
- * a regenerate instruction when the evidence is missing or stale.
+ * a regenerate instruction when the evidence is missing or stale. The web
+ * wire seat verifies against the same fresh contract; its problems and the
+ * outside-seat spelling sweep come back as hard faults.
  */
 export async function classifiedScan(
   root: string,
-): Promise<{ report: Report; raw: string; notes: string[] }> {
+): Promise<{ report: Report; raw: string; notes: string[]; faults: string[] }> {
   const { report, raw } = await scan(root);
   const contract = await exportContract(root);
   let evidence: Evidence;
@@ -146,7 +149,15 @@ export async function classifiedScan(
   }
   assertFresh(evidence, contract);
   const notes = await applyWireEvidence(root, report, evidence);
-  return { report, raw, notes };
+  const seat = await loadSeat(root);
+  const source = await Deno.readTextFile(join(root, seat.file));
+  const faults = verifySeat(source, seat, contract.schemas).map(
+    (problem) => `wire seat: ${problem}`,
+  );
+  if (faults.length === 0) {
+    faults.push(...sweep(await sources(root), seat, spellings(seat, contract.schemas)));
+  }
+  return { report, raw, notes, faults };
 }
 
 /**

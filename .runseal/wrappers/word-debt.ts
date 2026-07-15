@@ -38,15 +38,22 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
-  let report, raw, notes;
+  let report, raw, notes, faults;
   try {
-    ({ report, raw, notes } = await classifiedScan(root));
+    ({ report, raw, notes, faults } = await classifiedScan(root));
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     return 2;
   }
   for (const note of notes) {
     console.log(note);
+  }
+  if (faults.length > 0) {
+    for (const fault of faults) {
+      console.error(fault);
+    }
+    console.error(`wire-seat gate FAILED: ${faults.length} fault(s)`);
+    return 1;
   }
 
   for (const line of lawLines(raw)) {

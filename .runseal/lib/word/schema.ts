@@ -23,6 +23,7 @@ export interface Contract {
   digest: string;
   components: string[];
   properties: Record<string, string[]>;
+  schemas: Record<string, Record<string, unknown>>;
 }
 
 /** Freshly export the OpenAPI document and derive digest + component list. */
@@ -51,7 +52,12 @@ export async function exportContract(root: string): Promise<Contract> {
   for (const name of components) {
     properties[name] = propertyNames(schemas[name]);
   }
-  return { digest, components, properties };
+  return {
+    digest,
+    components,
+    properties,
+    schemas: schemas as Record<string, Record<string, unknown>>,
+  };
 }
 
 function propertyNames(schema: unknown): string[] {

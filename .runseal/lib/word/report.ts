@@ -50,7 +50,7 @@ export interface Baseline {
 const DEBT_LINE = /^(.+?):(\d+):(\d+) debt (.+)$/;
 /** Path-segment word debt has no line/column. */
 const DEBT_PATH = /^(.+?) debt (.+)$/;
-const SUMMARY = /^(\d+) faults, (\d+) blindspots, (\d+) debt$/;
+const SUMMARY = /^(\d+) faults, (\d+) blindspots, (\d+) debts?$/;
 const BY_LAW = /^by law: (.+)$/;
 const BASELINE_FILE = ".runseal/word-debt-baseline.json";
 

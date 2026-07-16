@@ -289,3 +289,13 @@ Deno.test("distinct-owner field twins lift as a group", async () => {
   assertEquals(report.tracks.wire.occurrences, 2);
   assertEquals(notes.filter((m) => m.includes("identity binding")).length, 2);
 });
+
+import { lawLines } from "@/lib/word/report.ts";
+
+Deno.test("law summary parses both singular and plural spellings", () => {
+  const old = "0 faults, 0 blindspots, 2124 debt\nby law: word=2124";
+  const now = "0 faults, 0 blindspots, 2124 debts\nby law: word=2124";
+  assertEquals(lawLines(old).length, 2);
+  assertEquals(lawLines(now).length, 2);
+  assertEquals(lawLines("noise\nnot a summary").length, 0);
+});

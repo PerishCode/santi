@@ -2,6 +2,16 @@
 # Idempotently provision Santi's Authentik forward-auth application and CLI identity.
 set -eu
 
+case "${1:-}" in
+  "") rotate=0 ;;
+  --rotate) rotate=1 ;;
+  *)
+    echo "usage: $0 [--rotate]" >&2
+    exit 2
+    ;;
+esac
+export AK_ROTATE="$rotate"
+
 AK_TOKEN="$(k3s kubectl get secret authentik-secret -n authentik \
   -o jsonpath='{.data.AUTHENTIK_BOOTSTRAP_TOKEN}' | base64 -d)"
 export AK_TOKEN
@@ -131,6 +141,10 @@ else:
 
 token_id = name + "-app-password"
 status, _ = api("GET", "/core/tokens/" + token_id + "/")
+if os.environ["AK_ROTATE"] == "1" and status < 300:
+    status, result = api("DELETE", "/core/tokens/" + token_id + "/")
+    assert status in (204, 404), result
+    status = 404
 if status >= 300:
     status, result = api(
         "POST",

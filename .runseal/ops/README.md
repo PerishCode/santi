@@ -30,6 +30,10 @@ runseal :scp .runseal/ops/edge/register-authentik.sh \
 runseal :ssh hk-03.zxiyun -- sh /tmp/register-santi-authentik.sh
 ```
 
+Pass `--rotate` to delete and recreate the app-password token. Capture the output directly into a
+mode-600 local file, update `.local/secrets/santi.toml`, and delete the capture after the client
+health check; do not print credentials into terminal or task logs.
+
 ## Edge apply
 
 The namespace, ingress routes, window proxy, and current compatibility panel are applied from this

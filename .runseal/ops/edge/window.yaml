@@ -1,0 +1,95 @@
+# santi window — the read-only audit surface (a glass wall onto the occurrence
+# stream). An nginx that serves the static panel and bare-proxies the panel's
+# data reads to santi on 127.0.0.1. The panel is a CLIENT of santi's read API;
+# santi itself is auth-free and loopback-bound, so this is the only thing that can
+# reach it besides on-box callers.
+#
+# It runs as a hostNetwork pod: that lets it reach santi at 127.0.0.1:43307 and
+# bind the node's private cni0 gateway (10.42.0.1:8088 — reachable by the traefik
+# pod, NOT routable from the internet) plus loopback. traefik reaches it through a
+# selector-less Service + manual Endpoints pointing at 10.42.0.1:8088; the actual
+# public gate (authentik forward-auth) is attached at the IngressRoute in
+# ./ingress.yaml.
+#
+# The two ConfigMaps (window-html, window-nginx) are generated from
+# resources/index.html / resources/nginx.conf by the apply recipe in AGENTS.md
+# (those files are the canonical source, not inlined here).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: window
+  namespace: santi
+  labels:
+    app: window
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # a single host-networked binder; never two racing for the port
+  selector:
+    matchLabels:
+      app: window
+  template:
+    metadata:
+      labels:
+        app: window
+    spec:
+      # Share the node's network namespace: reach santi at 127.0.0.1 and bind the
+      # private cni0 gateway. Keep cluster DNS working alongside host networking.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: nginx
+          image: docker.io/library/nginx:1.27-alpine
+          volumeMounts:
+            - name: html
+              mountPath: /usr/share/nginx/html
+              readOnly: true
+            - name: conf
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+          readinessProbe:
+            # hostNetwork: an httpGet probe would target the node's public IP,
+            # where nginx does NOT listen — probe loopback via exec instead.
+            exec:
+              command: ["wget", "-q", "-O-", "http://127.0.0.1:8088/healthz"]
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+      volumes:
+        - name: html
+          configMap:
+            name: window-html
+        - name: conf
+          configMap:
+            name: window-nginx
+---
+# Selector-less Service: traefik routes here by name; the backend is the
+# host-networked nginx reached at the node's cni0 gateway (managed Endpoints).
+apiVersion: v1
+kind: Service
+metadata:
+  name: window
+  namespace: santi
+spec:
+  ports:
+    - name: http
+      port: 8088
+      targetPort: 8088
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: window
+  namespace: santi
+subsets:
+  - addresses:
+      - ip: 10.42.0.1 # node cni0 gateway; the hostNetwork nginx listens here
+    ports:
+      - name: http
+        port: 8088

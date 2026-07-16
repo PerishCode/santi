@@ -1,0 +1,82 @@
+# santi's public front door on santi.liberte.top, served by the k3s cluster santi
+# manages.
+#
+# santi runs as a host systemd service (User=santi) bound to 127.0.0.1:43307 — it
+# carries NO auth of its own and is NOT publicly reachable. The only public entry
+# is :443 here: traefik → (authentik forward-auth) → the window nginx
+# (../window/, a hostNetwork pod on the node's cni0 gateway) → santi on 127.0.0.1.
+#
+# TLS comes from the cluster's default TLSStore (the *.liberte.top wildcard in
+# kube-system) — no per-route certificate.
+#
+# Two routes on the same host:
+#   - /api/v1/webhooks/* → the window, WITHOUT forward-auth. External callers
+#     (GitHub/feishu) can't SSO; santi authenticates them by per-subscription
+#     signature. Higher priority so it wins over the catch-all.
+#   - everything else    → the window, WITH the authentik forward-auth middleware.
+#     Humans authenticate by SSO cookie (read-only at the window); the machine/CLI
+#     by a client_credentials JWT (Authorization: Bearer), which the window nginx
+#     also requires for write methods.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: santi
+  labels:
+    estate.perish.top/layer: santi
+---
+# authentik forward-auth: traefik asks the embedded outpost whether to admit each
+# request, and copies the identity headers the outpost returns onto the request.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: authentik
+  namespace: santi
+spec:
+  forwardAuth:
+    address: http://authentik-server.authentik.svc.cluster.local/outpost.goauthentik.io/auth/traefik
+    trustForwardHeader: true
+    authResponseHeaders:
+      - X-authentik-username
+      - X-authentik-groups
+      - X-authentik-email
+      - X-authentik-uid
+      - X-authentik-jwt
+      - X-authentik-meta-provider
+      - X-authentik-meta-app
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: santi-webhooks
+  namespace: santi
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`santi.liberte.top`) && PathPrefix(`/api/v1/webhooks`)
+      kind: Rule
+      priority: 20 # beat the catch-all; no forward-auth middleware here
+      services:
+        - name: window
+          port: 8088
+  tls: {}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: santi
+  namespace: santi
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`santi.liberte.top`)
+      kind: Rule
+      priority: 10
+      middlewares:
+        - name: authentik
+          namespace: santi
+      services:
+        - name: window
+          port: 8088
+  tls: {}

@@ -7,6 +7,7 @@
   },
   "fmt": {
     "lineWidth": 100,
-    "semiColons": true
+    "semiColons": true,
+    "exclude": ["ops/edge/resources/index.html"]
   }
 }

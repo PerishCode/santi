@@ -11,6 +11,7 @@ crates/
   santi-provider/  # ProviderClient boundary; keeps santi-core provider-agnostic
   santi-api/       # HTTP/SSE/OpenAPI server library over santi-core
   santi/           # the `santi` binary: `service` runs the server; else HTTP client
+.runseal/ops/       # santi-owned cold host/edge operations for the live service
 ```
 
 ## Boundaries
@@ -76,6 +77,9 @@ rejected, not silently created). To address a soul ad hoc without a default:
   `Cargo.toml`; crates reference them with `.workspace = true`.
 - Forgejo (`PerishFire/santi`) is the canonical write target. The public GitHub
   repository is historical and is not reverse-synchronized.
+- Santi owns its complete service lifecycle here, including cold service-user/kube
+  wiring and the `santi.liberte.top` edge. The infra repo owns only the generic host,
+  k3s, DNS, and shared middleware substrate; it must not carry Santi-specific ops.
 - Runtime secrets live in `santi.toml`; local release credentials live in
   `.forgejo/release.env`. Both are gitignored. Never commit live credentials;
   `santi.example.toml` and `.forgejo/release.env.example` are tracked templates.

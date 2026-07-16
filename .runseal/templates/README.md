@@ -1,9 +1,9 @@
 # santi ops templates
 
-Seeds for the gitignored `.local/` that santi's remote-ops wrappers read. santi owns its
-**high-frequency ops** (reach its host, run the client against the live edge, deploy new betas); the
-infra repo owns the **cold, one-time buildout** (cluster, authentik, window nginx). The box + edge
-are consumed as running services, so nothing here depends on the infra repo.
+Seeds for the gitignored `.local/` that santi's remote-ops wrappers read. santi owns its complete
+service lifecycle: reach its host, run the client, deploy new betas, cold service-user/kube wiring,
+and the Santi-specific edge/authentik integration. The infra repo supplies only the generic host,
+k3s, DNS, and shared middleware substrate. Nothing here depends on an infra checkout.
 
 ## Wrappers
 
@@ -13,6 +13,8 @@ are consumed as running services, so nothing here depends on the infra repo.
 - `runseal :deploy [<version>]` — fetch the latest (or given) beta `.deb` on the box and run
   `santi upgrade`, then verify schema + soul-memory continuity + health. (Cut the release first:
   `runseal :release` / the release-beta workflow.)
+- `.runseal/ops/` — cold, idempotent host access wiring and edge manifests/recipes. These are
+  intentionally service-owned even though they operate platform APIs.
 
 ## Provision `.local/` (once per checkout: local + claude.host)
 

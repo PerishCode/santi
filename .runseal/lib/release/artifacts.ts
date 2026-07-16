@@ -141,6 +141,9 @@ export function accept(repo: string): void {
   const version = required("RELEASE_VERSION");
   const dir = artifactDir(repo, version);
   if (!exists(join(dir, "checksums.txt"))) fail("missing checksums.txt");
+  if (!exists(join(dir, "web-audit.json"))) {
+    fail("missing web-audit.json (the release must carry its audit)");
+  }
   for (const spec of ARTIFACTS) {
     if (!exists(join(dir, spec.archive))) fail(`missing artifact: ${spec.archive}`);
   }

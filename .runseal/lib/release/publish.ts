@@ -30,6 +30,12 @@ export async function publish(repo: string): Promise<void> {
     contentTypeFor("checksums.txt"),
     IMMUTABLE,
   );
+  await putObject(
+    join(dir, "web-audit.json"),
+    `${versionPrefix}/web-audit.json`,
+    "application/json",
+    IMMUTABLE,
+  );
 
   // The Linux install manager lives at the root and is refreshed every release.
   await putObject(join(repo, "manage.sh"), "manage.sh", contentTypeFor("manage.sh"), REVALIDATE);

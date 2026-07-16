@@ -1,23 +1,20 @@
-//! `runseal :image <initial|terminal|faithful>` — the address-bound
-//! registry-drift gate (CI-only; the mirror registries are per-appliance
-//! closed loops). Member selection comes from the runner-injected
-//! /etc/hosts mapping of the registry hostname; every request is forced to
-//! the selected address via `curl --resolve` (hostname preserved for TLS
-//! verification, proxies bypassed, redirects refused, effective peer
-//! verified). The initial phase records its selection under RUNNER_TEMP;
-//! the terminal phase requires the selection unchanged. Fail-closed
-//! throughout; certificate verification is never disabled.
+//! `runseal :image <initial|terminal|faithful>` — the registry-integrity
+//! gate on the never-reused versioned tag (CI-only; the mirror registries
+//! are appliance closed loops). Requests go straight to the authority
+//! hostname with proxies bypassed and redirects refused; the effective peer
+//! is recorded as diagnostic evidence only. The initial phase records the
+//! authority/selector/runner snapshot under RUNNER_TEMP; the terminal phase
+//! re-verifies everything and requires the snapshot unchanged. Fail-closed;
+//! certificate verification is never disabled.
 
 import {
   agree,
   Answer,
   AUTHORITY_FILE,
-  HOSTS_FILE,
   loadAuthority,
-  mapping,
-  member,
-  Selection,
   selector,
+  snapshot,
+  Trace,
   unchanged,
   verify,
   WORKFLOW_FILE,
@@ -25,8 +22,7 @@ import {
 import { repoRoot } from "@/lib/std/repo.ts";
 import { join } from "@/lib/std/fs.ts";
 
-async function client(url: string, accept: string, address: string): Promise<Answer> {
-  const host = new URL(url).hostname;
+async function client(url: string, accept: string): Promise<Answer> {
   const headers = await Deno.makeTempFile();
   const body = await Deno.makeTempFile();
   try {
@@ -34,8 +30,6 @@ async function client(url: string, accept: string, address: string): Promise<Ans
       args: [
         "--silent",
         "--show-error",
-        "--resolve",
-        `${host}:443:${address}`,
         "--noproxy",
         "*",
         "--max-redirs",
@@ -81,31 +75,21 @@ function statePath(): string {
 export async function main(argv: string[]): Promise<number> {
   const phase = argv[0] ?? "initial";
   const root = repoRoot();
-  const authority = loadAuthority(await Deno.readTextFile(join(root, AUTHORITY_FILE)));
+  const text = await Deno.readTextFile(join(root, AUTHORITY_FILE));
+  const authority = loadAuthority(text);
   const workflow = await Deno.readTextFile(join(root, WORKFLOW_FILE));
-  const disagreement = agree(authority, selector(workflow));
+  const chosen = selector(workflow);
   console.log(`gate phase ${phase}`);
+  const disagreement = agree(authority, chosen);
   if (disagreement.length > 0) {
     for (const line of disagreement) {
       console.error(line);
     }
-    console.error(`registry-drift gate FAILED (${phase}, selector)`);
+    console.error(`registry-integrity gate FAILED (${phase}, selector)`);
     return 1;
   }
-  const mapped = mapping(await Deno.readTextFile(HOSTS_FILE), authority.registry);
-  if (mapped.problem !== undefined) {
-    console.error(mapped.problem);
-    console.error(`registry-drift gate FAILED (${phase}, pre-network)`);
-    return 1;
-  }
-  const found = member(authority, mapped.address as string);
-  if (found.problem !== undefined) {
-    console.error(found.problem);
-    console.error(`registry-drift gate FAILED (${phase}, pre-network)`);
-    return 1;
-  }
-  const chosen: Selection = { label: found.label as string, address: mapped.address as string };
-  const { problems, evidence } = await verify(authority, chosen, client);
+  const runner = Deno.env.get("RUNNER_NAME") ?? undefined;
+  const { problems, evidence } = await verify(authority, runner, client);
   for (const line of evidence) {
     console.log(line);
   }
@@ -113,33 +97,36 @@ export async function main(argv: string[]): Promise<number> {
     for (const line of problems) {
       console.error(line);
     }
-    console.error(`registry-drift gate FAILED (${phase})`);
+    console.error(`registry-integrity gate FAILED (${phase})`);
     return 1;
   }
+  const current = await snapshot(text, authority, chosen, runner as string);
   if (phase === "initial") {
-    await Deno.writeTextFile(statePath(), `${JSON.stringify(chosen)}\n`);
+    await Deno.writeTextFile(statePath(), `${JSON.stringify(current)}\n`);
   }
   if (phase === "terminal") {
-    let initial: Selection;
+    let initial: Trace;
     try {
-      initial = JSON.parse(await Deno.readTextFile(statePath())) as Selection;
+      initial = JSON.parse(await Deno.readTextFile(statePath())) as Trace;
     } catch {
-      console.error("terminal gate cannot read the initial selection record");
-      console.error(`registry-drift gate FAILED (${phase})`);
+      console.error("terminal gate cannot read the initial snapshot record");
+      console.error(`registry-integrity gate FAILED (${phase})`);
       return 1;
     }
-    const moved = unchanged(initial, chosen);
+    const moved = unchanged(initial, current);
     if (moved.length > 0) {
       for (const line of moved) {
         console.error(line);
       }
-      console.error(`registry-drift gate FAILED (${phase})`);
+      console.error(`registry-integrity gate FAILED (${phase})`);
       return 1;
     }
-    console.log(`selection unchanged since the initial gate (${initial.label}@${initial.address})`);
+    console.log(
+      `snapshot unchanged since the initial gate (${initial.reference}, ${initial.runner})`,
+    );
   }
   console.log(
-    `registry-drift gate: ok (${phase}; address-bound drift detection only — not a pinned container, not machine attestation)`,
+    `registry-integrity gate: ok (${phase}; never-reused versioned tag verified — not content-addressed execution, not attestation)`,
   );
   return 0;
 }

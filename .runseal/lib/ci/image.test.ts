@@ -1,13 +1,11 @@
-//! Address-bound registry-drift gate vectors (Liberte CI-image amendment v3).
+//! Versioned-tag registry-integrity gate vectors (Liberte sunset ruling v4).
 
 import {
   agree,
   Answer,
   loadAuthority,
-  mapping,
-  member,
-  Selection,
   selector,
+  snapshot,
   unchanged,
   verify,
 } from "@/lib/ci/image.ts";
@@ -49,290 +47,127 @@ async function digestOf(text: string): Promise<string> {
 const config = JSON.stringify({ architecture: "amd64", os: "linux" });
 const configDigest = await digestOf(config);
 
-const one = JSON.stringify({
+const manifest = JSON.stringify({
   schemaVersion: 2,
   mediaType: "application/vnd.docker.distribution.manifest.v2+json",
   config: { digest: configDigest },
   layers: [{}],
 });
-const four = JSON.stringify({
-  schemaVersion: 2,
-  mediaType: "application/vnd.docker.distribution.manifest.v2+json",
-  config: { digest: configDigest },
-  layers: [{}, {}],
-});
+const pinned = await digestOf(manifest);
+const short = pinned.slice("sha256:".length, "sha256:".length + 8);
 
-const oneDigest = await digestOf(one);
-const fourDigest = await digestOf(four);
-
-const CANONICAL = "sha256:1cb896ad03bbc246329efe714ce103e4be6c9580e17561e97664034382423630";
-const HYPHENATED = "sha256:1cb896ad0-3bbc246329efe714ce103e4be6c9580e17561e97664034382423630";
-
-function authorityText(members: Record<string, { address: string; digest: string }>): string {
+function authorityText(overrides: Partial<Record<string, string>> = {}): string {
   return JSON.stringify({
-    schema: "santi.ci_image.v3",
+    schema: "santi.ci_image.v4",
     registry: "mirror.perish.lan",
     repository: "ci/deno",
-    tag: "latest",
+    tag: `20260716-${short}`,
+    digest: pinned,
     media: "application/vnd.docker.distribution.manifest.v2+json",
     platform: "linux/amd64",
-    members,
+    ...overrides,
   });
 }
 
-const authority = loadAuthority(authorityText({
-  "hk-01-heavy": { address: "43.251.225.113", digest: oneDigest },
-  "hk-04-heavy": { address: "38.76.202.208", digest: fourDigest },
-}));
+const authority = loadAuthority(authorityText());
+const RUNNER = "hk-01-heavy";
 
-const HK01: Selection = { label: "hk-01-heavy", address: "43.251.225.113" };
-const HK04: Selection = { label: "hk-04-heavy", address: "38.76.202.208" };
-
-function serving(manifest: string, digest: string, overrides: Partial<Answer> = {}) {
-  return (url: string, _accept: string, address: string): Promise<Answer> => {
+function serving(overrides: Partial<Answer> = {}, blob: string = config) {
+  return (url: string, _accept: string): Promise<Answer> => {
     const base: Answer = url.includes("/manifests/")
-      ? { status: 200, remote: address, redirects: 0, digest, body: encoder.encode(manifest) }
-      : { status: 200, remote: address, redirects: 0, body: encoder.encode(config) };
+      ? {
+        status: 200,
+        remote: "43.251.225.113",
+        redirects: 0,
+        digest: pinned,
+        body: encoder.encode(manifest),
+      }
+      : { status: 200, remote: "43.251.225.113", redirects: 0, body: encoder.encode(blob) };
     return Promise.resolve(url.includes("/manifests/") ? { ...base, ...overrides } : base);
   };
 }
 
-function counting(inner: ReturnType<typeof serving>) {
-  let calls = 0;
-  const client = (url: string, accept: string, address: string) => {
-    calls += 1;
-    return inner(url, accept, address);
-  };
-  return { client, count: () => calls };
-}
-
-Deno.test("hk-01 address with hk-01 digest passes", async () => {
-  const { problems, evidence } = await verify(authority, HK01, serving(one, oneDigest));
+Deno.test("the canonical authority passes", async () => {
+  const { problems, evidence } = await verify(authority, RUNNER, serving());
   assertEquals(problems, []);
-  assert(evidence.some((line) => line.includes("selected member hk-01-heavy at 43.251.225.113")));
+  assert(evidence.some((line) => line.includes("runner hk-01-heavy")));
+  assert(evidence.some((line) => line.includes("diagnostic only")));
   assert(evidence.some((line) => line.includes("observed platform linux/amd64")));
 });
 
-Deno.test("hk-04 address with hk-04 digest passes", async () => {
-  const { problems } = await verify(authority, HK04, serving(four, fourDigest));
-  assertEquals(problems, []);
+Deno.test("latest is rejected", () => {
+  assertThrows(() => loadAuthority(authorityText({ tag: "latest" })), "outside the reviewed");
 });
 
-Deno.test("hk-01 address observing hk-04's approved digest fails", async () => {
-  const { problems } = await verify(authority, HK01, serving(four, fourDigest));
-  assert(problems.some((line) => line.includes(`header digest ${fourDigest} != member digest`)));
+Deno.test("malformed version tags are rejected", () => {
+  assertThrows(() => loadAuthority(authorityText({ tag: "v1.2.3" })), "outside the reviewed");
+  assertThrows(
+    () => loadAuthority(authorityText({ tag: `2026716-${short}` })),
+    "outside the reviewed",
+  );
+});
+
+Deno.test("tag suffix and full digest disagreement is rejected", () => {
+  assertThrows(
+    () => loadAuthority(authorityText({ tag: "20260716-00000000" })),
+    "does not locate the authority digest",
+  );
+});
+
+Deno.test("selector tag disagreement fails", () => {
+  assert(agree(authority, "mirror.perish.lan/ci/deno:latest").length === 1);
+  assert(agree(authority, "mirror.perish.lan/ci/deno").length === 1);
+  assert(agree(authority, `mirror.perish.lan/ci/deno:20260716-00000000`).length === 1);
+  assertEquals(agree(authority, `mirror.perish.lan/ci/deno:20260716-${short}`), []);
+});
+
+Deno.test("selector repository disagreement fails", () => {
+  assert(agree(authority, `mirror.perish.lan/ci/rust:20260716-${short}`).length === 1);
+  assert(agree(authority, `docker.io/ci/deno:20260716-${short}`).length === 1);
+});
+
+Deno.test("a changed header digest fails", async () => {
+  const other = await digestOf("other");
+  const { problems } = await verify(authority, RUNNER, serving({ digest: other }));
+  assert(problems.some((line) => line.includes("no longer serves its reviewed content")));
+});
+
+Deno.test("a changed raw-body digest fails", async () => {
+  const { problems } = await verify(
+    authority,
+    RUNNER,
+    serving({ body: encoder.encode(`${manifest} `) }),
+  );
   assert(problems.some((line) => line.includes("independently hashed manifest")));
 });
 
-Deno.test("hk-04 address observing hk-01's approved digest fails", async () => {
-  const { problems } = await verify(authority, HK04, serving(one, oneDigest));
-  assert(problems.some((line) => line.includes(`header digest ${oneDigest} != member digest`)));
-});
-
-Deno.test("missing hosts entry fails before network access", () => {
-  const hosts = "127.0.0.1 localhost\n::1 localhost\n";
-  const mapped = mapping(hosts, "mirror.perish.lan");
-  assert(mapped.problem !== undefined && mapped.problem.includes("no entry"));
-});
-
-Deno.test("unknown address fails before network access", async () => {
-  const found = member(authority, "10.0.0.9");
-  assert(found.problem !== undefined && found.problem.includes("not a reviewed member"));
-  const spy = counting(serving(one, oneDigest));
-  if (found.problem !== undefined) {
-    assertEquals(spy.count(), 0, "no registry request may be attempted");
-  }
-  await Promise.resolve();
-});
-
-Deno.test("multiple different addresses fail", () => {
-  const hosts = "43.251.225.113 mirror.perish.lan\n38.76.202.208 mirror.perish.lan\n";
-  const mapped = mapping(hosts, "mirror.perish.lan");
-  assert(mapped.problem !== undefined && mapped.problem.includes("2 lines"));
-});
-
-Deno.test("duplicate identical entries fail rather than collapse", () => {
-  const hosts = "43.251.225.113 mirror.perish.lan\n43.251.225.113 mirror.perish.lan\n";
-  const mapped = mapping(hosts, "mirror.perish.lan");
-  assert(mapped.problem !== undefined && mapped.problem.includes("never collapsed"));
-});
-
-Deno.test("duplicate authority addresses fail", () => {
-  assertThrows(
-    () =>
-      loadAuthority(authorityText({
-        "hk-01-heavy": { address: "43.251.225.113", digest: oneDigest },
-        "hk-04-heavy": { address: "43.251.225.113", digest: fourDigest },
-      })),
-    "duplicate member address",
-  );
-});
-
-Deno.test("malformed hosts address fails", () => {
-  const mapped = mapping("999.1.2.3 mirror.perish.lan\n", "mirror.perish.lan");
-  assert(mapped.problem !== undefined && mapped.problem.includes("malformed address"));
-});
-
-Deno.test("malformed authority address fails", () => {
-  assertThrows(
-    () =>
-      loadAuthority(authorityText({
-        "hk-01-heavy": { address: "not-an-ip", digest: oneDigest },
-      })),
-    "malformed address for member hk-01-heavy",
-  );
-});
-
-Deno.test("exact hostname tokens ignore lookalike suffixes", () => {
-  const hosts = [
-    "1.2.3.4 notmirror.perish.lan",
-    "5.6.7.8 mirror.perish.lan.evil",
-    "43.251.225.113 mirror.perish.lan",
-  ].join("\n");
-  assertEquals(mapping(hosts, "mirror.perish.lan"), { address: "43.251.225.113" });
-});
-
-Deno.test("comments and whitespace parse correctly", () => {
-  const hosts = [
-    "# managed by the runner",
-    "",
-    "   43.251.225.113\tmirror.perish.lan   # appliance closed loop",
-    "127.0.0.1 localhost",
-  ].join("\n");
-  assertEquals(mapping(hosts, "mirror.perish.lan"), { address: "43.251.225.113" });
-});
-
-Deno.test("effective peer mismatch fails", async () => {
-  const { problems } = await verify(
-    authority,
-    HK01,
-    serving(one, oneDigest, { remote: "9.9.9.9" }),
-  );
-  assertEquals(problems, ["effective peer 9.9.9.9 != selected address 43.251.225.113"]);
-});
-
-Deno.test("a redirect fails", async () => {
-  const { problems } = await verify(
-    authority,
-    HK01,
-    serving(one, oneDigest, { redirects: 1 }),
-  );
-  assert(problems.some((line) => line.includes("redirects are refused")));
-});
-
-Deno.test("initial and terminal member mismatch fails", () => {
-  assertEquals(unchanged(HK01, HK01), []);
-  const moved = unchanged(HK01, HK04);
-  assertEquals(moved.length, 1);
-  assert(moved[0].includes("selection moved during the job"));
-});
-
-Deno.test("canonical hk-04 digest loads while the hyphenated transcription fails", () => {
-  loadAuthority(authorityText({
-    "hk-04-heavy": { address: "38.76.202.208", digest: CANONICAL },
-  }));
-  assertThrows(
-    () =>
-      loadAuthority(authorityText({
-        "hk-04-heavy": { address: "38.76.202.208", digest: HYPHENATED },
-      })),
-    "malformed digest for member hk-04-heavy",
-  );
-});
-
-Deno.test("config blob hash must match the manifest-named digest", async () => {
-  const bent = (url: string, _accept: string, address: string): Promise<Answer> =>
-    Promise.resolve(
-      url.includes("/manifests/")
-        ? {
-          status: 200,
-          remote: address,
-          redirects: 0,
-          digest: oneDigest,
-          body: encoder.encode(one),
-        }
-        : {
-          status: 200,
-          remote: address,
-          redirects: 0,
-          body: encoder.encode(`${config} `),
-        },
-    );
-  const { problems } = await verify(authority, HK01, bent);
-  assert(problems.some((line) => line.includes("platform fields untrusted")));
-});
-
-Deno.test("empty member map fails closed", () => {
-  assertThrows(() => loadAuthority(authorityText({})), "member map is missing or empty");
-});
-
-Deno.test("unknown authority field fails closed", () => {
-  const stray = JSON.parse(
-    authorityText({ "hk-01-heavy": { address: "43.251.225.113", digest: oneDigest } }),
-  );
-  stray.extra = true;
-  assertThrows(() => loadAuthority(JSON.stringify(stray)), "unknown field extra");
-});
-
-Deno.test("duplicate member identity fails closed", () => {
-  const doubled = authorityText({
-    "hk-01-heavy": { address: "43.251.225.113", digest: oneDigest },
-  }).replace(
-    `"hk-01-heavy":`,
-    `"hk-01-heavy":{"address":"38.76.202.208","digest":"${fourDigest}"},"hk-01-heavy":`,
-  );
-  assertThrows(() => loadAuthority(doubled), "duplicate member identity hk-01-heavy");
-});
-
-Deno.test("selector mismatch fails", () => {
-  assertEquals(agree(authority, "mirror.perish.lan/ci/deno").length, 0);
-  assertEquals(agree(authority, "mirror.perish.lan/ci/deno:latest").length, 0);
-  assert(agree(authority, "mirror.perish.lan/ci/rust").length === 1);
-  assert(agree(authority, "mirror.perish.lan/ci/deno:stable").length === 1);
-  assert(agree(authority, "docker.io/ci/deno").length === 1);
-});
-
-Deno.test("missing digest header fails closed", async () => {
-  const { problems } = await verify(
-    authority,
-    HK01,
-    serving(one, oneDigest, { digest: undefined }),
-  );
-  assert(problems.some((line) => line.includes("no docker-content-digest header")));
-});
-
-Deno.test("malformed manifest fails closed", async () => {
-  const { problems } = await verify(
-    authority,
-    HK01,
-    serving(one, oneDigest, { body: encoder.encode("not json") }),
-  );
-  assert(problems.some((line) => line.includes("not valid JSON")));
-});
-
-Deno.test("registry error fails closed", async () => {
-  const { problems } = await verify(
-    authority,
-    HK01,
-    serving(one, oneDigest, { status: 503 }),
-  );
-  assertEquals(problems, ["registry answered HTTP 503 for the manifest"]);
-});
-
-Deno.test("image index is refused outright", async () => {
+Deno.test("an image index fails", async () => {
   const index = JSON.stringify({
     schemaVersion: 2,
     mediaType: "application/vnd.docker.distribution.manifest.v2+json",
     manifests: [],
   });
+  const dig = await digestOf(index);
   const moved = loadAuthority(authorityText({
-    "hk-01-heavy": { address: "43.251.225.113", digest: await digestOf(index) },
+    tag: `20260716-${dig.slice(7, 15)}`,
+    digest: dig,
   }));
-  const { problems } = await verify(moved, HK01, serving(index, await digestOf(index)));
+  const { problems } = await verify(
+    moved,
+    RUNNER,
+    serving({ digest: dig, body: encoder.encode(index) }),
+  );
   assert(problems.some((line) => line.includes("image INDEX")));
 });
 
-Deno.test("platform mismatch fails", async () => {
+Deno.test("a malformed or mismatched config blob fails", async () => {
+  const bent = await verify(authority, RUNNER, serving({}, `${config} `));
+  assert(bent.problems.some((line) => line.includes("platform fields untrusted")));
+  const broken = await verify(authority, RUNNER, serving({}, "not json"));
+  assert(broken.problems.some((line) => line.includes("untrusted")));
+});
+
+Deno.test("a different platform fails", async () => {
   const arm = JSON.stringify({ architecture: "arm64", os: "linux" });
   const armDigest = await digestOf(arm);
   const bentManifest = JSON.stringify({
@@ -341,39 +176,92 @@ Deno.test("platform mismatch fails", async () => {
     config: { digest: armDigest },
     layers: [{}],
   });
+  const dig = await digestOf(bentManifest);
   const moved = loadAuthority(authorityText({
-    "hk-01-heavy": { address: "43.251.225.113", digest: await digestOf(bentManifest) },
+    tag: `20260716-${dig.slice(7, 15)}`,
+    digest: dig,
   }));
-  const bent = (url: string, _accept: string, address: string): Promise<Answer> =>
+  const bent = (url: string, _accept: string): Promise<Answer> =>
     Promise.resolve(
       url.includes("/manifests/")
         ? {
           status: 200,
-          remote: address,
+          remote: "r",
           redirects: 0,
-          digest: moved.members["hk-01-heavy"].digest,
+          digest: dig,
           body: encoder.encode(bentManifest),
         }
-        : { status: 200, remote: address, redirects: 0, body: encoder.encode(arm) },
+        : { status: 200, remote: "r", redirects: 0, body: encoder.encode(arm) },
     );
-  const { problems } = await verify(moved, HK01, bent);
+  const { problems } = await verify(moved, RUNNER, bent);
   assert(problems.some((line) => line.includes("platform linux/arm64 != pinned linux/amd64")));
+});
+
+Deno.test("redirects fail", async () => {
+  const { problems } = await verify(authority, RUNNER, serving({ redirects: 1 }));
+  assert(problems.some((line) => line.includes("redirects are refused")));
+});
+
+Deno.test("missing RUNNER_NAME fails", async () => {
+  for (const runner of [undefined, ""]) {
+    const { problems } = await verify(authority, runner, serving());
+    assert(problems.some((line) => line.includes("CI audit contract")));
+  }
+});
+
+Deno.test("initial and terminal runner-name mismatch fails", async () => {
+  const text = authorityText();
+  const initial = await snapshot(text, authority, "sel", "hk-01-heavy");
+  const terminal = await snapshot(text, authority, "sel", "hk-04-heavy");
+  const moved = unchanged(initial, terminal);
+  assertEquals(moved.length, 1);
+  assert(moved[0].includes("runner moved during the job"));
+});
+
+Deno.test("initial and terminal authority mutation fails", async () => {
+  const initial = await snapshot(authorityText(), authority, "sel", RUNNER);
+  const terminal = await snapshot(`${authorityText()} `, authority, "sel", RUNNER);
+  const moved = unchanged(initial, terminal);
+  assert(moved.some((line) => line.includes("authority moved during the job")));
+});
+
+Deno.test("initial and terminal selector mutation fails", async () => {
+  const text = authorityText();
+  const initial = await snapshot(text, authority, "mirror.perish.lan/ci/deno:a", RUNNER);
+  const terminal = await snapshot(text, authority, "mirror.perish.lan/ci/deno:b", RUNNER);
+  const moved = unchanged(initial, terminal);
+  assert(moved.some((line) => line.includes("chosen moved during the job")));
+});
+
+Deno.test("registry error fails closed", async () => {
+  const { problems } = await verify(authority, RUNNER, serving({ status: 404 }));
+  assertEquals(problems, ["registry answered HTTP 404 for the versioned tag"]);
+});
+
+Deno.test("missing digest header fails closed", async () => {
+  const { problems } = await verify(authority, RUNNER, serving({ digest: undefined }));
+  assert(problems.some((line) => line.includes("no docker-content-digest header")));
+});
+
+Deno.test("unknown and duplicate authority fields fail", () => {
+  const stray = JSON.parse(authorityText());
+  stray.extra = true;
+  assertThrows(() => loadAuthority(JSON.stringify(stray)), "unknown field extra");
+  assertThrows(
+    () => loadAuthority(JSON.stringify({ schema: "santi.ci_image.v4", registry: "r" })),
+    "missing field",
+  );
 });
 
 Deno.test("selector extraction reads both workflow forms", () => {
   assertEquals(
-    selector("jobs:\n  guard:\n    container: mirror.perish.lan/ci/deno\n"),
-    "mirror.perish.lan/ci/deno",
+    selector("jobs:\n  guard:\n    container: mirror.perish.lan/ci/deno:20260716-2d60b029\n"),
+    "mirror.perish.lan/ci/deno:20260716-2d60b029",
   );
   assertEquals(
-    selector("jobs:\n  guard:\n    container:\n      image: mirror.perish.lan/ci/deno:latest\n"),
-    "mirror.perish.lan/ci/deno:latest",
-  );
-});
-
-Deno.test("malformed authority fails closed", () => {
-  assertThrows(
-    () => loadAuthority(JSON.stringify({ schema: "santi.ci_image.v3", registry: "r" })),
-    "missing field",
+    selector(
+      "jobs:\n  guard:\n    container:\n      image: mirror.perish.lan/ci/deno:20260716-2d60b029\n",
+    ),
+    "mirror.perish.lan/ci/deno:20260716-2d60b029",
   );
 });

@@ -32,6 +32,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Web toolchain pins
+        run: |
+          set -eu
+          pin=$(cat web/.node-version)
+          actual=$(node --version)
+          [ "$actual" = "v$pin" ] || { echo "node $actual != pinned v$pin"; exit 1; }
+          npm install -g pnpm@11.13.0
+          got=$(pnpm --version)
+          [ "$got" = "11.13.0" ] || { echo "pnpm $got != pinned 11.13.0"; exit 1; }
+
       - name: Install pinned Negentropy
         run: |
           set -eu

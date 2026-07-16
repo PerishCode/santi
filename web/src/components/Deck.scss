@@ -1,0 +1,11 @@
+.deck {
+	display: grid;
+	grid-template-columns: 2fr 1fr;
+	gap: var(--space-3);
+	align-items: start;
+
+	.port,
+	.star {
+		min-width: 0;
+	}
+}

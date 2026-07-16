@@ -1,6 +1,7 @@
 mod effects;
 mod error;
 mod errors;
+mod glass;
 mod im;
 mod ingress;
 mod openapi;
@@ -15,7 +16,7 @@ use crate::{config, provider};
 
 pub use effects::{ResolveEffectRequest, effect_status, resolve_effect};
 pub use error::ApiError;
-pub use routes::{drive_strand, health, receipt_status, send_strand};
+pub use routes::{drive_strand, health, receipt_status, send_strand, web};
 pub use window::{
     TranscriptQuery, send_window as window_send, transcript_window as window_transcript,
 };

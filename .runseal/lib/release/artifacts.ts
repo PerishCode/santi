@@ -1,6 +1,7 @@
 //! Build, archive, checksum, and validate the Linux x86_64 `santi` release.
 
 import { capture, run } from "@/lib/std/cmd.ts";
+import { generate, pins } from "@/lib/web/manifest.ts";
 import { exists, join } from "@/lib/std/fs.ts";
 import { fail, required } from "@/lib/release/env.ts";
 
@@ -50,6 +51,8 @@ export async function pkg(repo: string): Promise<void> {
 
   const dir = artifactDir(repo, version);
   Deno.mkdirSync(dir, { recursive: true });
+
+  await forge(repo, dir);
 
   if (
     await run("cargo", ["build", "--release", "--locked", "-p", "santi", "--target", target], {
@@ -179,6 +182,43 @@ async function hostTarget(): Promise<string> {
   const match = result.stdout.match(/^host:\s*(.+)$/m);
   if (!match) fail("could not determine host target from rustc -Vv");
   return match[1].trim();
+}
+
+/**
+ * Build the pane the binary will embed and pin the release audit to it:
+ * pins verified, frozen install, tests, production build, freshness
+ * manifest, and a web-audit.json artifact binding the dist digests to the
+ * source revision, lockfile, toolchain, and kernel versions.
+ */
+async function forge(repo: string, dir: string): Promise<void> {
+  const { node, pnpm } = await pins(repo);
+  const steps: Array<[string, string[]]> = [
+    ["pnpm", ["--dir", "web", "install", "--frozen-lockfile"]],
+    ["pnpm", ["--dir", "web", "exec", "vitest", "run"]],
+    ["pnpm", ["--dir", "web", "build"]],
+  ];
+  for (const [command, args] of steps) {
+    if (await run(command, args, { cwd: repo }) !== 0) {
+      fail(`web ${args.join(" ")} failed`);
+    }
+  }
+  const manifest = await generate(repo);
+  const head = await capture("git", ["rev-parse", "HEAD"], { cwd: repo });
+  const kernel = await capture("negentropy", ["--version"], { cwd: repo });
+  const audit = {
+    schema: "santi.web_audit.v1",
+    manifest: manifest.schema,
+    algorithm: manifest.algorithm,
+    inputs: manifest.inputs,
+    output: manifest.output,
+    revision: head.stdout.trim(),
+    lockfile: await sha256(join(repo, "web/pnpm-lock.yaml")),
+    node,
+    pnpm,
+    negentropy: kernel.stdout.trim(),
+    tests: "vitest run green (release gate; suite fails the release otherwise)",
+  };
+  await Deno.writeTextFile(join(dir, "web-audit.json"), `${JSON.stringify(audit, null, 2)}\n`);
 }
 
 async function sha256(path: string): Promise<string> {

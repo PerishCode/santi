@@ -74,6 +74,8 @@ pub(super) fn router(service: Service) -> Router {
         .route("/api/v1/health", get(health))
         .route("/api/v1/webhooks/{name}", post(ingest_webhook))
         .merge(api)
+        .route("/api/{*rest}", axum::routing::any(missing))
+        .merge(super::glass::router())
         .layer(TraceLayer::new_for_http())
         .layer(
             CorsLayer::new()
@@ -82,6 +84,19 @@ pub(super) fn router(service: Service) -> Router {
                 .allow_headers(Any),
         )
         .with_state(service)
+}
+
+pub fn web() -> Router {
+    Router::new()
+        .route("/api/{*rest}", axum::routing::any(missing))
+        .merge(super::glass::router())
+}
+
+async fn missing() -> impl IntoResponse {
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({"error": "unknown api path"})),
+    )
 }
 
 #[utoipa::path(

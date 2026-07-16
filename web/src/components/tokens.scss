@@ -80,3 +80,116 @@
 	syntax: "*";
 	inherits: true;
 }
+
+@property --well {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: magenta;
+}
+
+@property --rule {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: magenta;
+}
+
+@property --accent {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: magenta;
+}
+
+@property --ok {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: magenta;
+}
+
+@property --warn {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: magenta;
+}
+
+@property --fail {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: magenta;
+}
+
+@property --fine {
+	syntax: "<length>";
+	inherits: true;
+	initial-value: 0px;
+}
+
+@property --body {
+	syntax: "<length>";
+	inherits: true;
+	initial-value: 0px;
+}
+
+@property --radius {
+	syntax: "<length>";
+	inherits: true;
+	initial-value: 0px;
+}
+
+@property --bead {
+	syntax: "<length>";
+	inherits: true;
+	initial-value: 0px;
+}
+
+@property --line {
+	syntax: "<length>";
+	inherits: true;
+	initial-value: 0px;
+}
+
+@property --mono {
+	syntax: "*";
+	inherits: true;
+}
+
+@property --soul {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: magenta;
+}
+
+@property --order {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: magenta;
+}
+
+@property --think {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: magenta;
+}
+
+@property --craft {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: magenta;
+}
+
+@property --fruit {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: magenta;
+}
+
+@property --fold {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: magenta;
+}
+
+@property --space-1 {
+	syntax: "<length>";
+	inherits: true;
+	initial-value: 0px;
+}

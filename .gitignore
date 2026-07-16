@@ -3,6 +3,7 @@
 .env.local
 .env.release
 santi.toml
+!.runseal/templates/secrets/santi.toml
 .local/
 .task/
 .tmp/

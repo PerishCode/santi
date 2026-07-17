@@ -7,8 +7,8 @@
 # It runs as a hostNetwork pod: that lets it reach santi at 127.0.0.1:43307 and
 # bind the node's private cni0 gateway (10.42.0.1:8088 — reachable by the traefik
 # pod, NOT routable from the internet) plus loopback. traefik reaches it through a
-# selector-less Service + manual Endpoints pointing at 10.42.0.1:8088; the actual
-# public gate (authentik forward-auth) is attached at the IngressRoute in
+# selector-less Service + manual EndpointSlice pointing at 10.42.0.1:8088; the
+# actual public gate (authentik forward-auth) is attached at the IngressRoute in
 # ./ingress.yaml.
 #
 # The two ConfigMaps (window-html, window-nginx) are generated from
@@ -70,7 +70,7 @@ spec:
             name: window-nginx
 ---
 # Selector-less Service: traefik routes here by name; the backend is the
-# host-networked nginx reached at the node's cni0 gateway (managed Endpoints).
+# host-networked nginx reached at the node's cni0 gateway (manual EndpointSlice).
 apiVersion: v1
 kind: Service
 metadata:
@@ -82,14 +82,23 @@ spec:
       port: 8088
       targetPort: 8088
 ---
-apiVersion: v1
-kind: Endpoints
+# Manual EndpointSlice (v1 Endpoints is deprecated since k8s 1.33). The
+# service-name label is what binds it to the Service above. One-time migration
+# on a cluster that still carries the legacy object: apply this file first,
+# then `kubectl delete endpoints window -n santi` — the mirroring controller's
+# auto-generated slice leaves with it, and this one keeps serving.
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
 metadata:
-  name: window
+  name: window-1
   namespace: santi
-subsets:
+  labels:
+    kubernetes.io/service-name: window
+addressType: IPv4
+endpoints:
   - addresses:
-      - ip: 10.42.0.1 # node cni0 gateway; the hostNetwork nginx listens here
-    ports:
-      - name: http
-        port: 8088
+      - 10.42.0.1 # node cni0 gateway; the hostNetwork nginx listens here
+ports:
+  - name: http
+    port: 8088
+    protocol: TCP

@@ -14,7 +14,7 @@ estate-specific privileges and connect that account to its local k3s work surfac
 ```sh
 for script in 00-host-preflight 10-santi-user 20-kube-access; do
   runseal :scp ".runseal/ops/host/${script}.sh" "hk-03.zxiyun:/tmp/${script}.sh"
-  runseal :ssh hk-03.zxiyun -- sh "/tmp/${script}.sh"
+  runseal :ssh hk-03.zxiyun -- bash "/tmp/${script}.sh"
 done
 ```
 

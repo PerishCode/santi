@@ -55,3 +55,13 @@ allow = ["path"]
 paths = ["crates/santi-api/build.rs"]
 note = "cargo build scripts must live at the crate root; path law anchors to src and tests"
 allow = ["path"]
+
+[[boundary]]
+paths = [
+  "crates/santi-api/src/server",
+  "crates/santi-core/src/store",
+  "crates/santi-core/src/service",
+  "crates/santi-core/tests/service",
+]
+note = "temporary: dirs under active crate-split decomposition; fanout exemption dropped per-dir as each is fixed. file-length stays enforced."
+allow = ["fanout"]

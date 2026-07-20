@@ -1,0 +1,149 @@
+use crate::store::{db::Database, span::Span};
+use crate::{ActorType, MessageKind, MessageState, StrandTargetType};
+use rusqlite::{Connection, OptionalExtension, params};
+use serde_json::Value;
+
+use super::*;
+
+pub(super) fn plan_compact_in_tx(
+    conn: &Connection,
+    strand_id: &str,
+    from_message_id: &str,
+    to_message_id: &str,
+) -> Result<Plan, String> {
+    for (label, id) in [("from", from_message_id), ("to", to_message_id)] {
+        let message = Database::new(conn)
+            .message_record_by_id(id)?
+            .ok_or_else(|| format!("compact {label} message not found"))?;
+        let is_projected = message.actor_type == ActorType::Soul
+            || (message.actor_type == ActorType::System
+                && matches!(
+                    message.message_kind,
+                    MessageKind::Text | MessageKind::SantiSystem
+                ));
+        if !is_projected || message.state != MessageState::Fixed {
+            return Err(format!(
+                "compact {label} boundary must be a fixed projected message"
+            ));
+        }
+    }
+
+    let database = Database::new(conn);
+    let start_seq = database
+        .message_seq_in_strand(strand_id, from_message_id)?
+        .ok_or_else(|| "compact from message not in this strand".to_string())?;
+    let end_seq = database
+        .message_seq_in_strand(strand_id, to_message_id)?
+        .ok_or_else(|| "compact to message not in this strand".to_string())?;
+    if start_seq > end_seq {
+        return Err("compact from must not be after to".to_string());
+    }
+
+    let mut absorbed = Vec::new();
+    for existing in database.compacts_for_strand(strand_id)? {
+        let (Some(es), Some(ee)) = (
+            database.message_seq_in_strand(strand_id, &existing.start_message_id)?,
+            database.message_seq_in_strand(strand_id, &existing.end_message_id)?,
+        ) else {
+            continue;
+        };
+        if ee < start_seq || es > end_seq {
+            continue;
+        }
+        if start_seq <= es && ee <= end_seq {
+            absorbed.push(existing.id);
+            continue;
+        }
+        return Err("compact range partially overlaps an existing compact".to_string());
+    }
+
+    let collapsed_count: i64 = conn
+        .query_row(
+            r#"
+            SELECT COUNT(*) FROM r_strand_entries
+            WHERE strand_id = ?1 AND strand_seq BETWEEN ?2 AND ?3
+            "#,
+            params![strand_id, start_seq, end_seq],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+
+    Ok(Plan {
+        span: Span { start_seq, end_seq },
+        absorbed,
+        collapsed_count,
+    })
+}
+
+pub(super) fn message_id_at_seq(
+    conn: &Connection,
+    strand_id: &str,
+    seq: i64,
+) -> Result<Option<String>, String> {
+    conn.query_row(
+        r#"
+        SELECT target_id
+        FROM r_strand_entries
+        WHERE strand_id = ?1 AND strand_seq = ?2 AND target_type = 'message'
+        LIMIT 1
+        "#,
+        params![strand_id, seq],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|error| error.to_string())
+}
+
+pub(super) fn entry_text(
+    conn: &Connection,
+    target_type: &str,
+    target_id: &str,
+) -> Result<String, String> {
+    Ok(match target_type {
+        "message" => Database::new(conn)
+            .message_record_by_id(target_id)?
+            .map(|message| message.content.content_text())
+            .unwrap_or_default(),
+        "tool_call" => Database::new(conn)
+            .tool_call_by_id(target_id)?
+            .map(|call| {
+                format!(
+                    "[tool_call {}] {}",
+                    call.tool_name,
+                    value_text(&call.arguments)
+                )
+            })
+            .unwrap_or_default(),
+        "tool_result" => Database::new(conn)
+            .tool_result_by_id(target_id)?
+            .map(|result| match (result.output, result.error_text) {
+                (Some(output), _) => format!("[tool_result] {}", value_text(&output)),
+                (None, Some(error)) => format!("[tool_result error] {error}"),
+                (None, None) => "[tool_result]".to_string(),
+            })
+            .unwrap_or_default(),
+        "thinking" => Database::new(conn)
+            .thinking_span_by_id(target_id)?
+            .and_then(|thinking| thinking.summary)
+            .map(|summary| format!("[thinking] {summary}"))
+            .unwrap_or_default(),
+        _ => String::new(),
+    })
+}
+
+pub(super) fn value_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
+}
+
+pub(super) fn parse_target_type(value: &str) -> StrandTargetType {
+    match value {
+        "compact" => StrandTargetType::Compact,
+        "thinking" => StrandTargetType::Thinking,
+        "tool_call" => StrandTargetType::ToolCall,
+        "tool_result" => StrandTargetType::ToolResult,
+        _ => StrandTargetType::Message,
+    }
+}

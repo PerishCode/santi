@@ -5,7 +5,7 @@ use super::{
     ActorType, Compact, MaterialUpdated, MessageEvent, Strand, StrandEffect, StrandMessage,
     ThinkingSpan, Timestamp, ToolCall, ToolResult, Turn,
 };
-use crate::{ErrorIncident, ErrorTransition, SantiError};
+use santi_error::{ErrorIncident, ErrorTransition, SantiError};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SantiStreamEvent {

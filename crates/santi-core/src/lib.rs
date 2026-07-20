@@ -1,13 +1,12 @@
 mod assembly;
 mod context;
-mod model;
 
 pub mod service;
 mod store;
 pub mod workspace;
 
-pub use model::*;
 pub use santi_error::*;
+pub use santi_model::*;
 pub use santi_object::{LocalObjectStore, ObjectBucket, ObjectMeta, ObjectPayload, ObjectUri};
 pub use santi_provider::ProviderItem;
 pub use store::{

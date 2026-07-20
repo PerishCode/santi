@@ -4,6 +4,7 @@ members = [
   "crates/santi-api",
   "crates/santi-core",
   "crates/santi-error",
+  "crates/santi-model",
   "crates/santi-object",
   "crates/santi-provider",
 ]
@@ -35,6 +36,7 @@ rusqlite = { version = "0.40.1", features = ["bundled"] }
 santi-api = { path = "crates/santi-api" }
 santi-core = { path = "crates/santi-core" }
 santi-error = { path = "crates/santi-error" }
+santi-model = { path = "crates/santi-model" }
 santi-object = { path = "crates/santi-object" }
 santi-provider = { path = "crates/santi-provider" }
 serde = { version = "1.0.228", features = ["derive"] }

@@ -3,6 +3,7 @@ use serde_json::Value;
 use utoipa::ToSchema;
 
 mod api;
+mod codec;
 pub use api::*;
 
 pub type Timestamp = String;
@@ -202,9 +203,7 @@ pub fn timestamp_now() -> Timestamp {
     buf
 }
 
-pub(crate) fn timestamp_from_system_time(
-    system_time: std::time::SystemTime,
-) -> Result<Timestamp, String> {
+pub fn timestamp_from_system_time(system_time: std::time::SystemTime) -> Result<Timestamp, String> {
     use jiff::fmt::temporal::DateTimePrinter;
 
     let timestamp = jiff::Timestamp::try_from(system_time).map_err(|error| error.to_string())?;

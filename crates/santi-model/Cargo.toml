@@ -1,0 +1,13 @@
+[package]
+name = "santi-model"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+santi-error.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+utoipa.workspace = true
+jiff.workspace = true
+uuid.workspace = true

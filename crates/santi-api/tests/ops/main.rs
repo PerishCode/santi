@@ -203,3 +203,5 @@ fn seed_rejects_unknown() {
     let store = santi_core::SantiStore::open(&paths.database_path).expect("reopen");
     assert!(store.strands_with_pending_requests().unwrap().is_empty());
 }
+
+mod doctor;

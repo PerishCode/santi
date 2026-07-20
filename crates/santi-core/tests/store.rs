@@ -1,4 +1,4 @@
-#[path = "store/effects.rs"]
+#[path = "store/effects/mod.rs"]
 mod effects;
 #[path = "store/errors.rs"]
 mod errors;
@@ -8,7 +8,7 @@ mod fork;
 mod inbox;
 #[path = "store/receipt_schema.rs"]
 mod receipt_schema;
-#[path = "store/schema.rs"]
+#[path = "store/schema/mod.rs"]
 mod schema;
 #[path = "store/support.rs"]
 mod support;

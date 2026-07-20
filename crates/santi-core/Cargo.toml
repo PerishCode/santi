@@ -12,6 +12,7 @@ futures-util.workspace = true
 jiff.workspace = true
 rusqlite.workspace = true
 santi-error.workspace = true
+santi-object.workspace = true
 santi-provider.workspace = true
 serde.workspace = true
 serde_json.workspace = true

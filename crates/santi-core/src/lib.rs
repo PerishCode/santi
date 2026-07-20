@@ -1,14 +1,14 @@
 mod assembly;
 mod context;
 mod model;
-mod object;
+
 pub mod service;
 mod store;
 pub mod workspace;
 
 pub use model::*;
-pub use object::store::{LocalObjectStore, ObjectBucket, ObjectMeta, ObjectPayload, ObjectUri};
 pub use santi_error::*;
+pub use santi_object::{LocalObjectStore, ObjectBucket, ObjectMeta, ObjectPayload, ObjectUri};
 pub use santi_provider::ProviderItem;
 pub use store::{
     Completion, DEFAULT_SOUL_ID, Draft, Invocation, Reply, SCHEMA_VERSION, SantiStore,

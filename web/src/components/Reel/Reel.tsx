@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { Occ } from "../lib/feed";
+import type { Occ } from "../../lib/feed";
 import "./Reel.scss";
 
 type Props = {

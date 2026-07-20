@@ -1,5 +1,5 @@
-import type { Raw } from "../lib/feed";
-import { text } from "../lib/feed";
+import type { Raw } from "../../lib/feed";
+import { text } from "../../lib/feed";
 import "./Roll.scss";
 
 type Props = {

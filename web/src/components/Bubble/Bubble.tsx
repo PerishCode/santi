@@ -1,4 +1,4 @@
-import type { Line } from "../lib/chat";
+import type { Line } from "../../lib/chat";
 import "./Bubble.scss";
 
 type Props = {

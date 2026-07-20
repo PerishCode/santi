@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
-import "./tokens.scss";
-import "./themes/glass.scss";
-import "./media.scss";
+import "../tokens.scss";
+import "../themes/glass.scss";
+import "../media.scss";
 import "./Frame.scss";
 
 type Props = {

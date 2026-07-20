@@ -1,10 +1,10 @@
 import { type MutableRefObject, useEffect, useRef, useState } from "react";
-import { Bubble } from "../components/Bubble";
-import { Composer } from "../components/Composer";
-import { Deck } from "../components/Deck";
-import { Pill } from "../components/Pill";
-import { Reel } from "../components/Reel";
-import { Roll } from "../components/Roll";
+import { Bubble } from "../components/Bubble/Bubble";
+import { Composer } from "../components/Composer/Composer";
+import { Deck } from "../components/Deck/Deck";
+import { Pill } from "../components/Pill/Pill";
+import { Reel } from "../components/Reel/Reel";
+import { Roll } from "../components/Roll/Roll";
 import { Chat, type Line } from "../lib/chat";
 import { Feed, NAMES, type Raw, text } from "../lib/feed";
 import type { Accepted, Transcript } from "../lib/wire";

@@ -1,12 +1,8 @@
-use std::{
-    path::Path,
-    sync::{Arc, Mutex},
-};
+use std::path::Path;
 
 use rusqlite::{Connection, params};
 
-use crate::store::{DEFAULT_SOUL_ID, SCHEMA_VERSION, SantiStore, schema::SCHEMA};
-use crate::timestamp_now;
+use crate::store::{SCHEMA_VERSION, schema::SCHEMA};
 
 mod migrate;
 use migrate::*;
@@ -139,65 +135,48 @@ fn migrate_v22_to_v23(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-impl SantiStore {
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, String> {
-        if let Some(parent) = path.as_ref().parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        let conn = Connection::open(path).map_err(|error| error.to_string())?;
-        conn.busy_timeout(std::time::Duration::from_secs(5))
-            .map_err(|error| error.to_string())?;
-        let store = Self {
-            conn: Arc::new(Mutex::new(conn)),
-        };
-        store.migrate()?;
-        store.seed_defaults()?;
-        Ok(store)
-    }
-
-    fn migrate(&self) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
-        let version = conn
-            .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
-            .map_err(|error| error.to_string())?;
-        if version == 21 && SCHEMA_VERSION == 28 {
-            migrate_v21_to_v22(&conn)?;
-            migrate_v22_to_v23(&conn)?;
-            migrate_v23_to_v24(&conn)?;
-            super::migration::receipt::migrate_v24_to_v25(&conn)?;
-            super::migration::effect::migrate_v25_to_v26(&conn)?;
-            super::migration::im::migrate_v26_to_v27(&conn)?;
-            super::migration::window::migrate_v27_to_v28(&conn)?;
-        } else if version == 22 && SCHEMA_VERSION == 28 {
-            migrate_v22_to_v23(&conn)?;
-            migrate_v23_to_v24(&conn)?;
-            super::migration::receipt::migrate_v24_to_v25(&conn)?;
-            super::migration::effect::migrate_v25_to_v26(&conn)?;
-            super::migration::im::migrate_v26_to_v27(&conn)?;
-            super::migration::window::migrate_v27_to_v28(&conn)?;
-        } else if version == 23 && SCHEMA_VERSION == 28 {
-            migrate_v23_to_v24(&conn)?;
-            super::migration::receipt::migrate_v24_to_v25(&conn)?;
-            super::migration::effect::migrate_v25_to_v26(&conn)?;
-            super::migration::im::migrate_v26_to_v27(&conn)?;
-            super::migration::window::migrate_v27_to_v28(&conn)?;
-        } else if version == 24 && SCHEMA_VERSION == 28 {
-            super::migration::receipt::migrate_v24_to_v25(&conn)?;
-            super::migration::effect::migrate_v25_to_v26(&conn)?;
-            super::migration::im::migrate_v26_to_v27(&conn)?;
-            super::migration::window::migrate_v27_to_v28(&conn)?;
-        } else if version == 25 && SCHEMA_VERSION == 28 {
-            super::migration::effect::migrate_v25_to_v26(&conn)?;
-            super::migration::im::migrate_v26_to_v27(&conn)?;
-            super::migration::window::migrate_v27_to_v28(&conn)?;
-        } else if version == 26 && SCHEMA_VERSION == 28 {
-            super::migration::im::migrate_v26_to_v27(&conn)?;
-            super::migration::window::migrate_v27_to_v28(&conn)?;
-        } else if version == 27 && SCHEMA_VERSION == 28 {
-            super::migration::window::migrate_v27_to_v28(&conn)?;
-        } else if version != SCHEMA_VERSION {
-            conn.execute_batch(
-                r#"
+pub fn migrate(conn: &Connection) -> Result<(), String> {
+    let version = conn
+        .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
+        .map_err(|error| error.to_string())?;
+    if version == 21 && SCHEMA_VERSION == 28 {
+        migrate_v21_to_v22(conn)?;
+        migrate_v22_to_v23(conn)?;
+        migrate_v23_to_v24(conn)?;
+        super::migration::receipt::migrate_v24_to_v25(conn)?;
+        super::migration::effect::migrate_v25_to_v26(conn)?;
+        super::migration::im::migrate_v26_to_v27(conn)?;
+        super::migration::window::migrate_v27_to_v28(conn)?;
+    } else if version == 22 && SCHEMA_VERSION == 28 {
+        migrate_v22_to_v23(conn)?;
+        migrate_v23_to_v24(conn)?;
+        super::migration::receipt::migrate_v24_to_v25(conn)?;
+        super::migration::effect::migrate_v25_to_v26(conn)?;
+        super::migration::im::migrate_v26_to_v27(conn)?;
+        super::migration::window::migrate_v27_to_v28(conn)?;
+    } else if version == 23 && SCHEMA_VERSION == 28 {
+        migrate_v23_to_v24(conn)?;
+        super::migration::receipt::migrate_v24_to_v25(conn)?;
+        super::migration::effect::migrate_v25_to_v26(conn)?;
+        super::migration::im::migrate_v26_to_v27(conn)?;
+        super::migration::window::migrate_v27_to_v28(conn)?;
+    } else if version == 24 && SCHEMA_VERSION == 28 {
+        super::migration::receipt::migrate_v24_to_v25(conn)?;
+        super::migration::effect::migrate_v25_to_v26(conn)?;
+        super::migration::im::migrate_v26_to_v27(conn)?;
+        super::migration::window::migrate_v27_to_v28(conn)?;
+    } else if version == 25 && SCHEMA_VERSION == 28 {
+        super::migration::effect::migrate_v25_to_v26(conn)?;
+        super::migration::im::migrate_v26_to_v27(conn)?;
+        super::migration::window::migrate_v27_to_v28(conn)?;
+    } else if version == 26 && SCHEMA_VERSION == 28 {
+        super::migration::im::migrate_v26_to_v27(conn)?;
+        super::migration::window::migrate_v27_to_v28(conn)?;
+    } else if version == 27 && SCHEMA_VERSION == 28 {
+        super::migration::window::migrate_v27_to_v28(conn)?;
+    } else if version != SCHEMA_VERSION {
+        conn.execute_batch(
+            r#"
                 DROP TABLE IF EXISTS provider_replay_material;
                 DROP TABLE IF EXISTS response_stream_deltas;
                 DROP TABLE IF EXISTS response_runs;
@@ -237,27 +216,12 @@ impl SantiStore {
                 DROP TABLE IF EXISTS session_effects;
                 DROP TABLE IF EXISTS accounts;
                 "#,
-            )
-            .map_err(|error| error.to_string())?;
-        }
-        conn.execute_batch(SCHEMA)
-            .map_err(|error| error.to_string())?;
-        conn.pragma_update(None, "user_version", SCHEMA_VERSION)
-            .map_err(|error| error.to_string())?;
-        Ok(())
-    }
-
-    fn seed_defaults(&self) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
-        let now = timestamp_now();
-        conn.execute(
-            r#"
-            INSERT OR IGNORE INTO souls (id, created_at, updated_at)
-            VALUES (?1, ?2, ?2)
-            "#,
-            params![DEFAULT_SOUL_ID, now],
         )
         .map_err(|error| error.to_string())?;
-        Ok(())
     }
+    conn.execute_batch(SCHEMA)
+        .map_err(|error| error.to_string())?;
+    conn.pragma_update(None, "user_version", SCHEMA_VERSION)
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }

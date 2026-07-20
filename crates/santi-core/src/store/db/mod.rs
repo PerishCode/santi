@@ -14,7 +14,8 @@ use crate::{
 
 use super::rows::*;
 pub(super) use inbox::drain_inbox_in_tx;
-pub use lifecycle::{read_schema_version, soul_memory_file};
+pub use lifecycle::{migrate, read_schema_version, soul_memory_file};
+pub(crate) use receipts::receipt_state_from_db;
 
 pub(super) struct Database<'a> {
     pub(super) conn: &'a Connection,

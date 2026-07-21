@@ -139,7 +139,9 @@ async fn delivery_failure_does_not_fail_turn() {
         Arc::new(FakeProvider::default()),
     )
     .expect("open service");
-    let conn = rusqlite::Connection::open(&database_path).unwrap();
+    let mut im_db = database_path.clone().into_os_string();
+    im_db.push(".im");
+    let conn = rusqlite::Connection::open(&im_db).unwrap();
     conn.execute_batch(
         r#"
         CREATE TRIGGER reject_im_delivery

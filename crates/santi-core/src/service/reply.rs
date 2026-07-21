@@ -8,8 +8,7 @@ pub(super) struct Sink<'a> {
 
 impl ReplySink for Sink<'_> {
     fn deliver_reply(&self, event: &ReplyEvent) -> Result<(), String> {
-        let conn = self.service.store.connection();
-        santi_im::deliver_reply(&conn, event)
+        self.service.store.deliver_reply(event)
     }
 }
 

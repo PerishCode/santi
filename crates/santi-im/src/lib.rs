@@ -1,228 +1,222 @@
+use std::sync::{Arc, Mutex};
+
 use rusqlite::{Connection, OptionalExtension, params};
 
-use santi_model::{
-    IM_LABEL_PREFIX, ImDelivery, ImDeliveryMode, ImInboxEntry, prefixed_id, timestamp_now,
-};
+use santi_model::{ImDelivery, ImDeliveryMode, ImInboxEntry, prefixed_id, timestamp_now};
+
+const IM_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS im_participants (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('human', 'soul')),
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS im_inbox (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    participant_id TEXT NOT NULL,
+    from_ref TEXT,
+    turn_id TEXT,
+    message_id TEXT,
+    delivery_mode TEXT CHECK (
+        delivery_mode IS NULL OR delivery_mode IN ('explicit', 'automatic')
+    ),
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_im_inbox_participant_seq ON im_inbox (participant_id, seq);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_im_inbox_turn
+ON im_inbox(turn_id)
+WHERE turn_id IS NOT NULL;
+"#;
 
 pub struct Reply<'a> {
     pub strand: &'a str,
     pub turn: &'a str,
+    pub participant: &'a str,
     pub message: Option<&'a str>,
     pub content: &'a str,
     pub mode: ImDeliveryMode,
 }
 
-pub fn ensure_participant(conn: &Connection, id: &str, kind: &str) -> Result<(), String> {
-    let now = timestamp_now();
-    conn.execute(
-        r#"
-        INSERT INTO im_participants (id, kind, created_at)
-        VALUES (?1, ?2, ?3)
-        ON CONFLICT(id) DO NOTHING
-        "#,
-        params![id, kind, now],
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(())
+#[derive(Clone)]
+pub struct ImStore {
+    conn: Arc<Mutex<Connection>>,
 }
 
-pub fn enqueue_inbox(
-    conn: &Connection,
-    participant_id: &str,
-    from_ref: Option<&str>,
-    content: &str,
-) -> Result<ImInboxEntry, String> {
-    let id = prefixed_id("imx");
-    let now = timestamp_now();
-    conn.execute(
-        r#"
-        INSERT INTO im_inbox (id, participant_id, from_ref, content, created_at)
-        VALUES (?1, ?2, ?3, ?4, ?5)
-        "#,
-        params![id, participant_id, from_ref, content, now],
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(ImInboxEntry {
-        seq: conn.last_insert_rowid(),
-        id,
-        participant_id: participant_id.to_string(),
-        from_ref: from_ref.map(str::to_string),
-        turn_id: None,
-        message_id: None,
-        delivery_mode: None,
-        content: content.to_string(),
-        created_at: now,
-    })
-}
-
-pub fn poll_inbox(
-    conn: &Connection,
-    participant_id: &str,
-    since: i64,
-) -> Result<Vec<ImInboxEntry>, String> {
-    let mut stmt = conn
-        .prepare(
-            r#"
-            SELECT seq, id, participant_id, from_ref, turn_id, message_id,
-                   delivery_mode, content, created_at
-            FROM im_inbox
-            WHERE participant_id = ?1 AND seq > ?2
-            ORDER BY seq ASC
-            "#,
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map(params![participant_id, since], |row| {
-            Ok(ImInboxEntry {
-                seq: row.get(0)?,
-                id: row.get(1)?,
-                participant_id: row.get(2)?,
-                from_ref: row.get(3)?,
-                turn_id: row.get(4)?,
-                message_id: row.get(5)?,
-                delivery_mode: row
-                    .get::<_, Option<String>>(6)?
-                    .map(|mode| delivery_mode_from_db(&mode)),
-                content: row.get(7)?,
-                created_at: row.get(8)?,
-            })
+impl ImStore {
+    pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self, String> {
+        let conn = Connection::open(path).map_err(|error| error.to_string())?;
+        conn.execute_batch(IM_SCHEMA)
+            .map_err(|error| error.to_string())?;
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
         })
-        .map_err(|error| error.to_string())?;
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row.map_err(|error| error.to_string())?);
     }
-    Ok(out)
-}
 
-pub fn participant_for_strand(
-    conn: &Connection,
-    strand_id: &str,
-) -> Result<Option<String>, String> {
-    let label: Option<Option<String>> = conn
-        .query_row(
-            "SELECT external_label FROM strands WHERE id = ?1",
-            params![strand_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|error| error.to_string())?;
-    Ok(label
-        .flatten()
-        .and_then(|label| label.strip_prefix(IM_LABEL_PREFIX).map(str::to_string)))
-}
-
-pub fn enqueue_turn_in(
-    conn: &Connection,
-    reply: Reply<'_>,
-    at: &str,
-) -> Result<(ImInboxEntry, bool), String> {
-    let Reply {
-        strand,
-        turn,
-        message,
-        content,
-        mode,
-    } = reply;
-    let (turn_strand, external_label): (String, Option<String>) = conn
-        .query_row(
+    pub fn ensure_participant(&self, id: &str, kind: &str) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
             r#"
-            SELECT turn.strand_id, strand.external_label
-            FROM turns AS turn
-            JOIN strands AS strand ON strand.id = turn.strand_id
-            WHERE turn.id = ?1
+            INSERT INTO im_participants (id, kind, created_at)
+            VALUES (?1, ?2, ?3)
+            ON CONFLICT(id) DO NOTHING
             "#,
-            params![turn],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("unknown turn {turn}"))?;
-    if turn_strand != strand {
-        return Err(format!(
-            "turn {turn} belongs to strand {turn_strand}, not {strand}"
-        ));
-    }
-    let participant_id = external_label
-        .as_deref()
-        .and_then(|label| label.strip_prefix(IM_LABEL_PREFIX))
-        .ok_or_else(|| format!("strand {strand} is not an IM conversation"))?;
-    conn.execute(
-        r#"
-        INSERT INTO im_participants (id, kind, created_at)
-        VALUES (?1, 'human', ?2)
-        ON CONFLICT(id) DO NOTHING
-        "#,
-        params![participant_id, at],
-    )
-    .map_err(|error| error.to_string())?;
-    let id = prefixed_id("imx");
-    let inserted = conn
-        .execute(
-            r#"
-            INSERT OR IGNORE INTO im_inbox (
-              id, participant_id, from_ref, turn_id, message_id,
-              delivery_mode, content, created_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-            "#,
-            params![
-                id,
-                participant_id,
-                strand,
-                turn,
-                message,
-                im_delivery_mode_db(&mode),
-                content,
-                at,
-            ],
-        )
-        .map_err(|error| error.to_string())?
-        == 1;
-    let entry = reply_for_turn_in(conn, turn)?
-        .ok_or_else(|| format!("IM reply for turn {turn} missing after insert"))?;
-    if entry.participant_id != participant_id || entry.from_ref.as_deref() != Some(strand) {
-        return Err(format!("IM reply idempotency collision for turn {turn}"));
-    }
-    Ok((entry, inserted))
-}
-
-pub fn deliveries_for_receipt_in(
-    conn: &Connection,
-    inbox_id: &str,
-) -> Result<Vec<ImDelivery>, String> {
-    let mut stmt = conn
-        .prepare(
-            r#"
-            SELECT DISTINCT delivery.seq, delivery.id, delivery.participant_id,
-                   delivery.from_ref, delivery.turn_id, delivery.message_id,
-                   delivery.delivery_mode, delivery.created_at
-            FROM im_inbox AS delivery
-            JOIN receipt_transitions AS receipt ON receipt.turn_id = delivery.turn_id
-            WHERE receipt.inbox_id = ?1
-            ORDER BY delivery.seq
-            "#,
+            params![id, kind, timestamp_now()],
         )
         .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map(params![inbox_id], |row| {
-            let mode = row.get::<_, String>(6)?;
-            Ok(ImDelivery {
-                seq: row.get(0)?,
-                id: row.get(1)?,
-                participant_id: row.get(2)?,
-                strand_id: row.get(3)?,
-                turn_id: row.get(4)?,
-                message_id: row.get(5)?,
-                delivery_mode: delivery_mode_from_db(&mode),
-                created_at: row.get(7)?,
-            })
+        Ok(())
+    }
+
+    pub fn enqueue_inbox(
+        &self,
+        participant_id: &str,
+        from_ref: Option<&str>,
+        content: &str,
+    ) -> Result<ImInboxEntry, String> {
+        let conn = self.conn.lock().unwrap();
+        let id = prefixed_id("imx");
+        let now = timestamp_now();
+        conn.execute(
+            r#"
+            INSERT INTO im_inbox (id, participant_id, from_ref, content, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            "#,
+            params![id, participant_id, from_ref, content, now],
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(ImInboxEntry {
+            seq: conn.last_insert_rowid(),
+            id,
+            participant_id: participant_id.to_string(),
+            from_ref: from_ref.map(str::to_string),
+            turn_id: None,
+            message_id: None,
+            delivery_mode: None,
+            content: content.to_string(),
+            created_at: now,
         })
+    }
+
+    pub fn poll_inbox(
+        &self,
+        participant_id: &str,
+        since: i64,
+    ) -> Result<Vec<ImInboxEntry>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                r#"
+                SELECT seq, id, participant_id, from_ref, turn_id, message_id,
+                       delivery_mode, content, created_at
+                FROM im_inbox
+                WHERE participant_id = ?1 AND seq > ?2
+                ORDER BY seq ASC
+                "#,
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map(params![participant_id, since], map_inbox_entry)
+            .map_err(|error| error.to_string())?;
+        rows.map(|row| row.map_err(|error| error.to_string()))
+            .collect()
+    }
+
+    pub fn enqueue_reply(&self, reply: Reply<'_>) -> Result<(ImInboxEntry, bool), String> {
+        let conn = self.conn.lock().unwrap();
+        let now = timestamp_now();
+        conn.execute(
+            r#"
+            INSERT INTO im_participants (id, kind, created_at)
+            VALUES (?1, 'human', ?2)
+            ON CONFLICT(id) DO NOTHING
+            "#,
+            params![reply.participant, now],
+        )
         .map_err(|error| error.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())
+        let inserted = conn
+            .execute(
+                r#"
+                INSERT OR IGNORE INTO im_inbox (
+                  id, participant_id, from_ref, turn_id, message_id,
+                  delivery_mode, content, created_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                "#,
+                params![
+                    prefixed_id("imx"),
+                    reply.participant,
+                    reply.strand,
+                    reply.turn,
+                    reply.message,
+                    delivery_mode_db(&reply.mode),
+                    reply.content,
+                    now,
+                ],
+            )
+            .map_err(|error| error.to_string())?
+            == 1;
+        let entry = reply_for_turn(&conn, reply.turn)?
+            .ok_or_else(|| format!("IM reply for turn {} missing after insert", reply.turn))?;
+        if entry.participant_id != reply.participant
+            || entry.from_ref.as_deref() != Some(reply.strand)
+        {
+            return Err(format!(
+                "IM reply idempotency collision for turn {}",
+                reply.turn
+            ));
+        }
+        Ok((entry, inserted))
+    }
+
+    pub fn deliver_reply(&self, event: &santi_protocol::ReplyEvent) -> Result<(), String> {
+        self.enqueue_reply(Reply {
+            strand: &event.strand_id,
+            turn: &event.turn_id,
+            participant: &event.participant_id,
+            message: event.message_id.as_deref(),
+            content: &event.content,
+            mode: event.mode,
+        })
+        .map(|_| ())
+    }
+
+    pub fn deliveries_for_turns(&self, turn_ids: &[String]) -> Result<Vec<ImDelivery>, String> {
+        if turn_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().unwrap();
+        let placeholders = turn_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let mut stmt = conn
+            .prepare(&format!(
+                r#"
+                SELECT DISTINCT seq, id, participant_id, from_ref, turn_id, message_id,
+                       delivery_mode, created_at
+                FROM im_inbox
+                WHERE turn_id IN ({placeholders})
+                ORDER BY seq
+                "#
+            ))
+            .map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(turn_ids), |row| {
+                let mode = row.get::<_, String>(6)?;
+                Ok(ImDelivery {
+                    seq: row.get(0)?,
+                    id: row.get(1)?,
+                    participant_id: row.get(2)?,
+                    strand_id: row.get(3)?,
+                    turn_id: row.get(4)?,
+                    message_id: row.get(5)?,
+                    delivery_mode: delivery_mode_from_db(&mode),
+                    created_at: row.get(7)?,
+                })
+            })
+            .map_err(|error| error.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())
+    }
 }
 
-fn reply_for_turn_in(conn: &Connection, turn_id: &str) -> Result<Option<ImInboxEntry>, String> {
+fn reply_for_turn(conn: &Connection, turn_id: &str) -> Result<Option<ImInboxEntry>, String> {
     conn.query_row(
         r#"
         SELECT seq, id, participant_id, from_ref, turn_id, message_id,
@@ -230,27 +224,29 @@ fn reply_for_turn_in(conn: &Connection, turn_id: &str) -> Result<Option<ImInboxE
         FROM im_inbox WHERE turn_id = ?1
         "#,
         params![turn_id],
-        |row| {
-            Ok(ImInboxEntry {
-                seq: row.get(0)?,
-                id: row.get(1)?,
-                participant_id: row.get(2)?,
-                from_ref: row.get(3)?,
-                turn_id: row.get(4)?,
-                message_id: row.get(5)?,
-                delivery_mode: row
-                    .get::<_, Option<String>>(6)?
-                    .map(|mode| delivery_mode_from_db(&mode)),
-                content: row.get(7)?,
-                created_at: row.get(8)?,
-            })
-        },
+        map_inbox_entry,
     )
     .optional()
     .map_err(|error| error.to_string())
 }
 
-fn im_delivery_mode_db(mode: &ImDeliveryMode) -> &'static str {
+fn map_inbox_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImInboxEntry> {
+    Ok(ImInboxEntry {
+        seq: row.get(0)?,
+        id: row.get(1)?,
+        participant_id: row.get(2)?,
+        from_ref: row.get(3)?,
+        turn_id: row.get(4)?,
+        message_id: row.get(5)?,
+        delivery_mode: row
+            .get::<_, Option<String>>(6)?
+            .map(|mode| delivery_mode_from_db(&mode)),
+        content: row.get(7)?,
+        created_at: row.get(8)?,
+    })
+}
+
+fn delivery_mode_db(mode: &ImDeliveryMode) -> &'static str {
     match mode {
         ImDeliveryMode::Explicit => "explicit",
         ImDeliveryMode::Automatic => "automatic",
@@ -262,36 +258,4 @@ fn delivery_mode_from_db(mode: &str) -> ImDeliveryMode {
         "explicit" => ImDeliveryMode::Explicit,
         _ => ImDeliveryMode::Automatic,
     }
-}
-
-pub fn deliver_reply(conn: &Connection, event: &santi_protocol::ReplyEvent) -> Result<(), String> {
-    conn.execute(
-        r#"
-        INSERT INTO im_participants (id, kind, created_at)
-        VALUES (?1, 'human', ?2)
-        ON CONFLICT(id) DO NOTHING
-        "#,
-        params![event.participant_id, timestamp_now()],
-    )
-    .map_err(|error| error.to_string())?;
-    conn.execute(
-        r#"
-        INSERT OR IGNORE INTO im_inbox (
-          id, participant_id, from_ref, turn_id, message_id,
-          delivery_mode, content, created_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-        "#,
-        params![
-            prefixed_id("imx"),
-            event.participant_id,
-            event.strand_id,
-            event.turn_id,
-            event.message_id,
-            im_delivery_mode_db(&event.mode),
-            event.content,
-            timestamp_now(),
-        ],
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(())
 }

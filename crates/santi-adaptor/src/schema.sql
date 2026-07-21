@@ -307,35 +307,6 @@ CREATE INDEX IF NOT EXISTS idx_r_strand_entries_seq ON r_strand_entries (strand_
 -- here, in the IM's envelope. The runtime inbox may carry bounded diagnostic
 -- source provenance, but that is not a reply capability or provider-visible
 -- message content.
-CREATE TABLE IF NOT EXISTS im_participants (
-    id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL CHECK (kind IN ('human', 'soul')),
-    created_at TEXT NOT NULL
-);
-
--- The passive inbox for a (human/CLI) participant: the return values it catches.
--- `seq` is a global monotonic cursor (caller polls `WHERE participant_id=? AND
--- seq > since`); `from_ref` names the soul strand that replied. Retained for audit
--- (the IM conversation history); no ack — the caller's high-water `seq` is the ack.
--- Runtime-owned replies carry a unique turn id, joining participant delivery to
--- the accepted inbox receipt without exposing the reply content in receipt status.
-CREATE TABLE IF NOT EXISTS im_inbox (
-    seq INTEGER PRIMARY KEY AUTOINCREMENT,
-    id TEXT NOT NULL UNIQUE,
-    participant_id TEXT NOT NULL,
-    from_ref TEXT,
-    turn_id TEXT,
-    message_id TEXT,
-    delivery_mode TEXT CHECK (
-        delivery_mode IS NULL OR delivery_mode IN ('explicit', 'automatic')
-    ),
-    content TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_im_inbox_participant_seq ON im_inbox (participant_id, seq);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_im_inbox_turn
-ON im_inbox(turn_id)
-WHERE turn_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS window_messages (
     participant_id TEXT NOT NULL,

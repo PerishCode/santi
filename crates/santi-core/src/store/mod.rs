@@ -55,6 +55,7 @@ pub fn soul_memory_file(
 #[derive(Clone)]
 pub struct SantiStore {
     conn: Arc<Mutex<Connection>>,
+    im: santi_im::ImStore,
 }
 
 #[derive(Debug, Clone)]

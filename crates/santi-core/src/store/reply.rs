@@ -21,9 +21,3 @@ impl ReplyOutbox for SantiStore {
         Database::new(&conn).mark_reply_delivered(id, &timestamp_now())
     }
 }
-
-impl SantiStore {
-    pub(crate) fn connection(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
-        self.conn.lock().unwrap()
-    }
-}

@@ -1,12 +1,19 @@
-pub use santi_im::{Reply, deliveries_for_receipt_in};
-use santi_model::ImInboxEntry;
+use rusqlite::{OptionalExtension, params};
+use santi_model::{IM_LABEL_PREFIX, ImDeliveryMode, ImInboxEntry};
 
 use super::SantiStore;
 
+pub struct Reply<'a> {
+    pub strand: &'a str,
+    pub turn: &'a str,
+    pub message: Option<&'a str>,
+    pub content: &'a str,
+    pub mode: ImDeliveryMode,
+}
+
 impl SantiStore {
     pub fn ensure_im_participant(&self, id: &str, kind: &str) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
-        santi_im::ensure_participant(&conn, id, kind)
+        self.im.ensure_participant(id, kind)
     }
 
     pub fn enqueue_im_inbox(
@@ -15,16 +22,21 @@ impl SantiStore {
         from_ref: Option<&str>,
         content: &str,
     ) -> Result<ImInboxEntry, String> {
-        let conn = self.conn.lock().unwrap();
-        santi_im::enqueue_inbox(&conn, participant_id, from_ref, content)
+        self.im.enqueue_inbox(participant_id, from_ref, content)
     }
 
     pub fn enqueue_turn_reply(&self, reply: Reply<'_>) -> Result<(ImInboxEntry, bool), String> {
-        let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let outcome = santi_im::enqueue_turn_in(&tx, reply, &santi_model::timestamp_now())?;
-        tx.commit().map_err(|error| error.to_string())?;
-        Ok(outcome)
+        let participant = self
+            .im_participant_for_strand(reply.strand)?
+            .ok_or_else(|| format!("strand {} is not an IM conversation", reply.strand))?;
+        self.im.enqueue_reply(santi_im::Reply {
+            strand: reply.strand,
+            turn: reply.turn,
+            participant: &participant,
+            message: reply.message,
+            content: reply.content,
+            mode: reply.mode,
+        })
     }
 
     pub fn poll_im_inbox(
@@ -32,12 +44,25 @@ impl SantiStore {
         participant_id: &str,
         since: i64,
     ) -> Result<Vec<ImInboxEntry>, String> {
-        let conn = self.conn.lock().unwrap();
-        santi_im::poll_inbox(&conn, participant_id, since)
+        self.im.poll_inbox(participant_id, since)
     }
 
     pub fn im_participant_for_strand(&self, strand_id: &str) -> Result<Option<String>, String> {
         let conn = self.conn.lock().unwrap();
-        santi_im::participant_for_strand(&conn, strand_id)
+        let label: Option<Option<String>> = conn
+            .query_row(
+                "SELECT external_label FROM strands WHERE id = ?1",
+                params![strand_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        Ok(label
+            .flatten()
+            .and_then(|label| label.strip_prefix(IM_LABEL_PREFIX).map(str::to_string)))
+    }
+
+    pub(crate) fn deliver_reply(&self, event: &santi_protocol::ReplyEvent) -> Result<(), String> {
+        self.im.deliver_reply(event)
     }
 }

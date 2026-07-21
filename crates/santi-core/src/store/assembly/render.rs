@@ -93,79 +93,89 @@ pub(super) fn assembly_input_with_preview(
             }
             continue;
         }
-        if let Some(item) = database.provider_item(&target_type, &target_id)? {
+        if let Some(item) = provider_item(&database, &target_type, &target_id)? {
             input.push(item);
         }
     }
     Ok(input)
 }
 
-impl Database<'_> {
-    fn provider_item(
-        &self,
-        target_type: &str,
-        target_id: &str,
-    ) -> Result<Option<ProviderItem>, String> {
-        match target_type {
-            "message" => self.message_item(target_id),
-            "thinking" => self.thinking_item(target_id),
-            "tool_call" => self.tool_call_item(target_id),
-            "tool_result" => self.tool_result_item(target_id),
-            _ => Ok(None),
-        }
+pub(super) fn provider_item(
+    db: &Database<'_>,
+    target_type: &str,
+    target_id: &str,
+) -> Result<Option<ProviderItem>, String> {
+    match target_type {
+        "message" => message_item(db, target_id),
+        "thinking" => thinking_item(db, target_id),
+        "tool_call" => tool_call_item(db, target_id),
+        "tool_result" => tool_result_item(db, target_id),
+        _ => Ok(None),
     }
+}
 
-    fn message_item(&self, target_id: &str) -> Result<Option<ProviderItem>, String> {
-        let Some(message) = self.message_record_by_id(target_id)? else {
-            return Ok(None);
-        };
-        Ok(message_to_provider_item(&message))
-    }
+pub(super) fn message_item(
+    db: &Database<'_>,
+    target_id: &str,
+) -> Result<Option<ProviderItem>, String> {
+    let Some(message) = db.message_record_by_id(target_id)? else {
+        return Ok(None);
+    };
+    Ok(message_to_provider_item(&message))
+}
 
-    fn thinking_item(&self, target_id: &str) -> Result<Option<ProviderItem>, String> {
-        let Some(thinking) = self.thinking_span_by_id(target_id)? else {
-            return Ok(None);
-        };
-        let Some(content) = thinking.summary.filter(|text| !text.trim().is_empty()) else {
-            return Ok(None);
-        };
-        Ok(Some(ProviderItem::Reasoning {
-            id: thinking.provider_response_id,
-            content,
-        }))
-    }
+pub(super) fn thinking_item(
+    db: &Database<'_>,
+    target_id: &str,
+) -> Result<Option<ProviderItem>, String> {
+    let Some(thinking) = db.thinking_span_by_id(target_id)? else {
+        return Ok(None);
+    };
+    let Some(content) = thinking.summary.filter(|text| !text.trim().is_empty()) else {
+        return Ok(None);
+    };
+    Ok(Some(ProviderItem::Reasoning {
+        id: thinking.provider_response_id,
+        content,
+    }))
+}
 
-    fn tool_call_item(&self, target_id: &str) -> Result<Option<ProviderItem>, String> {
-        let Some(tool_call) = self.tool_call_by_id(target_id)? else {
-            return Ok(None);
-        };
-        let (item, item_id) = self.regenerable_replay_material(&tool_call.id)?;
-        let arguments_raw =
-            serde_json::to_string(&tool_call.arguments).map_err(|error| error.to_string())?;
-        Ok(Some(ProviderItem::FunctionCall {
-            call_id: tool_call.id,
-            name: tool_call.tool_name,
-            arguments_raw,
-            item,
-            item_id,
-        }))
-    }
+pub(super) fn tool_call_item(
+    db: &Database<'_>,
+    target_id: &str,
+) -> Result<Option<ProviderItem>, String> {
+    let Some(tool_call) = db.tool_call_by_id(target_id)? else {
+        return Ok(None);
+    };
+    let (item, item_id) = db.regenerable_replay_material(&tool_call.id)?;
+    let arguments_raw =
+        serde_json::to_string(&tool_call.arguments).map_err(|error| error.to_string())?;
+    Ok(Some(ProviderItem::FunctionCall {
+        call_id: tool_call.id,
+        name: tool_call.tool_name,
+        arguments_raw,
+        item,
+        item_id,
+    }))
+}
 
-    fn tool_result_item(&self, target_id: &str) -> Result<Option<ProviderItem>, String> {
-        let Some(tool_result) = self.tool_result_by_id(target_id)? else {
-            return Ok(None);
-        };
-        let output = serde_json::to_string(&json!({
-            "ok": tool_result.error_text.is_none(),
-            "output": tool_result.output,
-            "error": tool_result.error_text,
-        }))
-        .map_err(|error| error.to_string())?;
-        Ok(Some(ProviderItem::FunctionCallOutput {
-            call_id: tool_result.tool_call_id,
-            output,
-        }))
-    }
+pub(super) fn tool_result_item(
+    db: &Database<'_>,
+    target_id: &str,
+) -> Result<Option<ProviderItem>, String> {
+    let Some(tool_result) = db.tool_result_by_id(target_id)? else {
+        return Ok(None);
+    };
+    let output = serde_json::to_string(&json!({
+        "ok": tool_result.error_text.is_none(),
+        "output": tool_result.output,
+        "error": tool_result.error_text,
+    }))
+    .map_err(|error| error.to_string())?;
+    Ok(Some(ProviderItem::FunctionCallOutput {
+        call_id: tool_result.tool_call_id,
+        output,
+    }))
 }
 
 pub(super) fn render_compact_for_provider(

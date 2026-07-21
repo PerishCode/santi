@@ -32,7 +32,7 @@ impl SantiStore {
         }
 
         let database = Database::new(&tx);
-        let pending = database.pending_items(strand)?;
+        let pending = super::state::pending_items(&database, strand)?;
         let has_failed_receipt = recover
             && tx
                 .query_row(
@@ -50,7 +50,8 @@ impl SantiStore {
             .active_incident(&context_incident_key(strand))?
             .is_some()
         {
-            let error = database.repeat_context_incident(strand, "pending_active_guard")?;
+            let error =
+                super::state::repeat_context_incident(&database, strand, "pending_active_guard")?;
             tx.commit().map_err(|error| error.to_string())?;
             return Ok(StartTurnOutcome::Held(error));
         }
@@ -66,7 +67,8 @@ impl SantiStore {
             if estimate.total_bytes > admission.budget_bytes {
                 let reason = over_budget_reason(estimate.total_bytes, admission.budget_bytes);
                 let observed_at_seq = database.current_strand_seq(strand)?;
-                let error = database.open_context_incident(
+                let error = super::state::open_context_incident(
+                    &database,
                     strand,
                     Pressure {
                         reason_code: REASON_PENDING,

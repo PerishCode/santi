@@ -110,7 +110,7 @@ impl SantiStore {
         strand_id: &str,
     ) -> Result<Vec<ProviderItem>, String> {
         let conn = self.conn.lock().unwrap();
-        Database::new(&conn).pending_items(strand_id)
+        state::pending_items(&Database::new(&conn), strand_id)
     }
 
     pub(crate) fn open_context_incident(
@@ -122,7 +122,7 @@ impl SantiStore {
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
-        let error = Database::new(&tx).open_context_incident(strand_id, input)?;
+        let error = state::open_context_incident(&Database::new(&tx), strand_id, input)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(error)
     }

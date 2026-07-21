@@ -64,8 +64,11 @@ impl SantiStore {
                 .active_incident(&context_incident_key(strand))?
                 .is_some()
         {
-            let error =
-                Database::new(&tx).repeat_context_incident(strand, "ingest_active_guard")?;
+            let error = super::state::repeat_context_incident(
+                &Database::new(&tx),
+                strand,
+                "ingest_active_guard",
+            )?;
             tx.commit().map_err(|error| error.to_string())?;
             return Ok(IngestOutcome::Rejected {
                 error: Box::new(error),
@@ -75,7 +78,7 @@ impl SantiStore {
         if let Some(admission) = admission {
             let database = Database::new(&tx);
             let mut input = assembly_input_in_conn(&tx, strand)?;
-            input.extend(database.pending_items(strand)?);
+            input.extend(super::state::pending_items(&database, strand)?);
             if let Some(candidate) = crate::context::budget::inbound_provider_item(&kind, &content)
             {
                 input.push(candidate);
@@ -88,7 +91,8 @@ impl SantiStore {
             if estimate.total_bytes > admission.budget_bytes {
                 let reason = over_budget_reason(estimate.total_bytes, admission.budget_bytes);
                 let observed_at_seq = database.current_strand_seq(strand)?;
-                let error = database.open_context_incident(
+                let error = super::state::open_context_incident(
+                    &database,
                     strand,
                     Pressure {
                         reason_code: "candidate_input_exceeds_budget",

@@ -1,3 +1,4 @@
+mod budget;
 mod effects;
 pub use effects::{Prepared, Transition};
 mod inbox;

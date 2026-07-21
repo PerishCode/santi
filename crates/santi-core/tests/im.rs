@@ -116,16 +116,10 @@ fn turn_reply_deduplicates() {
             response: None,
         })
         .unwrap();
-    let status = store
-        .receipt_status(&receipt.inbox_id)
-        .unwrap()
-        .expect("receipt");
-    assert_eq!(status.im_deliveries.len(), 1);
-    assert_eq!(status.im_deliveries[0].id, early.id);
-    assert_eq!(
-        status.im_deliveries[0].delivery_mode,
-        ImDeliveryMode::Explicit
-    );
+    let deliveries = store.im_deliveries_for_receipt(&receipt.inbox_id).unwrap();
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(deliveries[0].id, early.id);
+    assert_eq!(deliveries[0].delivery_mode, ImDeliveryMode::Explicit);
 }
 
 #[test]

@@ -3,7 +3,7 @@ use rusqlite::{OptionalExtension, params};
 use crate::store::SantiStore;
 use crate::store::db::{Database, receipt_state_from_db};
 use crate::store::im::deliveries_for_receipt_in;
-use crate::{ReceiptStatus, ReceiptTransition};
+use crate::{ImDelivery, ReceiptStatus, ReceiptTransition};
 
 impl SantiStore {
     pub fn receipt_status(&self, inbox_id: &str) -> Result<Option<ReceiptStatus>, String> {
@@ -73,7 +73,6 @@ impl SantiStore {
             )
             .collect::<Result<Vec<_>, String>>()?;
         let effects = Database::new(&conn).effects_for_receipt(&inbox_id)?;
-        let im_deliveries = deliveries_for_receipt_in(&conn, &inbox_id)?;
         Ok(Some(ReceiptStatus {
             inbox_id,
             strand_id,
@@ -82,7 +81,12 @@ impl SantiStore {
             updated_at,
             transitions,
             effects,
-            im_deliveries,
+            im_deliveries: Vec::new(),
         }))
+    }
+
+    pub fn im_deliveries_for_receipt(&self, inbox_id: &str) -> Result<Vec<ImDelivery>, String> {
+        let conn = self.conn.lock().unwrap();
+        deliveries_for_receipt_in(&conn, inbox_id)
     }
 }

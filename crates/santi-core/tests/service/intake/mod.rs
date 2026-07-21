@@ -113,11 +113,14 @@ async fn completion_delivers() {
         .expect("query receipt")
         .expect("receipt");
     assert_eq!(status.state, santi_core::ReceiptState::Completed);
-    assert_eq!(status.im_deliveries.len(), 1);
-    assert_eq!(status.im_deliveries[0].id, entries[0].id);
-    assert_eq!(status.im_deliveries[0].turn_id, turn.id);
+    let deliveries = service
+        .im_deliveries_for_receipt(&receipt.inbox_id)
+        .expect("deliveries");
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(deliveries[0].id, entries[0].id);
+    assert_eq!(deliveries[0].turn_id, turn.id);
     assert_eq!(
-        status.im_deliveries[0].delivery_mode,
+        deliveries[0].delivery_mode,
         santi_core::ImDeliveryMode::Automatic
     );
 }
@@ -167,8 +170,13 @@ async fn delivery_failure_does_not_fail_turn() {
         }
         sleep(Duration::from_millis(20)).await;
     }
-    let status = completed.expect("turn completes even though downstream delivery fails");
-    assert!(status.im_deliveries.is_empty());
+    completed.expect("turn completes even though downstream delivery fails");
+    assert!(
+        service
+            .im_deliveries_for_receipt(&receipt.inbox_id)
+            .expect("deliveries")
+            .is_empty()
+    );
     let runtime = service
         .runtime_snapshot(&receipt.strand_id)
         .unwrap()

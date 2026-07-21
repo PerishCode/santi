@@ -14,11 +14,14 @@ pub async fn receipt_status(
     State(service): State<Service>,
     Path(inbox_id): Path<String>,
 ) -> Result<Json<ReceiptStatus>, ApiError> {
-    service
+    let mut receipt = service
         .receipt_status(&inbox_id)
         .map_err(ApiError::from_service)?
-        .map(Json)
-        .ok_or_else(|| ApiError::not_found("receipt not found"))
+        .ok_or_else(|| ApiError::not_found("receipt not found"))?;
+    receipt.im_deliveries = service
+        .im_deliveries_for_receipt(&inbox_id)
+        .map_err(ApiError::from_service)?;
+    Ok(Json(receipt))
 }
 
 #[utoipa::path(

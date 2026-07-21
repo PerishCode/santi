@@ -3,6 +3,8 @@ use serde_json::Value;
 use utoipa::ToSchema;
 
 pub mod catalog;
+mod codec;
+pub use codec::*;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

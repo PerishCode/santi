@@ -1,11 +1,18 @@
-use crate::store::{SantiStore, db::Database};
+use serde_json::Value;
+pub(crate) struct Settlement<'a> {
+    pub(crate) call: &'a str,
+    pub(crate) output: Option<Value>,
+    pub(crate) error: Option<String>,
+    pub(crate) state: EffectState,
+}
+
+use crate::store::SantiStore;
+use crate::store::db::{Database, Transition};
 use crate::{
     EffectResolutionOutcome, EffectState, EffectStatus, EffectTransitionReason, StrandEffect,
     StrandTargetType, ToolResult, prefixed_id, timestamp_now,
 };
 use rusqlite::params;
-
-use super::*;
 
 impl SantiStore {
     pub fn effect_status(&self, effect_id: &str) -> Result<Option<EffectStatus>, String> {

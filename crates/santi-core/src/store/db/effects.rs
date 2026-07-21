@@ -1,43 +1,31 @@
 use rusqlite::{OptionalExtension, params};
-use serde_json::Value;
 
-use super::{db::Database, rows::Decode};
+use super::Database;
+use crate::store::rows::{Decode, collect_rows};
 use crate::{EffectState, EffectTransition, EffectTransitionReason, StrandEffect, prefixed_id};
-
-mod ops;
 
 const EFFECT_COLUMNS: &str = r#"
     id, strand_id, turn_id, tool_call_id, effect_type, state,
     result_ref, error_text, created_at, updated_at, dispatched_at, settled_at
 "#;
 
-pub(super) struct Prepared<'a> {
-    pub(super) strand: &'a str,
-    pub(super) turn: &'a str,
-    pub(super) call: &'a str,
-    pub(super) kind: &'a str,
-    pub(super) time: &'a str,
+pub struct Prepared<'a> {
+    pub strand: &'a str,
+    pub turn: &'a str,
+    pub call: &'a str,
+    pub kind: &'a str,
+    pub time: &'a str,
 }
 
-struct Transition<'a> {
-    state: EffectState,
-    reason: EffectTransitionReason,
-    evidence: Option<&'a str>,
-    time: &'a str,
-}
-
-pub(crate) struct Settlement<'a> {
-    pub(crate) call: &'a str,
-    pub(crate) output: Option<Value>,
-    pub(crate) error: Option<String>,
-    pub(crate) state: EffectState,
+pub struct Transition<'a> {
+    pub state: EffectState,
+    pub reason: EffectTransitionReason,
+    pub evidence: Option<&'a str>,
+    pub time: &'a str,
 }
 
 impl Database<'_> {
-    pub(in crate::store) fn insert_prepared(
-        &self,
-        prepared: Prepared<'_>,
-    ) -> Result<String, String> {
+    pub fn insert_prepared(&self, prepared: Prepared<'_>) -> Result<String, String> {
         let effect_id = prefixed_id("effect");
         self.conn
             .execute(
@@ -71,7 +59,7 @@ impl Database<'_> {
         Ok(effect_id)
     }
 
-    fn append_effect_transition(
+    pub fn append_effect_transition(
         &self,
         effect_id: &str,
         transition: Transition<'_>,
@@ -98,10 +86,7 @@ impl Database<'_> {
         Ok(())
     }
 
-    pub(in crate::store) fn find_effect(
-        &self,
-        effect_id: &str,
-    ) -> Result<Option<StrandEffect>, String> {
+    pub fn find_effect(&self, effect_id: &str) -> Result<Option<StrandEffect>, String> {
         self.conn
             .query_row(
                 &format!("SELECT {EFFECT_COLUMNS} FROM strand_effects WHERE id = ?1 LIMIT 1"),
@@ -112,10 +97,7 @@ impl Database<'_> {
             .map_err(|error| error.to_string())
     }
 
-    pub(in crate::store) fn effects_for_receipt(
-        &self,
-        inbox_id: &str,
-    ) -> Result<Vec<StrandEffect>, String> {
+    pub fn effects_for_receipt(&self, inbox_id: &str) -> Result<Vec<StrandEffect>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -134,10 +116,10 @@ impl Database<'_> {
         let rows = stmt
             .query_map(params![inbox_id], StrandEffect::decode)
             .map_err(|error| error.to_string())?;
-        super::rows::collect_rows(rows)
+        collect_rows(rows)
     }
 
-    fn effect_transitions(&self, effect_id: &str) -> Result<Vec<EffectTransition>, String> {
+    pub fn effect_transitions(&self, effect_id: &str) -> Result<Vec<EffectTransition>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -161,10 +143,10 @@ impl Database<'_> {
                 })
             })
             .map_err(|error| error.to_string())?;
-        super::rows::collect_rows(rows)
+        collect_rows(rows)
     }
 
-    fn receipt_ids(&self, effect_id: &str) -> Result<Vec<String>, String> {
+    pub fn receipt_ids(&self, effect_id: &str) -> Result<Vec<String>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -184,7 +166,7 @@ impl Database<'_> {
             .map_err(|error| error.to_string())
     }
 
-    pub(in crate::store) fn reconcile_effects(
+    pub fn reconcile_effects(
         &self,
         turn_id: &str,
         prepared_reason: EffectTransitionReason,

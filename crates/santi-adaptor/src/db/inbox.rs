@@ -2,15 +2,15 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
 use super::Database;
-use crate::store::SANTI_SYSTEM_ACTOR_ID;
-use crate::{StrandMessage, StrandTargetType, prefixed_id, timestamp_now};
+use crate::SANTI_SYSTEM_ACTOR_ID;
+use santi_model::{StrandMessage, StrandTargetType, prefixed_id, timestamp_now};
 
-pub(in crate::store) struct DrainedInbox {
+pub struct DrainedInbox {
     pub messages: Vec<StrandMessage>,
     pub inbox_ids: Vec<String>,
 }
 
-pub(in crate::store) fn drain_inbox_in_tx(
+pub fn drain_inbox_in_tx(
     conn: &Connection,
     strand_id: &str,
     committing_turn_id: &str,

@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use rusqlite::params;
 
 use super::Database;
-use crate::{ReceiptState, prefixed_id, timestamp_now};
+use santi_model::{ReceiptState, prefixed_id, timestamp_now};
 
 struct Transition<'a> {
     state: ReceiptState,
@@ -13,7 +13,7 @@ struct Transition<'a> {
 }
 
 impl Database<'_> {
-    pub(in crate::store) fn insert_accepted(
+    pub fn insert_accepted(
         &self,
         inbox_id: &str,
         strand_id: &str,
@@ -39,7 +39,7 @@ impl Database<'_> {
         )
     }
 
-    pub(in crate::store) fn begin_turn(
+    pub fn begin_turn(
         &self,
         strand_id: &str,
         turn_id: &str,
@@ -89,7 +89,7 @@ impl Database<'_> {
         Ok(())
     }
 
-    pub(in crate::store) fn fail_turn(
+    pub fn fail_turn(
         &self,
         turn_id: &str,
         incident_id: Option<&str>,
@@ -98,11 +98,7 @@ impl Database<'_> {
         self.transition_turn_receipts(turn_id, ReceiptState::TurnFailed, incident_id, occurred_at)
     }
 
-    pub(in crate::store) fn complete_turn(
-        &self,
-        turn_id: &str,
-        occurred_at: &str,
-    ) -> Result<(), String> {
+    pub fn complete_turn(&self, turn_id: &str, occurred_at: &str) -> Result<(), String> {
         self.transition_turn_receipts(turn_id, ReceiptState::Completed, None, occurred_at)
     }
 
@@ -188,7 +184,7 @@ impl Database<'_> {
     }
 }
 
-pub(crate) fn receipt_state_db(state: &ReceiptState) -> &'static str {
+pub fn receipt_state_db(state: &ReceiptState) -> &'static str {
     match state {
         ReceiptState::Accepted => "accepted",
         ReceiptState::MechanicallyRecovered => "mechanically_recovered",
@@ -198,7 +194,7 @@ pub(crate) fn receipt_state_db(state: &ReceiptState) -> &'static str {
     }
 }
 
-pub(crate) fn receipt_state_from_db(state: &str) -> Result<ReceiptState, String> {
+pub fn receipt_state_from_db(state: &str) -> Result<ReceiptState, String> {
     match state {
         "accepted" => Ok(ReceiptState::Accepted),
         "mechanically_recovered" => Ok(ReceiptState::MechanicallyRecovered),

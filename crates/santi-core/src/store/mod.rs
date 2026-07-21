@@ -19,7 +19,6 @@ mod lifecycle;
 mod receipts;
 mod rows;
 mod runtime;
-mod schema;
 mod souls;
 mod span;
 mod turns;
@@ -27,18 +26,30 @@ mod window;
 
 pub(crate) use budget::{Ingress, Launch, Reservation, execution_budget_incident_key};
 pub(crate) use compact::Collapse;
+pub use db::read_schema_version;
 use db::*;
-pub use db::{read_schema_version, soul_memory_file};
 pub(crate) use effects::Settlement;
 pub use im::Reply;
 use rows::{Decode, collect_rows};
 pub use runtime::Invocation;
 pub use turns::Completion;
 
-pub const SCHEMA_VERSION: u32 = 28;
+use santi_adaptor::SANTI_SYSTEM_ACTOR_ID;
+pub use santi_adaptor::SCHEMA_VERSION;
 pub const DEFAULT_SOUL_ID: &str = "soul_default";
-const SANTI_SYSTEM_ACTOR_ID: &str = "santi";
 const STRAND_INBOX_GATE: i64 = 500;
+
+pub fn soul_memory_file(
+    runtime_root: impl AsRef<std::path::Path>,
+    soul_id: &str,
+) -> std::path::PathBuf {
+    runtime_root
+        .as_ref()
+        .join("souls")
+        .join(soul_id)
+        .join("memory")
+        .join(crate::workspace::MEMORY_FILE)
+}
 
 #[derive(Clone)]
 pub struct SantiStore {

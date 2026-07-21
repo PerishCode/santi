@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/santi",
+  "crates/santi-adaptor",
   "crates/santi-api",
   "crates/santi-core",
   "crates/santi-error",
@@ -35,6 +36,7 @@ reqwest = { version = "0.13.4", default-features = false, features = ["json", "r
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 santi-api = { path = "crates/santi-api" }
 santi-core = { path = "crates/santi-core" }
+santi-adaptor = { path = "crates/santi-adaptor" }
 santi-error = { path = "crates/santi-error" }
 santi-model = { path = "crates/santi-model" }
 santi-object = { path = "crates/santi-object" }

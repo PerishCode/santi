@@ -1,7 +1,7 @@
 use rusqlite::{Connection, params};
 use serde_json::json;
 
-use crate::{prefixed_id, timestamp_now};
+use santi_model::{prefixed_id, timestamp_now};
 
 struct LegacyEffect {
     id: String,
@@ -17,7 +17,7 @@ struct LegacyEffect {
     updated_at: String,
 }
 
-pub(in crate::store::db) fn migrate_v25_to_v26(conn: &Connection) -> Result<(), String> {
+pub fn migrate_v25_to_v26(conn: &Connection) -> Result<(), String> {
     if !table_exists(conn, "strand_effects")? {
         return Ok(());
     }

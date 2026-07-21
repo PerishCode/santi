@@ -1,10 +1,10 @@
-use crate::{
+use rusqlite::Row;
+use santi_model::{
     ActorType, Compact, EffectState, Message, MessageContent, MessageEvent, MessageKind,
     MessageState, Soul, Strand, StrandEffect, StrandMessage, StrandMessageRef,
     ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState, ToolCall, ToolResult, Turn,
     TurnStatus, TurnTriggerType, WebhookSubscription,
 };
-use rusqlite::Row;
 use serde_json::Value;
 
 use super::*;

@@ -1,6 +1,6 @@
 use rusqlite::{Connection, params};
 
-pub(in crate::store::db) fn migrate_v26_to_v27(conn: &Connection) -> Result<(), String> {
+pub fn migrate_v26_to_v27(conn: &Connection) -> Result<(), String> {
     if !table_exists(conn, "im_inbox")? {
         return Ok(());
     }

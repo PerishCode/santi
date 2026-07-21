@@ -1,8 +1,10 @@
 use rusqlite::{OptionalExtension, params};
 
 use super::Database;
-use crate::store::rows::{Decode, collect_rows};
-use crate::{EffectState, EffectTransition, EffectTransitionReason, StrandEffect, prefixed_id};
+use crate::rows::{Decode, collect_rows};
+use santi_model::{
+    EffectState, EffectTransition, EffectTransitionReason, StrandEffect, prefixed_id,
+};
 
 const EFFECT_COLUMNS: &str = r#"
     id, strand_id, turn_id, tool_call_id, effect_type, state,

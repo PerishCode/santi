@@ -11,26 +11,26 @@ mod timeline;
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::{
+use santi_model::{
     ActorType, MessageEvent, MessageKind, Soul, Strand, StrandEntry, StrandMessage,
     StrandTargetType, WebhookSubscription, timestamp_now,
 };
 
 use super::rows::*;
-pub(super) use inbox::drain_inbox_in_tx;
-pub use lifecycle::{migrate, read_schema_version, soul_memory_file};
-pub(crate) use receipts::receipt_state_from_db;
+pub use inbox::drain_inbox_in_tx;
+pub use lifecycle::{migrate, read_schema_version};
+pub use receipts::receipt_state_from_db;
 
-pub(super) struct Database<'a> {
+pub struct Database<'a> {
     pub(super) conn: &'a Connection,
 }
 
 impl<'a> Database<'a> {
-    pub(super) fn new(conn: &'a Connection) -> Self {
+    pub fn new(conn: &'a Connection) -> Self {
         Self { conn }
     }
 
-    pub(super) fn append_entry_in_tx(
+    pub fn append_entry_in_tx(
         &self,
         strand_id: &str,
         target_type: StrandTargetType,
@@ -76,10 +76,7 @@ impl<'a> Database<'a> {
         })
     }
 
-    pub(super) fn message_events_for_strand(
-        &self,
-        strand_id: &str,
-    ) -> Result<Vec<MessageEvent>, String> {
+    pub fn message_events_for_strand(&self, strand_id: &str) -> Result<Vec<MessageEvent>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -99,7 +96,7 @@ impl<'a> Database<'a> {
         collect_rows(rows)
     }
 
-    pub(super) fn soul_by_id(&self, soul_id: &str) -> Result<Option<Soul>, String> {
+    pub fn soul_by_id(&self, soul_id: &str) -> Result<Option<Soul>, String> {
         self.conn
             .query_row(
                 r#"
@@ -115,10 +112,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub(super) fn webhook_by_name(
-        &self,
-        name: &str,
-    ) -> Result<Option<WebhookSubscription>, String> {
+    pub fn webhook_by_name(&self, name: &str) -> Result<Option<WebhookSubscription>, String> {
         self.conn
             .query_row(
                 r#"
@@ -134,7 +128,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub(super) fn strand_by_id(&self, strand_id: &str) -> Result<Option<Strand>, String> {
+    pub fn strand_by_id(&self, strand_id: &str) -> Result<Option<Strand>, String> {
         self.conn
             .query_row(
                 r#"
@@ -151,11 +145,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub(super) fn strand_by_label(
-        &self,
-        soul_id: &str,
-        label: &str,
-    ) -> Result<Option<Strand>, String> {
+    pub fn strand_by_label(&self, soul_id: &str, label: &str) -> Result<Option<Strand>, String> {
         self.conn
             .query_row(
                 r#"
@@ -172,7 +162,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub(super) fn message_by_id(&self, message_id: &str) -> Result<Option<StrandMessage>, String> {
+    pub fn message_by_id(&self, message_id: &str) -> Result<Option<StrandMessage>, String> {
         self.conn
             .query_row(
                 r#"
@@ -191,10 +181,10 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub(super) fn message_record_by_id(
+    pub fn message_record_by_id(
         &self,
         message_id: &str,
-    ) -> Result<Option<crate::Message>, String> {
+    ) -> Result<Option<santi_model::Message>, String> {
         self.conn
             .query_row(
                 r#"
@@ -205,13 +195,13 @@ impl<'a> Database<'a> {
         LIMIT 1
         "#,
                 params![message_id],
-                crate::Message::decode,
+                santi_model::Message::decode,
             )
             .optional()
             .map_err(|error| error.to_string())
     }
 
-    pub(super) fn strand_messages(&self, strand_id: &str) -> Result<Vec<StrandMessage>, String> {
+    pub fn strand_messages(&self, strand_id: &str) -> Result<Vec<StrandMessage>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -233,8 +223,8 @@ impl<'a> Database<'a> {
     }
 }
 
-pub(super) fn message_to_provider_item(
-    message: &crate::Message,
+pub fn message_to_provider_item(
+    message: &santi_model::Message,
 ) -> Option<santi_provider::ProviderItem> {
     let role = match (&message.actor_type, &message.message_kind) {
         (ActorType::Soul, _) => "assistant",

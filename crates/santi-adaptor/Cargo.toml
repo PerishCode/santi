@@ -1,0 +1,13 @@
+[package]
+name = "santi-adaptor"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+rusqlite.workspace = true
+santi-error.workspace = true
+santi-model.workspace = true
+santi-provider.workspace = true
+serde.workspace = true
+serde_json.workspace = true

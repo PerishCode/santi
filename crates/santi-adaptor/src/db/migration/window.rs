@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-pub(in crate::store::db) fn migrate_v27_to_v28(conn: &Connection) -> Result<(), String> {
+pub fn migrate_v27_to_v28(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS window_messages (

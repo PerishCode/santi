@@ -2,7 +2,7 @@ use std::path::Path;
 
 use rusqlite::{Connection, params};
 
-use crate::store::{SCHEMA_VERSION, schema::SCHEMA};
+use crate::{SCHEMA_VERSION, schema::SCHEMA};
 
 mod migrate;
 use migrate::*;
@@ -55,15 +55,6 @@ pub fn read_schema_version(path: impl AsRef<Path>) -> Result<Option<u32>, String
     conn.query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
         .map(Some)
         .map_err(|error| error.to_string())
-}
-
-pub fn soul_memory_file(runtime_root: impl AsRef<Path>, soul_id: &str) -> std::path::PathBuf {
-    runtime_root
-        .as_ref()
-        .join("souls")
-        .join(soul_id)
-        .join("memory")
-        .join(crate::workspace::MEMORY_FILE)
 }
 
 fn migrate_v21_to_v22(conn: &Connection) -> Result<(), String> {

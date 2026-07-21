@@ -6,7 +6,7 @@ struct Migration<'a> {
     conn: &'a Connection,
 }
 
-pub(in crate::store::db) fn migrate_v24_to_v25(conn: &Connection) -> Result<(), String> {
+pub fn migrate_v24_to_v25(conn: &Connection) -> Result<(), String> {
     let tx = conn
         .unchecked_transaction()
         .map_err(|error| error.to_string())?;

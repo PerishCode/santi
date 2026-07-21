@@ -1660,6 +1660,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "santi-adaptor"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "santi-error",
+ "santi-model",
+ "santi-provider",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "santi-api"
 version = "0.1.0"
 dependencies = [
@@ -1701,6 +1713,7 @@ dependencies = [
  "hex",
  "jiff",
  "rusqlite",
+ "santi-adaptor",
  "santi-error",
  "santi-model",
  "santi-object",

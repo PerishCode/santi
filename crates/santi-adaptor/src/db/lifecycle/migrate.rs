@@ -1,5 +1,5 @@
-use crate::prefixed_id;
 use rusqlite::{Connection, params};
+use santi_model::prefixed_id;
 
 use super::*;
 
@@ -28,7 +28,7 @@ struct V23Block {
     cleared_by: Option<String>,
 }
 
-pub(super) fn migrate_v23_to_v24(conn: &Connection) -> Result<(), String> {
+pub fn migrate_v23_to_v24(conn: &Connection) -> Result<(), String> {
     let tx = conn
         .unchecked_transaction()
         .map_err(|error| error.to_string())?;

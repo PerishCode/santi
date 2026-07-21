@@ -1,11 +1,11 @@
 use rusqlite::params;
 
-use crate::{ThinkingSpan, ToolCall, ToolResult, Turn};
+use santi_model::{ThinkingSpan, ToolCall, ToolResult, Turn};
 
 use super::{Database, Decode, collect_rows};
 
 impl Database<'_> {
-    pub(in crate::store) fn turns_for_strand(&self, strand_id: &str) -> Result<Vec<Turn>, String> {
+    pub fn turns_for_strand(&self, strand_id: &str) -> Result<Vec<Turn>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -25,10 +25,7 @@ impl Database<'_> {
         collect_rows(rows)
     }
 
-    pub(in crate::store) fn soul_tool_calls(
-        &self,
-        strand_id: &str,
-    ) -> Result<Vec<ToolCall>, String> {
+    pub fn soul_tool_calls(&self, strand_id: &str) -> Result<Vec<ToolCall>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -47,10 +44,7 @@ impl Database<'_> {
         collect_rows(rows)
     }
 
-    pub(in crate::store) fn tool_calls_for_turn(
-        &self,
-        turn_id: &str,
-    ) -> Result<Vec<ToolCall>, String> {
+    pub fn tool_calls_for_turn(&self, turn_id: &str) -> Result<Vec<ToolCall>, String> {
         let mut stmt = self
             .conn
         .prepare(
@@ -63,10 +57,7 @@ impl Database<'_> {
         collect_rows(rows)
     }
 
-    pub(in crate::store) fn soul_thinking_spans(
-        &self,
-        strand_id: &str,
-    ) -> Result<Vec<ThinkingSpan>, String> {
+    pub fn soul_thinking_spans(&self, strand_id: &str) -> Result<Vec<ThinkingSpan>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -87,10 +78,7 @@ impl Database<'_> {
         collect_rows(rows)
     }
 
-    pub(in crate::store) fn thinking_spans_for_turn(
-        &self,
-        turn_id: &str,
-    ) -> Result<Vec<ThinkingSpan>, String> {
+    pub fn thinking_spans_for_turn(&self, turn_id: &str) -> Result<Vec<ThinkingSpan>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -109,10 +97,7 @@ impl Database<'_> {
         collect_rows(rows)
     }
 
-    pub(in crate::store) fn soul_tool_results(
-        &self,
-        strand_id: &str,
-    ) -> Result<Vec<ToolResult>, String> {
+    pub fn soul_tool_results(&self, strand_id: &str) -> Result<Vec<ToolResult>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -131,10 +116,7 @@ impl Database<'_> {
         collect_rows(rows)
     }
 
-    pub(in crate::store) fn tool_results_for_turn(
-        &self,
-        turn_id: &str,
-    ) -> Result<Vec<ToolResult>, String> {
+    pub fn tool_results_for_turn(&self, turn_id: &str) -> Result<Vec<ToolResult>, String> {
         let mut stmt = self
             .conn
             .prepare(

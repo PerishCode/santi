@@ -16,7 +16,7 @@ const INCIDENT_COLUMNS: &str = r#"
 "#;
 
 impl Database<'_> {
-    pub(crate) fn open_incident(&self, draft: IncidentDraft) -> Result<SantiError, String> {
+    pub fn open_incident(&self, draft: IncidentDraft) -> Result<SantiError, String> {
         let existing = self.active_incident(&draft.incident_key)?;
         let mutation =
             engine().open_incident(existing.as_ref(), draft, santi_model::timestamp_now());
@@ -24,7 +24,7 @@ impl Database<'_> {
         Ok(mutation.error)
     }
 
-    pub(crate) fn resolve_incident(
+    pub fn resolve_incident(
         &self,
         incident_key: &str,
         resolved_by: &str,
@@ -39,10 +39,7 @@ impl Database<'_> {
         Ok(true)
     }
 
-    pub(crate) fn active_incident(
-        &self,
-        incident_key: &str,
-    ) -> Result<Option<ErrorIncident>, String> {
+    pub fn active_incident(&self, incident_key: &str) -> Result<Option<ErrorIncident>, String> {
         self.conn
             .query_row(
                 &format!(
@@ -55,7 +52,7 @@ impl Database<'_> {
             .map_err(|error| error.to_string())
     }
 
-    pub(crate) fn list_incidents(
+    pub fn list_incidents(
         &self,
         scope_kind: &str,
         scope_id: &str,
@@ -79,7 +76,7 @@ impl Database<'_> {
             .map_err(|error| error.to_string())
     }
 
-    pub(crate) fn persist_mutation(&self, mutation: &IncidentMutation) -> Result<(), String> {
+    pub fn persist_mutation(&self, mutation: &IncidentMutation) -> Result<(), String> {
         let incident = &mutation.incident;
         self.conn
             .execute(

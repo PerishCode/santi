@@ -1,11 +1,11 @@
-use crate::store::rows::*;
-use crate::{Compact, StrandEffect, ThinkingSpan, ToolCall, ToolResult, Turn};
+use crate::rows::*;
 use rusqlite::{OptionalExtension, params};
+use santi_model::{Compact, StrandEffect, ThinkingSpan, ToolCall, ToolResult, Turn};
 
 use super::*;
 
 impl<'a> Database<'a> {
-    pub(in crate::store) fn turn_by_id(&self, turn_id: &str) -> Result<Option<Turn>, String> {
+    pub fn turn_by_id(&self, turn_id: &str) -> Result<Option<Turn>, String> {
         self.conn
             .query_row(
                 r#"
@@ -23,10 +23,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub(in crate::store) fn compact_by_id(
-        &self,
-        compact_id: &str,
-    ) -> Result<Option<Compact>, String> {
+    pub fn compact_by_id(&self, compact_id: &str) -> Result<Option<Compact>, String> {
         self.conn
             .query_row(
                 r#"
@@ -40,7 +37,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub(in crate::store) fn turn_strand_id(&self, turn_id: &str) -> Result<String, String> {
+    pub fn turn_strand_id(&self, turn_id: &str) -> Result<String, String> {
         self.conn
             .query_row(
                 "SELECT strand_id FROM turns WHERE id = ?1 LIMIT 1",
@@ -50,7 +47,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub(in crate::store) fn call_soul_id(&self, tool_call_id: &str) -> Result<String, String> {
+    pub fn call_soul_id(&self, tool_call_id: &str) -> Result<String, String> {
         self.conn
             .query_row(
                 r#"
@@ -66,10 +63,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub(in crate::store) fn tool_call_by_id(
-        &self,
-        tool_call_id: &str,
-    ) -> Result<Option<ToolCall>, String> {
+    pub fn tool_call_by_id(&self, tool_call_id: &str) -> Result<Option<ToolCall>, String> {
         self.conn.query_row(
         "SELECT id, turn_id, tool_name, arguments, created_at FROM tool_calls WHERE id = ?1 LIMIT 1",
         params![tool_call_id],
@@ -79,7 +73,7 @@ impl<'a> Database<'a> {
     .map_err(|error| error.to_string())
     }
 
-    pub(in crate::store) fn regenerable_replay_material(
+    pub fn regenerable_replay_material(
         &self,
         tool_call_id: &str,
     ) -> Result<(Option<serde_json::Value>, Option<String>), String> {
@@ -104,10 +98,7 @@ impl<'a> Database<'a> {
             })
     }
 
-    pub(in crate::store) fn tool_result_by_id(
-        &self,
-        tool_result_id: &str,
-    ) -> Result<Option<ToolResult>, String> {
+    pub fn tool_result_by_id(&self, tool_result_id: &str) -> Result<Option<ToolResult>, String> {
         self.conn.query_row(
         "SELECT id, tool_call_id, output, error_text, created_at FROM tool_results WHERE id = ?1 LIMIT 1",
         params![tool_result_id],
@@ -117,7 +108,7 @@ impl<'a> Database<'a> {
     .map_err(|error| error.to_string())
     }
 
-    pub(in crate::store) fn thinking_span_by_id(
+    pub fn thinking_span_by_id(
         &self,
         thinking_span_id: &str,
     ) -> Result<Option<ThinkingSpan>, String> {
@@ -137,7 +128,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub(in crate::store) fn message_seq_in_strand(
+    pub fn message_seq_in_strand(
         &self,
         strand_id: &str,
         message_id: &str,
@@ -156,10 +147,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub(in crate::store) fn compacts_for_strand(
-        &self,
-        strand_id: &str,
-    ) -> Result<Vec<Compact>, String> {
+    pub fn compacts_for_strand(&self, strand_id: &str) -> Result<Vec<Compact>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -176,10 +164,7 @@ impl<'a> Database<'a> {
         collect_rows(rows)
     }
 
-    pub(in crate::store) fn strand_effects(
-        &self,
-        strand_id: &str,
-    ) -> Result<Vec<StrandEffect>, String> {
+    pub fn strand_effects(&self, strand_id: &str) -> Result<Vec<StrandEffect>, String> {
         let mut stmt = self
             .conn
             .prepare(

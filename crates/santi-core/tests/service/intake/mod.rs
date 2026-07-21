@@ -123,7 +123,7 @@ async fn completion_delivers() {
 }
 
 #[tokio::test]
-async fn delivery_failure_rolls_back() {
+async fn delivery_failure_does_not_fail_turn() {
     let temp = tempfile::tempdir().expect("temp dir");
     let database_path = temp.path().join("santi.sqlite");
     let service = Service::open(
@@ -155,19 +155,19 @@ async fn delivery_failure_rolls_back() {
     let santi_core::IngestOutcome::Accepted { receipt } = outcome else {
         panic!("IM send rejected");
     };
-    let mut failed = None;
+    let mut completed = None;
     for _ in 0..100 {
         let status = service
             .receipt_status(&receipt.inbox_id)
             .expect("query receipt")
             .expect("receipt");
-        if status.state == santi_core::ReceiptState::TurnFailed {
-            failed = Some(status);
+        if status.state == santi_core::ReceiptState::Completed {
+            completed = Some(status);
             break;
         }
         sleep(Duration::from_millis(20)).await;
     }
-    let status = failed.expect("receipt should fail when delivery cannot commit");
+    let status = completed.expect("turn completes even though downstream delivery fails");
     assert!(status.im_deliveries.is_empty());
     let runtime = service
         .runtime_snapshot(&receipt.strand_id)
@@ -177,7 +177,7 @@ async fn delivery_failure_rolls_back() {
         runtime
             .turns
             .iter()
-            .all(|turn| turn.status != santi_core::TurnStatus::Completed)
+            .any(|turn| turn.status == santi_core::TurnStatus::Completed)
     );
 }
 

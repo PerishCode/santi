@@ -2,10 +2,8 @@ use rusqlite::params;
 use serde_json::json;
 
 use super::{provider_incident_key, runtime_incident_key};
-use crate::store::{
-    Reply, SantiStore, db::Database, execution_budget_incident_key, im::enqueue_turn_in,
-};
-use crate::{IM_LABEL_PREFIX, ImDeliveryMode, StrandMessage, Turn, timestamp_now};
+use crate::store::{SantiStore, db::Database, execution_budget_incident_key};
+use crate::{IM_LABEL_PREFIX, ImDeliveryMode, StrandMessage, Turn, prefixed_id, timestamp_now};
 
 pub struct Completion<'a> {
     pub turn: &'a str,
@@ -114,23 +112,23 @@ impl SantiStore {
                 "model": completion.model,
             }),
         )?;
-        if let (Some(_), Some(reply)) = (
+        if let (Some(participant), Some(reply)) = (
             external_label
                 .as_deref()
                 .and_then(|label| label.strip_prefix(IM_LABEL_PREFIX)),
             message.filter(|message| !message.content_text.trim().is_empty()),
         ) {
-            enqueue_turn_in(
-                &tx,
-                Reply {
-                    strand: &strand_id,
-                    turn: completion.turn,
-                    message: Some(&reply.message.id),
-                    content: &reply.content_text,
-                    mode: ImDeliveryMode::Automatic,
-                },
-                &now,
-            )?;
+            let event = santi_protocol::ReplyEvent {
+                id: prefixed_id("rpl"),
+                strand_id: strand_id.clone(),
+                turn_id: completion.turn.to_string(),
+                participant_id: participant.to_string(),
+                message_id: Some(reply.message.id.clone()),
+                content: reply.content_text.clone(),
+                mode: ImDeliveryMode::Automatic,
+            };
+            let payload = serde_json::to_string(&event).map_err(|error| error.to_string())?;
+            Database::new(&tx).insert_reply_outbox(&event.id, &event.turn_id, &payload, &now)?;
         }
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)

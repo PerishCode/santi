@@ -262,7 +262,7 @@ fn v27_window_migrates_preserving_state() {
         santi_core::read_schema_version(&db)
             .expect("version")
             .expect("some"),
-        28
+        santi_core::SCHEMA_VERSION
     );
     let webhooks = store.list_webhooks().expect("webhooks");
     assert!(

@@ -1718,6 +1718,7 @@ dependencies = [
  "santi-im",
  "santi-model",
  "santi-object",
+ "santi-protocol",
  "santi-provider",
  "santi-window",
  "serde",
@@ -1745,6 +1746,7 @@ version = "0.1.0"
 dependencies = [
  "rusqlite",
  "santi-model",
+ "santi-protocol",
 ]
 
 [[package]]
@@ -1762,6 +1764,14 @@ dependencies = [
 [[package]]
 name = "santi-object"
 version = "0.1.0"
+
+[[package]]
+name = "santi-protocol"
+version = "0.1.0"
+dependencies = [
+ "santi-model",
+ "serde",
+]
 
 [[package]]
 name = "santi-provider"

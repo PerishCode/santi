@@ -1,10 +1,9 @@
 [package]
-name = "santi-im"
+name = "santi-protocol"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
 
 [dependencies]
-rusqlite.workspace = true
 santi-model.workspace = true
-santi-protocol.workspace = true
+serde.workspace = true

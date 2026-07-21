@@ -64,6 +64,7 @@ impl Service {
         ) {
             Ok(_) => {
                 self.dispatch_error_events();
+                self.dispatch_replies();
                 self.publish_stream(
                     strand_id,
                     SantiStreamPayload::TurnCompleted {

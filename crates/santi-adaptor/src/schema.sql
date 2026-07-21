@@ -347,3 +347,13 @@ CREATE TABLE IF NOT EXISTS window_messages (
     received_at TEXT NOT NULL,
     PRIMARY KEY (participant_id, client_message_id)
 );
+
+CREATE TABLE IF NOT EXISTS reply_outbox (
+    id TEXT PRIMARY KEY,
+    turn_id TEXT NOT NULL UNIQUE,
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    delivered_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_reply_outbox_pending
+ON reply_outbox(created_at, id);

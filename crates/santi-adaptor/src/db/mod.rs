@@ -7,6 +7,7 @@ mod lifecycle;
 mod migration;
 mod query;
 mod receipts;
+mod reply;
 mod timeline;
 
 use rusqlite::{Connection, OptionalExtension, params};

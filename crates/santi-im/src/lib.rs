@@ -263,3 +263,35 @@ fn delivery_mode_from_db(mode: &str) -> ImDeliveryMode {
         _ => ImDeliveryMode::Automatic,
     }
 }
+
+pub fn deliver_reply(conn: &Connection, event: &santi_protocol::ReplyEvent) -> Result<(), String> {
+    conn.execute(
+        r#"
+        INSERT INTO im_participants (id, kind, created_at)
+        VALUES (?1, 'human', ?2)
+        ON CONFLICT(id) DO NOTHING
+        "#,
+        params![event.participant_id, timestamp_now()],
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute(
+        r#"
+        INSERT OR IGNORE INTO im_inbox (
+          id, participant_id, from_ref, turn_id, message_id,
+          delivery_mode, content, created_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "#,
+        params![
+            prefixed_id("imx"),
+            event.participant_id,
+            event.strand_id,
+            event.turn_id,
+            event.message_id,
+            im_delivery_mode_db(&event.mode),
+            event.content,
+            timestamp_now(),
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}

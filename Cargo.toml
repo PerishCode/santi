@@ -8,6 +8,7 @@ members = [
   "crates/santi-im",
   "crates/santi-model",
   "crates/santi-object",
+  "crates/santi-protocol",
   "crates/santi-provider",
   "crates/santi-window",
 ]
@@ -43,6 +44,7 @@ santi-error = { path = "crates/santi-error" }
 santi-im = { path = "crates/santi-im" }
 santi-model = { path = "crates/santi-model" }
 santi-object = { path = "crates/santi-object" }
+santi-protocol = { path = "crates/santi-protocol" }
 santi-provider = { path = "crates/santi-provider" }
 santi-window = { path = "crates/santi-window" }
 serde = { version = "1.0.228", features = ["derive"] }

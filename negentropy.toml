@@ -62,6 +62,12 @@ paths = [
   "crates/santi-core/src/store",
   "crates/santi-core/src/service",
   "crates/santi-core/tests/service",
+  "crates/santi-adaptor/src/db",
 ]
 note = "temporary: dirs under active crate-split decomposition; fanout exemption dropped per-dir as each is fixed. file-length stays enforced."
+allow = ["fanout"]
+
+[[boundary]]
+paths = ["crates"]
+note = "structural: the crate-split deliberately decomposes santi into many small crates; the workspace crate list exceeds the per-directory fanout limit by design. file-length stays enforced."
 allow = ["fanout"]

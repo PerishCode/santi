@@ -1,4 +1,4 @@
-pub use santi_im::{Reply, deliveries_for_receipt_in, enqueue_turn_in};
+pub use santi_im::{Reply, deliveries_for_receipt_in};
 use santi_model::ImInboxEntry;
 
 use super::SantiStore;

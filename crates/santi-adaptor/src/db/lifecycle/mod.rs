@@ -130,7 +130,7 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
     let version = conn
         .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
         .map_err(|error| error.to_string())?;
-    if version == 21 && SCHEMA_VERSION == 28 {
+    if version == 21 && SCHEMA_VERSION == 29 {
         migrate_v21_to_v22(conn)?;
         migrate_v22_to_v23(conn)?;
         migrate_v23_to_v24(conn)?;
@@ -138,33 +138,42 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
         super::migration::effect::migrate_v25_to_v26(conn)?;
         super::migration::im::migrate_v26_to_v27(conn)?;
         super::migration::window::migrate_v27_to_v28(conn)?;
-    } else if version == 22 && SCHEMA_VERSION == 28 {
+        super::migration::reply::migrate_v28_to_v29(conn)?;
+    } else if version == 22 && SCHEMA_VERSION == 29 {
         migrate_v22_to_v23(conn)?;
         migrate_v23_to_v24(conn)?;
         super::migration::receipt::migrate_v24_to_v25(conn)?;
         super::migration::effect::migrate_v25_to_v26(conn)?;
         super::migration::im::migrate_v26_to_v27(conn)?;
         super::migration::window::migrate_v27_to_v28(conn)?;
-    } else if version == 23 && SCHEMA_VERSION == 28 {
+        super::migration::reply::migrate_v28_to_v29(conn)?;
+    } else if version == 23 && SCHEMA_VERSION == 29 {
         migrate_v23_to_v24(conn)?;
         super::migration::receipt::migrate_v24_to_v25(conn)?;
         super::migration::effect::migrate_v25_to_v26(conn)?;
         super::migration::im::migrate_v26_to_v27(conn)?;
         super::migration::window::migrate_v27_to_v28(conn)?;
-    } else if version == 24 && SCHEMA_VERSION == 28 {
+        super::migration::reply::migrate_v28_to_v29(conn)?;
+    } else if version == 24 && SCHEMA_VERSION == 29 {
         super::migration::receipt::migrate_v24_to_v25(conn)?;
         super::migration::effect::migrate_v25_to_v26(conn)?;
         super::migration::im::migrate_v26_to_v27(conn)?;
         super::migration::window::migrate_v27_to_v28(conn)?;
-    } else if version == 25 && SCHEMA_VERSION == 28 {
+        super::migration::reply::migrate_v28_to_v29(conn)?;
+    } else if version == 25 && SCHEMA_VERSION == 29 {
         super::migration::effect::migrate_v25_to_v26(conn)?;
         super::migration::im::migrate_v26_to_v27(conn)?;
         super::migration::window::migrate_v27_to_v28(conn)?;
-    } else if version == 26 && SCHEMA_VERSION == 28 {
+        super::migration::reply::migrate_v28_to_v29(conn)?;
+    } else if version == 26 && SCHEMA_VERSION == 29 {
         super::migration::im::migrate_v26_to_v27(conn)?;
         super::migration::window::migrate_v27_to_v28(conn)?;
-    } else if version == 27 && SCHEMA_VERSION == 28 {
+        super::migration::reply::migrate_v28_to_v29(conn)?;
+    } else if version == 27 && SCHEMA_VERSION == 29 {
         super::migration::window::migrate_v27_to_v28(conn)?;
+        super::migration::reply::migrate_v28_to_v29(conn)?;
+    } else if version == 28 && SCHEMA_VERSION == 29 {
+        super::migration::reply::migrate_v28_to_v29(conn)?;
     } else if version != SCHEMA_VERSION {
         conn.execute_batch(
             r#"

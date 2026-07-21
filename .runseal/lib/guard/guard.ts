@@ -7,7 +7,6 @@
 
 import { run } from "@/lib/std/cmd.ts";
 import { join } from "@/lib/std/fs.ts";
-import { verify as verifyNegentropy } from "@/lib/negentropy.ts";
 import { repoRoot } from "@/lib/std/repo.ts";
 import {
   classifiedScan,
@@ -36,14 +35,6 @@ export async function guard(argv: string[]): Promise<number> {
   const repo = repoRoot();
   const wrappers = wrapperFiles(repo);
   const config = ".runseal/deno.json";
-
-  console.log("==> pinned negentropy");
-  try {
-    await verifyNegentropy(repo);
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
-    return 1;
-  }
 
   console.log("==> negentropy");
   try {

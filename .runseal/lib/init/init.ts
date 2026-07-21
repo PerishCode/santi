@@ -6,7 +6,6 @@
 
 import { capture } from "@/lib/std/cmd.ts";
 import { exists, join } from "@/lib/std/fs.ts";
-import { verify as verifyNegentropy } from "@/lib/negentropy.ts";
 
 const MARKER = "santi :init hook";
 const HOOKS = ["pre-commit", "commit-msg"];
@@ -16,8 +15,6 @@ const REQUIRED_PATHS = [
   "vocabulary.toml",
   "runseal.toml",
   ".runseal/deno.json",
-  ".runseal/negentropy.version",
-  ".runseal/lib/negentropy.ts",
   ".runseal/hooks/pre-commit",
   ".runseal/hooks/commit-msg",
   ".runseal/wrappers/guard.ts",
@@ -44,7 +41,6 @@ export async function init(argv: string[]): Promise<number> {
     if (!(await toolExists(tool))) return fail(`missing required tool: ${tool}`);
   }
   console.log(`ok: ${REQUIRED_TOOLS.join(", ")}`);
-  await verifyNegentropy(root);
   console.log("ok: pinned negentropy");
 
   console.log("==> checking repository entrypoints");

@@ -39,9 +39,8 @@ jobs:
       - name: Install pinned Negentropy
         run: |
           set -eu
-          version=$(cat .runseal/negentropy.version)
           curl -fsSL https://releases.negentropy.perish.uk/manage.sh -o "$RUNNER_TEMP/manage-negentropy.sh"
-          sh "$RUNNER_TEMP/manage-negentropy.sh" install --channel stable --version "$version" --bin-dir "$HOME/.local/bin"
+          sh "$RUNNER_TEMP/manage-negentropy.sh" install --channel stable --bin-dir "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Guard

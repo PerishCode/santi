@@ -1715,6 +1715,7 @@ dependencies = [
  "rusqlite",
  "santi-adaptor",
  "santi-error",
+ "santi-im",
  "santi-model",
  "santi-object",
  "santi-provider",
@@ -1735,6 +1736,14 @@ dependencies = [
  "serde_json",
  "utoipa",
  "uuid",
+]
+
+[[package]]
+name = "santi-im"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "santi-model",
 ]
 
 [[package]]

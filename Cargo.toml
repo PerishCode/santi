@@ -5,6 +5,7 @@ members = [
   "crates/santi-api",
   "crates/santi-core",
   "crates/santi-error",
+  "crates/santi-im",
   "crates/santi-model",
   "crates/santi-object",
   "crates/santi-provider",
@@ -38,6 +39,7 @@ santi-api = { path = "crates/santi-api" }
 santi-core = { path = "crates/santi-core" }
 santi-adaptor = { path = "crates/santi-adaptor" }
 santi-error = { path = "crates/santi-error" }
+santi-im = { path = "crates/santi-im" }
 santi-model = { path = "crates/santi-model" }
 santi-object = { path = "crates/santi-object" }
 santi-provider = { path = "crates/santi-provider" }

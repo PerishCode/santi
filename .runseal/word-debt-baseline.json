@@ -1,19 +1,19 @@
 {
   "schema": "santi.word_debt.v1",
-  "note": "internal moved 857->849->844->857 across the crate-split (2026-07-21): the adaptor/im/window extractions transiently dipped it by relocating compound types onto the wire boundary; the santi-protocol reply-decoupling then added genuinely new internal vocabulary (outbox/dispatch/sink functions), returning it to the long-standing 857 floor. core gate is zero, no core entry; internal no-rise; wire/test observed",
-  "total": 2124,
+  "note": "refreshed 2026-07-21 after the window subtraction + full web removal: web/ is deleted (its ts/tsx/scss left the scan), and the session's crate-split moved many compound types onto crate wire boundaries (santi-adaptor/im/model/protocol/…), so wire rose while internal/test/total fell. core gate is zero, no core entry; internal no-rise; wire/test observed.",
+  "total": 2079,
   "tracks": {
     "wire": {
-      "occurrences": 754,
-      "unique": 547
+      "occurrences": 1035,
+      "unique": 698
     },
     "test": {
-      "occurrences": 513,
-      "unique": 416
+      "occurrences": 485,
+      "unique": 393
     },
     "internal": {
-      "occurrences": 861,
-      "unique": 698
+      "occurrences": 559,
+      "unique": 472
     }
   }
 }

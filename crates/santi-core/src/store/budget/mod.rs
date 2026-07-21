@@ -85,15 +85,6 @@ pub(crate) struct Ingress<'a> {
     pub content: MessageContent,
     pub source: Option<InboxSource>,
     pub admission: Option<&'a Admission>,
-    pub window: Option<Reservation<'a>>,
-}
-
-pub(crate) struct Reservation<'a> {
-    pub participant: &'a str,
-    pub client: &'a str,
-    pub message: &'a str,
-    pub hash: &'a str,
-    pub received: &'a str,
 }
 
 pub(crate) struct Launch<'a> {

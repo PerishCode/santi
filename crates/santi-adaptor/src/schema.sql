@@ -308,17 +308,6 @@ CREATE INDEX IF NOT EXISTS idx_r_strand_entries_seq ON r_strand_entries (strand_
 -- source provenance, but that is not a reply capability or provider-visible
 -- message content.
 
-CREATE TABLE IF NOT EXISTS window_messages (
-    participant_id TEXT NOT NULL,
-    client_message_id TEXT NOT NULL,
-    inbox_id TEXT NOT NULL UNIQUE,
-    message_id TEXT NOT NULL UNIQUE,
-    content_hash TEXT NOT NULL,
-    cursor INTEGER,
-    received_at TEXT NOT NULL,
-    PRIMARY KEY (participant_id, client_message_id)
-);
-
 CREATE TABLE IF NOT EXISTS reply_outbox (
     id TEXT PRIMARY KEY,
     turn_id TEXT NOT NULL UNIQUE,

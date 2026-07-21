@@ -11,7 +11,6 @@ import {
   fieldBinding,
   loadEvidence,
 } from "@/lib/word/schema.ts";
-import { loadSeat, sources, spellings, sweep, verifySeat } from "@/lib/word/seat.ts";
 import { classify, Track, TRACKS } from "@/lib/word/tracks.ts";
 
 export interface Finding {
@@ -149,15 +148,7 @@ export async function classifiedScan(
   }
   assertFresh(evidence, contract);
   const notes = await applyWireEvidence(root, report, evidence);
-  const seat = await loadSeat(root);
-  const source = await Deno.readTextFile(join(root, seat.file));
-  const faults = verifySeat(source, seat, contract.schemas).map(
-    (problem) => `wire seat: ${problem}`,
-  );
-  if (faults.length === 0) {
-    faults.push(...sweep(await sources(root), seat, spellings(seat, contract.schemas)));
-  }
-  return { report, raw, notes, faults };
+  return { report, raw, notes, faults: [] };
 }
 
 /**

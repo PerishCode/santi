@@ -1,22 +1,15 @@
 [scan]
 include = [
   "crates/**/*.rs",
-  "web/**/*.ts",
-  "web/**/*.tsx",
-  "web/**/*.scss",
 ]
 exclude = [
   "**/target/**",
-  "web/node_modules/**",
-  "web/dist/**",
 ]
 
 [module]
 roots = [
   "crates/*/src",
   "crates/*/tests",
-  "web/src",
-  "web/tests",
 ]
 
 [limit]
@@ -35,26 +28,10 @@ single = true
 syntax = "test"
 paths = [
   "crates/*/tests/**/*.rs",
-  "web/tests/**/*.test.ts",
-  "web/tests/**/*.test.tsx",
 ]
 
-[[grant]]
-syntax = "style"
-paths = ["web/src/components/**"]
 
-[[boundary]]
-paths = [
-  "web/vite.config.ts",
-  "web/vitest.config.ts",
-]
-note = "vite and vitest require root-level config files; path law anchors to src and tests"
-allow = ["path"]
 
-[[boundary]]
-paths = ["crates/santi-api/build.rs"]
-note = "cargo build scripts must live at the crate root; path law anchors to src and tests"
-allow = ["path"]
 
 [[boundary]]
 paths = [

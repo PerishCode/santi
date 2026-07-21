@@ -10,7 +10,6 @@ members = [
   "crates/santi-object",
   "crates/santi-protocol",
   "crates/santi-provider",
-  "crates/santi-window",
 ]
 resolver = "2"
 
@@ -46,7 +45,6 @@ santi-model = { path = "crates/santi-model" }
 santi-object = { path = "crates/santi-object" }
 santi-protocol = { path = "crates/santi-protocol" }
 santi-provider = { path = "crates/santi-provider" }
-santi-window = { path = "crates/santi-window" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 rust-embed = "8.7.2"

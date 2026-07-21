@@ -1,6 +1,6 @@
 {
   "schema": "santi.wire_schema.v2",
-  "digest": "3218ee3f9c5f77f8a0c520821b43f83938ca22b8da6b67df263afb532b9514fd",
+  "digest": "1eddef8da1e8109e1017d8cff356c50876384384f3a24fd462806ff90e5691ed",
   "components": [
     "ActorType",
     "Compact",
@@ -77,12 +77,7 @@
     "TurnActivityState",
     "TurnStatus",
     "TurnTriggerType",
-    "WebhookSubscription",
-    "WindowAuthor",
-    "WindowSendAccepted",
-    "WindowSendRequest",
-    "WindowTranscript",
-    "WindowTranscriptEntry"
+    "WebhookSubscription"
   ],
   "properties": {
     "ActorType": [],
@@ -504,33 +499,6 @@
       "soul_id",
       "strand_strategy",
       "updated_at"
-    ],
-    "WindowAuthor": [],
-    "WindowSendAccepted": [
-      "client_message_id",
-      "cursor",
-      "message_id",
-      "receipt_id",
-      "received_at",
-      "status"
-    ],
-    "WindowSendRequest": [
-      "client_message_id",
-      "content"
-    ],
-    "WindowTranscript": [
-      "empty",
-      "entries",
-      "has_more",
-      "next_since",
-      "participant"
-    ],
-    "WindowTranscriptEntry": [
-      "at",
-      "author",
-      "message_id",
-      "seq",
-      "text"
     ]
   }
 }

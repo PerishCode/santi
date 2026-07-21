@@ -23,9 +23,8 @@ mod runtime;
 mod souls;
 mod span;
 mod turns;
-mod window;
 
-pub(crate) use budget::{Ingress, Launch, Reservation, execution_budget_incident_key};
+pub(crate) use budget::{Ingress, Launch, execution_budget_incident_key};
 pub(crate) use compact::Collapse;
 pub use db::read_schema_version;
 use db::*;

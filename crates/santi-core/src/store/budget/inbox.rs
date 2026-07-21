@@ -22,7 +22,6 @@ impl SantiStore {
                 content,
                 source,
                 admission: None,
-                window: None,
             },
             false,
         )
@@ -39,7 +38,6 @@ impl SantiStore {
             content,
             source,
             admission,
-            window,
         } = ingress;
         let mut conn = self.conn.lock().unwrap();
         let tx = conn
@@ -168,24 +166,6 @@ impl SantiStore {
             ],
         )
         .map_err(|error| error.to_string())?;
-        if let Some(reservation) = window {
-            tx.execute(
-                r#"
-                INSERT INTO window_messages (
-                  participant_id, client_message_id, inbox_id, message_id, content_hash, cursor, received_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6)
-                "#,
-                params![
-                    reservation.participant,
-                    reservation.client,
-                    inbox_id,
-                    reservation.message,
-                    reservation.hash,
-                    reservation.received
-                ],
-            )
-            .map_err(|error| error.to_string())?;
-        }
         Database::new(&tx).insert_accepted(&inbox_id, strand, &now)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(IngestOutcome::Accepted {

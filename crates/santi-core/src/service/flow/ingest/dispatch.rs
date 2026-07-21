@@ -45,7 +45,6 @@ impl Service {
                     kind: MessageKind::Text,
                     trigger: "strand_send",
                     source: Some(InboxSource::new("strand_send").with_ref(strand.id.clone())),
-                    window: None,
                 },
             )
             .map_err(|message| send_error(catalog::INTERNAL, strand_id, message))?;

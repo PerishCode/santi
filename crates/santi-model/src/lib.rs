@@ -26,9 +26,6 @@ pub use im::*;
 mod stream;
 pub use stream::*;
 
-mod window;
-pub use window::*;
-
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct HealthResponse {
     pub ok: bool,

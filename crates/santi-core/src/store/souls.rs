@@ -71,7 +71,6 @@ impl SantiStore {
             content,
             source,
             admission: None,
-            window: None,
         })
     }
 

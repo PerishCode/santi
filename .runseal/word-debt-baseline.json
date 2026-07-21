@@ -1,6 +1,6 @@
 {
   "schema": "santi.word_debt.v1",
-  "note": "internal ratcheted 857->849 on the santi-adaptor lift (2026-07-21): db/rows/schema left santi-core into the adaptor crate, moving compound types onto the wire boundary. core gate is zero, no core entry; internal no-rise; wire/test observed",
+  "note": "internal ratcheted 857->849->844 across the crate-split (2026-07-21): the santi-adaptor lift, then the santi-im and santi-window feature-crate extractions, moved compound types onto the wire boundary. core gate is zero, no core entry; internal no-rise; wire/test observed",
   "total": 2124,
   "tracks": {
     "wire": {
@@ -12,8 +12,8 @@
       "unique": 416
     },
     "internal": {
-      "occurrences": 849,
-      "unique": 690
+      "occurrences": 844,
+      "unique": 689
     }
   }
 }

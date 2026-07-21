@@ -15,7 +15,7 @@ export const TRACKS: readonly Track[] = ["wire", "test", "core", "internal"];
  * SQLite schema / projection seats — not ordinary internal orchestration code.
  */
 const WIRE_PATH =
-  /(?:^|\/)(?:model(?:\/|\.rs$)|server\/(?:openapi|routes|sse|im|effects|errors|error\.rs$)|webhook(?:\/|\.rs$)|provider\.rs$|openai(?:\/|\.rs$)|chat\/completions(?:\/|\.rs$)|cli(?:\/|\.rs$)|config(?:\/|\.rs$)|ops\.rs$|upgrade(?:\/|\.rs$)|santi-model\/|santi-object\/|santi-adaptor\/|santi-im\/|object\/store\.rs$|santi-error\/|store\/(?:db(?:\/|\.rs$)|schema\.rs$|rows(?:\/|\.rs$))|store(?:\.rs|\/(?:mod|souls)\.rs)$)/;
+  /(?:^|\/)(?:model(?:\/|\.rs$)|server\/(?:openapi|routes|sse|im|effects|errors|error\.rs$)|webhook(?:\/|\.rs$)|provider\.rs$|openai(?:\/|\.rs$)|chat\/completions(?:\/|\.rs$)|cli(?:\/|\.rs$)|config(?:\/|\.rs$)|ops\.rs$|upgrade(?:\/|\.rs$)|santi-model\/|santi-object\/|santi-adaptor\/|santi-im\/|santi-window\/|object\/store\.rs$|santi-error\/|store\/(?:db(?:\/|\.rs$)|schema\.rs$|rows(?:\/|\.rs$))|store(?:\.rs|\/(?:mod|souls)\.rs)$)/;
 
 /** Protocol field dialect: multi-word spellings that encode wire/schema shape. */
 const FIELD_DIALECT =

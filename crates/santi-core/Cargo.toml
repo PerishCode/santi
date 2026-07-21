@@ -17,6 +17,7 @@ santi-model.workspace = true
 santi-object.workspace = true
 santi-adaptor.workspace = true
 santi-provider.workspace = true
+santi-window.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 hex.workspace = true

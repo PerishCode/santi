@@ -1,0 +1,10 @@
+[package]
+name = "santi-window"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+rusqlite.workspace = true
+santi-model.workspace = true
+serde_json.workspace = true

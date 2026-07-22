@@ -444,7 +444,11 @@ action_arm() {
 action_status() {
   local capsule_id service_state health_state="unhealthy"
   require_commands
-  mkdir -p -m 0700 "$RECOVERY_ROOT"
+  if [[ ! -e $RECOVERY_ROOT ]]; then
+    echo "recovery: no capsule armed"
+    return 0
+  fi
+  [[ -d $RECOVERY_ROOT && ! -L $RECOVERY_ROOT ]] || fail "recovery root is not a directory"
   if [[ -e $ARMING_MARKER && ! -e $ARMED_POINTER ]]; then
     echo "recovery: capsule arm incomplete: $(head -n 1 "$ARMING_MARKER" 2>/dev/null || true)"
     return 1

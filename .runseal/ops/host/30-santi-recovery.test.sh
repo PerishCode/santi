@@ -169,6 +169,11 @@ assert_file_text "$ACCEPT_HOME/runtime/db.schema" "33"
 [[ -f $ACCEPT_HOME/recovery/$ACCEPT_ID/ACCEPTED ]]
 [[ ! -e $ACCEPT_HOME/recovery/armed ]]
 
+EMPTY_HOME="$TEST_ROOT/empty/home"
+mkdir -p "$EMPTY_HOME"
+invoke "$EMPTY_HOME" status | grep -q 'no capsule armed'
+[[ ! -e $EMPTY_HOME/recovery ]]
+
 EARLY_FAILURE_HOME="$TEST_ROOT/early-failure/home"
 mkdir -p "$EARLY_FAILURE_HOME"
 if invoke "$EARLY_FAILURE_HOME" arm >/dev/null 2>&1; then

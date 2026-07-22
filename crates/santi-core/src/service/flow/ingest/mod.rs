@@ -15,6 +15,14 @@ pub(in crate::service) struct Ingest<'a> {
     pub(in crate::service) replay: Option<crate::store::Replay<'a>>,
 }
 
+pub(in crate::service) struct External<'a> {
+    pub(in crate::service) soul: &'a str,
+    pub(in crate::service) label: &'a str,
+    pub(in crate::service) text: String,
+    pub(in crate::service) source: Option<InboxSource>,
+    pub(in crate::service) replay: Option<crate::store::Replay<'a>>,
+}
+
 struct Audit {
     source_type: String,
     source_ref: String,
@@ -88,13 +96,14 @@ impl Service {
             Gate::Pause {
                 maintenance_strand_id,
             } => {
-                let intake = self.store.enqueue_inbox_while_suspended(
-                    &strand.id,
-                    input.kind,
-                    input.content,
-                    input.source,
-                    input.replay,
-                )?;
+                let intake = self.store.enqueue_inbox_while_suspended(Ingress {
+                    strand: &strand.id,
+                    kind: input.kind,
+                    content: input.content,
+                    source: input.source,
+                    admission: None,
+                    replay: input.replay,
+                })?;
                 let outcome = intake.outcome;
                 self.dispatch_error_events();
                 if let IngestOutcome::Rejected { error } = &outcome {
@@ -168,31 +177,33 @@ impl Service {
         system_text: String,
         source: Option<InboxSource>,
     ) -> Result<IngestOutcome, String> {
-        self.ingest_external(soul_id, label, system_text, source, None)
+        self.ingest_external(External {
+            soul: soul_id,
+            label,
+            text: system_text,
+            source,
+            replay: None,
+        })
     }
 
     pub(in crate::service) fn ingest_external(
         &self,
-        soul_id: &str,
-        label: &str,
-        system_text: String,
-        source: Option<InboxSource>,
-        replay: Option<crate::store::Replay<'_>>,
+        input: External<'_>,
     ) -> Result<IngestOutcome, String> {
         let strand = self
             .store
             .resolve_strand_selector(&StrandSelector::ByLabel {
-                soul_id: soul_id.to_string(),
-                label: label.to_string(),
+                soul_id: input.soul.to_string(),
+                label: input.label.to_string(),
             })?;
         let (outcome, _driven) = self.enqueue(
             &strand,
             Ingest {
-                content: MessageContent::text(system_text),
+                content: MessageContent::text(input.text),
                 kind: MessageKind::SantiSystem,
                 trigger: "system",
-                source,
-                replay,
+                source: input.source,
+                replay: input.replay,
             },
         )?;
         Ok(outcome)

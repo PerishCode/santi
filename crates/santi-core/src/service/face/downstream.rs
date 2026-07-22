@@ -2,6 +2,7 @@ use santi_model::{DownstreamCredential, InboxSource, IngestRequest};
 use sha2::{Digest as _, Sha256};
 
 use super::{Admission, Service};
+use crate::service::flow::ingest::External;
 
 impl Service {
     pub fn principal(&self, bearer: &str) -> Result<Option<DownstreamCredential>, String> {
@@ -85,17 +86,17 @@ impl Service {
                 receipt,
             }));
         }
-        let outcome = self.ingest_external(
-            &request.soul_id,
-            &request.label,
-            request.text,
+        let outcome = self.ingest_external(External {
+            soul: &request.soul_id,
+            label: &request.label,
+            text: request.text,
             source,
-            Some(crate::store::Replay {
+            replay: Some(crate::store::Replay {
                 owner: &downstream.id,
                 request: &request.request_id,
                 digest: &digest,
             }),
-        )?;
+        })?;
         Ok(Admission::Accepted(outcome))
     }
 }

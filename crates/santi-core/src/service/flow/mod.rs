@@ -1,5 +1,5 @@
 mod budget;
 mod driver;
 mod failure;
-mod ingest;
+pub(in crate::service) mod ingest;
 mod memory;

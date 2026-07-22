@@ -10,23 +10,10 @@ impl SantiStore {
 
     pub(crate) fn enqueue_inbox_while_suspended(
         &self,
-        strand_id: &str,
-        message_kind: MessageKind,
-        content: MessageContent,
-        source: Option<InboxSource>,
-        replay: Option<Replay<'_>>,
+        mut ingress: Ingress<'_>,
     ) -> Result<Intake, String> {
-        self.enqueue_inbox_with_policy(
-            Ingress {
-                strand: strand_id,
-                kind: message_kind,
-                content,
-                source,
-                admission: None,
-                replay,
-            },
-            false,
-        )
+        ingress.admission = None;
+        self.enqueue_inbox_with_policy(ingress, false)
     }
 
     fn enqueue_inbox_with_policy(

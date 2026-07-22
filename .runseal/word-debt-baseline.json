@@ -1,19 +1,19 @@
 {
   "schema": "santi.word_debt.v1",
-  "note": "refreshed 2026-07-21 after the window subtraction + full web removal: web/ is deleted (its ts/tsx/scss left the scan), and the session's crate-split moved many compound types onto crate wire boundaries (santi-adaptor/im/model/protocol/…), so wire rose while internal/test/total fell. core gate is zero, no core entry; internal no-rise; wire/test observed.",
-  "total": 2079,
+  "note": "refreshed 2026-07-22 after integrated IM removal, final fanout grouping, and structural-debt cleanup: the previous wire/internal split did not reproduce because its broad crate-boundary assumption was never encoded by WIRE_PATH. This baseline records the classifier actually enforced by the gate, including the grouped durable store seats. core gate is zero, no core entry; internal no-rise; wire/test observed.",
+  "total": 2032,
   "tracks": {
     "wire": {
-      "occurrences": 1035,
-      "unique": 698
+      "occurrences": 739,
+      "unique": 543
     },
     "test": {
-      "occurrences": 485,
-      "unique": 393
+      "occurrences": 479,
+      "unique": 389
     },
     "internal": {
-      "occurrences": 559,
-      "unique": 472
+      "occurrences": 814,
+      "unique": 657
     }
   }
 }

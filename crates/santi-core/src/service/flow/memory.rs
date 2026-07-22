@@ -4,6 +4,7 @@ use santi_provider::ProviderItem;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
+use crate::store::Ingress;
 use crate::{
     ErrorScope, ErrorSource, InboxSource, IncidentDraft, IngestOutcome, MessageContent,
     MessageKind, Strand, catalog, soul_memory_uri,
@@ -143,13 +144,16 @@ impl Service {
             return Ok(());
         }
 
-        let outcome = self.store.enqueue_inbox_while_suspended(
-            &maintenance.id,
-            MessageKind::SantiSystem,
-            memory_maintenance_metaprompt(snapshot, policy),
-            Some(InboxSource::new("runtime_memory_pressure").with_ref(maintenance.soul_id.clone())),
-            None,
-        )?;
+        let outcome = self.store.enqueue_inbox_while_suspended(Ingress {
+            strand: &maintenance.id,
+            kind: MessageKind::SantiSystem,
+            content: memory_maintenance_metaprompt(snapshot, policy),
+            source: Some(
+                InboxSource::new("runtime_memory_pressure").with_ref(maintenance.soul_id.clone()),
+            ),
+            admission: None,
+            replay: None,
+        })?;
         match outcome.outcome {
             IngestOutcome::Accepted { .. } => Ok(()),
             IngestOutcome::Rejected { error } => Err(format!(

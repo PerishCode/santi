@@ -2,6 +2,7 @@ mod budget;
 mod effects;
 mod errors;
 pub use effects::{Prepared, Transition};
+mod downstream;
 mod inbox;
 mod lifecycle;
 mod migration;

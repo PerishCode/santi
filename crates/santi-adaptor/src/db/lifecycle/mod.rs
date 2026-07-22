@@ -130,7 +130,7 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
     let version = conn
         .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
         .map_err(|error| error.to_string())?;
-    if version == 21 && SCHEMA_VERSION == 30 {
+    if version == 21 && SCHEMA_VERSION == 31 {
         migrate_v21_to_v22(conn)?;
         migrate_v22_to_v23(conn)?;
         migrate_v23_to_v24(conn)?;
@@ -140,7 +140,8 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
         super::migration::window::migrate_v27_to_v28(conn)?;
         super::migration::reply::migrate_v28_to_v29(conn)?;
         super::migration::turn::migrate_v29_to_v30(conn)?;
-    } else if version == 22 && SCHEMA_VERSION == 30 {
+        super::migration::downstream::migrate_v30_to_v31(conn)?;
+    } else if version == 22 && SCHEMA_VERSION == 31 {
         migrate_v22_to_v23(conn)?;
         migrate_v23_to_v24(conn)?;
         super::migration::receipt::migrate_v24_to_v25(conn)?;
@@ -149,7 +150,8 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
         super::migration::window::migrate_v27_to_v28(conn)?;
         super::migration::reply::migrate_v28_to_v29(conn)?;
         super::migration::turn::migrate_v29_to_v30(conn)?;
-    } else if version == 23 && SCHEMA_VERSION == 30 {
+        super::migration::downstream::migrate_v30_to_v31(conn)?;
+    } else if version == 23 && SCHEMA_VERSION == 31 {
         migrate_v23_to_v24(conn)?;
         super::migration::receipt::migrate_v24_to_v25(conn)?;
         super::migration::effect::migrate_v25_to_v26(conn)?;
@@ -157,33 +159,42 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
         super::migration::window::migrate_v27_to_v28(conn)?;
         super::migration::reply::migrate_v28_to_v29(conn)?;
         super::migration::turn::migrate_v29_to_v30(conn)?;
-    } else if version == 24 && SCHEMA_VERSION == 30 {
+        super::migration::downstream::migrate_v30_to_v31(conn)?;
+    } else if version == 24 && SCHEMA_VERSION == 31 {
         super::migration::receipt::migrate_v24_to_v25(conn)?;
         super::migration::effect::migrate_v25_to_v26(conn)?;
         super::migration::im::migrate_v26_to_v27(conn)?;
         super::migration::window::migrate_v27_to_v28(conn)?;
         super::migration::reply::migrate_v28_to_v29(conn)?;
         super::migration::turn::migrate_v29_to_v30(conn)?;
-    } else if version == 25 && SCHEMA_VERSION == 30 {
+        super::migration::downstream::migrate_v30_to_v31(conn)?;
+    } else if version == 25 && SCHEMA_VERSION == 31 {
         super::migration::effect::migrate_v25_to_v26(conn)?;
         super::migration::im::migrate_v26_to_v27(conn)?;
         super::migration::window::migrate_v27_to_v28(conn)?;
         super::migration::reply::migrate_v28_to_v29(conn)?;
         super::migration::turn::migrate_v29_to_v30(conn)?;
-    } else if version == 26 && SCHEMA_VERSION == 30 {
+        super::migration::downstream::migrate_v30_to_v31(conn)?;
+    } else if version == 26 && SCHEMA_VERSION == 31 {
         super::migration::im::migrate_v26_to_v27(conn)?;
         super::migration::window::migrate_v27_to_v28(conn)?;
         super::migration::reply::migrate_v28_to_v29(conn)?;
         super::migration::turn::migrate_v29_to_v30(conn)?;
-    } else if version == 27 && SCHEMA_VERSION == 30 {
+        super::migration::downstream::migrate_v30_to_v31(conn)?;
+    } else if version == 27 && SCHEMA_VERSION == 31 {
         super::migration::window::migrate_v27_to_v28(conn)?;
         super::migration::reply::migrate_v28_to_v29(conn)?;
         super::migration::turn::migrate_v29_to_v30(conn)?;
-    } else if version == 28 && SCHEMA_VERSION == 30 {
+        super::migration::downstream::migrate_v30_to_v31(conn)?;
+    } else if version == 28 && SCHEMA_VERSION == 31 {
         super::migration::reply::migrate_v28_to_v29(conn)?;
         super::migration::turn::migrate_v29_to_v30(conn)?;
-    } else if version == 29 && SCHEMA_VERSION == 30 {
+        super::migration::downstream::migrate_v30_to_v31(conn)?;
+    } else if version == 29 && SCHEMA_VERSION == 31 {
         super::migration::turn::migrate_v29_to_v30(conn)?;
+        super::migration::downstream::migrate_v30_to_v31(conn)?;
+    } else if version == 30 && SCHEMA_VERSION == 31 {
+        super::migration::downstream::migrate_v30_to_v31(conn)?;
     } else if version != SCHEMA_VERSION {
         conn.execute_batch(
             r#"

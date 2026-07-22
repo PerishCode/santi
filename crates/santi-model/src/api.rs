@@ -6,6 +6,31 @@ use utoipa::ToSchema;
 use super::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DownstreamCredential {
+    pub id: String,
+    pub label_prefix: String,
+    pub credential_env: String,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CreateDownstreamRequest {
+    pub id: String,
+    pub label_prefix: String,
+    pub credential_env: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct IngestRequest {
+    pub soul_id: String,
+    pub label: String,
+    pub text: String,
+    #[serde(default)]
+    pub source_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TurnEvent {
     pub id: String,
     pub strand_id: String,

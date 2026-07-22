@@ -1,5 +1,6 @@
 mod address;
 mod api;
+pub use api::Admission;
 mod bucket;
 mod compact;
 mod drive;

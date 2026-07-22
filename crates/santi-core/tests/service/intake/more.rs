@@ -131,3 +131,71 @@ async fn send_targets_soul() {
         .expect_err("unknown strand should error");
     assert!(error.message.contains("strand not found"), "got: {error}");
 }
+
+#[tokio::test]
+async fn downstream_credential_gates_ingest() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let provider = Arc::new(FakeProvider::default());
+    let service = Service::open(
+        service::Config {
+            database_path: temp.path().join("santi.sqlite").display().to_string(),
+            runtime_root: temp.path().join("runtime").display().to_string(),
+            execution_root: temp.path().join("execution").display().to_string(),
+            bind_addr: Some("127.0.0.1:0".to_string()),
+        },
+        provider.clone(),
+    )
+    .expect("open service");
+
+    let soul_id = service.list_souls().expect("list souls")[0].id.clone();
+    let credential_env = "SANTI_TEST_STIM_CREDENTIAL";
+    unsafe { std::env::set_var(credential_env, "s3cret") };
+    service
+        .create_downstream(santi_core::CreateDownstreamRequest {
+            id: "stim".to_string(),
+            label_prefix: "stim:".to_string(),
+            credential_env: credential_env.to_string(),
+        })
+        .expect("create downstream");
+
+    let accepted = service
+        .ingest_downstream(
+            "s3cret",
+            santi_core::IngestRequest {
+                soul_id: soul_id.clone(),
+                label: "stim:alice".to_string(),
+                text: "hello".to_string(),
+                source_ref: None,
+            },
+        )
+        .expect("ingest");
+    assert!(matches!(accepted, service::Admission::Accepted(_)));
+
+    let no_credential = service
+        .ingest_downstream(
+            "wrong-token",
+            santi_core::IngestRequest {
+                soul_id: soul_id.clone(),
+                label: "stim:alice".to_string(),
+                text: "hello".to_string(),
+                source_ref: None,
+            },
+        )
+        .expect("ingest");
+    assert!(matches!(no_credential, service::Admission::Denied));
+
+    let forbidden = service
+        .ingest_downstream(
+            "s3cret",
+            santi_core::IngestRequest {
+                soul_id,
+                label: "other:bob".to_string(),
+                text: "hello".to_string(),
+                source_ref: None,
+            },
+        )
+        .expect("ingest");
+    assert!(matches!(forbidden, service::Admission::Forbidden));
+
+    unsafe { std::env::remove_var(credential_env) };
+}

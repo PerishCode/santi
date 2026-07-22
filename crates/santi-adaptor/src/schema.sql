@@ -327,3 +327,11 @@ CREATE TABLE IF NOT EXISTS turn_outbox (
 );
 CREATE INDEX IF NOT EXISTS idx_turn_outbox_seq
 ON turn_outbox(seq);
+
+CREATE TABLE IF NOT EXISTS downstreams (
+    id TEXT PRIMARY KEY,
+    label_prefix TEXT NOT NULL,
+    credential_env TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);

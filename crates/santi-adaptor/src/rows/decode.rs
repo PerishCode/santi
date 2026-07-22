@@ -1,7 +1,7 @@
 use rusqlite::Row;
 use santi_model::{
-    ActorType, Compact, EffectState, Message, MessageContent, MessageEvent, MessageKind,
-    MessageState, Soul, Strand, StrandEffect, StrandMessage, StrandMessageRef,
+    ActorType, Compact, DownstreamCredential, EffectState, Message, MessageContent, MessageEvent,
+    MessageKind, MessageState, Soul, Strand, StrandEffect, StrandMessage, StrandMessageRef,
     ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState, ToolCall, ToolResult, Turn,
     TurnStatus, TurnTriggerType, WebhookSubscription,
 };
@@ -15,6 +15,18 @@ impl Decode for Soul {
             id: row.get(0)?,
             created_at: row.get(1)?,
             updated_at: row.get(2)?,
+        })
+    }
+}
+
+impl Decode for DownstreamCredential {
+    fn decode(row: &Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get(0)?,
+            label_prefix: row.get(1)?,
+            credential_env: row.get(2)?,
+            created_at: row.get(3)?,
+            updated_at: row.get(4)?,
         })
     }
 }

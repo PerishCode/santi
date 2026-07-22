@@ -7,11 +7,12 @@ use axum::{
 };
 use santi_core::service::Service;
 use santi_core::{
-    CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateSoulRequest,
-    CreateStrandResponse, CreateWebhookRequest, DriveStrandResponse, ForkStrandResponse,
-    HealthResponse, MaterialRequest, ReceiptStatus, SantiError, SendStrandAcceptedResponse,
-    SendStrandRequest, Soul, Strand, StrandBudgetSnapshot, StrandDetail, StrandMaterial,
-    StrandRuntimeSnapshot, TurnEventPage, WebhookSubscription,
+    CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateDownstreamRequest,
+    CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, DownstreamCredential,
+    DriveStrandResponse, ForkStrandResponse, HealthResponse, IngestRequest, MaterialRequest,
+    ReceiptStatus, SantiError, SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand,
+    StrandBudgetSnapshot, StrandDetail, StrandMaterial, StrandRuntimeSnapshot, TurnEventPage,
+    WebhookSubscription,
 };
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -59,6 +60,11 @@ pub(super) fn router(service: Service) -> Router {
         .route("/api/v1/compacts/{compact_id}", get(compact_query))
         .route("/api/v1/strands/{strand_id}/runtime", get(runtime_snapshot))
         .route("/api/v1/turn-events", get(turn_events))
+        .route(
+            "/api/v1/downstreams",
+            post(create_downstream).get(list_downstreams),
+        )
+        .route("/api/v1/ingest", post(ingest))
         .route("/api/v1/im/send", post(super::im::send_im))
         .route("/api/v1/im/inbox/{participant_id}", get(super::im::poll_im))
         .route(
@@ -115,9 +121,11 @@ pub async fn health(State(service): State<Service>) -> impl IntoResponse {
     )
 }
 
+mod downstream;
 mod drive;
 mod receipts;
 mod turn;
+pub use downstream::*;
 pub use drive::*;
 pub use receipts::*;
 pub use turn::*;

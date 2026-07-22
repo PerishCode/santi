@@ -11,6 +11,7 @@ mod assembly;
 pub(crate) mod budget;
 mod compact;
 mod db;
+mod downstream;
 mod effects;
 pub(crate) mod errors;
 mod fork;

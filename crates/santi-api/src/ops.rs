@@ -72,23 +72,6 @@ fn inbox_seed_existing_strand(
     })
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct ImReplyReport {
-    pub participant_id: String,
-    pub seq: i64,
-    pub turn_id: Option<String>,
-    pub delivery_mode: Option<santi_core::ImDeliveryMode>,
-    pub deduplicated: bool,
-}
-
-pub fn im_reply(strand_id: &str, content: &str) -> Result<ImReplyReport, String> {
-    let turn_id = std::env::var("SANTI_TURN_ID")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    config::resolve_runtime_paths().im_reply_turn(strand_id, turn_id.as_deref(), content)
-}
-
 impl RuntimePaths {
     pub fn doctor(&self) -> Result<DoctorReport, String> {
         self.doctor_report(None)
@@ -172,43 +155,5 @@ impl RuntimePaths {
         let store = santi_core::SantiStore::open(&self.database_path)?;
         let strand = store.find_labeled_strand(soul_id, label)?;
         inbox_seed_existing_strand(&store, &strand.id, text)
-    }
-
-    pub fn im_reply(&self, strand_id: &str, content: &str) -> Result<ImReplyReport, String> {
-        self.im_reply_turn(strand_id, None, content)
-    }
-
-    pub fn im_reply_turn(
-        &self,
-        strand_id: &str,
-        turn_id: Option<&str>,
-        content: &str,
-    ) -> Result<ImReplyReport, String> {
-        let store = santi_core::SantiStore::open(&self.database_path)?;
-        let (entry, inserted) = match turn_id {
-            Some(turn_id) => store.enqueue_turn_reply(santi_core::Reply {
-                strand: strand_id,
-                turn: turn_id,
-                message: None,
-                content,
-                mode: santi_core::ImDeliveryMode::Explicit,
-            })?,
-            None => {
-                let participant_id = store
-                    .im_participant_for_strand(strand_id)?
-                    .ok_or_else(|| format!("strand {strand_id} is not an IM conversation"))?;
-                (
-                    store.enqueue_im_inbox(&participant_id, Some(strand_id), content)?,
-                    true,
-                )
-            }
-        };
-        Ok(ImReplyReport {
-            participant_id: entry.participant_id.clone(),
-            seq: entry.seq,
-            turn_id: entry.turn_id,
-            delivery_mode: entry.delivery_mode,
-            deduplicated: !inserted,
-        })
     }
 }

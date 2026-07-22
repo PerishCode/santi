@@ -42,7 +42,7 @@ fn github_verifies_signature() {
 }
 
 #[test]
-fn github_normalizes_doorbell() {
+fn github_normalizes_event() {
     let event = expect_event(
         GithubAdaptor::configured(None, None)
             .normalize(

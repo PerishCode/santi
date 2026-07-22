@@ -8,9 +8,9 @@ use anyhow::Result;
 use clap::Parser;
 
 use auth::{Credentials, resolve_edge_bearer};
-use cli::{Cli, ClientDefaults, Command, ImCommand, InboxCommand};
+use cli::{Cli, ClientDefaults, Command, InboxCommand};
 use client::run_client;
-pub use text::source::{read_im_reply_text, read_inbox_seed_text};
+pub use text::source::read_inbox_seed_text;
 
 pub async fn run() -> Result<()> {
     dotenvy::dotenv_override().ok();
@@ -25,10 +25,6 @@ pub async fn run() -> Result<()> {
             run,
             finalize,
         } => run_upgrade(deb, previous_deb, run, finalize),
-        Command::Im(ImCommand::Reply { text, file, stdin }) => {
-            let text = read_im_reply_text(text, file, stdin)?;
-            run_im_reply(text, cli.strand)
-        }
         other => {
             let defaults = ClientDefaults {
                 strand: cli.strand,
@@ -84,19 +80,6 @@ fn run_inbox(command: InboxCommand, default_strand: Option<String>) -> Result<()
             Ok(())
         }
     }
-}
-
-fn run_im_reply(text: String, default_strand: Option<String>) -> Result<()> {
-    let strand_id = default_strand
-        .map(|id| id.trim().to_string())
-        .filter(|id| !id.is_empty())
-        .ok_or_else(|| {
-            anyhow::anyhow!("no strand id: set --strand / SANTI_STRAND_ID (the IM conversation)")
-        })?;
-    let report =
-        santi_api::ops::im_reply(&strand_id, &text).map_err(|error| anyhow::anyhow!(error))?;
-    println!("{}", serde_json::to_string_pretty(&report)?);
-    Ok(())
 }
 
 fn run_upgrade(

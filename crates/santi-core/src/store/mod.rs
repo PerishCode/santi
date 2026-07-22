@@ -15,10 +15,8 @@ mod downstream;
 mod effects;
 pub(crate) mod errors;
 mod fork;
-mod im;
 mod lifecycle;
 mod receipts;
-mod reply;
 mod rows;
 mod runtime;
 mod souls;
@@ -31,7 +29,6 @@ pub(crate) use compact::Collapse;
 pub use db::read_schema_version;
 use db::*;
 pub(crate) use effects::Settlement;
-pub use im::Reply;
 use rows::{Decode, collect_rows};
 pub use runtime::Invocation;
 pub use turns::Completion;
@@ -56,7 +53,6 @@ pub fn soul_memory_file(
 #[derive(Clone)]
 pub struct SantiStore {
     conn: Arc<Mutex<Connection>>,
-    im: santi_im::ImStore,
 }
 
 #[derive(Debug, Clone)]

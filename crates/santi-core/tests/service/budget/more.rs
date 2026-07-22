@@ -217,15 +217,23 @@ async fn budget_raise_clears_hold_on_ingest() {
         }),
     );
     let rejected = held
-        .im_send(santi_core::DEFAULT_SOUL_ID, "operator", "over budget")
-        .expect("im send");
+        .ingest_external_event(
+            santi_core::DEFAULT_SOUL_ID,
+            "test:operator",
+            "over budget".to_string(),
+        )
+        .expect("external ingest");
     let santi_core::IngestOutcome::Rejected { error } = rejected else {
         panic!("first send should open the hold");
     };
     assert_eq!(error.code, "context.budget.exceeded");
     let repeat = held
-        .im_send(santi_core::DEFAULT_SOUL_ID, "operator", "still held")
-        .expect("im send repeat");
+        .ingest_external_event(
+            santi_core::DEFAULT_SOUL_ID,
+            "test:operator",
+            "still held".to_string(),
+        )
+        .expect("external ingest repeat");
     let santi_core::IngestOutcome::Rejected {
         error: repeat_error,
     } = repeat
@@ -243,8 +251,12 @@ async fn budget_raise_clears_hold_on_ingest() {
         }),
     );
     let outcome = raised
-        .im_send(santi_core::DEFAULT_SOUL_ID, "operator", "after the raise")
-        .expect("im send after raise");
+        .ingest_external_event(
+            santi_core::DEFAULT_SOUL_ID,
+            "test:operator",
+            "after the raise".to_string(),
+        )
+        .expect("external ingest after raise");
     let santi_core::IngestOutcome::Accepted { receipt } = outcome else {
         panic!("under-budget hold must auto-clear on ingest remeasure");
     };

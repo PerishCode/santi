@@ -151,7 +151,6 @@ pub struct ReceiptStatus {
     pub updated_at: Timestamp,
     pub transitions: Vec<ReceiptTransition>,
     pub effects: Vec<StrandEffect>,
-    pub im_deliveries: Vec<ImDelivery>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]

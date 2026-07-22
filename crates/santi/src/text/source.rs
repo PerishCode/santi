@@ -8,20 +8,6 @@ struct Source {
     stdin: bool,
 }
 
-pub fn read_im_reply_text(
-    text: Option<String>,
-    file: Option<String>,
-    stdin: bool,
-) -> Result<String> {
-    read_text_source(Source {
-        command: "im reply",
-        label: "reply",
-        text,
-        file,
-        stdin,
-    })
-}
-
 pub fn read_inbox_seed_text(
     text: Option<String>,
     file: Option<String>,

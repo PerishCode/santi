@@ -2,7 +2,7 @@ use rusqlite::{OptionalExtension, params};
 
 use crate::store::SantiStore;
 use crate::store::db::{Database, receipt_state_from_db};
-use crate::{ImDelivery, ReceiptStatus, ReceiptTransition};
+use crate::{ReceiptStatus, ReceiptTransition};
 
 impl SantiStore {
     pub fn receipt_status(&self, inbox_id: &str) -> Result<Option<ReceiptStatus>, String> {
@@ -80,28 +80,6 @@ impl SantiStore {
             updated_at,
             transitions,
             effects,
-            im_deliveries: Vec::new(),
         }))
-    }
-
-    pub fn im_deliveries_for_receipt(&self, inbox_id: &str) -> Result<Vec<ImDelivery>, String> {
-        let turn_ids = {
-            let conn = self.conn.lock().unwrap();
-            let mut stmt = conn
-                .prepare(
-                    r#"
-                    SELECT DISTINCT turn_id
-                    FROM receipt_transitions
-                    WHERE inbox_id = ?1 AND turn_id IS NOT NULL
-                    "#,
-                )
-                .map_err(|error| error.to_string())?;
-            let rows = stmt
-                .query_map(params![inbox_id], |row| row.get::<_, String>(0))
-                .map_err(|error| error.to_string())?;
-            rows.collect::<Result<Vec<_>, _>>()
-                .map_err(|error| error.to_string())?
-        };
-        self.im.deliveries_for_turns(&turn_ids)
     }
 }

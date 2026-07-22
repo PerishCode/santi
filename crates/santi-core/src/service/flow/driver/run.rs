@@ -50,7 +50,7 @@ impl Service {
             );
         }
         let metadata = self.provider.metadata();
-        match self.store.complete_turn_reply(
+        match self.store.complete(
             crate::Completion {
                 turn: turn_id,
                 sequence: last_soul_message
@@ -64,7 +64,6 @@ impl Service {
         ) {
             Ok((_, turn_event)) => {
                 self.dispatch_error_events();
-                self.dispatch_replies();
                 let (external_label, final_text) = match turn_event {
                     Some(event) => (Some(event.external_label), Some(event.final_text)),
                     None => (None, None),

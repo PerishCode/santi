@@ -10,7 +10,7 @@ pub use santi_model::*;
 pub use santi_object::{LocalObjectStore, ObjectBucket, ObjectMeta, ObjectPayload, ObjectUri};
 pub use santi_provider::ProviderItem;
 pub use store::{
-    Completion, DEFAULT_SOUL_ID, Draft, Invocation, Reply, SCHEMA_VERSION, SantiStore,
+    Completion, DEFAULT_SOUL_ID, Draft, Invocation, SCHEMA_VERSION, SantiStore,
     read_schema_version, soul_memory_file,
 };
 pub use workspace::{

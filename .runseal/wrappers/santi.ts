@@ -19,7 +19,6 @@ function usage(): void {
   );
   console.log("Examples:");
   console.log("  runseal :santi health");
-  console.log('  runseal :santi im send "hello" --as operator --soul soul_default --reply');
   console.log('  runseal :santi strand send <id> "hello"');
 }
 

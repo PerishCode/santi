@@ -130,83 +130,60 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
     let version = conn
         .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
         .map_err(|error| error.to_string())?;
-    if version == 21 && SCHEMA_VERSION == 32 {
+    if version == 21 && SCHEMA_VERSION == 33 {
         migrate_v21_to_v22(conn)?;
         migrate_v22_to_v23(conn)?;
         migrate_v23_to_v24(conn)?;
         super::migration::receipt::migrate_v24_to_v25(conn)?;
         super::migration::effect::migrate_v25_to_v26(conn)?;
-        super::migration::im::migrate_v26_to_v27(conn)?;
-        super::migration::window::migrate_v27_to_v28(conn)?;
-        super::migration::reply::migrate_v28_to_v29(conn)?;
         super::migration::turn::migrate_v29_to_v30(conn)?;
         super::migration::downstream::migrate_v30_to_v31(conn)?;
         super::migration::downstream::migrate_v31_to_v32(conn)?;
-    } else if version == 22 && SCHEMA_VERSION == 32 {
+        super::migration::retire::migrate_v32_to_v33(conn)?;
+    } else if version == 22 && SCHEMA_VERSION == 33 {
         migrate_v22_to_v23(conn)?;
         migrate_v23_to_v24(conn)?;
         super::migration::receipt::migrate_v24_to_v25(conn)?;
         super::migration::effect::migrate_v25_to_v26(conn)?;
-        super::migration::im::migrate_v26_to_v27(conn)?;
-        super::migration::window::migrate_v27_to_v28(conn)?;
-        super::migration::reply::migrate_v28_to_v29(conn)?;
         super::migration::turn::migrate_v29_to_v30(conn)?;
         super::migration::downstream::migrate_v30_to_v31(conn)?;
         super::migration::downstream::migrate_v31_to_v32(conn)?;
-    } else if version == 23 && SCHEMA_VERSION == 32 {
+        super::migration::retire::migrate_v32_to_v33(conn)?;
+    } else if version == 23 && SCHEMA_VERSION == 33 {
         migrate_v23_to_v24(conn)?;
         super::migration::receipt::migrate_v24_to_v25(conn)?;
         super::migration::effect::migrate_v25_to_v26(conn)?;
-        super::migration::im::migrate_v26_to_v27(conn)?;
-        super::migration::window::migrate_v27_to_v28(conn)?;
-        super::migration::reply::migrate_v28_to_v29(conn)?;
         super::migration::turn::migrate_v29_to_v30(conn)?;
         super::migration::downstream::migrate_v30_to_v31(conn)?;
         super::migration::downstream::migrate_v31_to_v32(conn)?;
-    } else if version == 24 && SCHEMA_VERSION == 32 {
+        super::migration::retire::migrate_v32_to_v33(conn)?;
+    } else if version == 24 && SCHEMA_VERSION == 33 {
         super::migration::receipt::migrate_v24_to_v25(conn)?;
         super::migration::effect::migrate_v25_to_v26(conn)?;
-        super::migration::im::migrate_v26_to_v27(conn)?;
-        super::migration::window::migrate_v27_to_v28(conn)?;
-        super::migration::reply::migrate_v28_to_v29(conn)?;
         super::migration::turn::migrate_v29_to_v30(conn)?;
         super::migration::downstream::migrate_v30_to_v31(conn)?;
         super::migration::downstream::migrate_v31_to_v32(conn)?;
-    } else if version == 25 && SCHEMA_VERSION == 32 {
+        super::migration::retire::migrate_v32_to_v33(conn)?;
+    } else if version == 25 && SCHEMA_VERSION == 33 {
         super::migration::effect::migrate_v25_to_v26(conn)?;
-        super::migration::im::migrate_v26_to_v27(conn)?;
-        super::migration::window::migrate_v27_to_v28(conn)?;
-        super::migration::reply::migrate_v28_to_v29(conn)?;
         super::migration::turn::migrate_v29_to_v30(conn)?;
         super::migration::downstream::migrate_v30_to_v31(conn)?;
         super::migration::downstream::migrate_v31_to_v32(conn)?;
-    } else if version == 26 && SCHEMA_VERSION == 32 {
-        super::migration::im::migrate_v26_to_v27(conn)?;
-        super::migration::window::migrate_v27_to_v28(conn)?;
-        super::migration::reply::migrate_v28_to_v29(conn)?;
+        super::migration::retire::migrate_v32_to_v33(conn)?;
+    } else if (26..=29).contains(&version) && SCHEMA_VERSION == 33 {
         super::migration::turn::migrate_v29_to_v30(conn)?;
         super::migration::downstream::migrate_v30_to_v31(conn)?;
         super::migration::downstream::migrate_v31_to_v32(conn)?;
-    } else if version == 27 && SCHEMA_VERSION == 32 {
-        super::migration::window::migrate_v27_to_v28(conn)?;
-        super::migration::reply::migrate_v28_to_v29(conn)?;
-        super::migration::turn::migrate_v29_to_v30(conn)?;
+        super::migration::retire::migrate_v32_to_v33(conn)?;
+    } else if version == 30 && SCHEMA_VERSION == 33 {
         super::migration::downstream::migrate_v30_to_v31(conn)?;
         super::migration::downstream::migrate_v31_to_v32(conn)?;
-    } else if version == 28 && SCHEMA_VERSION == 32 {
-        super::migration::reply::migrate_v28_to_v29(conn)?;
-        super::migration::turn::migrate_v29_to_v30(conn)?;
-        super::migration::downstream::migrate_v30_to_v31(conn)?;
+        super::migration::retire::migrate_v32_to_v33(conn)?;
+    } else if version == 31 && SCHEMA_VERSION == 33 {
         super::migration::downstream::migrate_v31_to_v32(conn)?;
-    } else if version == 29 && SCHEMA_VERSION == 32 {
-        super::migration::turn::migrate_v29_to_v30(conn)?;
-        super::migration::downstream::migrate_v30_to_v31(conn)?;
-        super::migration::downstream::migrate_v31_to_v32(conn)?;
-    } else if version == 30 && SCHEMA_VERSION == 32 {
-        super::migration::downstream::migrate_v30_to_v31(conn)?;
-        super::migration::downstream::migrate_v31_to_v32(conn)?;
-    } else if version == 31 && SCHEMA_VERSION == 32 {
-        super::migration::downstream::migrate_v31_to_v32(conn)?;
+        super::migration::retire::migrate_v32_to_v33(conn)?;
+    } else if version == 32 && SCHEMA_VERSION == 33 {
+        super::migration::retire::migrate_v32_to_v33(conn)?;
     } else if version != SCHEMA_VERSION {
         conn.execute_batch(
             r#"
@@ -225,8 +202,6 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
                 DROP TABLE IF EXISTS turn_outbox;
                 DROP TABLE IF EXISTS reply_outbox;
                 DROP TABLE IF EXISTS window_messages;
-                DROP TABLE IF EXISTS im_inbox;
-                DROP TABLE IF EXISTS im_participants;
                 DROP TABLE IF EXISTS compacts;
                 DROP TABLE IF EXISTS error_transitions;
                 DROP TABLE IF EXISTS error_incidents;

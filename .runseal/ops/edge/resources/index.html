@@ -7,12 +7,7 @@
     GET /api/v1/strands/{id}/runtime           → full state for history replay
     GET /api/v1/strands/{id}/events  (SSE)     → live occurrences
   No own query-model. It renders OCCURRENCES (messages, thinking, tool
-  calls/results, turn markers) — not chat bubbles. Plus ONE principal-bound
-  input: the chat pane on the right speaks through the window doorbell
-  (POST /api/v1/window/im/send, allowlisted at the edge); everything else
-  stays read-only. The chat pane is a pure IM projection of the viewer's own
-  participant transcript — the server derives who you are; the page never
-  chooses a soul, participant, or destination.
+  calls/results, turn markers) — not chat bubbles. It is strictly read-only.
 
   Same-origin: it talks to /api/* which the fronting nginx bare-proxies to santi
   (127.0.0.1). The browser holds no santi credential; access is gated upstream by
@@ -84,31 +79,6 @@
     .occ.turn     { border-color:var(--turn); }      .occ.turn .k    { color:var(--turn); }
     .occ.fail     { border-color:var(--fail); }      .occ.fail .k    { color:var(--fail); }      .occ.fail pre    { color:#fecdd3; }
     .occ.compact  { border-color:var(--compact); }   .occ.compact .k { color:var(--compact); }   .occ.compact pre { color:#c7d2fe; }
-    #chat {
-      width:26rem; flex:0 0 auto; border-left:1px solid var(--line);
-      background:var(--panel); display:flex; flex-direction:column; min-width:0;
-    }
-    #chatmsgs { flex:1; overflow-y:auto; padding:1rem; }
-    .cmsg { margin:.6rem 0; }
-    .cmsg .who { font-size:10px; text-transform:uppercase; letter-spacing:.08em; opacity:.75; }
-    .cmsg.human .who { color:var(--system); }
-    .cmsg.assistant .who { color:var(--soul); }
-    .cmsg pre { margin:.15rem 0 0; white-space:pre-wrap; word-break:break-word; font-size:12.5px; line-height:1.55; color:var(--ink-bright); }
-    .cmsg .cst { font-size:10px; color:var(--ink-dim); margin-top:.1rem; }
-    .cmsg.rejected .cst { color:var(--fail); }
-    .cmsg.unknown .cst { color:var(--system); }
-    .cmsg .retry { color:var(--soul); cursor:pointer; text-decoration:underline; margin-left:.4rem; }
-    #chatnote { color:var(--ink-dim); }
-    #composer { border-top:1px solid var(--line); padding:.6rem; display:flex; gap:.5rem; }
-    #composer textarea {
-      flex:1; background:var(--bg); color:var(--ink-bright); border:1px solid var(--line);
-      border-radius:4px; padding:.45rem .6rem; font:inherit; resize:none; height:3.4rem;
-    }
-    #composer button {
-      background:#132038; color:var(--ink-bright); border:1px solid var(--line);
-      border-radius:4px; padding:0 .9rem; cursor:pointer; font:inherit;
-    }
-    #composer button:disabled { opacity:.4; cursor:default; }
   </style>
 </head>
 <body>
@@ -125,17 +95,6 @@
     </header>
     <div id="timeline" class="scroll"><div class="empty">左侧选择一条 strand 观看其发生流</div></div>
   </main>
-  <section id="chat">
-    <div class="brand"><b>chat</b><span id="chatconn" class="pill">–</span></div>
-    <div class="sub">IM 投影 · 每个身份只见自己的对话 · 沉默是合法结果</div>
-    <div id="chatmsgs" class="scroll"></div>
-    <div id="chatnote" class="sub" hidden></div>
-    <form id="composer">
-      <textarea id="chatinput" placeholder="说点什么…(Enter 发送,Shift+Enter 换行)"></textarea>
-      <button id="chatsend" type="submit">发送</button>
-    </form>
-  </section>
-
   <script>
   (() => {
     const $ = (s, r = document) => r.querySelector(s);
@@ -305,134 +264,6 @@
     setInterval(() => { if (!active) loadStrands(); }, 15000);
   })();
 
-  // ---------- chat pane: the viewer's own IM projection + the doorbell ----------
-  (() => {
-    const $ = (s, r = document) => r.querySelector(s);
-    const eln = (tag, cls, txt) => { const n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; };
-    const msgs = $('#chatmsgs'), input = $('#chatinput'), send = $('#chatsend');
-    const connPill = $('#chatconn'), note = $('#chatnote'), form = $('#composer');
-    const clock = (iso) => { try { return new Date(iso).toLocaleTimeString('zh-CN', { hour12: false }); } catch { return ''; } };
-    const setPill = (t, k) => { connPill.textContent = t; connPill.className = 'pill' + (k ? ' ' + k : ''); };
-    const tell = (t) => { note.hidden = !t; note.textContent = t || ''; };
-
-    let since = 0;
-    let sending = false;
-    const known = new Set();     // materialized message ids already rendered
-    const locals = new Map();    // message_id -> local (pending) row, from acceptances
-    let stick = true;
-    msgs.addEventListener('scroll', () => {
-      stick = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 48;
-    });
-    const settle = () => { if (stick) msgs.scrollTop = msgs.scrollHeight; };
-
-    function bubble(author, text, at) {
-      const r = eln('div', 'cmsg ' + author);
-      const head = eln('div', 'who', author === 'human' ? 'you' : 'liberte');
-      if (at) head.appendChild(eln('span', 't', '  ' + clock(at)));
-      r.appendChild(head);
-      const pre = eln('pre'); pre.textContent = text; r.appendChild(pre);
-      return r;
-    }
-
-    function addEntry(entry) {
-      if (known.has(entry.message_id)) return;
-      known.add(entry.message_id);
-      const local = locals.get(entry.message_id);
-      if (local) { local.querySelector('.cst').textContent = 'accepted · 已入时间线'; locals.delete(entry.message_id); return; }
-      msgs.appendChild(bubble(entry.author, entry.text, entry.at));
-      settle();
-    }
-
-    // Non-overlapping poll: the next tick is scheduled only after this one
-    // settles. The cursor never advances on error or ambiguity; has_more
-    // pages drain immediately.
-    async function poll() {
-      try {
-        const r = await fetch('/api/v1/window/im/transcript?since=' + since, { headers: { Accept: 'application/json' } });
-        if (!r.ok) throw new Error(String(r.status));
-        const t = await r.json();
-        for (const e of t.entries) addEntry(e);
-        if (t.entries.length) since = t.next_since;
-        setPill('live', 'live');
-        if (t.empty && !known.size && !locals.size && !msgs.childElementCount) {
-          msgs.appendChild(eln('div', 'empty', '还没有对话。说点什么开始。'));
-        }
-        if (t.has_more) return poll();
-      } catch { setPill('reconnecting…', 'off'); }
-    }
-    (function loop() { poll().finally(() => setTimeout(loop, 3500)); })();
-
-    const REASONS = {
-      'window.identity.missing': '身份缺失(未登录?)',
-      'window.content.invalid': '内容无效',
-      'window.content.oversize': '内容超长(16KiB 上限)',
-      'window.rate.limited': '发送过快,稍后重试',
-      'window.message.conflict': '幂等键冲突(内部错误)',
-    };
-
-    // One message = one immutable client_message_id, reused verbatim on every
-    // retry; a network death after POST is UNKNOWN, never "failed".
-    async function submit(text, key, row) {
-      sending = true; send.disabled = true;
-      const st = row.querySelector('.cst');
-      st.textContent = 'submitting…'; row.className = 'cmsg human';
-      let r;
-      try {
-        r = await fetch('/api/v1/window/im/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: text, client_message_id: key }),
-        });
-      } catch {
-        row.className = 'cmsg human unknown';
-        st.textContent = 'unknown — 网络中断,消息可能已被接受';
-        offerRetry(st, text, key, row);
-        sending = false; send.disabled = false;
-        return;
-      }
-      sending = false; send.disabled = false;
-      if (r.ok) {
-        const a = await r.json().catch(() => null);
-        st.textContent = 'accepted' + (a && a.received_at ? ' · ' + clock(a.received_at) : '');
-        if (a && a.message_id) locals.set(a.message_id, row);
-        return;
-      }
-      if (r.status === 403) {
-        row.className = 'cmsg human rejected';
-        st.textContent = 'rejected — 此身份无发言权限';
-        form.querySelectorAll('textarea,button').forEach((n) => { n.disabled = true; });
-        tell('只读:此身份未被授予发言权限,投影仍然可见。');
-        return;
-      }
-      const e = await r.json().catch(() => null);
-      const code = (e && e.code) || String(r.status);
-      row.className = 'cmsg human rejected';
-      st.textContent = 'rejected — ' + (REASONS[code] || code);
-      if (code === 'window.rate.limited' || r.status >= 500) offerRetry(st, text, key, row);
-    }
-
-    function offerRetry(st, text, key, row) {
-      const again = eln('span', 'retry', '重试');
-      again.onclick = () => { if (!sending) submit(text, key, row); };
-      st.appendChild(again);
-    }
-
-    form.addEventListener('submit', (ev) => {
-      ev.preventDefault();
-      const text = input.value;
-      if (!text.trim() || sending) return;
-      const key = crypto.randomUUID();
-      const empty = msgs.querySelector('.empty'); if (empty) empty.remove();
-      const row = bubble('human', text, null);
-      row.appendChild(eln('div', 'cst', ''));
-      msgs.appendChild(row); stick = true; settle();
-      input.value = '';
-      submit(text, key, row);
-    });
-    input.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); form.requestSubmit(); }
-    });
-  })();
   </script>
 </body>
 </html>

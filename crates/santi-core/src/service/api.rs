@@ -143,13 +143,6 @@ impl Service {
         self.store.receipt_status(inbox_id)
     }
 
-    pub fn im_deliveries_for_receipt(
-        &self,
-        inbox_id: &str,
-    ) -> Result<Vec<crate::ImDelivery>, String> {
-        self.store.im_deliveries_for_receipt(inbox_id)
-    }
-
     pub fn effect_status(&self, effect_id: &str) -> Result<Option<EffectStatus>, String> {
         self.store.effect_status(effect_id)
     }

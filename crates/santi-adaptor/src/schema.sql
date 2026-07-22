@@ -297,27 +297,6 @@ CREATE INDEX IF NOT EXISTS idx_thinking_spans_turn_id_created_at ON thinking_spa
 CREATE INDEX IF NOT EXISTS idx_r_strand_entries_target_lookup ON r_strand_entries (target_type, target_id);
 CREATE INDEX IF NOT EXISTS idx_r_strand_entries_seq ON r_strand_entries (strand_id, strand_seq);
 
--- ── IM layer (im_*) ──────────────────────────────────────────────────────────
--- A plain messenger integrated into the santi binary for cold-start; conceptually
--- ORTHOGONAL to the runtime (souls/strands/turns). These tables are the IM's own
--- store. The runtime touches them only at the explicit IM service seam and when
--- atomically delivering a completed IM turn. A participant is a persistent messaging
--- endpoint (a human/CLI peer with a passive inbox; a soul participant's "inbox" is
--- its strand and is NOT stored here). Reply-routing authority lives entirely
--- here, in the IM's envelope. The runtime inbox may carry bounded diagnostic
--- source provenance, but that is not a reply capability or provider-visible
--- message content.
-
-CREATE TABLE IF NOT EXISTS reply_outbox (
-    id TEXT PRIMARY KEY,
-    turn_id TEXT NOT NULL UNIQUE,
-    payload TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    delivered_at TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_reply_outbox_pending
-ON reply_outbox(created_at, id);
-
 CREATE TABLE IF NOT EXISTS turn_outbox (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,

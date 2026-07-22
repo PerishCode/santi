@@ -9,7 +9,6 @@ mod lifecycle;
 mod migration;
 mod query;
 mod receipts;
-mod reply;
 mod timeline;
 mod turn;
 pub use turn::TurnOutboxInsert;

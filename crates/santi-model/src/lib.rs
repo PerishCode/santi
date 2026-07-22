@@ -20,9 +20,6 @@ pub use compact::*;
 mod effects;
 pub use effects::*;
 
-mod im;
-pub use im::*;
-
 mod stream;
 pub use stream::*;
 

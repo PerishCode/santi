@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    IM_LABEL_PREFIX, SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, Strand, Timestamp, soul_memory_uri,
+    SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, Strand, Timestamp, soul_memory_uri,
     strand_memory_uri, timestamp_from_system_time,
 };
 
@@ -54,9 +54,6 @@ pub(crate) fn render_system_prompt(request: SystemPromptRequest<'_>) -> Result<S
     if let Some(fork_topology) = render_fork_topology(&request) {
         sections.push(fork_topology);
     }
-    if let Some(capability) = render_im_reply_capability(&request) {
-        sections.push(capability);
-    }
     sections.push(render_memory_section(
         "santi-soul",
         &soul_source,
@@ -68,24 +65,6 @@ pub(crate) fn render_system_prompt(request: SystemPromptRequest<'_>) -> Result<S
         &strand_memory,
     ));
     Ok(sections.join("\n\n"))
-}
-
-fn render_im_reply_capability(request: &SystemPromptRequest<'_>) -> Option<String> {
-    let label = request.strand.external_label.as_deref()?;
-    if !label.starts_with(IM_LABEL_PREFIX) {
-        return None;
-    }
-    Some(
-        [
-            "[santi-im]",
-            "This strand is an IM conversation with a person. Your final natural-language response is delivered to them automatically when the turn completes.",
-            "Normally, answer them directly and do not use the shell for delivery.",
-            "Only when you must send an early reply before the turn completes, run in your shell:",
-            "  santi im reply \"<your message>\"",
-            "The early-reply command and automatic completion share one idempotency key, so the automatic path will not duplicate a reply already sent in this turn.",
-        ]
-        .join("\n"),
-    )
 }
 
 fn render_constitution(path: &Path) -> Result<String, String> {

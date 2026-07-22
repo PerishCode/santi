@@ -2,6 +2,7 @@ use super::support::*;
 
 mod downstream;
 mod more;
+mod retire;
 
 #[test]
 fn schema_matches_runtime() {
@@ -49,6 +50,7 @@ fn schema_matches_runtime() {
         "session_effects",
         "strand_blocks",
         "rejected_deliveries",
+        "reply_outbox",
     ] {
         let exists: i64 = conn
             .query_row(

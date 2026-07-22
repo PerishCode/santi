@@ -132,50 +132,40 @@ fn projects_utf8_safely() {
 }
 
 #[tokio::test]
-async fn im_capability_scope() {
+async fn external_labels_stay_out_of_prompt() {
     let harness = PromptHarness::open();
-    let im = harness
+    let first = harness
         .service
         .ingest_external_event(
             santi_core::DEFAULT_SOUL_ID,
-            "im:operator",
+            "stim:operator",
             "hello".to_string(),
         )
-        .expect("im strand");
-    let webhook = harness
+        .expect("first strand");
+    let second = harness
         .service
         .ingest_external_event(
             santi_core::DEFAULT_SOUL_ID,
             "github:ops:issue:PerishCode/santi#1",
             "hello".to_string(),
         )
-        .expect("webhook strand");
+        .expect("second strand");
     let santi_core::IngestOutcome::Accepted {
-        receipt: im_receipt,
-    } = im
+        receipt: first_receipt,
+    } = first
     else {
-        panic!("im ingest rejected");
+        panic!("first ingest rejected");
     };
     let santi_core::IngestOutcome::Accepted {
-        receipt: webhook_receipt,
-    } = webhook
+        receipt: second_receipt,
+    } = second
     else {
-        panic!("webhook ingest rejected");
+        panic!("second ingest rejected");
     };
-    let im_id = im_receipt.strand_id;
-    let webhook_id = webhook_receipt.strand_id;
-
-    let im_text = harness.system_prompt_for(&im_id).text;
-    assert!(im_text.contains("[santi-im]"));
-    assert!(im_text.contains("delivered to them automatically"));
-    assert!(im_text.contains("santi im reply"));
-    assert!(
-        !harness
-            .system_prompt_for(&webhook_id)
-            .text
-            .contains("[santi-im]")
-    );
-    assert!(!harness.system_prompt().text.contains("[santi-im]"));
+    let first_text = harness.system_prompt_for(&first_receipt.strand_id).text;
+    let second_text = harness.system_prompt_for(&second_receipt.strand_id).text;
+    assert!(!first_text.contains("stim:operator"));
+    assert!(!second_text.contains("github:ops:issue:PerishCode/santi#1"));
 }
 
 struct PromptHarness {

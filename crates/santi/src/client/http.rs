@@ -125,27 +125,6 @@ impl Http<'_> {
         }
         Ok(())
     }
-
-    pub(super) async fn high_water(&self, base: &str, participant: &str) -> Result<i64> {
-        let url = format!("{base}/api/v1/im/inbox/{participant}?since=0");
-        let entries: serde_json::Value = self
-            .client
-            .get(&url)
-            .timeout(REQUEST_TIMEOUT)
-            .send()
-            .await
-            .with_context(|| format!("GET {url}"))?
-            .json()
-            .await
-            .context("parse inbox")?;
-        Ok(entries
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|entry| entry.get("seq").and_then(serde_json::Value::as_i64))
-            .max()
-            .unwrap_or(0))
-    }
 }
 
 pub(super) async fn print_json(response: reqwest::Response) -> Result<()> {
@@ -159,82 +138,6 @@ pub(super) async fn print_json(response: reqwest::Response) -> Result<()> {
         anyhow::bail!("request failed with status {status}");
     }
     Ok(())
-}
-
-pub(super) async fn im_send(delivery: Delivery<'_>) -> Result<()> {
-    let Delivery {
-        client,
-        base,
-        body,
-        participant,
-        reply,
-        wait: reply_timeout,
-    } = delivery;
-    let baseline = if reply {
-        Http { client }.high_water(base, participant).await?
-    } else {
-        0
-    };
-    let url = format!("{base}/api/v1/im/send");
-    let response = client
-        .post(&url)
-        .timeout(REQUEST_TIMEOUT)
-        .json(&body)
-        .send()
-        .await
-        .with_context(|| format!("POST {url}"))?;
-    let status = response.status();
-    let text = response.text().await.context("read response body")?;
-    if !status.is_success() {
-        println!("{text}");
-        anyhow::bail!("im send failed with status {status}");
-    }
-    let accepted = serde_json::from_str::<serde_json::Value>(&text).ok();
-    if let Some(warning) = accepted_warning(accepted.as_ref()) {
-        println!(
-            "{}",
-            accepted
-                .as_ref()
-                .map(serde_json::to_string_pretty)
-                .transpose()?
-                .unwrap_or(text)
-        );
-        return Err(accepted_warning_error(warning));
-    }
-    if !reply {
-        match accepted {
-            Some(value) => println!("{}", serde_json::to_string_pretty(&value)?),
-            None => println!("{text}"),
-        }
-        return Ok(());
-    }
-    let inbox_url = format!("{base}/api/v1/im/inbox/{participant}?since={baseline}");
-    let deadline = Instant::now() + Duration::from_secs(reply_timeout);
-    loop {
-        let entries: serde_json::Value = client
-            .get(&inbox_url)
-            .timeout(REQUEST_TIMEOUT)
-            .send()
-            .await
-            .with_context(|| format!("GET {inbox_url}"))?
-            .json()
-            .await
-            .context("parse inbox")?;
-        if entries
-            .as_array()
-            .is_some_and(|entries| !entries.is_empty())
-        {
-            print_im_replies(accepted.as_ref(), entries)?;
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            eprintln!(
-                "(no reply within {reply_timeout}s — it may still arrive; poll: santi im poll --as {participant} --since {baseline})"
-            );
-            return Ok(());
-        }
-        tokio::time::sleep(Duration::from_secs(2)).await;
-    }
 }
 
 pub(super) fn strand_send_body(text: String, soul: Option<&str>) -> serde_json::Value {
@@ -252,19 +155,4 @@ pub(super) fn print_watch_line(stdout: &mut impl std::io::Write, event: &str, da
         writeln!(stdout, "{line}").ok();
         stdout.flush().ok();
     }
-}
-
-pub(super) fn print_im_replies(
-    accepted: Option<&serde_json::Value>,
-    entries: serde_json::Value,
-) -> Result<()> {
-    let output = match accepted {
-        Some(send) => serde_json::json!({
-            "send": send,
-            "replies": entries,
-        }),
-        None => entries,
-    };
-    println!("{}", serde_json::to_string_pretty(&output)?);
-    Ok(())
 }

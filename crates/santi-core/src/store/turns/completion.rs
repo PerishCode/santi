@@ -3,7 +3,7 @@ use serde_json::json;
 
 use super::{provider_incident_key, runtime_incident_key};
 use crate::store::{SantiStore, db::Database, execution_budget_incident_key};
-use crate::{IM_LABEL_PREFIX, ImDeliveryMode, StrandMessage, Turn, prefixed_id, timestamp_now};
+use crate::{StrandMessage, Turn, prefixed_id, timestamp_now};
 
 pub struct Completion<'a> {
     pub turn: &'a str,
@@ -15,18 +15,10 @@ pub struct Completion<'a> {
 
 impl SantiStore {
     pub fn complete_turn(&self, completion: Completion<'_>) -> Result<Turn, String> {
-        self.complete_inner(completion, None).map(|(turn, _)| turn)
+        self.complete(completion, None).map(|(turn, _)| turn)
     }
 
-    pub(crate) fn complete_turn_reply(
-        &self,
-        completion: Completion<'_>,
-        message: Option<&StrandMessage>,
-    ) -> Result<(Turn, Option<crate::TurnEvent>), String> {
-        self.complete_inner(completion, message)
-    }
-
-    fn complete_inner(
+    pub(crate) fn complete(
         &self,
         completion: Completion<'_>,
         message: Option<&StrandMessage>,
@@ -136,24 +128,6 @@ impl SantiStore {
         } else {
             None
         };
-        if let (Some(participant), Some(reply)) = (
-            external_label
-                .as_deref()
-                .and_then(|label| label.strip_prefix(IM_LABEL_PREFIX)),
-            message.filter(|message| !message.content_text.trim().is_empty()),
-        ) {
-            let event = santi_protocol::ReplyEvent {
-                id: prefixed_id("rpl"),
-                strand_id: strand_id.clone(),
-                turn_id: completion.turn.to_string(),
-                participant_id: participant.to_string(),
-                message_id: Some(reply.message.id.clone()),
-                content: reply.content_text.clone(),
-                mode: ImDeliveryMode::Automatic,
-            };
-            let payload = serde_json::to_string(&event).map_err(|error| error.to_string())?;
-            Database::new(&tx).insert_reply_outbox(&event.id, &event.turn_id, &payload, &now)?;
-        }
         tx.commit().map_err(|error| error.to_string())?;
         let turn = Database::new(&conn)
             .turn_by_id(completion.turn)?

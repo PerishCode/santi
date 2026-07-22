@@ -15,7 +15,7 @@ use utoipa::{
 mod descriptions;
 use descriptions::COMPONENT_DESCRIPTIONS;
 
-const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 15] = [
+const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 12] = [
     (
         "CreateDownstreamRequest",
         "credential_sha256",
@@ -62,11 +62,6 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 15] = [
         "Per-attempt shell effects reached by any turn carrying this receipt.\nCompletion alone does not imply that any listed external effect applied.",
     ),
     (
-        "ReceiptStatus",
-        "im_deliveries",
-        "Runtime-owned IM replies delivered by any attempt carrying this receipt.\nContents remain in the participant inbox and are intentionally omitted.",
-    ),
-    (
         "StrandEffect",
         "tool_call_id",
         "Absent only for an imported legacy row whose old schema had no neutral\ntool-call locator.",
@@ -80,16 +75,6 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 15] = [
         "EffectStatus",
         "receipt_ids",
         "Obligation roots whose attempts include this effect's turn.",
-    ),
-    (
-        "ImInboxEntry",
-        "turn_id",
-        "Absent for legacy or operator-authored entries outside a provider turn.",
-    ),
-    (
-        "ImInboxEntry",
-        "message_id",
-        "Present when automatic delivery used a final assistant message.",
     ),
 ];
 
@@ -127,8 +112,6 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 15] = [
         super::routes::create_downstream,
         super::routes::list_downstreams,
         super::routes::ingest,
-        super::im::send_im,
-        super::im::poll_im,
         crate::bucket::get_bucket_object
     ),
     components(schemas(
@@ -159,12 +142,6 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 15] = [
         santi_core::EffectStatus,
         santi_core::EffectResolutionOutcome,
         super::effects::ResolveEffectRequest,
-        santi_core::ImSendRequest,
-        santi_core::ImSendResponse,
-        santi_core::ImInboxEntry,
-        santi_core::ImDelivery,
-        santi_core::ImDeliveryMode,
-        santi_core::ImParticipant,
         StrandDetail,
         StrandMaterial,
         StrandRuntimeSnapshot,

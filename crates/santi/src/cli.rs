@@ -133,11 +133,6 @@ pub enum Command {
     #[command(about = "Compact a strand's own timeline, or query a compact's detail")]
     #[command(subcommand)]
     Compact(CompactCommand),
-    #[command(
-        about = "The plain IM integrated into santi — converse with a soul as a persistent participant (send/poll over HTTP), or the soul's offline reply egress"
-    )]
-    #[command(subcommand)]
-    Im(ImCommand),
 }
 
 #[derive(Subcommand)]
@@ -224,10 +219,8 @@ pub fn split_send_args(
 }
 
 mod compact;
-mod im;
 mod inbox;
 mod strand;
 pub use compact::*;
-pub use im::*;
 pub use inbox::*;
 pub use strand::*;

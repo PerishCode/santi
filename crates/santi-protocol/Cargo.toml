@@ -1,9 +1,0 @@
-[package]
-name = "santi-protocol"
-edition.workspace = true
-license.workspace = true
-version.workspace = true
-
-[dependencies]
-santi-model.workspace = true
-serde.workspace = true

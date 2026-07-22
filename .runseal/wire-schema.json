@@ -1,6 +1,6 @@
 {
   "schema": "santi.wire_schema.v2",
-  "digest": "9d762a0ac277beca61a80588a5181c618f5c4cc89e71cafcf165911dd892d25e",
+  "digest": "68ec0801b4de6e2a6298b2a2f06df7c95e9476907faf6e98ef3454bbc28e132c",
   "components": [
     "ActorType",
     "Compact",
@@ -34,12 +34,6 @@
     "ErrorTransitionKind",
     "ForkStrandResponse",
     "HealthResponse",
-    "ImDelivery",
-    "ImDeliveryMode",
-    "ImInboxEntry",
-    "ImParticipant",
-    "ImSendRequest",
-    "ImSendResponse",
     "IncidentStatus",
     "IngestReceipt",
     "IngestRequest",
@@ -254,42 +248,6 @@
       "ok",
       "service"
     ],
-    "ImDelivery": [
-      "created_at",
-      "delivery_mode",
-      "id",
-      "message_id",
-      "participant_id",
-      "seq",
-      "strand_id",
-      "turn_id"
-    ],
-    "ImDeliveryMode": [],
-    "ImInboxEntry": [
-      "content",
-      "created_at",
-      "delivery_mode",
-      "from_ref",
-      "id",
-      "message_id",
-      "participant_id",
-      "seq",
-      "turn_id"
-    ],
-    "ImParticipant": [
-      "created_at",
-      "id",
-      "kind"
-    ],
-    "ImSendRequest": [
-      "content",
-      "participant_id",
-      "soul_id"
-    ],
-    "ImSendResponse": [
-      "participant_id",
-      "receipt"
-    ],
     "IncidentStatus": [],
     "IngestReceipt": [
       "inbox_id",
@@ -349,7 +307,6 @@
     "ReceiptStatus": [
       "accepted_at",
       "effects",
-      "im_deliveries",
       "inbox_id",
       "state",
       "strand_id",

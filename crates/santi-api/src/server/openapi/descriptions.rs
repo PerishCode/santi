@@ -1,4 +1,4 @@
-pub const COMPONENT_DESCRIPTIONS: [(&str, &str); 11] = [
+pub const COMPONENT_DESCRIPTIONS: [(&str, &str); 7] = [
     (
         "Soul",
         "A soul is a cyber-individual, keyed by id alone. It has no name/avatar/desc\ncolumn: identity is the mutable self, and it lives entirely in the soul's\nmemory (rendered live into `[santi-soul]`), not in a profile row. The\ntimestamps are pure provenance.",
@@ -22,22 +22,6 @@ pub const COMPONENT_DESCRIPTIONS: [(&str, &str); 11] = [
     (
         "EffectState",
         "Durable truth for one concrete external-effect attempt. It is deliberately\nnot turn state: one turn may contain several independently settled or\nambiguous effects.",
-    ),
-    (
-        "ImSendRequest",
-        "IM inbound: a participant sends content to a soul. The sender's address is\nIM envelope only, carried by the `im:<participant_id>` conversation label.",
-    ),
-    (
-        "ImSendResponse",
-        "Durable enqueue confirmation for an IM send. The soul may still be mid-turn.",
-    ),
-    (
-        "ImInboxEntry",
-        "One delivered message in a participant's passive inbox.",
-    ),
-    (
-        "ImDelivery",
-        "Content-free delivery evidence projected onto an accepted inbox receipt.",
     ),
     (
         "ActorType",

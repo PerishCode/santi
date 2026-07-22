@@ -1,11 +1,11 @@
 use std::io::Write as _;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 
 use crate::cli::{
-    ClientDefaults, Command, CompactCommand, EffectCommand, ImCommand, StrandCommand, WatchFormat,
+    ClientDefaults, Command, CompactCommand, EffectCommand, StrandCommand, WatchFormat,
     split_send_args,
 };
 use crate::text::source::read_summary_file;
@@ -14,7 +14,6 @@ use crate::watch::{next_sse_frame, render_watch_event};
 mod send;
 
 pub use send::{Request, send};
-use send::{accepted_warning, accepted_warning_error};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -31,15 +30,6 @@ struct Capsule<'a> {
     queryability: String,
     preview: bool,
     soul: Option<&'a str>,
-}
-
-struct Delivery<'a> {
-    client: &'a reqwest::Client,
-    base: &'a str,
-    body: serde_json::Value,
-    participant: &'a str,
-    reply: bool,
-    wait: u64,
 }
 
 pub(crate) async fn run_client(
@@ -148,39 +138,6 @@ pub(crate) async fn run_client(
             let id = defaults.resolve_strand(id)?;
             http.follow(&format!("{base}/api/v1/strands/{id}/events"), format)
                 .await
-        }
-        Command::Im(ImCommand::Send {
-            text,
-            participant,
-            reply,
-            reply_timeout,
-        }) => {
-            let soul = defaults
-                .soul()
-                .ok_or_else(|| anyhow::anyhow!("no target soul: set --soul / SANTI_SOUL_ID"))?;
-            let body = serde_json::json!({
-                "soul_id": soul,
-                "participant_id": participant,
-                "content": text,
-            });
-            im_send(Delivery {
-                client: &client,
-                base: &base,
-                body,
-                participant: &participant,
-                reply,
-                wait: reply_timeout,
-            })
-            .await
-        }
-        Command::Im(ImCommand::Poll { participant, since }) => {
-            http.get(&format!(
-                "{base}/api/v1/im/inbox/{participant}?since={since}"
-            ))
-            .await
-        }
-        Command::Im(ImCommand::Reply { .. }) => {
-            unreachable!("im reply is handled before the client path")
         }
         Command::Compact(CompactCommand::Exec {
             from,

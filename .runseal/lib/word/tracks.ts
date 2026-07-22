@@ -15,11 +15,11 @@ export const TRACKS: readonly Track[] = ["wire", "test", "core", "internal"];
  * SQLite schema / projection seats — not ordinary internal orchestration code.
  */
 const WIRE_PATH =
-  /(?:^|\/)(?:model(?:\/|\.rs$)|server\/(?:openapi|routes|sse|im|effects|errors|error\.rs$)|webhook(?:\/|\.rs$)|provider\.rs$|openai(?:\/|\.rs$)|chat\/completions(?:\/|\.rs$)|cli(?:\/|\.rs$)|config(?:\/|\.rs$)|ops\.rs$|upgrade(?:\/|\.rs$)|santi-model\/|santi-object\/|santi-adaptor\/|santi-im\/|santi-protocol\/|object\/store\.rs$|santi-error\/|store\/(?:db(?:\/|\.rs$)|schema\.rs$|rows(?:\/|\.rs$))|store(?:\.rs|\/(?:mod|souls)\.rs)$)/;
+  /(?:^|\/)(?:model(?:\/|\.rs$)|server\/(?:openapi|routes|sse|effects|errors|error\.rs$)|webhook(?:\/|\.rs$)|provider\.rs$|openai(?:\/|\.rs$)|chat\/completions(?:\/|\.rs$)|cli(?:\/|\.rs$)|config(?:\/|\.rs$)|ops\.rs$|upgrade(?:\/|\.rs$)|santi-model\/|santi-object\/|santi-adaptor\/|object\/store\.rs$|santi-error\/|store\/(?:db(?:\/|\.rs$)|schema\.rs$|rows(?:\/|\.rs$))|store(?:\.rs|\/(?:mod|souls)\.rs)$)/;
 
 /** Protocol field dialect: multi-word spellings that encode wire/schema shape. */
 const FIELD_DIALECT =
-  /_(?:id|at|bytes|path|url|key|seq|root|count|mode|type|ref|text|name|raw|json|state|kind|source|status|label|version|prefix|index|size|limit|timeout|effort|summary|budget|rounds|calls|output|input|memory|strand|soul|turn|message|incident|receipt|effect|compact|delivery|participant|provider|response|request)$/;
+  /_(?:id|at|bytes|path|url|key|seq|root|count|mode|type|ref|text|name|raw|json|state|kind|source|status|label|version|prefix|index|size|limit|timeout|effort|summary|budget|rounds|calls|output|input|memory|strand|soul|turn|message|incident|receipt|effect|compact|delivery|provider|response|request)$/;
 
 /** Wire-facing type suffixes kept on the protocol boundary. */
 const WIRE_TYPE = /(?:Request|Response|Params|Query|Report)$/;

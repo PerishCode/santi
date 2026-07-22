@@ -77,6 +77,11 @@ export async function guard(argv: string[]): Promise<number> {
     },
     { title: "cargo test", command: "cargo", args: ["test", "--locked", "--workspace"] },
     {
+      title: "recovery capsule",
+      command: "bash",
+      args: [".runseal/ops/host/30-santi-recovery.test.sh"],
+    },
+    {
       title: "deno fmt",
       command: "deno",
       args: ["fmt", "--config", config, "--check", ".runseal"],

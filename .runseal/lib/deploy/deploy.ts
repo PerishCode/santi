@@ -6,6 +6,7 @@
 //! the high-frequency hot op santi owns; the box + edge are consumed as running
 //! services, so it carries no dependency on the infra repo.
 
+import { armRecovery, guardDeploy } from "@/lib/recovery/recovery.ts";
 import { run } from "@/lib/std/cmd.ts";
 import { repoRoot } from "@/lib/std/repo.ts";
 
@@ -29,6 +30,11 @@ export async function deploy(argv: string[]): Promise<number> {
   }
   const version = (argv[0] ?? "").trim();
   const metaPath = version === "" ? "latest" : `versions/${version}`;
+
+  const recoveryGate = await guardDeploy();
+  if (recoveryGate !== 0) {
+    return recoveryGate;
+  }
 
   // The on-box orchestration. ssh connects as root; the santi user (passwordless
   // sudo) owns `santi upgrade`. The launcher returns fast; we poll the detached
@@ -112,5 +118,12 @@ export async function deploy(argv: string[]): Promise<number> {
     "fi",
   ].join("\n");
 
-  return await run("ssh", ["-F", SSH_CONFIG, HOST, remote], { cwd: repoRoot() });
+  const deployed = await run("ssh", ["-F", SSH_CONFIG, HOST, remote], { cwd: repoRoot() });
+  if (deployed !== 0) {
+    return deployed;
+  }
+
+  // A healthy candidate is not a completed deployment until its raw
+  // pre-upgrade snapshot and both package artifacts are durably armed.
+  return await armRecovery();
 }

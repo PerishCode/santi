@@ -57,4 +57,28 @@ k3s kubectl apply -f /tmp/window.yaml
 k3s kubectl rollout restart deployment/window -n santi'
 ```
 
-Runtime release and upgrade remain `runseal :release` and `runseal :deploy` respectively.
+## Deploy recovery capsule
+
+`runseal :deploy` first refuses to proceed while an earlier capsule is armed. After the normal
+upgrade and readiness checks pass, it copies the upgrader's raw pre-deploy runtime snapshot and the
+source/candidate Debian packages into `/home/santi/.santi/recovery/`, validates their identities and
+hashes, then atomically arms the capsule. An upgrade is not reported as complete until this
+succeeds.
+
+```sh
+runseal :rollback status
+runseal :rollback execute <capsule-id> --confirm <candidate-package-version>
+runseal :rollback accept <capsule-id>
+```
+
+`execute` stops the service before swapping runtime directories and reinstalling the source package.
+If anything fails after that boundary, the service stays stopped and the candidate runtime remains
+in the capsule for diagnosis, including state written after cutover. The restored source runtime is
+the exact pre-deploy snapshot. Recovery never rolls the edge configuration back. `accept` requires a
+healthy candidate and closes the rollback window without deleting the capsule. If post-deploy
+capsule construction was interrupted, inspect `status`, then use `runseal :rollback repair` to
+reconstruct it from the still-retained artifacts.
+
+Runtime release and upgrade remain `runseal :release` and `runseal :deploy` respectively. Apply the
+edge configuration separately; retired `/panel` routes intentionally stay absent so a runtime
+rollback cannot resurrect the old embedded chat surface.

@@ -32,6 +32,10 @@ The binary is installed to `/usr/bin/santi`.
   resolve the durable artifact and reject a conflicting caller file. A successful trial promotes its
   retained candidate before finalization, while rollback restores both runtime data and the previous
   installed-package manifest.
+- **Post-success recovery is ops-owned.** `runseal :deploy` copies the upgrader's raw snapshot plus
+  both verified packages into a capsule outside `runtime/`. This provides an explicit rollback
+  window after a successful schema upgrade without adding a candidate-service or core-runtime
+  dependency.
 - **Upgrade unit runs as santi + sudo**, so every file it writes stays santi-owned; the privileged
   dpkg/systemctl calls use santi's passwordless sudo (a SystemHost detail tuned on-box in STEP 6).
 

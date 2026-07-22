@@ -27,6 +27,15 @@ export async function putObject(
   contentType: string,
   cacheControl: string,
 ): Promise<void> {
+  let source: Deno.FileInfo;
+  try {
+    source = Deno.lstatSync(filePath);
+  } catch (error) {
+    fail(`upload source is unavailable: ${filePath}: ${error}`);
+  }
+  if (!source.isFile || source.isSymlink) {
+    fail(`upload source is not a regular file: ${filePath}`);
+  }
   const result = await aws([
     "s3api",
     "put-object",

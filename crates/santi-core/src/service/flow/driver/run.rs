@@ -62,13 +62,19 @@ impl Service {
             },
             last_soul_message.as_ref(),
         ) {
-            Ok(_) => {
+            Ok((_, turn_event)) => {
                 self.dispatch_error_events();
                 self.dispatch_replies();
+                let (external_label, final_text) = match turn_event {
+                    Some(event) => (Some(event.external_label), Some(event.final_text)),
+                    None => (None, None),
+                };
                 self.publish_stream(
                     strand_id,
                     SantiStreamPayload::TurnCompleted {
                         turn_id: turn_id.to_string(),
+                        external_label,
+                        final_text,
                     },
                 );
             }

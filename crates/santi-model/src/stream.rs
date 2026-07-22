@@ -75,6 +75,10 @@ pub enum SantiStreamPayload {
     },
     TurnCompleted {
         turn_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        external_label: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        final_text: Option<String>,
     },
     TurnFailed {
         turn_id: String,

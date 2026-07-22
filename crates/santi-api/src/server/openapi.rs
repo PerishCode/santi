@@ -146,12 +146,15 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 12] = [
         super::effects::resolve_effect,
         super::sse::error_events,
         super::routes::runtime_snapshot,
+        super::routes::turn_events,
         super::im::send_im,
         super::im::poll_im,
         crate::bucket::get_bucket_object
     ),
     components(schemas(
         CreateStrandResponse,
+        santi_core::TurnEvent,
+        santi_core::TurnEventPage,
         ForkStrandResponse,
         CreateSoulRequest,
         CreateWebhookRequest,

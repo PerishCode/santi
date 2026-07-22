@@ -6,6 +6,22 @@ use utoipa::ToSchema;
 use super::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TurnEvent {
+    pub id: String,
+    pub strand_id: String,
+    pub turn_id: String,
+    pub external_label: String,
+    pub final_text: String,
+    pub completed_at: Timestamp,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TurnEventPage {
+    pub cursor: i64,
+    pub event: TurnEvent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CreateSoulRequest {
     #[serde(default)]
     pub memory: Option<String>,

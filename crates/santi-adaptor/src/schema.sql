@@ -317,3 +317,13 @@ CREATE TABLE IF NOT EXISTS reply_outbox (
 );
 CREATE INDEX IF NOT EXISTS idx_reply_outbox_pending
 ON reply_outbox(created_at, id);
+
+CREATE TABLE IF NOT EXISTS turn_outbox (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    turn_id TEXT NOT NULL UNIQUE,
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_turn_outbox_seq
+ON turn_outbox(seq);

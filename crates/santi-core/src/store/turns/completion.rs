@@ -15,14 +15,14 @@ pub struct Completion<'a> {
 
 impl SantiStore {
     pub fn complete_turn(&self, completion: Completion<'_>) -> Result<Turn, String> {
-        self.complete_inner(completion, None)
+        self.complete_inner(completion, None).map(|(turn, _)| turn)
     }
 
     pub(crate) fn complete_turn_reply(
         &self,
         completion: Completion<'_>,
         message: Option<&StrandMessage>,
-    ) -> Result<Turn, String> {
+    ) -> Result<(Turn, Option<crate::TurnEvent>), String> {
         self.complete_inner(completion, message)
     }
 
@@ -30,7 +30,7 @@ impl SantiStore {
         &self,
         completion: Completion<'_>,
         message: Option<&StrandMessage>,
-    ) -> Result<Turn, String> {
+    ) -> Result<(Turn, Option<crate::TurnEvent>), String> {
         let mut conn = self.conn.lock().unwrap();
         let now = timestamp_now();
         let provider_state = completion.response.as_ref().map(|response| {
@@ -112,6 +112,24 @@ impl SantiStore {
                 "model": completion.model,
             }),
         )?;
+        let turn_event = if let (Some(label), Some(reply)) = (
+            external_label.as_deref(),
+            message.filter(|message| !message.content_text.trim().is_empty()),
+        ) {
+            let event = crate::TurnEvent {
+                id: prefixed_id("tev"),
+                strand_id: strand_id.clone(),
+                turn_id: completion.turn.to_string(),
+                external_label: label.to_string(),
+                final_text: reply.content_text.clone(),
+                completed_at: now.clone(),
+            };
+            let payload = serde_json::to_string(&event).map_err(|error| error.to_string())?;
+            Database::new(&tx).insert_turn_outbox(&event.id, &event.turn_id, &payload, &now)?;
+            Some(event)
+        } else {
+            None
+        };
         if let (Some(participant), Some(reply)) = (
             external_label
                 .as_deref()
@@ -131,8 +149,9 @@ impl SantiStore {
             Database::new(&tx).insert_reply_outbox(&event.id, &event.turn_id, &payload, &now)?;
         }
         tx.commit().map_err(|error| error.to_string())?;
-        Database::new(&conn)
+        let turn = Database::new(&conn)
             .turn_by_id(completion.turn)?
-            .ok_or_else(|| "completed turn missing".to_string())
+            .ok_or_else(|| "completed turn missing".to_string())?;
+        Ok((turn, turn_event))
     }
 }

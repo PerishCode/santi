@@ -34,7 +34,7 @@ async fn emits_turn_completed() {
     let completed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events.recv().await.expect("stream event").payload {
-                santi_core::SantiStreamPayload::TurnCompleted { turn_id } => break turn_id,
+                santi_core::SantiStreamPayload::TurnCompleted { turn_id, .. } => break turn_id,
                 _ => continue,
             }
         }
@@ -42,6 +42,57 @@ async fn emits_turn_completed() {
     .await
     .expect("turn_completed within timeout");
     assert_eq!(completed, turn_id);
+}
+
+#[tokio::test]
+async fn labeled_turn_emits_envelope_and_records_outbox() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let provider = Arc::new(FakeProvider::default());
+    let service = Service::open(
+        service::Config {
+            database_path: temp.path().join("santi.sqlite").display().to_string(),
+            runtime_root: temp.path().join("runtime").display().to_string(),
+            execution_root: temp.path().join("execution").display().to_string(),
+            bind_addr: Some("127.0.0.1:0".to_string()),
+        },
+        provider.clone(),
+    )
+    .expect("open service");
+
+    let mut events = service.subscribe_stream();
+    let soul_id = service.list_souls().expect("list souls")[0].id.clone();
+    let label = "github:ops:issue:PerishCode/santi#7";
+    let santi_core::IngestOutcome::Accepted { .. } = service
+        .ingest_external_event(&soul_id, label, "external request".to_string())
+        .expect("ingest event")
+    else {
+        panic!("expected accepted");
+    };
+
+    let (label_seen, text_seen) = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let santi_core::SantiStreamPayload::TurnCompleted {
+                external_label,
+                final_text,
+                ..
+            } = events.recv().await.expect("stream event").payload
+            {
+                break (external_label, final_text);
+            }
+        }
+    })
+    .await
+    .expect("turn_completed within timeout");
+    assert_eq!(label_seen.as_deref(), Some(label));
+    assert!(text_seen.is_some_and(|text| !text.is_empty()));
+
+    let recorded = service.turn_events_since(0, 10).expect("turn events");
+    let event = recorded
+        .iter()
+        .map(|(_, event)| event)
+        .find(|event| event.external_label == label)
+        .expect("outbox turn event for the labeled strand");
+    assert!(!event.final_text.is_empty());
 }
 
 #[tokio::test]

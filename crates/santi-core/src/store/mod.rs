@@ -22,6 +22,7 @@ mod rows;
 mod runtime;
 mod souls;
 mod span;
+mod turn;
 mod turns;
 
 pub(crate) use budget::{Ingress, Launch, execution_budget_incident_key};

@@ -178,6 +178,14 @@ impl Service {
             .map_err(|_| ())
     }
 
+    pub fn turn_events_since(
+        &self,
+        after_seq: i64,
+        limit: usize,
+    ) -> Result<Vec<(i64, crate::TurnEvent)>, String> {
+        self.store.turn_events_since(after_seq, limit)
+    }
+
     pub(in crate::service) fn dispatch_error_events(&self) {
         let sink = error::Sink { service: self };
         if let Err(error) = engine().dispatch_outbox(&self.store, &sink, 256)

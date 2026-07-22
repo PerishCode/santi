@@ -1,4 +1,4 @@
-use crate::TurnEvent;
+use crate::{TurnEvent, TurnEventBatch};
 
 use super::SantiStore;
 use super::db::Database;
@@ -7,17 +7,18 @@ impl SantiStore {
     pub fn turn_events_since(
         &self,
         after_seq: i64,
+        label_prefix: &str,
         limit: usize,
-    ) -> Result<Vec<(i64, TurnEvent)>, String> {
+    ) -> Result<TurnEventBatch, String> {
         let conn = self.conn.lock().unwrap();
-        Database::new(&conn)
-            .turn_events_since(after_seq, limit)?
+        let (cursor, rows) =
+            Database::new(&conn).turn_events_since(after_seq, label_prefix, limit)?;
+        let events = rows
             .into_iter()
-            .map(|(seq, payload)| {
-                serde_json::from_str::<TurnEvent>(&payload)
-                    .map(|event| (seq, event))
-                    .map_err(|error| error.to_string())
+            .map(|(_, payload)| {
+                serde_json::from_str::<TurnEvent>(&payload).map_err(|error| error.to_string())
             })
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(TurnEventBatch { cursor, events })
     }
 }

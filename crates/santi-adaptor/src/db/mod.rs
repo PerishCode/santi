@@ -3,6 +3,7 @@ mod effects;
 mod errors;
 pub use effects::{Prepared, Transition};
 mod downstream;
+pub use downstream::ReplayInsert;
 mod inbox;
 mod lifecycle;
 mod migration;
@@ -11,6 +12,7 @@ mod receipts;
 mod reply;
 mod timeline;
 mod turn;
+pub use turn::TurnOutboxInsert;
 
 use rusqlite::{Connection, OptionalExtension, params};
 

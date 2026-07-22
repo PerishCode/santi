@@ -97,6 +97,51 @@ Export the OpenAPI document:
 cargo run -p santi -- service export-openapi
 ```
 
+## Cross-host downstreams
+
+A downstream owns one non-overlapping label zone such as `stim:`. Create a
+high-entropy token, register only its SHA-256 digest through the trusted
+management path, and retain the token in the downstream:
+
+```sh
+TOKEN=$(openssl rand -hex 32)
+DIGEST=$(printf %s "$TOKEN" | sha256sum | cut -d ' ' -f1)
+curl -X POST http://127.0.0.1:43307/api/v1/downstreams \
+  -H 'Content-Type: application/json' \
+  -d "{\"id\":\"stim\",\"label_prefix\":\"stim:\",\"credential_sha256\":\"$DIGEST\"}"
+```
+
+The credential digest is stored but never returned by the management API.
+Registrations are idempotent when all three input fields match. Prefix overlap,
+credential reuse, or reuse of an id with different values is rejected. Upgrading
+a v31 database intentionally clears the old environment-variable registrations;
+register digest credentials before starting a remote consumer.
+
+The downstream submits every request with a stable idempotency key. Repeating the
+same key and payload returns the original receipt; changing the payload produces
+`409 Conflict`:
+
+```sh
+curl -X POST https://santi.liberte.top/api/v1/ingest \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"soul_id":"soul_default","label":"stim:alice","text":"hello","request_id":"message-42"}'
+```
+
+Completed turns are pulled with the same credential. The response is
+`{"cursor":...,"events":[...]}` and includes only the registered zone. Persist
+the returned cursor even when `events` is empty. The cursor is a global opaque
+high-water mark, so it reveals aggregate activity volume but no other zone's
+labels or payloads. The SSE endpoint is only a lossy wake-up signal; always use
+cursor backfill as the authority:
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" \
+  'https://santi.liberte.top/api/v1/turn-events?since=0'
+curl -N -H "Authorization: Bearer $TOKEN" \
+  https://santi.liberte.top/api/v1/turn-events/stream
+```
+
 ## Configuration
 
 `santi.toml` (gitignored) holds real provider credentials. Start from
@@ -115,7 +160,7 @@ its own variable (and the provider config follows `--flag` > config file > env):
 | `SANTI_EXECUTION_ROOT` | `$SANTI_HOME/execution` | Shell tool working area |
 | `SANTI_PROVIDER` | `openai` | Selected provider profile |
 | `SANTI_HOST` / `SANTI_PORT` | `127.0.0.1` / `43307` | Bind address |
-| `SANTI_API_KEY` | unset (open) | Optional bearer key. Server: when set, every endpoint except `/health` requires `Authorization: Bearer <key>`. Client: sent on requests (`--api-key` overrides). |
+| `SANTI_API_KEY` | unset | Transitional static bearer sent by the CLI (`--api-key` overrides). The runtime has no global API-key gate; edge Authentik protects management paths, while downstream data paths use registered zone credentials. |
 | `SANTI_API_URL` | `http://127.0.0.1:43307` | Client target (`--base-url` overrides) |
 
 A `.env` in the working directory is loaded and overrides the process

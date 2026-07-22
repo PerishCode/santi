@@ -1,5 +1,6 @@
 use super::support::*;
 
+mod downstream;
 mod more;
 
 #[test]

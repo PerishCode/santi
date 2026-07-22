@@ -322,16 +322,31 @@ CREATE TABLE IF NOT EXISTS turn_outbox (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
     turn_id TEXT NOT NULL UNIQUE,
+    external_label TEXT NOT NULL,
     payload TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_turn_outbox_seq
 ON turn_outbox(seq);
+CREATE INDEX IF NOT EXISTS idx_turn_outbox_label_seq
+ON turn_outbox(external_label, seq);
 
 CREATE TABLE IF NOT EXISTS downstreams (
     id TEXT PRIMARY KEY,
-    label_prefix TEXT NOT NULL,
-    credential_env TEXT NOT NULL,
+    label_prefix TEXT NOT NULL UNIQUE,
+    credential_sha256 TEXT NOT NULL UNIQUE,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS downstream_ingest (
+    downstream_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    request_sha256 TEXT NOT NULL,
+    strand_id TEXT NOT NULL,
+    inbox_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (downstream_id, request_id)
+);
+CREATE INDEX IF NOT EXISTS idx_downstream_ingest_receipt
+ON downstream_ingest(inbox_id);

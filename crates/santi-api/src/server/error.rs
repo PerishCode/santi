@@ -62,6 +62,18 @@ impl ApiError {
         }))
     }
 
+    pub fn forbidden(message: impl Into<String>) -> Self {
+        let mut error = Self::unauthorized(message);
+        error.status = StatusCode::FORBIDDEN;
+        error
+    }
+
+    pub fn conflict(message: impl Into<String>) -> Self {
+        let mut error = Self::bad_request(message);
+        error.status = StatusCode::CONFLICT;
+        error
+    }
+
     pub fn from_santi(error: SantiError) -> Self {
         let status = if error.code == catalog::CONTEXT_BUDGET_EXCEEDED.code {
             StatusCode::LOCKED
@@ -93,8 +105,15 @@ impl ApiError {
         let text = message.as_str();
         if text == "strand not found" || text == "soul not found" || text.ends_with("not found") {
             Self::not_found(message)
+        } else if text.starts_with("downstream request conflicts")
+            || text.starts_with("downstream id conflicts")
+            || text.contains("overlaps an existing registration")
+            || text.ends_with("is already registered")
+        {
+            Self::conflict(message)
         } else if text.starts_with("unknown soul")
             || text.contains("must not be empty")
+            || text.starts_with("downstream ") && text.contains(" must ")
             || text.contains("must contain text")
             || text.starts_with("strand_strategy must be")
             || text.starts_with("fork_point")

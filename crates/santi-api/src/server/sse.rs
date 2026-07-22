@@ -2,6 +2,7 @@ use std::convert::Infallible;
 
 use axum::{
     extract::{Path, State},
+    http::HeaderMap,
     response::{
         Sse,
         sse::{Event, KeepAlive},
@@ -15,6 +16,7 @@ use santi_core::{
 use tokio::sync::broadcast;
 
 use super::ApiError;
+use super::routes::bearer;
 
 pub(super) async fn strand_events(
     State(service): State<Service>,
@@ -60,6 +62,32 @@ pub(super) async fn error_events(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/turn-events/stream",
+    security(("downstream_bearer" = [])),
+    responses(
+        (status = 200, description = "Zone-filtered turn event wake-up stream"),
+        (status = 401, body = santi_core::SantiError)
+    )
+)]
+pub(super) async fn turn_event_stream(
+    State(service): State<Service>,
+    headers: HeaderMap,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    let principal = service
+        .principal(bearer(&headers))
+        .map_err(ApiError::from_service)?
+        .ok_or_else(|| ApiError::unauthorized("invalid or missing credential"))?;
+    let mut receiver = service.subscribe_stream();
+    let stream = async_stream::stream! {
+        while receive_turn(&mut receiver, &principal.label_prefix).await {
+            yield Ok(Event::default().event("turn_event_available").data("{}"));
+        }
+    };
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
 async fn receive_strand(
     receiver: &mut broadcast::Receiver<SantiStreamEvent>,
     strand_id: &str,
@@ -68,6 +96,25 @@ async fn receive_strand(
         let event = receive(receiver).await?;
         if event.strand_id == strand_id {
             return Some(event);
+        }
+    }
+}
+
+async fn receive_turn(
+    receiver: &mut broadcast::Receiver<SantiStreamEvent>,
+    label_prefix: &str,
+) -> bool {
+    loop {
+        let Some(event) = receive(receiver).await else {
+            return false;
+        };
+        if let SantiStreamPayload::TurnCompleted {
+            external_label: Some(label),
+            ..
+        } = event.payload
+            && label.starts_with(label_prefix)
+        {
+            return true;
         }
     }
 }

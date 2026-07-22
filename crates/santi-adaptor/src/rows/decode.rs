@@ -24,7 +24,7 @@ impl Decode for DownstreamCredential {
         Ok(Self {
             id: row.get(0)?,
             label_prefix: row.get(1)?,
-            credential_env: row.get(2)?,
+            credential_sha256: row.get(2)?,
             created_at: row.get(3)?,
             updated_at: row.get(4)?,
         })

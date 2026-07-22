@@ -4,7 +4,7 @@ impl SantiStore {
     pub(crate) fn enqueue_inbox_with_context(
         &self,
         ingress: Ingress<'_>,
-    ) -> Result<IngestOutcome, String> {
+    ) -> Result<Intake, String> {
         self.enqueue_inbox_with_policy(ingress, true)
     }
 
@@ -14,7 +14,8 @@ impl SantiStore {
         message_kind: MessageKind,
         content: MessageContent,
         source: Option<InboxSource>,
-    ) -> Result<IngestOutcome, String> {
+        replay: Option<Replay<'_>>,
+    ) -> Result<Intake, String> {
         self.enqueue_inbox_with_policy(
             Ingress {
                 strand: strand_id,
@@ -22,6 +23,7 @@ impl SantiStore {
                 content,
                 source,
                 admission: None,
+                replay,
             },
             false,
         )
@@ -31,18 +33,39 @@ impl SantiStore {
         &self,
         ingress: Ingress<'_>,
         enforce_active_holds: bool,
-    ) -> Result<IngestOutcome, String> {
+    ) -> Result<Intake, String> {
         let Ingress {
             strand,
             kind,
             content,
             source,
             admission,
+            replay,
         } = ingress;
         let mut conn = self.conn.lock().unwrap();
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
+
+        if let Some(replay) = &replay
+            && let Some((digest, strand_id, inbox_id)) =
+                Database::new(&tx).replay(replay.owner, replay.request)?
+        {
+            tx.commit().map_err(|error| error.to_string())?;
+            if digest != replay.digest {
+                return Err("downstream request conflicts with an accepted payload".to_string());
+            }
+            return Ok(Intake {
+                outcome: IngestOutcome::Accepted {
+                    receipt: IngestReceipt {
+                        strand_id,
+                        inbox_id,
+                        warning: None,
+                    },
+                },
+                inserted: false,
+            });
+        }
 
         if enforce_active_holds
             && let Some(error) = crate::store::errors::drive::repeat_active_in_conn(
@@ -52,8 +75,11 @@ impl SantiStore {
             )?
         {
             tx.commit().map_err(|error| error.to_string())?;
-            return Ok(IngestOutcome::Rejected {
-                error: Box::new(error),
+            return Ok(Intake {
+                outcome: IngestOutcome::Rejected {
+                    error: Box::new(error),
+                },
+                inserted: false,
             });
         }
 
@@ -68,8 +94,11 @@ impl SantiStore {
                 "ingest_active_guard",
             )?;
             tx.commit().map_err(|error| error.to_string())?;
-            return Ok(IngestOutcome::Rejected {
-                error: Box::new(error),
+            return Ok(Intake {
+                outcome: IngestOutcome::Rejected {
+                    error: Box::new(error),
+                },
+                inserted: false,
             });
         }
 
@@ -107,8 +136,11 @@ impl SantiStore {
                     },
                 )?;
                 tx.commit().map_err(|error| error.to_string())?;
-                return Ok(IngestOutcome::Rejected {
-                    error: Box::new(error),
+                return Ok(Intake {
+                    outcome: IngestOutcome::Rejected {
+                        error: Box::new(error),
+                    },
+                    inserted: false,
                 });
             }
         }
@@ -130,8 +162,11 @@ impl SantiStore {
                 message,
                 context: json!({"pending": pending, "gate": STRAND_INBOX_GATE}),
             });
-            return Ok(IngestOutcome::Rejected {
-                error: Box::new(error),
+            return Ok(Intake {
+                outcome: IngestOutcome::Rejected {
+                    error: Box::new(error),
+                },
+                inserted: false,
             });
         }
 
@@ -167,13 +202,26 @@ impl SantiStore {
         )
         .map_err(|error| error.to_string())?;
         Database::new(&tx).insert_accepted(&inbox_id, strand, &now)?;
+        if let Some(replay) = replay {
+            Database::new(&tx).insert_replay(crate::store::db::ReplayInsert {
+                owner: replay.owner,
+                request: replay.request,
+                digest: replay.digest,
+                strand,
+                inbox: &inbox_id,
+                created: &now,
+            })?;
+        }
         tx.commit().map_err(|error| error.to_string())?;
-        Ok(IngestOutcome::Accepted {
-            receipt: IngestReceipt {
-                strand_id: strand.to_string(),
-                inbox_id,
-                warning: None,
+        Ok(Intake {
+            outcome: IngestOutcome::Accepted {
+                receipt: IngestReceipt {
+                    strand_id: strand.to_string(),
+                    inbox_id,
+                    warning: None,
+                },
             },
+            inserted: true,
         })
     }
 }

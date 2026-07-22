@@ -26,7 +26,7 @@ mod span;
 mod turn;
 mod turns;
 
-pub(crate) use budget::{Ingress, Launch, execution_budget_incident_key};
+pub(crate) use budget::{Ingress, Launch, Replay, execution_budget_incident_key};
 pub(crate) use compact::Collapse;
 pub use db::read_schema_version;
 use db::*;

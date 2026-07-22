@@ -3,6 +3,7 @@ mod api;
 pub use api::Admission;
 mod bucket;
 mod compact;
+mod downstream;
 mod drive;
 mod error;
 mod flow;

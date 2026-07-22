@@ -70,6 +70,18 @@ impl ProviderClient for DriverProvider {
 fn classifies_errors() {
     assert_eq!(status("strand not found"), StatusCode::NOT_FOUND);
     assert_eq!(status("unknown soul: soul_x"), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        status("downstream credential_sha256 must be 64 hexadecimal characters"),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        status("downstream request conflicts with an accepted payload"),
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        ApiError::forbidden("outside zone").status(),
+        StatusCode::FORBIDDEN
+    );
     let budget = engine().transient(santi_core::Signal {
         descriptor: catalog::CONTEXT_BUDGET_EXCEEDED,
         source: ErrorSource::new("test", "admission"),
@@ -106,6 +118,11 @@ fn openapi_lists_error_surfaces() {
     assert!(document.contains("/api/v1/effects/{effect_id}/resolve"));
     assert!(document.contains("EffectTransitionReason"));
     assert!(document.contains("IngestReceipt"));
+    assert!(document.contains("/api/v1/turn-events/stream"));
+    assert!(document.contains("TurnEventBatch"));
+    assert!(document.contains("request_id"));
+    assert!(document.contains("downstream_bearer"));
+    assert!(!document.contains("credential_env"));
 }
 
 #[tokio::test]

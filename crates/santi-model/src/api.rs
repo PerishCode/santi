@@ -9,7 +9,9 @@ use super::*;
 pub struct DownstreamCredential {
     pub id: String,
     pub label_prefix: String,
-    pub credential_env: String,
+    #[serde(skip)]
+    #[schema(ignore)]
+    pub credential_sha256: String,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -18,7 +20,7 @@ pub struct DownstreamCredential {
 pub struct CreateDownstreamRequest {
     pub id: String,
     pub label_prefix: String,
-    pub credential_env: String,
+    pub credential_sha256: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -26,6 +28,7 @@ pub struct IngestRequest {
     pub soul_id: String,
     pub label: String,
     pub text: String,
+    pub request_id: String,
     #[serde(default)]
     pub source_ref: Option<String>,
 }
@@ -41,9 +44,9 @@ pub struct TurnEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct TurnEventPage {
+pub struct TurnEventBatch {
     pub cursor: i64,
-    pub event: TurnEvent,
+    pub events: Vec<TurnEvent>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

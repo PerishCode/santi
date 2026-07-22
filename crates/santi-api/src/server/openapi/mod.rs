@@ -4,14 +4,33 @@ use santi_core::{
     Soul, Strand, StrandDetail, StrandMaterial, StrandRuntimeSnapshot, WebhookSubscription,
 };
 use utoipa::{
-    OpenApi,
-    openapi::{RefOr, schema::Schema},
+    Modify, OpenApi,
+    openapi::{
+        RefOr,
+        schema::Schema,
+        security::{Http, HttpAuthScheme, SecurityScheme},
+    },
 };
 
 mod descriptions;
 use descriptions::COMPONENT_DESCRIPTIONS;
 
-const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 12] = [
+const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 15] = [
+    (
+        "CreateDownstreamRequest",
+        "credential_sha256",
+        "Lowercase or uppercase SHA-256 hex of a high-entropy Bearer token. The digest is stored but never returned.",
+    ),
+    (
+        "IngestRequest",
+        "request_id",
+        "Stable idempotency key, unique within the authenticated downstream. Reuse with a changed payload is a conflict.",
+    ),
+    (
+        "TurnEventBatch",
+        "cursor",
+        "Opaque global high-water mark. Persist it even when events is empty; it reveals aggregate activity but no foreign payload.",
+    ),
     (
         "HealthResponse",
         "active_drive_incidents",
@@ -76,6 +95,7 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 12] = [
 
 #[derive(OpenApi)]
 #[openapi(
+    modifiers(&SecurityAddon),
     paths(
         super::routes::health,
         super::routes::create_strand,
@@ -101,6 +121,7 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 12] = [
         super::effects::effect_status,
         super::effects::resolve_effect,
         super::sse::error_events,
+        super::sse::turn_event_stream,
         super::routes::runtime_snapshot,
         super::routes::turn_events,
         super::routes::create_downstream,
@@ -113,7 +134,7 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 12] = [
     components(schemas(
         CreateStrandResponse,
         santi_core::TurnEvent,
-        santi_core::TurnEventPage,
+        santi_core::TurnEventBatch,
         santi_core::DownstreamCredential,
         santi_core::CreateDownstreamRequest,
         santi_core::IngestRequest,
@@ -191,6 +212,19 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 12] = [
     ))
 )]
 struct ApiDoc;
+
+struct SecurityAddon;
+
+impl Modify for SecurityAddon {
+    fn modify(&self, document: &mut utoipa::openapi::OpenApi) {
+        if let Some(components) = document.components.as_mut() {
+            components.add_security_scheme(
+                "downstream_bearer",
+                SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer)),
+            );
+        }
+    }
+}
 
 pub(super) fn document() -> utoipa::openapi::OpenApi {
     let mut document = ApiDoc::openapi();

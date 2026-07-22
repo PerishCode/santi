@@ -71,7 +71,9 @@ impl SantiStore {
             content,
             source,
             admission: None,
+            replay: None,
         })
+        .map(|intake| intake.outcome)
     }
 
     pub fn create_webhook(

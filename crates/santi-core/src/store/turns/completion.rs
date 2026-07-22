@@ -125,7 +125,13 @@ impl SantiStore {
                 completed_at: now.clone(),
             };
             let payload = serde_json::to_string(&event).map_err(|error| error.to_string())?;
-            Database::new(&tx).insert_turn_outbox(&event.id, &event.turn_id, &payload, &now)?;
+            Database::new(&tx).insert_turn_outbox(crate::store::db::TurnOutboxInsert {
+                id: &event.id,
+                turn: &event.turn_id,
+                label: &event.external_label,
+                payload: &payload,
+                created: &now,
+            })?;
             Some(event)
         } else {
             None

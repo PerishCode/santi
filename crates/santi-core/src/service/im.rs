@@ -24,6 +24,7 @@ impl Service {
                 kind: MessageKind::Text,
                 trigger: "strand_send",
                 source: Some(InboxSource::new("im").with_ref(participant_id.to_string())),
+                replay: None,
             },
         )
     }

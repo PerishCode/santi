@@ -86,13 +86,86 @@ async fn labeled_turn_emits_envelope_and_records_outbox() {
     assert_eq!(label_seen.as_deref(), Some(label));
     assert!(text_seen.is_some_and(|text| !text.is_empty()));
 
-    let recorded = service.turn_events_since(0, 10).expect("turn events");
+    let recorded = service
+        .turn_events_since(0, "github:", 10)
+        .expect("turn events");
     let event = recorded
+        .events
         .iter()
-        .map(|(_, event)| event)
         .find(|event| event.external_label == label)
         .expect("outbox turn event for the labeled strand");
     assert!(!event.final_text.is_empty());
+}
+
+#[tokio::test]
+async fn downstream_batch_isolates_zone_and_advances_over_other_zones() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let service = Service::open(
+        service::Config {
+            database_path: temp.path().join("santi.sqlite").display().to_string(),
+            runtime_root: temp.path().join("runtime").display().to_string(),
+            execution_root: temp.path().join("execution").display().to_string(),
+            bind_addr: Some("127.0.0.1:0".to_string()),
+        },
+        Arc::new(FakeProvider::default()),
+    )
+    .expect("open service");
+    let soul_id = service.list_souls().expect("list souls")[0].id.clone();
+    let mut stream = service.subscribe_stream();
+    service
+        .ingest_external_event(&soul_id, "github:issue:1", "github".to_string())
+        .expect("ingest github");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let santi_core::SantiStreamPayload::TurnCompleted {
+                external_label: Some(label),
+                ..
+            } = stream.recv().await.expect("stream event").payload
+                && label == "github:issue:1"
+            {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("github turn completes");
+
+    let empty = service
+        .turn_events_since(0, "stim:", 10)
+        .expect("empty stim batch");
+    assert!(empty.events.is_empty());
+    assert!(empty.cursor > 0);
+
+    service
+        .ingest_external_event(&soul_id, "stim:alice", "stim".to_string())
+        .expect("ingest stim");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let santi_core::SantiStreamPayload::TurnCompleted {
+                external_label: Some(label),
+                ..
+            } = stream.recv().await.expect("stream event").payload
+                && label == "stim:alice"
+            {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("stim turn completes");
+
+    let stim = service
+        .turn_events_since(empty.cursor, "stim:", 10)
+        .expect("stim batch");
+    assert_eq!(stim.events.len(), 1);
+    assert_eq!(stim.events[0].external_label, "stim:alice");
+    assert!(stim.cursor > empty.cursor);
+    let github = service
+        .turn_events_since(0, "github:", 10)
+        .expect("github batch");
+    assert_eq!(github.events.len(), 1);
+    assert_eq!(github.events[0].external_label, "github:issue:1");
+    assert_eq!(github.cursor, stim.cursor);
 }
 
 #[tokio::test]

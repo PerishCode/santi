@@ -11,7 +11,7 @@ use santi_core::{
     CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, DownstreamCredential,
     DriveStrandResponse, ForkStrandResponse, HealthResponse, IngestRequest, MaterialRequest,
     ReceiptStatus, SantiError, SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand,
-    StrandBudgetSnapshot, StrandDetail, StrandMaterial, StrandRuntimeSnapshot, TurnEventPage,
+    StrandBudgetSnapshot, StrandDetail, StrandMaterial, StrandRuntimeSnapshot, TurnEventBatch,
     WebhookSubscription,
 };
 use tower_http::{
@@ -23,7 +23,7 @@ use super::{
     ApiError,
     errors::{errors, strand_errors},
     ingress::ingest_webhook,
-    sse::{error_events, strand_events},
+    sse::{error_events, strand_events, turn_event_stream},
 };
 
 pub(super) fn router(service: Service) -> Router {
@@ -60,6 +60,7 @@ pub(super) fn router(service: Service) -> Router {
         .route("/api/v1/compacts/{compact_id}", get(compact_query))
         .route("/api/v1/strands/{strand_id}/runtime", get(runtime_snapshot))
         .route("/api/v1/turn-events", get(turn_events))
+        .route("/api/v1/turn-events/stream", get(turn_event_stream))
         .route(
             "/api/v1/downstreams",
             post(create_downstream).get(list_downstreams),

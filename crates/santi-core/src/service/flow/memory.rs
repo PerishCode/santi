@@ -148,8 +148,9 @@ impl Service {
             MessageKind::SantiSystem,
             memory_maintenance_metaprompt(snapshot, policy),
             Some(InboxSource::new("runtime_memory_pressure").with_ref(maintenance.soul_id.clone())),
+            None,
         )?;
-        match outcome {
+        match outcome.outcome {
             IngestOutcome::Accepted { .. } => Ok(()),
             IngestOutcome::Rejected { error } => Err(format!(
                 "memory maintenance metaprompt was rejected: {}",

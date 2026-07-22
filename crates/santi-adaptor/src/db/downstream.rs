@@ -4,21 +4,32 @@ use santi_model::DownstreamCredential;
 use super::Database;
 use crate::rows::{Decode, collect_rows};
 
+pub struct ReplayInsert<'a> {
+    pub owner: &'a str,
+    pub request: &'a str,
+    pub digest: &'a str,
+    pub strand: &'a str,
+    pub inbox: &'a str,
+    pub created: &'a str,
+}
+
 impl Database<'_> {
     pub fn insert_downstream(
         &self,
         id: &str,
         label_prefix: &str,
-        credential_env: &str,
+        credential_sha256: &str,
         created_at: &str,
     ) -> Result<(), String> {
         self.conn
             .execute(
                 r#"
-                INSERT INTO downstreams (id, label_prefix, credential_env, created_at, updated_at)
+                INSERT INTO downstreams (
+                  id, label_prefix, credential_sha256, created_at, updated_at
+                )
                 VALUES (?1, ?2, ?3, ?4, ?4)
                 "#,
-                params![id, label_prefix, credential_env, created_at],
+                params![id, label_prefix, credential_sha256, created_at],
             )
             .map_err(|error| error.to_string())?;
         Ok(())
@@ -28,7 +39,7 @@ impl Database<'_> {
         self.conn
             .query_row(
                 r#"
-                SELECT id, label_prefix, credential_env, created_at, updated_at
+                SELECT id, label_prefix, credential_sha256, created_at, updated_at
                 FROM downstreams WHERE id = ?1 LIMIT 1
                 "#,
                 params![id],
@@ -43,7 +54,7 @@ impl Database<'_> {
             .conn
             .prepare(
                 r#"
-                SELECT id, label_prefix, credential_env, created_at, updated_at
+                SELECT id, label_prefix, credential_sha256, created_at, updated_at
                 FROM downstreams ORDER BY created_at ASC, id ASC
                 "#,
             )
@@ -52,5 +63,46 @@ impl Database<'_> {
             .query_map([], DownstreamCredential::decode)
             .map_err(|error| error.to_string())?;
         collect_rows(rows)
+    }
+
+    pub fn replay(
+        &self,
+        owner: &str,
+        request: &str,
+    ) -> Result<Option<(String, String, String)>, String> {
+        self.conn
+            .query_row(
+                r#"
+                SELECT request_sha256, strand_id, inbox_id
+                FROM downstream_ingest
+                WHERE downstream_id = ?1 AND request_id = ?2
+                "#,
+                params![owner, request],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn insert_replay(&self, input: ReplayInsert<'_>) -> Result<(), String> {
+        self.conn
+            .execute(
+                r#"
+                INSERT INTO downstream_ingest (
+                  downstream_id, request_id, request_sha256,
+                  strand_id, inbox_id, created_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "#,
+                params![
+                    input.owner,
+                    input.request,
+                    input.digest,
+                    input.strand,
+                    input.inbox,
+                    input.created
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
     }
 }

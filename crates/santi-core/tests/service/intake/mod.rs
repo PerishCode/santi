@@ -1,6 +1,7 @@
 use super::support::*;
 use santi_core::service::{self, Service};
 
+mod downstream;
 mod more;
 
 #[tokio::test]

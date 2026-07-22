@@ -12,6 +12,7 @@ pub(in crate::service) struct Ingest<'a> {
     pub(in crate::service) kind: MessageKind,
     pub(in crate::service) trigger: &'a str,
     pub(in crate::service) source: Option<InboxSource>,
+    pub(in crate::service) replay: Option<crate::store::Replay<'a>>,
 }
 
 struct Audit {
@@ -61,6 +62,7 @@ impl Service {
                 kind,
                 trigger: trigger_type,
                 source: None,
+                replay: None,
             },
         )
     }
@@ -86,17 +88,21 @@ impl Service {
             Gate::Pause {
                 maintenance_strand_id,
             } => {
-                let outcome = self.store.enqueue_inbox_while_suspended(
+                let intake = self.store.enqueue_inbox_while_suspended(
                     &strand.id,
                     input.kind,
                     input.content,
                     input.source,
+                    input.replay,
                 )?;
+                let outcome = intake.outcome;
                 self.dispatch_error_events();
                 if let IngestOutcome::Rejected { error } = &outcome {
                     log_ingest_rejection(error, &strand.id, &audit);
                 }
-                drive_maintenance(self, &maintenance_strand_id);
+                if intake.inserted {
+                    drive_maintenance(self, &maintenance_strand_id);
+                }
                 return Ok((outcome, drive::Outcome::Paused));
             }
         }
@@ -112,25 +118,27 @@ impl Service {
             ));
         }
         let admission = self.context_admission(&strand.id)?;
-        let outcome = self.store.enqueue_inbox_with_context(Ingress {
+        let intake = self.store.enqueue_inbox_with_context(Ingress {
             strand: &strand.id,
             kind: input.kind,
             content: input.content,
             source: input.source,
             admission: admission.as_ref(),
+            replay: input.replay,
         })?;
+        let outcome = intake.outcome;
         self.dispatch_error_events();
         if let IngestOutcome::Rejected { error } = &outcome {
             log_ingest_rejection(error, &strand.id, &audit);
         }
         let drive = match &outcome {
-            IngestOutcome::Accepted { receipt } => self.poke(
+            IngestOutcome::Accepted { receipt } if intake.inserted => self.poke(
                 &strand.id,
                 input.trigger,
                 Some(&receipt.inbox_id),
                 "ingest_poke",
             ),
-            IngestOutcome::Rejected { .. } => drive::Outcome::Idle,
+            IngestOutcome::Accepted { .. } | IngestOutcome::Rejected { .. } => drive::Outcome::Idle,
         };
         let mut outcome = outcome;
         if let IngestOutcome::Accepted { receipt } = &mut outcome {
@@ -160,6 +168,17 @@ impl Service {
         system_text: String,
         source: Option<InboxSource>,
     ) -> Result<IngestOutcome, String> {
+        self.ingest_external(soul_id, label, system_text, source, None)
+    }
+
+    pub(in crate::service) fn ingest_external(
+        &self,
+        soul_id: &str,
+        label: &str,
+        system_text: String,
+        source: Option<InboxSource>,
+        replay: Option<crate::store::Replay<'_>>,
+    ) -> Result<IngestOutcome, String> {
         let strand = self
             .store
             .resolve_strand_selector(&StrandSelector::ByLabel {
@@ -173,6 +192,7 @@ impl Service {
                 kind: MessageKind::SantiSystem,
                 trigger: "system",
                 source,
+                replay,
             },
         )?;
         Ok(outcome)

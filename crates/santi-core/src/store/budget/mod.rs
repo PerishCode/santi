@@ -85,6 +85,18 @@ pub(crate) struct Ingress<'a> {
     pub content: MessageContent,
     pub source: Option<InboxSource>,
     pub admission: Option<&'a Admission>,
+    pub replay: Option<Replay<'a>>,
+}
+
+pub(crate) struct Replay<'a> {
+    pub owner: &'a str,
+    pub request: &'a str,
+    pub digest: &'a str,
+}
+
+pub(crate) struct Intake {
+    pub outcome: IngestOutcome,
+    pub inserted: bool,
 }
 
 pub(crate) struct Launch<'a> {

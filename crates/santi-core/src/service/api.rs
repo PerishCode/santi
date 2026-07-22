@@ -1,12 +1,10 @@
-use crate::{
-    CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, DownstreamCredential,
-    EffectResolutionOutcome, EffectStatus, ErrorIncident, ErrorScope, InboxSource, IngestOutcome,
-    IngestRequest, ReceiptStatus, SantiStreamEvent, SantiStreamPayload, Soul, Strand,
-    StrandBudgetSnapshot, StrandDetail, StrandRuntimeSnapshot, WebhookSubscription, engine,
-    prefixed_id, timestamp_now,
-};
-
 use super::*;
+use crate::{
+    CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, EffectResolutionOutcome,
+    EffectStatus, ErrorIncident, ErrorScope, IngestOutcome, ReceiptStatus, SantiStreamEvent,
+    SantiStreamPayload, Soul, Strand, StrandBudgetSnapshot, StrandDetail, StrandRuntimeSnapshot,
+    WebhookSubscription, engine, prefixed_id, timestamp_now,
+};
 
 pub enum Admission {
     Accepted(IngestOutcome),
@@ -188,64 +186,10 @@ impl Service {
     pub fn turn_events_since(
         &self,
         after_seq: i64,
+        label_prefix: &str,
         limit: usize,
-    ) -> Result<Vec<(i64, crate::TurnEvent)>, String> {
-        self.store.turn_events_since(after_seq, limit)
-    }
-
-    pub fn create_downstream(
-        &self,
-        request: crate::CreateDownstreamRequest,
-    ) -> Result<DownstreamCredential, String> {
-        let id = request.id.trim();
-        let label_prefix = request.label_prefix.trim();
-        let credential_env = request.credential_env.trim();
-        if id.is_empty() {
-            return Err("downstream id must not be empty".to_string());
-        }
-        if label_prefix.is_empty() {
-            return Err("downstream label_prefix must not be empty".to_string());
-        }
-        if credential_env.is_empty() {
-            return Err("downstream credential_env must not be empty".to_string());
-        }
-        self.store
-            .create_downstream(id, label_prefix, credential_env)
-    }
-
-    pub fn list_downstreams(&self) -> Result<Vec<DownstreamCredential>, String> {
-        self.store.list_downstreams()
-    }
-
-    pub fn ingest_downstream(
-        &self,
-        bearer: &str,
-        request: IngestRequest,
-    ) -> Result<Admission, String> {
-        if bearer.is_empty() {
-            return Ok(Admission::Denied);
-        }
-        let matched = self
-            .store
-            .list_downstreams()?
-            .into_iter()
-            .find(|downstream| {
-                std::env::var(&downstream.credential_env)
-                    .map(|value| !value.is_empty() && value == bearer)
-                    .unwrap_or(false)
-            });
-        let Some(downstream) = matched else {
-            return Ok(Admission::Denied);
-        };
-        if !request.label.starts_with(&downstream.label_prefix) {
-            return Ok(Admission::Forbidden);
-        }
-        let source = request
-            .source_ref
-            .map(|reference| InboxSource::new("downstream").with_ref(reference));
-        let outcome =
-            self.ingest_external_source(&request.soul_id, &request.label, request.text, source)?;
-        Ok(Admission::Accepted(outcome))
+    ) -> Result<crate::TurnEventBatch, String> {
+        self.store.turn_events_since(after_seq, label_prefix, limit)
     }
 
     pub(in crate::service) fn dispatch_error_events(&self) {

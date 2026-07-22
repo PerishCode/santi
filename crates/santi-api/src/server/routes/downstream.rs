@@ -9,6 +9,8 @@ use super::*;
     path = "/api/v1/downstreams",
     responses(
         (status = 200, body = DownstreamCredential),
+        (status = 400, body = SantiError),
+        (status = 409, body = SantiError),
         (status = 500, body = SantiError)
     )
 )]
@@ -42,10 +44,14 @@ pub(super) async fn list_downstreams(
 #[utoipa::path(
     post,
     path = "/api/v1/ingest",
+    security(("downstream_bearer" = [])),
     request_body = IngestRequest,
     responses(
         (status = 202, body = IngestReceipt),
+        (status = 400, body = SantiError),
         (status = 401, body = SantiError),
+        (status = 403, body = SantiError),
+        (status = 409, body = SantiError),
         (status = 500, body = SantiError)
     )
 )]
@@ -54,11 +60,7 @@ pub(super) async fn ingest(
     headers: HeaderMap,
     Json(request): Json<IngestRequest>,
 ) -> Result<Json<IngestReceipt>, ApiError> {
-    let token = headers
-        .get("authorization")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .unwrap_or("");
+    let token = bearer(&headers);
     match service
         .ingest_downstream(token, request)
         .map_err(ApiError::from_service)?
@@ -66,8 +68,16 @@ pub(super) async fn ingest(
         Admission::Accepted(IngestOutcome::Accepted { receipt }) => Ok(Json(receipt)),
         Admission::Accepted(IngestOutcome::Rejected { error }) => Err(ApiError::from_santi(*error)),
         Admission::Denied => Err(ApiError::unauthorized("invalid or missing credential")),
-        Admission::Forbidden => Err(ApiError::unauthorized(
+        Admission::Forbidden => Err(ApiError::forbidden(
             "label outside the credential's authorized prefix",
         )),
     }
+}
+
+pub(crate) fn bearer(headers: &HeaderMap) -> &str {
+    headers
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .unwrap_or("")
 }

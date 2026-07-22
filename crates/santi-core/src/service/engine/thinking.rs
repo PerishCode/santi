@@ -4,7 +4,7 @@ use crate::{
 
 use super::Service;
 
-pub(super) struct Progress<'a> {
+pub(in crate::service) struct Progress<'a> {
     pub strand: &'a str,
     pub turn: &'a str,
     pub current: &'a mut Option<ThinkingSpan>,
@@ -13,7 +13,10 @@ pub(super) struct Progress<'a> {
 }
 
 impl Service {
-    pub(super) fn ensure_thinking_span(&self, progress: Progress<'_>) -> Result<(), String> {
+    pub(in crate::service) fn ensure_thinking_span(
+        &self,
+        progress: Progress<'_>,
+    ) -> Result<(), String> {
         if let Some(thinking) = progress.current {
             if progress.response.is_some()
                 && thinking.provider_response_id != progress.response
@@ -45,7 +48,7 @@ impl Service {
         Ok(())
     }
 
-    pub(super) fn update_thinking_span_summary(
+    pub(in crate::service) fn update_thinking_span_summary(
         &self,
         strand_id: &str,
         summary_target: &mut Option<ThinkingSpan>,
@@ -70,7 +73,7 @@ impl Service {
         Ok(())
     }
 
-    pub(super) fn complete_current_thinking_span(
+    pub(in crate::service) fn complete_current_thinking_span(
         &self,
         strand_id: &str,
         current: &mut Option<ThinkingSpan>,
@@ -93,7 +96,7 @@ impl Service {
         Ok(())
     }
 
-    pub(super) fn fail_current_thinking_span(
+    pub(in crate::service) fn fail_current_thinking_span(
         &self,
         strand_id: &str,
         current: &mut Option<ThinkingSpan>,
@@ -111,7 +114,7 @@ impl Service {
         Ok(())
     }
 
-    pub(super) fn publish_turn_activity(
+    pub(in crate::service) fn publish_turn_activity(
         &self,
         strand_id: &str,
         turn_id: &str,

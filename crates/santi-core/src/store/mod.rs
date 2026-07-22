@@ -10,18 +10,11 @@ use crate::{
 mod assembly;
 pub(crate) mod budget;
 mod compact;
-mod db;
-mod downstream;
-mod effects;
 pub(crate) mod errors;
-mod fork;
+mod ledger;
+use ledger::{db, effects, rows, span};
 mod lifecycle;
-mod receipts;
-mod rows;
 mod runtime;
-mod souls;
-mod span;
-mod turn;
 mod turns;
 
 pub(crate) use budget::{Ingress, Launch, Replay, execution_budget_incident_key};

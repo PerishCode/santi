@@ -4,10 +4,11 @@ use crate::{ErrorTransition, SantiStreamPayload};
 
 use super::Service;
 
-pub(super) const NO_ERROR_EVENT_SUBSCRIBERS: &str = "error event bus has no subscribers";
+pub(in crate::service) const NO_ERROR_EVENT_SUBSCRIBERS: &str =
+    "error event bus has no subscribers";
 
-pub(super) struct Sink<'a> {
-    pub(super) service: &'a Service,
+pub(in crate::service) struct Sink<'a> {
+    pub(in crate::service) service: &'a Service,
 }
 
 impl ErrorEventSink for Sink<'_> {

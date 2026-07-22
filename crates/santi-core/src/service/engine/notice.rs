@@ -9,20 +9,20 @@ use crate::{MessageContent, MessageIntake, SantiStreamPayload};
 
 use super::{Service, address::Address};
 
-pub(super) struct Observation<'a> {
-    pub(super) address: Address<&'a str>,
-    pub(super) round: usize,
-    pub(super) provider: &'a str,
-    pub(super) model: &'a str,
-    pub(super) input: &'a [ProviderItem],
-    pub(super) instructions: Option<&'a str>,
+pub(in crate::service) struct Observation<'a> {
+    pub(in crate::service) address: Address<&'a str>,
+    pub(in crate::service) round: usize,
+    pub(in crate::service) provider: &'a str,
+    pub(in crate::service) model: &'a str,
+    pub(in crate::service) input: &'a [ProviderItem],
+    pub(in crate::service) instructions: Option<&'a str>,
 }
 
 const RUNTIME_NOTICE_QUEUE_CAPACITY: usize = 128;
-pub(super) const COMPACT_REMINDER_REFERENCE_BYTES: usize = 96 * 1024;
+pub(in crate::service) const COMPACT_REMINDER_REFERENCE_BYTES: usize = 96 * 1024;
 
 #[derive(Debug, Clone)]
-pub(super) enum Event {
+pub(in crate::service) enum Event {
     Observed(Observed),
 }
 
@@ -41,16 +41,16 @@ impl Event {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct Observed {
-    pub(super) address: Address<String>,
-    pub(super) round: usize,
-    pub(super) provider: String,
-    pub(super) model: String,
-    pub(super) input_items: usize,
-    pub(super) input_bytes: usize,
-    pub(super) instructions_bytes: usize,
-    pub(super) reference_threshold_bytes: usize,
-    pub(super) band: String,
+pub(in crate::service) struct Observed {
+    pub(in crate::service) address: Address<String>,
+    pub(in crate::service) round: usize,
+    pub(in crate::service) provider: String,
+    pub(in crate::service) model: String,
+    pub(in crate::service) input_items: usize,
+    pub(in crate::service) input_bytes: usize,
+    pub(in crate::service) instructions_bytes: usize,
+    pub(in crate::service) reference_threshold_bytes: usize,
+    pub(in crate::service) band: String,
 }
 
 impl Observed {
@@ -73,7 +73,7 @@ impl Observed {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct Bus {
+pub(in crate::service) struct Bus {
     inner: Arc<Mutex<State>>,
 }
 
@@ -85,7 +85,7 @@ struct State {
 }
 
 impl Bus {
-    pub(super) fn new() -> Self {
+    pub(in crate::service) fn new() -> Self {
         Self::with_capacity(RUNTIME_NOTICE_QUEUE_CAPACITY)
     }
 
@@ -99,7 +99,7 @@ impl Bus {
         }
     }
 
-    pub(super) fn publish(&self, event: Event) -> bool {
+    pub(in crate::service) fn publish(&self, event: Event) -> bool {
         let dedupe_key = event.dedupe_key();
         let mut state = self.inner.lock().unwrap();
         if let Some(key) = dedupe_key.as_ref()
@@ -117,7 +117,7 @@ impl Bus {
         true
     }
 
-    pub(super) fn drain_for_turn(&self, turn_id: &str) -> Vec<Event> {
+    pub(in crate::service) fn drain_for_turn(&self, turn_id: &str) -> Vec<Event> {
         let mut state = self.inner.lock().unwrap();
         let mut drained = Vec::new();
         let mut kept = VecDeque::with_capacity(state.queue.len());
@@ -140,7 +140,7 @@ impl Default for Bus {
 }
 
 impl Service {
-    pub(super) fn observe_provider_input(&self, observation: Observation<'_>) {
+    pub(in crate::service) fn observe_provider_input(&self, observation: Observation<'_>) {
         let input_bytes = provider_input_bytes(observation.input);
         let instructions_bytes = observation.instructions.map_or(0, str::len);
         let event = Observed {
@@ -157,7 +157,7 @@ impl Service {
         let _ = self.runtime_notices.publish(Event::Observed(event));
     }
 
-    pub(super) fn drain_runtime_notices(&self, turn_id: &str) {
+    pub(in crate::service) fn drain_runtime_notices(&self, turn_id: &str) {
         for event in self.runtime_notices.drain_for_turn(turn_id) {
             if let Err(error) = self.handle_internal_runtime_event(event) {
                 eprintln!("santi: internal runtime notice failed: {error}");

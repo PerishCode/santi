@@ -160,7 +160,7 @@ impl Service {
         let _ = self.send_stream(strand_id, payload);
     }
 
-    pub(super) fn send_stream(
+    pub(in crate::service) fn send_stream(
         &self,
         strand_id: &str,
         payload: SantiStreamPayload,

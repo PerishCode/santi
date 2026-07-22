@@ -3,6 +3,7 @@
 //! and the asserted value is the command's exit code itself.
 
 import { applyWireEvidence, Baseline, parse, ratchet } from "@/lib/word/report.ts";
+import { classify } from "@/lib/word/tracks.ts";
 
 function assert(condition: boolean, message = "assertion failed"): void {
   if (!condition) {
@@ -40,6 +41,22 @@ const BASELINE: Baseline = {
     internal: { occurrences: 859, unique: 681 },
   },
 };
+
+Deno.test("grouped durable store seats stay wire", () => {
+  for (
+    const path of [
+      "crates/santi-core/src/store/ledger/db.rs",
+      "crates/santi-core/src/store/ledger/rows.rs",
+      "crates/santi-core/src/store/ledger/souls.rs",
+    ]
+  ) {
+    assertEquals(classify(path, "strand_id"), "wire");
+  }
+  assertEquals(
+    classify("crates/santi-core/src/store/ledger/turn.rs", "strand_id"),
+    "internal",
+  );
+});
 
 function summary(faults: number, debt: number): string {
   return `${faults} faults, 0 blindspots, ${debt} debt`;

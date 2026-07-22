@@ -5,7 +5,7 @@ use std::{
 
 use santi_provider::{ProviderEvent, ProviderStreamTrace};
 
-pub(super) struct Turn<'a> {
+pub(in crate::service) struct Turn<'a> {
     turn_id: &'a str,
     turn_started: Instant,
     round_started: Option<Instant>,
@@ -18,7 +18,7 @@ pub(super) struct Turn<'a> {
 }
 
 impl<'a> Turn<'a> {
-    pub(super) fn new(turn_id: &'a str) -> Self {
+    pub(in crate::service) fn new(turn_id: &'a str) -> Self {
         let timing = Self {
             turn_id,
             turn_started: Instant::now(),
@@ -34,7 +34,7 @@ impl<'a> Turn<'a> {
         timing
     }
 
-    pub(super) fn request_built(
+    pub(in crate::service) fn request_built(
         &mut self,
         round: usize,
         input_len: usize,
@@ -49,12 +49,12 @@ impl<'a> Turn<'a> {
         );
     }
 
-    pub(super) fn http_response_started(&mut self, round: usize) {
+    pub(in crate::service) fn http_response_started(&mut self, round: usize) {
         self.response_started = Some(Instant::now());
         self.log("http_response_started", round, &self.round_elapsed());
     }
 
-    pub(super) fn first_sse_event(&self, round: usize, event_name: &'static str) {
+    pub(in crate::service) fn first_sse_event(&self, round: usize, event_name: &'static str) {
         self.log(
             "first_sse_event",
             round,
@@ -62,11 +62,11 @@ impl<'a> Turn<'a> {
         );
     }
 
-    pub(super) fn first_text_delta(&self, round: usize) {
+    pub(in crate::service) fn first_text_delta(&self, round: usize) {
         self.log("first_text_delta", round, &self.response_elapsed());
     }
 
-    pub(super) fn function_call_requested(&self, round: usize, name: &str) {
+    pub(in crate::service) fn function_call_requested(&self, round: usize, name: &str) {
         self.log(
             "function_call_requested",
             round,
@@ -74,7 +74,7 @@ impl<'a> Turn<'a> {
         );
     }
 
-    pub(super) fn completed(&self, round: usize) {
+    pub(in crate::service) fn completed(&self, round: usize) {
         self.log(
             "provider_completed",
             round,
@@ -88,15 +88,15 @@ impl<'a> Turn<'a> {
         );
     }
 
-    pub(super) fn tool_outputs_started(&self, round: usize, count: usize) {
+    pub(in crate::service) fn tool_outputs_started(&self, round: usize, count: usize) {
         self.log("tool_outputs_started", round, &format!("count={count}"));
     }
 
-    pub(super) fn tool_outputs_completed(&self, round: usize, count: usize) {
+    pub(in crate::service) fn tool_outputs_completed(&self, round: usize, count: usize) {
         self.log("tool_outputs_completed", round, &format!("count={count}"));
     }
 
-    pub(super) fn failed(&self, round: usize, stage: &str, error: &str) {
+    pub(in crate::service) fn failed(&self, round: usize, stage: &str, error: &str) {
         self.log(
             "failed",
             round,
@@ -107,7 +107,7 @@ impl<'a> Turn<'a> {
         );
     }
 
-    pub(super) fn provider_trace(&mut self, round: usize, trace: ProviderStreamTrace) {
+    pub(in crate::service) fn provider_trace(&mut self, round: usize, trace: ProviderStreamTrace) {
         match trace {
             ProviderStreamTrace::Chunk { bytes } => {
                 self.chunks += 1;
@@ -190,7 +190,7 @@ fn mapped_event_list(mapped_events: &[String]) -> String {
     }
 }
 
-pub(super) fn provider_event_name(event: &ProviderEvent) -> &'static str {
+pub(in crate::service) fn provider_event_name(event: &ProviderEvent) -> &'static str {
     match event {
         ProviderEvent::ResponseStarted { .. } => "response_started",
         ProviderEvent::ResponseInProgress { .. } => "response_in_progress",

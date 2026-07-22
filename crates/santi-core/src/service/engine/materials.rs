@@ -6,7 +6,7 @@ use crate::{
 
 use super::Service;
 
-pub(super) type Key = (String, MaterialKind);
+pub(in crate::service) type Key = (String, MaterialKind);
 
 const TEXT_PLAIN_UTF8: &str = "text/plain; charset=utf-8";
 
@@ -27,7 +27,7 @@ impl Service {
         }
     }
 
-    pub(super) fn system_prompt_text(&self, strand_id: &str) -> Result<String, String> {
+    pub(in crate::service) fn system_prompt_text(&self, strand_id: &str) -> Result<String, String> {
         let strand = self
             .store
             .strand(strand_id)?

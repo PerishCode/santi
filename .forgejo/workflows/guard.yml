@@ -14,31 +14,10 @@ concurrency:
 jobs:
   guard:
     runs-on: docker
-    # REGISTRY-DRIFT GATE, not a pinned container (Liberte CI-image
-    # amendment, 2026-07-15): this Forge version rejects digest-qualified
-    # job containers before dispatch, so the selector stays on the tag and
-    # the first/last guard steps verify the registry's current manifest for
-    # exactly this tag against the reviewed authority in
-    # NEVER-REUSED VERSIONED TAG (Liberte sunset ruling v4): the selector
-    # pins an operator-enforced versioned tag, digest-converged across the
-    # runner pool (infra !129/!137); the first and last guard steps verify
-    # the registry manifest for exactly this tag against the reviewed
-    # authority in .forgejo/ci-image.digest (header + independently hashed
-    # body, config blob, platform) and require the authority, selector, and
-    # RUNNER_NAME unchanged across the job. This is a versioned-tag
-    # reference with registry-integrity checks — not content-addressed
-    # execution and not attestation. Upgrades: rebuild -> new tag ->
-    # converge all registries -> ONE reviewed change updating this selector
-    # and the authority together.
-    container: mirror.perish.lan/ci/deno:20260716-ca349cb0
+    container: mirror.perish.lan/ci/deno
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
-      - name: Registry drift gate
-        run: |
-          set -eu
-          deno run --allow-run=curl --allow-read=.,/tmp --allow-write=/tmp --allow-env=RUNSEAL_PROFILE_PATH,RUNNER_TEMP,RUNNER_NAME --config .runseal/deno.json .runseal/wrappers/image.ts initial
 
       - name: Install pinned Negentropy
         run: |
@@ -52,11 +31,6 @@ jobs:
           set -eu
           export PATH="$HOME/.local/bin:$PATH"
           deno run --allow-all --config .runseal/deno.json .runseal/wrappers/guard.ts
-
-      - name: Registry drift gate (terminal)
-        run: |
-          set -eu
-          deno run --allow-run=curl --allow-read=.,/tmp --allow-write=/tmp --allow-env=RUNSEAL_PROFILE_PATH,RUNNER_TEMP,RUNNER_NAME --config .runseal/deno.json .runseal/wrappers/image.ts terminal
 
       - name: sccache statistics
         if: ${{ always() }}

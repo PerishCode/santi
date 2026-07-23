@@ -20,46 +20,46 @@ async fn external_ingest_turn() {
     )
     .expect("open service");
 
-    let soul_id = service.list_souls().expect("list souls")[0].id.clone();
+    let soul = service.list_souls().expect("list souls")[0].id.clone();
     let label = "github:ops:issue:PerishCode/santi#42";
     let santi_core::IngestOutcome::Accepted { receipt } = service
-        .ingest_external_event(&soul_id, label, "an external request arrived".to_string())
+        .ingest_external_event(&soul, label, "an external request arrived".to_string())
         .expect("ingest event")
     else {
         panic!("expected accepted");
     };
-    let strand_id = receipt.strand_id;
+    let strand = receipt.strand;
 
-    let runtime = Probe::new(&service).any_completed(&strand_id).await;
+    let runtime = Probe::new(&service).any_completed(&strand).await;
     assert!(
         runtime
             .turns
             .iter()
-            .any(|turn| turn.trigger_type == santi_core::TurnTriggerType::System)
+            .any(|turn| turn.trigger == santi_core::TurnTriggerType::System)
     );
     assert!(
         runtime
             .messages
             .iter()
-            .any(|message| message.content_text == "an external request arrived")
+            .any(|message| message.text == "an external request arrived")
     );
     assert!(
         runtime
             .messages
             .iter()
-            .any(|message| message.content_text == "hi from runtime")
+            .any(|message| message.text == "hi from runtime")
     );
 
     let santi_core::IngestOutcome::Accepted {
         receipt: receipt_again,
     } = service
-        .ingest_external_event(&soul_id, label, "a follow-up arrived".to_string())
+        .ingest_external_event(&soul, label, "a follow-up arrived".to_string())
         .expect("ingest second event")
     else {
         panic!("expected accepted");
     };
-    let strand_id_again = receipt_again.strand_id;
-    assert_eq!(strand_id_again, strand_id);
+    let strand_id_again = receipt_again.strand;
+    assert_eq!(strand_id_again, strand);
 
     let requests = provider.requests.lock().unwrap();
     assert!(requests.iter().any(|request| {
@@ -85,7 +85,7 @@ async fn boot_drains_inbox() {
     };
     let provider = Arc::new(FakeProvider::default());
 
-    let strand_id = {
+    let strand = {
         let service = Service::open(config.clone(), provider.clone()).expect("open service");
         service.create_strand().expect("create strand").strand.id
     };
@@ -93,7 +93,7 @@ async fn boot_drains_inbox() {
     let store = SantiStore::open(&config.database_path).expect("open store directly");
     store
         .enqueue_inbox(
-            &strand_id,
+            &strand,
             MessageKind::Text,
             MessageContent::text("stranded before the crash"),
         )
@@ -103,17 +103,17 @@ async fn boot_drains_inbox() {
     let service = Service::open(config, provider.clone()).expect("reopen service");
     service.resume_pending().expect("resume pending");
 
-    let runtime = Probe::new(&service).any_completed(&strand_id).await;
+    let runtime = Probe::new(&service).any_completed(&strand).await;
     assert!(
         runtime
             .messages
             .iter()
-            .any(|message| message.content_text == "stranded before the crash")
+            .any(|message| message.text == "stranded before the crash")
     );
     assert!(
         runtime
             .messages
             .iter()
-            .any(|message| message.content_text == "hi from runtime")
+            .any(|message| message.text == "hi from runtime")
     );
 }

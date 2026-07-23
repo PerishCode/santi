@@ -6,9 +6,9 @@ use std::{
 use rusqlite::{Connection, params};
 
 use super::db::migrate;
+use crate::now;
 use crate::store::DEFAULT_SOUL_ID;
 use crate::store::SantiStore;
-use crate::timestamp_now;
 
 impl SantiStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, String> {
@@ -28,7 +28,7 @@ impl SantiStore {
 
     fn seed_defaults(&self) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
-        let now = timestamp_now();
+        let now = now();
         conn.execute(
             r#"
             INSERT OR IGNORE INTO souls (id, created_at, updated_at)

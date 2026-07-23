@@ -32,16 +32,14 @@ struct Snapshot {
 
 impl Service {
     pub(in crate::service) fn soul_memory_policy(&self) -> Policy {
-        let input_budget_bytes = self
+        let bytes = self
             .provider
             .metadata()
             .context_budget
-            .map_or(FALLBACK_INPUT_BUDGET_BYTES, |budget| {
-                budget.input_budget_bytes
-            });
-        let allowance_bytes = (input_budget_bytes / 2).max(1);
+            .map_or(FALLBACK_INPUT_BUDGET_BYTES, |budget| budget.bytes);
+        let allowance_bytes = (bytes / 2).max(1);
         let operator_threshold_bytes =
-            (input_budget_bytes.saturating_mul(3) / 4).max(allowance_bytes.saturating_add(1));
+            (bytes.saturating_mul(3) / 4).max(allowance_bytes.saturating_add(1));
         Policy {
             allowance_bytes,
             operator_threshold_bytes,
@@ -51,15 +49,15 @@ impl Service {
     pub(super) fn memory_drive_gate(&self, strand: &Strand) -> Result<Gate, String> {
         let _guard = self.memory_pressure_lock.lock().unwrap();
         let policy = self.soul_memory_policy();
-        let snapshot = self.soul_memory_snapshot(&strand.soul_id)?;
-        self.reconcile_memory_intervention(&strand.soul_id, &snapshot, policy)?;
+        let snapshot = self.soul_memory_snapshot(&strand.soul)?;
+        self.reconcile_memory_intervention(&strand.soul, &snapshot, policy)?;
         if snapshot.source_bytes <= policy.allowance_bytes {
             return Ok(Gate::Allow);
         }
 
         let maintenance = self
             .store
-            .find_labeled_strand(&strand.soul_id, MEMORY_MAINTENANCE_LABEL)?;
+            .find_labeled_strand(&strand.soul, MEMORY_MAINTENANCE_LABEL)?;
         self.ensure_memory_maintenance_prompt(&maintenance, &snapshot, policy)?;
         if strand.id == maintenance.id {
             Ok(Gate::Allow)
@@ -70,34 +68,34 @@ impl Service {
         }
     }
 
-    pub(super) fn resume_after_memory_maintenance(&self, strand_id: &str) {
-        if let Err(error) = self.resume_memory_soul(strand_id) {
-            eprintln!("santi: soul memory relief scan failed strand_id={strand_id}: {error}");
+    pub(super) fn resume_after_memory_maintenance(&self, strand: &str) {
+        if let Err(error) = self.resume_memory_soul(strand) {
+            eprintln!("santi: soul memory relief scan failed strand={strand}: {error}");
         }
     }
 
-    fn resume_memory_soul(&self, strand_id: &str) -> Result<(), String> {
-        let Some(maintenance) = self.store.strand(strand_id)? else {
+    fn resume_memory_soul(&self, strand: &str) -> Result<(), String> {
+        let Some(maintenance) = self.store.strand(strand)? else {
             return Ok(());
         };
-        if maintenance.external_label.as_deref() != Some(MEMORY_MAINTENANCE_LABEL) {
+        if maintenance.label.as_deref() != Some(MEMORY_MAINTENANCE_LABEL) {
             return Ok(());
         }
         let policy = self.soul_memory_policy();
-        let snapshot = self.soul_memory_snapshot(&maintenance.soul_id)?;
-        self.reconcile_memory_intervention(&maintenance.soul_id, &snapshot, policy)?;
+        let snapshot = self.soul_memory_snapshot(&maintenance.soul)?;
+        self.reconcile_memory_intervention(&maintenance.soul, &snapshot, policy)?;
         if snapshot.source_bytes > policy.allowance_bytes {
             return Ok(());
         }
 
         for pending_id in self.store.strands_with_pending_requests()? {
-            if pending_id == strand_id {
+            if pending_id == strand {
                 continue;
             }
             let Some(pending) = self.store.strand(&pending_id)? else {
                 continue;
             };
-            if pending.soul_id == maintenance.soul_id {
+            if pending.soul == maintenance.soul {
                 let _ = self.poke(
                     &pending_id,
                     "strand_send",
@@ -109,8 +107,8 @@ impl Service {
         Ok(())
     }
 
-    fn soul_memory_snapshot(&self, soul_id: &str) -> Result<Snapshot, String> {
-        let path = self.soul_memory_file(soul_id);
+    fn soul_memory_snapshot(&self, soul: &str) -> Result<Snapshot, String> {
+        let path = self.soul_memory_file(soul);
         let bytes = match fs::read(path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
@@ -133,7 +131,7 @@ impl Service {
             .store
             .strand_messages(&maintenance.id)?
             .iter()
-            .any(|message| message.content_text.contains(&fingerprint));
+            .any(|message| message.text.contains(&fingerprint));
         let pending = self
             .store
             .pending_provider_items(&maintenance.id)?
@@ -148,7 +146,7 @@ impl Service {
             kind: MessageKind::SantiSystem,
             content: memory_maintenance_metaprompt(snapshot, policy),
             source: Some(
-                InboxSource::new("runtime_memory_pressure").with_ref(maintenance.soul_id.clone()),
+                InboxSource::new("runtime_memory_pressure").with_ref(maintenance.soul.clone()),
             ),
             admission: None,
             replay: None,
@@ -164,11 +162,11 @@ impl Service {
 
     fn reconcile_memory_intervention(
         &self,
-        soul_id: &str,
+        soul: &str,
         snapshot: &Snapshot,
         policy: Policy,
     ) -> Result<(), String> {
-        let key = memory_intervention_incident_key(soul_id);
+        let key = memory_intervention_incident_key(soul);
         let active = self.store.active_error_incident(&key)?;
         let mutated = if snapshot.source_bytes > policy.operator_threshold_bytes {
             if active.is_some() {
@@ -177,7 +175,7 @@ impl Service {
                 self.store.open_error_incident(santi_error::Draft {
                     key,
                     descriptor: catalog::SOUL_MEMORY_INTERVENTION_REQUIRED,
-                    scope: santi_error::Scope::new("soul", soul_id),
+                    scope: santi_error::Scope::new("soul", soul),
                     source: santi_error::Source::new("santi-core", "soul_memory_pressure"),
                     message: "soul memory exceeds the human-intervention threshold".to_string(),
                     context: json!({
@@ -246,9 +244,9 @@ fn provider_item_contains(item: &ProviderItem, needle: &str) -> bool {
     matches!(item, ProviderItem::Message { content, .. } if content.contains(needle))
 }
 
-fn memory_intervention_incident_key(soul_id: &str) -> String {
+fn memory_intervention_incident_key(soul: &str) -> String {
     format!(
-        "{}:soul:{soul_id}",
+        "{}:soul:{soul}",
         catalog::SOUL_MEMORY_INTERVENTION_REQUIRED.code
     )
 }
@@ -261,7 +259,7 @@ pub(super) fn drive_maintenance(service: &Service, maintenance_strand_id: &str) 
         "soul_memory_maintenance",
     ) {
         eprintln!(
-            "santi: memory maintenance drive failed strand_id={} code={}",
+            "santi: memory maintenance drive failed strand={} code={}",
             maintenance_strand_id, error.code
         );
     }

@@ -35,7 +35,7 @@ impl ProviderClient for BudgetedProvider {
             provider: Arc::from("budgeted-provider"),
             model: "budgeted-model".to_string(),
             context_budget: Some(ProviderContextBudget {
-                input_budget_bytes: 1,
+                bytes: 1,
                 source: "test".to_string(),
             }),
         }
@@ -43,7 +43,7 @@ impl ProviderClient for BudgetedProvider {
 
     async fn stream_response(&self, _request: ProviderRequest) -> Result<ProviderStream, String> {
         Ok(Box::pin(stream::iter(vec![Ok(ProviderEvent::Completed {
-            provider_response_id: None,
+            response: None,
         })])))
     }
 }
@@ -60,7 +60,7 @@ impl ProviderClient for DriverProvider {
 
     async fn stream_response(&self, _request: ProviderRequest) -> Result<ProviderStream, String> {
         Ok(Box::pin(stream::iter(vec![Ok(ProviderEvent::Completed {
-            provider_response_id: None,
+            response: None,
         })])))
     }
 }
@@ -70,7 +70,7 @@ fn classifies_errors() {
     assert_eq!(status("strand not found"), StatusCode::NOT_FOUND);
     assert_eq!(status("unknown soul: soul_x"), StatusCode::BAD_REQUEST);
     assert_eq!(
-        status("downstream credential_sha256 must be 64 hexadecimal characters"),
+        status("downstream digest must be 64 hexadecimal characters"),
         StatusCode::BAD_REQUEST
     );
     assert_eq!(
@@ -111,15 +111,15 @@ fn openapi_lists_error_surfaces() {
     let document = santi_api::export_openapi_json().expect("export openapi");
     assert!(document.contains("/api/v1/errors/{scope_kind}/{scope_id}"));
     assert!(document.contains("/api/v1/errors/events"));
-    assert!(document.contains("/api/v1/strands/{strand_id}/drive"));
-    assert!(document.contains("/api/v1/receipts/{inbox_id}"));
+    assert!(document.contains("/api/v1/strands/{strand}/drive"));
+    assert!(document.contains("/api/v1/receipts/{inbox}"));
     assert!(document.contains("/api/v1/effects/{effect_id}"));
     assert!(document.contains("/api/v1/effects/{effect_id}/resolve"));
     assert!(document.contains("EffectTransitionReason"));
     assert!(document.contains("IngestReceipt"));
     assert!(document.contains("/api/v1/turn-events/stream"));
     assert!(document.contains("TurnEventBatch"));
-    assert!(document.contains("request_id"));
+    assert!(document.contains("request"));
     assert!(document.contains("downstream_bearer"));
     assert!(!document.contains("credential_env"));
 }
@@ -130,7 +130,7 @@ async fn effect_http_roundtrip() {
     let database_path = temp.path().join("santi.sqlite");
     let store = SantiStore::open(&database_path).expect("open store");
     let strand = store.create_strand().expect("create strand");
-    let inbox_id = match store
+    let inbox = match store
         .enqueue_inbox(
             &strand.id,
             MessageKind::Text,
@@ -138,7 +138,7 @@ async fn effect_http_roundtrip() {
         )
         .expect("enqueue")
     {
-        IngestOutcome::Accepted { receipt } => receipt.inbox_id,
+        IngestOutcome::Accepted { receipt } => receipt.inbox,
         IngestOutcome::Rejected { .. } => panic!("unexpected rejection"),
     };
     let turn = store
@@ -186,7 +186,7 @@ async fn effect_http_roundtrip() {
         ),
     };
     assert_eq!(queried.effect.state, EffectState::Unknown);
-    assert_eq!(queried.receipt_ids, vec![inbox_id]);
+    assert_eq!(queried.receipts, vec![inbox]);
 
     let error = resolve_effect_handler(
         State(service.clone()),

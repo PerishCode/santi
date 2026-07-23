@@ -19,7 +19,7 @@ pub enum ProviderItem {
         name: String,
         arguments_raw: String,
         item: Option<Value>,
-        item_id: Option<String>,
+        mark: Option<String>,
     },
     FunctionCallOutput {
         call_id: String,
@@ -51,7 +51,7 @@ pub struct ProviderFunctionTool {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProviderFunctionCall {
     pub response_id: String,
-    pub item_id: Option<String>,
+    pub mark: Option<String>,
     pub item: Value,
     pub call_id: String,
     pub name: String,
@@ -79,26 +79,20 @@ pub struct ProviderMetadata {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderContextBudget {
-    pub input_budget_bytes: usize,
+    pub bytes: usize,
     pub source: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProviderEvent {
     StreamTrace(ProviderStreamTrace),
-    ResponseStarted {
-        provider_response_id: Option<String>,
-    },
-    ResponseInProgress {
-        provider_response_id: Option<String>,
-    },
+    ResponseStarted { response: Option<String> },
+    ResponseInProgress { response: Option<String> },
     ReasoningSummaryDelta(String),
     ReasoningSummaryDone(String),
     TextDelta(String),
     FunctionCallRequested(ProviderFunctionCall),
-    Completed {
-        provider_response_id: Option<String>,
-    },
+    Completed { response: Option<String> },
     Failed(String),
 }
 

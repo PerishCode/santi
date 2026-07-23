@@ -50,7 +50,7 @@ impl MessageContent {
         }
     }
 
-    pub fn content_text(&self) -> String {
+    pub fn rendered(&self) -> String {
         self.parts
             .iter()
             .filter_map(|part| match part {
@@ -77,40 +77,40 @@ impl MessageIntake {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Message {
     pub id: String,
-    pub actor_type: ActorType,
-    pub actor_id: String,
-    pub message_kind: MessageKind,
+    pub role: ActorType,
+    pub actor: String,
+    pub kind: MessageKind,
     pub content: MessageContent,
     pub state: MessageState,
     pub version: i64,
-    pub deleted_at: Option<Timestamp>,
-    pub created_at: Timestamp,
-    pub updated_at: Timestamp,
+    pub deleted: Option<Timestamp>,
+    pub created: Timestamp,
+    pub updated: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct StrandMessageRef {
-    pub strand_id: String,
-    pub message_id: String,
-    pub strand_seq: i64,
-    pub created_at: Timestamp,
+    pub strand: String,
+    pub message: String,
+    pub seq: i64,
+    pub created: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct StrandMessage {
     pub relation: StrandMessageRef,
     pub message: Message,
-    pub content_text: String,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct MessageEvent {
     pub id: String,
-    pub message_id: String,
+    pub message: String,
     pub action: String,
-    pub actor_type: ActorType,
-    pub actor_id: String,
+    pub role: ActorType,
+    pub actor: String,
     pub base_version: i64,
     pub payload: Value,
-    pub created_at: Timestamp,
+    pub created: Timestamp,
 }

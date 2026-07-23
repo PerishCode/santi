@@ -1,6 +1,6 @@
 use crate::{
     CreateWebhookRequest, InboxSource, IngestOutcome, MessageContent, MessageKind, Strand,
-    StrandSelector, prefixed_id, timestamp_now,
+    StrandSelector, now, tag,
 };
 pub(crate) use budget::Ingress;
 use rows::{Decode, collect_rows};
@@ -10,18 +10,18 @@ use super::{SantiStore, db::Database};
 use crate::store::{StartedTurn, budget, rows};
 
 impl SantiStore {
-    pub fn find_labeled_strand(&self, soul_id: &str, label: &str) -> Result<Strand, String> {
+    pub fn find_labeled_strand(&self, soul: &str, label: &str) -> Result<Strand, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let database = Database::new(&tx);
-        if database.soul_by_id(soul_id)?.is_none() {
+        if database.soul_by_id(soul)?.is_none() {
             return Err("soul not found".to_string());
         }
-        let strand_id = if let Some(existing) = database.strand_by_label(soul_id, label)? {
+        let strand = if let Some(existing) = database.strand_by_label(soul, label)? {
             existing.id
         } else {
-            let strand_id = prefixed_id("ss");
-            let now = timestamp_now();
+            let strand = tag("ss");
+            let now = now();
             tx.execute(
                 r#"
                 INSERT INTO strands (
@@ -30,45 +30,45 @@ impl SantiStore {
                 )
                 VALUES (?1, ?2, ?3, '', NULL, 1, 0, NULL, NULL, ?4, ?4)
                 "#,
-                params![strand_id, soul_id, label, now],
+                params![strand, soul, label, now],
             )
             .map_err(|error| error.to_string())?;
-            strand_id
+            strand
         };
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .strand_by_id(&strand_id)?
+            .strand_by_id(&strand)?
             .ok_or_else(|| "labeled strand missing".to_string())
     }
 
     pub fn resolve_strand_selector(&self, selector: &StrandSelector) -> Result<Strand, String> {
         match selector {
-            StrandSelector::ById(strand_id) => self
-                .strand(strand_id)?
+            StrandSelector::ById(strand) => self
+                .strand(strand)?
                 .ok_or_else(|| "strand not found".to_string()),
-            StrandSelector::ByLabel { soul_id, label } => self.find_labeled_strand(soul_id, label),
+            StrandSelector::ByLabel { soul, label } => self.find_labeled_strand(soul, label),
         }
     }
 
     pub fn enqueue_inbox(
         &self,
-        strand_id: &str,
-        message_kind: MessageKind,
+        strand: &str,
+        kind: MessageKind,
         content: MessageContent,
     ) -> Result<IngestOutcome, String> {
-        self.enqueue_inbox_with_source(strand_id, message_kind, content, None)
+        self.enqueue_inbox_with_source(strand, kind, content, None)
     }
 
     pub fn enqueue_inbox_with_source(
         &self,
-        strand_id: &str,
-        message_kind: MessageKind,
+        strand: &str,
+        kind: MessageKind,
         content: MessageContent,
         source: Option<InboxSource>,
     ) -> Result<IngestOutcome, String> {
         self.enqueue_inbox_with_context(Ingress {
-            strand: strand_id,
-            kind: message_kind,
+            strand,
+            kind,
             content,
             source,
             admission: None,
@@ -82,8 +82,8 @@ impl SantiStore {
         request: CreateWebhookRequest,
     ) -> Result<crate::WebhookSubscription, String> {
         let conn = self.conn.lock().unwrap();
-        let now = timestamp_now();
-        let strategy = request.strand_strategy.as_deref().unwrap_or("per_thread");
+        let now = now();
+        let strategy = request.strategy.as_deref().unwrap_or("per_thread");
         conn.execute(
             r#"
             INSERT INTO webhooks (
@@ -94,9 +94,9 @@ impl SantiStore {
             params![
                 request.name,
                 request.adaptor,
-                request.soul_id,
+                request.soul,
                 strategy,
-                request.secret_env,
+                request.credential,
                 now
             ],
         )
@@ -129,15 +129,15 @@ impl SantiStore {
 
     pub fn create_soul(&self) -> Result<crate::Soul, String> {
         let conn = self.conn.lock().unwrap();
-        let soul_id = prefixed_id("soul");
-        let now = timestamp_now();
+        let soul = tag("soul");
+        let now = now();
         conn.execute(
             "INSERT INTO souls (id, created_at, updated_at) VALUES (?1, ?2, ?2)",
-            params![soul_id, now],
+            params![soul, now],
         )
         .map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .soul_by_id(&soul_id)?
+            .soul_by_id(&soul)?
             .ok_or_else(|| "created soul missing".to_string())
     }
 
@@ -157,26 +157,26 @@ impl SantiStore {
         collect_rows(rows)
     }
 
-    pub fn soul(&self, soul_id: &str) -> Result<Option<crate::Soul>, String> {
+    pub fn soul(&self, soul: &str) -> Result<Option<crate::Soul>, String> {
         let conn = self.conn.lock().unwrap();
-        Database::new(&conn).soul_by_id(soul_id)
+        Database::new(&conn).soul_by_id(soul)
     }
 
-    pub fn strand(&self, strand_id: &str) -> Result<Option<Strand>, String> {
+    pub fn strand(&self, strand: &str) -> Result<Option<Strand>, String> {
         let conn = self.conn.lock().unwrap();
-        Database::new(&conn).strand_by_id(strand_id)
+        Database::new(&conn).strand_by_id(strand)
     }
 
-    pub fn soul_id_for_strand(&self, strand_id: &str) -> Result<String, String> {
-        self.strand(strand_id)?
-            .map(|strand| strand.soul_id)
+    pub fn soul_id_for_strand(&self, strand: &str) -> Result<String, String> {
+        self.strand(strand)?
+            .map(|strand| strand.soul)
             .ok_or_else(|| "strand not found".to_string())
     }
 
-    pub fn start_turn(&self, strand_id: &str, trigger_ref: &str) -> Result<StartedTurn, String> {
+    pub fn start_turn(&self, strand: &str, source: &str) -> Result<StartedTurn, String> {
         let conn = self.conn.lock().unwrap();
-        let turn_id = prefixed_id("turn");
-        let now = timestamp_now();
+        let turn = tag("turn");
+        let now = now();
         conn.execute(
             r#"
             INSERT INTO turns (
@@ -189,12 +189,12 @@ impl SantiStore {
             FROM strands
             WHERE id = ?2
             "#,
-            params![turn_id, strand_id, trigger_ref, now],
+            params![turn, strand, source, now],
         )
         .map_err(|error| error.to_string())?;
         Ok(StartedTurn {
             turn: Database::new(&conn)
-                .turn_by_id(&turn_id)?
+                .turn_by_id(&turn)?
                 .ok_or_else(|| "created turn missing".to_string())?,
             drained_messages: Vec::new(),
         })

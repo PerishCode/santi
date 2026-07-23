@@ -2,8 +2,8 @@ use super::*;
 
 #[utoipa::path(
     post,
-    path = "/api/v1/strands/{strand_id}/send",
-    params(("strand_id" = String, Path)),
+    path = "/api/v1/strands/{strand}/send",
+    params(("strand" = String, Path)),
     request_body = SendStrandRequest,
     responses(
         (status = 200, body = SendStrandAcceptedResponse),
@@ -15,11 +15,11 @@ use super::*;
 )]
 pub async fn send_strand(
     State(service): State<Service>,
-    Path(strand_id): Path<String>,
+    Path(strand): Path<String>,
     Json(request): Json<SendStrandRequest>,
 ) -> Result<Json<SendStrandAcceptedResponse>, ApiError> {
     service
-        .send_strand(&strand_id, request)
+        .send_strand(&strand, request)
         .await
         .map(Json)
         .map_err(ApiError::from_santi)
@@ -27,8 +27,8 @@ pub async fn send_strand(
 
 #[utoipa::path(
     post,
-    path = "/api/v1/strands/{strand_id}/drive",
-    params(("strand_id" = String, Path)),
+    path = "/api/v1/strands/{strand}/drive",
+    params(("strand" = String, Path)),
     responses(
         (status = 200, body = DriveStrandResponse),
         (status = 404, body = Fault),
@@ -39,18 +39,18 @@ pub async fn send_strand(
 )]
 pub async fn drive_strand(
     State(service): State<Service>,
-    Path(strand_id): Path<String>,
+    Path(strand): Path<String>,
 ) -> Result<Json<DriveStrandResponse>, ApiError> {
     service
-        .drive_strand(&strand_id)
+        .drive_strand(&strand)
         .map(Json)
         .map_err(|error| ApiError::from_santi(*error))
 }
 
 #[utoipa::path(
     post,
-    path = "/api/v1/strands/{strand_id}/fork",
-    params(("strand_id" = String, Path)),
+    path = "/api/v1/strands/{strand}/fork",
+    params(("strand" = String, Path)),
     responses(
         (status = 200, body = ForkStrandResponse),
         (status = 404, body = Fault),
@@ -59,18 +59,18 @@ pub async fn drive_strand(
 )]
 pub(super) async fn fork_strand(
     State(service): State<Service>,
-    Path(strand_id): Path<String>,
+    Path(strand): Path<String>,
 ) -> Result<Json<ForkStrandResponse>, ApiError> {
     service
-        .fork_strand(&strand_id)
+        .fork_strand(&strand)
         .map(Json)
         .map_err(ApiError::from_service)
 }
 
 #[utoipa::path(
     post,
-    path = "/api/v1/strands/{strand_id}/compact",
-    params(("strand_id" = String, Path)),
+    path = "/api/v1/strands/{strand}/compact",
+    params(("strand" = String, Path)),
     request_body = CompactExecRequest,
     responses(
         (status = 200, body = CompactExecResponse),
@@ -81,20 +81,20 @@ pub(super) async fn fork_strand(
 )]
 pub(super) async fn compact_exec(
     State(service): State<Service>,
-    Path(strand_id): Path<String>,
+    Path(strand): Path<String>,
     Json(request): Json<CompactExecRequest>,
 ) -> Result<Json<CompactExecResponse>, ApiError> {
     service
-        .compact_exec(&strand_id, request)
+        .compact_exec(&strand, request)
         .map(Json)
         .map_err(ApiError::from_service)
 }
 
 #[utoipa::path(
     get,
-    path = "/api/v1/compacts/{compact_id}",
+    path = "/api/v1/compacts/{compact}",
     params(
-        ("compact_id" = String, Path),
+        ("compact" = String, Path),
         ("keyword" = Option<String>, Query),
         ("page_index" = Option<i64>, Query),
         ("page_size" = Option<i64>, Query)
@@ -107,12 +107,12 @@ pub(super) async fn compact_exec(
 )]
 pub(super) async fn compact_query(
     State(service): State<Service>,
-    Path(compact_id): Path<String>,
+    Path(compact): Path<String>,
     Query(params): Query<CompactQueryParams>,
 ) -> Result<Json<CompactQueryResponse>, ApiError> {
     service
         .compact_query(
-            &compact_id,
+            &compact,
             params.keyword.as_deref(),
             params.page_index.unwrap_or(0),
             params.page_size.unwrap_or(50),
@@ -131,8 +131,8 @@ pub(super) struct CompactQueryParams {
 
 #[utoipa::path(
     get,
-    path = "/api/v1/strands/{strand_id}/runtime",
-    params(("strand_id" = String, Path)),
+    path = "/api/v1/strands/{strand}/runtime",
+    params(("strand" = String, Path)),
     responses(
         (status = 200, body = StrandRuntimeSnapshot),
         (status = 404, body = Fault),
@@ -141,10 +141,10 @@ pub(super) struct CompactQueryParams {
 )]
 pub(super) async fn runtime_snapshot(
     State(service): State<Service>,
-    Path(strand_id): Path<String>,
+    Path(strand): Path<String>,
 ) -> Result<Json<StrandRuntimeSnapshot>, ApiError> {
     service
-        .runtime_snapshot(&strand_id)
+        .runtime_snapshot(&strand)
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("strand not found"))
@@ -152,8 +152,8 @@ pub(super) async fn runtime_snapshot(
 
 #[utoipa::path(
     get,
-    path = "/api/v1/strands/{strand_id}/budget",
-    params(("strand_id" = String, Path)),
+    path = "/api/v1/strands/{strand}/budget",
+    params(("strand" = String, Path)),
     responses(
         (status = 200, body = StrandBudgetSnapshot),
         (status = 404, body = Fault),
@@ -162,10 +162,10 @@ pub(super) async fn runtime_snapshot(
 )]
 pub(super) async fn strand_budget(
     State(service): State<Service>,
-    Path(strand_id): Path<String>,
+    Path(strand): Path<String>,
 ) -> Result<Json<StrandBudgetSnapshot>, ApiError> {
     service
-        .strand_budget(&strand_id)
+        .strand_budget(&strand)
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("strand not found"))

@@ -23,13 +23,13 @@ impl Service {
         if update.assistant_text.is_empty() {
             update.timing.first_text_delta(update.round);
             self.complete_current_thinking_span(
-                update.address.strand_id,
+                update.address.strand,
                 update.current_thinking_span,
                 ThinkingCompletionReason::FirstTextDelta,
             )?;
             self.publish_turn_activity(
-                update.address.strand_id,
-                update.address.turn_id,
+                update.address.strand,
+                update.address.turn,
                 TurnActivityState::Generating,
                 update.active_provider_response_id.clone(),
             );
@@ -37,10 +37,10 @@ impl Service {
         update.assistant_text.push_str(&delta);
         update.round_assistant_text.push_str(&delta);
         self.publish_stream(
-            update.address.strand_id,
+            update.address.strand,
             SantiStreamPayload::MessageDelta {
-                message_id: format!("stream_{}", update.address.turn_id),
-                turn_id: update.address.turn_id.to_string(),
+                message: format!("stream_{}", update.address.turn),
+                turn: update.address.turn.to_string(),
                 role: ActorType::Soul,
                 text: delta,
             },

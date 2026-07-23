@@ -28,7 +28,7 @@ pub struct HealthResponse {
     pub ok: bool,
     pub service: String,
     pub degraded: bool,
-    pub active_drive_incidents: i64,
+    pub incidents: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq, Hash)]
@@ -44,40 +44,40 @@ pub struct MaterialRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct StrandMaterial {
-    pub strand_id: String,
+    pub strand: String,
     pub kind: MaterialKind,
     pub content_type: String,
     pub text: String,
-    pub updated_at: Timestamp,
+    pub updated: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct MaterialUpdated {
-    pub strand_id: String,
+    pub strand: String,
     pub kind: MaterialKind,
-    pub updated_at: Timestamp,
+    pub updated: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Soul {
     pub id: String,
-    pub created_at: Timestamp,
-    pub updated_at: Timestamp,
+    pub created: Timestamp,
+    pub updated: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Strand {
     pub id: String,
-    pub soul_id: String,
-    pub external_label: Option<String>,
-    pub strand_memory: String,
-    pub provider_state: Option<Value>,
-    pub next_seq: i64,
-    pub last_seen_strand_seq: i64,
-    pub parent_strand_id: Option<String>,
-    pub fork_point: Option<i64>,
-    pub created_at: Timestamp,
-    pub updated_at: Timestamp,
+    pub soul: String,
+    pub label: Option<String>,
+    pub memory: String,
+    pub state: Option<Value>,
+    pub next: i64,
+    pub seen: i64,
+    pub parent: Option<String>,
+    pub fork: Option<i64>,
+    pub created: Timestamp,
+    pub updated: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
@@ -98,42 +98,42 @@ pub enum TurnStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Turn {
     pub id: String,
-    pub strand_id: String,
-    pub trigger_type: TurnTriggerType,
-    pub trigger_ref: Option<String>,
-    pub base_strand_seq: i64,
-    pub end_strand_seq: Option<i64>,
+    pub strand: String,
+    pub trigger: TurnTriggerType,
+    pub source: Option<String>,
+    pub from: i64,
+    pub to: Option<i64>,
     pub status: TurnStatus,
-    pub error_text: Option<String>,
-    pub created_at: Timestamp,
-    pub updated_at: Timestamp,
-    pub finished_at: Option<Timestamp>,
+    pub error: Option<String>,
+    pub created: Timestamp,
+    pub updated: Timestamp,
+    pub finished: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ToolCall {
     pub id: String,
-    pub turn_id: String,
-    pub tool_name: String,
+    pub turn: String,
+    pub tool: String,
     pub arguments: Value,
-    pub created_at: Timestamp,
+    pub created: Timestamp,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct ToolCallProvenance {
-    pub provider_family: String,
+    pub family: String,
     pub item: Option<Value>,
-    pub item_id: Option<String>,
+    pub mark: Option<String>,
     pub response_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ToolResult {
     pub id: String,
-    pub tool_call_id: String,
+    pub call: String,
     pub output: Option<Value>,
-    pub error_text: Option<String>,
-    pub created_at: Timestamp,
+    pub error: Option<String>,
+    pub created: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
@@ -155,15 +155,15 @@ pub enum ThinkingCompletionReason {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ThinkingSpan {
     pub id: String,
-    pub turn_id: String,
-    pub provider_response_id: Option<String>,
+    pub turn: String,
+    pub response: Option<String>,
     pub state: ThinkingSpanState,
     pub summary: Option<String>,
     pub completion_reason: Option<ThinkingCompletionReason>,
-    pub error_text: Option<String>,
-    pub created_at: Timestamp,
-    pub updated_at: Timestamp,
-    pub finished_at: Option<Timestamp>,
+    pub error: Option<String>,
+    pub created: Timestamp,
+    pub updated: Timestamp,
+    pub finished: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
@@ -178,14 +178,14 @@ pub enum StrandTargetType {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct StrandEntry {
-    pub strand_id: String,
-    pub target_type: StrandTargetType,
-    pub target_id: String,
-    pub strand_seq: i64,
-    pub created_at: Timestamp,
+    pub strand: String,
+    pub kind: StrandTargetType,
+    pub target: String,
+    pub seq: i64,
+    pub created: Timestamp,
 }
 
-pub fn timestamp_now() -> Timestamp {
+pub fn now() -> Timestamp {
     use jiff::fmt::temporal::DateTimePrinter;
 
     let now = jiff::Timestamp::now();
@@ -197,7 +197,7 @@ pub fn timestamp_now() -> Timestamp {
     buf
 }
 
-pub fn timestamp_from_system_time(system_time: std::time::SystemTime) -> Result<Timestamp, String> {
+pub fn stamped(system_time: std::time::SystemTime) -> Result<Timestamp, String> {
     use jiff::fmt::temporal::DateTimePrinter;
 
     let timestamp = jiff::Timestamp::try_from(system_time).map_err(|error| error.to_string())?;
@@ -209,6 +209,6 @@ pub fn timestamp_from_system_time(system_time: std::time::SystemTime) -> Result<
     Ok(buf)
 }
 
-pub fn prefixed_id(prefix: &str) -> String {
+pub fn tag(prefix: &str) -> String {
     format!("{prefix}_{}", uuid::Uuid::new_v4().simple())
 }

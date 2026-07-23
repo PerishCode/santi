@@ -41,7 +41,7 @@ impl ProviderClient for BudgetProvider {
             BudgetProviderStep::Fail(error) => Err(error),
             BudgetProviderStep::Complete => {
                 Ok(Box::pin(stream::iter(vec![Ok(ProviderEvent::Completed {
-                    provider_response_id: Some(format!("resp_{index}")),
+                    response: Some(format!("resp_{index}")),
                 })])))
             }
             BudgetProviderStep::Calls {
@@ -71,7 +71,7 @@ fn tool_events(
         events.push(Ok(ProviderEvent::FunctionCallRequested(
             ProviderFunctionCall {
                 response_id: response_id.clone(),
-                item_id: Some(format!("item_{call_id}")),
+                mark: Some(format!("item_{call_id}")),
                 item: json!({
                     "type": "function_call",
                     "id": format!("item_{call_id}"),
@@ -87,7 +87,7 @@ fn tool_events(
         )));
     }
     events.push(Ok(ProviderEvent::Completed {
-        provider_response_id: Some(format!("resp_{index}")),
+        response: Some(format!("resp_{index}")),
     }));
     events
 }
@@ -102,17 +102,17 @@ fn output_command(bytes: usize) -> String {
 }
 
 fn execution_budget(
-    max_provider_rounds: usize,
-    max_tool_calls: usize,
-    max_tool_output_bytes: usize,
-    max_shell_output_bytes: usize,
+    rounds: usize,
+    calls: usize,
+    output: usize,
+    shell: usize,
 ) -> santi_core::Execution {
     santi_core::Execution {
         profile: "test_budget".to_string(),
-        max_provider_rounds,
-        max_tool_calls,
-        max_tool_output_bytes,
-        max_shell_output_bytes,
+        rounds,
+        calls,
+        output,
+        shell,
     }
 }
 
@@ -181,16 +181,13 @@ async fn dispatches_tools() {
         runtime
             .messages
             .iter()
-            .any(|message| message.content_text == "hi from runtime")
+            .any(|message| message.text == "hi from runtime")
     );
-    assert_eq!(runtime.tool_calls.len(), 1);
-    assert_eq!(runtime.tool_calls[0].tool_name, "shell");
-    assert_eq!(runtime.tool_results.len(), 1);
-    assert!(runtime.tool_results[0].error_text.is_none());
-    let output = runtime.tool_results[0]
-        .output
-        .as_ref()
-        .expect("tool output");
+    assert_eq!(runtime.calls.len(), 1);
+    assert_eq!(runtime.calls[0].tool, "shell");
+    assert_eq!(runtime.results.len(), 1);
+    assert!(runtime.results[0].error.is_none());
+    let output = runtime.results[0].output.as_ref().expect("tool output");
     let stdout = output
         .get("stdout")
         .and_then(|value| value.as_str())
@@ -220,12 +217,12 @@ async fn dispatches_tools() {
 
     assert_eq!(runtime.effects.len(), 1);
     let effect = &runtime.effects[0];
-    assert_eq!(effect.tool_call_id.as_deref(), Some("call_shell"));
-    assert_eq!(effect.effect_type, "shell");
+    assert_eq!(effect.call.as_deref(), Some("call_shell"));
+    assert_eq!(effect.kind, "shell");
     assert_eq!(effect.state, EffectState::Confirmed);
     assert_eq!(
-        effect.result_ref.as_deref(),
-        Some(runtime.tool_results[0].id.as_str())
+        effect.result.as_deref(),
+        Some(runtime.results[0].id.as_str())
     );
     let effect_status = service
         .effect_status(&effect.id)
@@ -252,12 +249,9 @@ async fn dispatches_tools() {
             ),
         ]
     );
-    assert_eq!(
-        effect_status.receipt_ids,
-        vec![response.receipt.inbox_id.clone()]
-    );
+    assert_eq!(effect_status.receipts, vec![response.receipt.inbox.clone()]);
     let receipt = service
-        .receipt_status(&response.receipt.inbox_id)
+        .receipt_status(&response.receipt.inbox)
         .expect("query receipt")
         .expect("receipt");
     assert_eq!(receipt.effects.len(), 1);

@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 use super::Database;
 use crate::SANTI_SYSTEM_ACTOR_ID;
-use santi_model::{StrandMessage, StrandTargetType, prefixed_id, timestamp_now};
+use santi_model::{StrandMessage, StrandTargetType, now, tag};
 
 pub struct DrainedInbox {
     pub messages: Vec<StrandMessage>,
@@ -12,7 +12,7 @@ pub struct DrainedInbox {
 
 pub fn drain_inbox_in_tx(
     conn: &Connection,
-    strand_id: &str,
+    strand: &str,
     committing_turn_id: &str,
 ) -> Result<DrainedInbox, String> {
     let mut stmt = conn
@@ -26,13 +26,13 @@ pub fn drain_inbox_in_tx(
         )
         .map_err(|error| error.to_string())?;
     let pending = stmt
-        .query_map(params![strand_id], |row| {
+        .query_map(params![strand], |row| {
             Ok(PendingInboxEntry {
                 id: row.get(0)?,
-                message_kind: row.get(1)?,
+                kind: row.get(1)?,
                 content: row.get(2)?,
-                source_type: row.get(3)?,
-                source_ref: row.get(4)?,
+                origin: row.get(3)?,
+                source: row.get(4)?,
                 source_metadata: row.get(5)?,
                 enqueued_at: row.get(6)?,
             })
@@ -42,11 +42,11 @@ pub fn drain_inbox_in_tx(
         .map_err(|error| error.to_string())?;
     drop(stmt);
 
-    let now = timestamp_now();
+    let now = now();
     let mut drained = Vec::with_capacity(pending.len());
     let mut inbox_ids = Vec::with_capacity(pending.len());
     for pending_entry in pending {
-        let message_id = prefixed_id("msg");
+        let message = tag("msg");
         conn.execute(
             r#"
             INSERT INTO messages (
@@ -56,21 +56,20 @@ pub fn drain_inbox_in_tx(
             VALUES (?1, 'system', ?2, ?3, ?4, 'fixed', 1, 1, NULL, ?5, ?5)
             "#,
             params![
-                message_id,
+                message,
                 SANTI_SYSTEM_ACTOR_ID,
-                pending_entry.message_kind.as_str(),
+                pending_entry.kind.as_str(),
                 pending_entry.content.as_str(),
                 now
             ],
         )
         .map_err(|error| error.to_string())?;
         let database = Database::new(conn);
-        let relation =
-            database.append_entry_in_tx(strand_id, StrandTargetType::Message, &message_id)?;
+        let relation = database.append_entry_in_tx(strand, StrandTargetType::Message, &message)?;
         database.insert_drain(Drain {
             pending: &pending_entry,
-            message: &message_id,
-            sequence: relation.strand_seq,
+            message: &message,
+            sequence: relation.seq,
             turn: committing_turn_id,
             at: &now,
         })?;
@@ -82,7 +81,7 @@ pub fn drain_inbox_in_tx(
         inbox_ids.push(pending_entry.id.clone());
         drained.push(
             database
-                .message_by_id(&message_id)?
+                .message_by_id(&message)?
                 .ok_or_else(|| "drained message missing".to_string())?,
         );
     }
@@ -94,10 +93,10 @@ pub fn drain_inbox_in_tx(
 
 struct PendingInboxEntry {
     id: String,
-    message_kind: String,
+    kind: String,
     content: String,
-    source_type: Option<String>,
-    source_ref: Option<String>,
+    origin: Option<String>,
+    source: Option<String>,
     source_metadata: Option<String>,
     enqueued_at: String,
 }
@@ -117,15 +116,15 @@ impl Database<'_> {
         });
         let payload = json!({
             "kind": "inbox_drain",
-            "inbox_id": drain.pending.id.as_str(),
+            "inbox": drain.pending.id.as_str(),
             "enqueued_at": drain.pending.enqueued_at.as_str(),
             "drained_at": drain.at,
             "committing_turn_id": drain.turn,
-            "message_id": drain.message,
-            "strand_seq": drain.sequence,
+            "message": drain.message,
+            "seq": drain.sequence,
             "source": {
-                "type": drain.pending.source_type.as_deref(),
-                "ref": drain.pending.source_ref.as_deref(),
+                "type": drain.pending.origin.as_deref(),
+                "ref": drain.pending.source.as_deref(),
                 "metadata": source_metadata,
             }
         });
@@ -138,7 +137,7 @@ impl Database<'_> {
                 VALUES (?1, ?2, 'insert', 'system', ?3, 1, ?4, ?5)
                 "#,
                 params![
-                    prefixed_id("mev"),
+                    tag("mev"),
                     drain.message,
                     SANTI_SYSTEM_ACTOR_ID,
                     payload.to_string(),

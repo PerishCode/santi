@@ -27,9 +27,9 @@ pub(in crate::service) enum Event {
 }
 
 impl Event {
-    fn turn_id(&self) -> &str {
+    fn turn(&self) -> &str {
         match self {
-            Self::Observed(event) => &event.address.turn_id,
+            Self::Observed(event) => &event.address.turn,
         }
     }
 
@@ -46,16 +46,16 @@ pub(in crate::service) struct Observed {
     pub(in crate::service) round: usize,
     pub(in crate::service) provider: String,
     pub(in crate::service) model: String,
-    pub(in crate::service) input_items: usize,
-    pub(in crate::service) input_bytes: usize,
-    pub(in crate::service) instructions_bytes: usize,
+    pub(in crate::service) items: usize,
+    pub(in crate::service) input: usize,
+    pub(in crate::service) instructions: usize,
     pub(in crate::service) reference_threshold_bytes: usize,
     pub(in crate::service) band: String,
 }
 
 impl Observed {
     fn total_input_bytes(&self) -> usize {
-        self.input_bytes.saturating_add(self.instructions_bytes)
+        self.input.saturating_add(self.instructions)
     }
 
     fn should_remind(&self) -> bool {
@@ -66,7 +66,7 @@ impl Observed {
         self.should_remind().then(|| {
             format!(
                 "compact_reminder:{}:{}:{}",
-                self.address.strand_id, self.reference_threshold_bytes, self.band
+                self.address.strand, self.reference_threshold_bytes, self.band
             )
         })
     }
@@ -117,12 +117,12 @@ impl Bus {
         true
     }
 
-    pub(in crate::service) fn drain_for_turn(&self, turn_id: &str) -> Vec<Event> {
+    pub(in crate::service) fn drain_for_turn(&self, turn: &str) -> Vec<Event> {
         let mut state = self.inner.lock().unwrap();
         let mut drained = Vec::new();
         let mut kept = VecDeque::with_capacity(state.queue.len());
         while let Some(event) = state.queue.pop_front() {
-            if event.turn_id() == turn_id {
+            if event.turn() == turn {
                 drained.push(event);
             } else {
                 kept.push_back(event);
@@ -141,24 +141,24 @@ impl Default for Bus {
 
 impl Service {
     pub(in crate::service) fn observe_provider_input(&self, observation: Observation<'_>) {
-        let input_bytes = provider_input_bytes(observation.input);
-        let instructions_bytes = observation.instructions.map_or(0, str::len);
+        let input = provider_input_bytes(observation.input);
+        let instructions = observation.instructions.map_or(0, str::len);
         let event = Observed {
             address: observation.address.owned(),
             round: observation.round,
             provider: observation.provider.to_string(),
             model: observation.model.to_string(),
-            input_items: observation.input.len(),
-            input_bytes,
-            instructions_bytes,
+            items: observation.input.len(),
+            input,
+            instructions,
             reference_threshold_bytes: COMPACT_REMINDER_REFERENCE_BYTES,
             band: "soft".to_string(),
         };
         let _ = self.runtime_notices.publish(Event::Observed(event));
     }
 
-    pub(in crate::service) fn drain_runtime_notices(&self, turn_id: &str) {
-        for event in self.runtime_notices.drain_for_turn(turn_id) {
+    pub(in crate::service) fn drain_runtime_notices(&self, turn: &str) {
+        for event in self.runtime_notices.drain_for_turn(turn) {
             if let Err(error) = self.handle_internal_runtime_event(event) {
                 eprintln!("santi: internal runtime notice failed: {error}");
             }
@@ -177,12 +177,12 @@ impl Service {
         }
         let content = compact_reminder_message(&event);
         let message = self.store.append_santi_system_message(
-            &event.address.strand_id,
+            &event.address.strand,
             content,
             MessageIntake::Record,
         )?;
         self.publish_stream(
-            &event.address.strand_id,
+            &event.address.strand,
             SantiStreamPayload::MessageCreated {
                 message: message.strand_message,
             },
@@ -199,13 +199,13 @@ fn compact_reminder_message(event: &Observed) -> MessageContent {
             "scope: strand_local".to_string(),
             "wake: false".to_string(),
             "obligation: false".to_string(),
-            format!("trigger_turn_id: {}", event.address.turn_id),
+            format!("trigger_turn_id: {}", event.address.turn),
             format!("round: {}", event.round),
             format!("provider: {}", event.provider),
             format!("model: {}", event.model),
-            format!("input_items: {}", event.input_items),
-            format!("input_bytes: {}", event.input_bytes),
-            format!("instructions_bytes: {}", event.instructions_bytes),
+            format!("items: {}", event.items),
+            format!("input: {}", event.input),
+            format!("instructions: {}", event.instructions),
             format!("total_input_bytes: {}", event.total_input_bytes()),
             format!(
                 "reference_threshold_bytes: {}",
@@ -234,12 +234,12 @@ fn provider_item_bytes(item: &ProviderItem) -> usize {
             name,
             arguments_raw,
             item,
-            item_id,
+            mark,
         } => call_id
             .len()
             .saturating_add(name.len())
             .saturating_add(arguments_raw.len())
-            .saturating_add(item_id.as_ref().map_or(0, String::len))
+            .saturating_add(mark.as_ref().map_or(0, String::len))
             .saturating_add(item.as_ref().map_or(0, |value| value.to_string().len())),
         ProviderItem::FunctionCallOutput { call_id, output } => {
             call_id.len().saturating_add(output.len())

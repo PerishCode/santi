@@ -31,24 +31,21 @@ pub(super) fn router(service: Service) -> Router {
         .route("/api/v1/openapi.json", get(openapi))
         .route("/api/v1/strands", post(create_strand).get(list_strands))
         .route("/api/v1/souls", post(create_soul).get(list_souls))
-        .route("/api/v1/souls/{soul_id}", get(get_soul))
+        .route("/api/v1/souls/{soul}", get(get_soul))
         .route("/api/v1/webhooks", post(create_webhook).get(list_webhooks))
-        .route("/api/v1/strands/{strand_id}", get(get_strand))
-        .route("/api/v1/strands/{strand_id}/messages", get(list_messages))
-        .route(
-            "/api/v1/strands/{strand_id}/materials",
-            post(strand_material),
-        )
-        .route("/api/v1/strands/{strand_id}/events", get(strand_events))
-        .route("/api/v1/strands/{strand_id}/send", post(send_strand))
-        .route("/api/v1/strands/{strand_id}/drive", post(drive_strand))
-        .route("/api/v1/strands/{strand_id}/fork", post(fork_strand))
-        .route("/api/v1/strands/{strand_id}/compact", post(compact_exec))
-        .route("/api/v1/strands/{strand_id}/budget", get(strand_budget))
-        .route("/api/v1/strands/{strand_id}/errors", get(strand_errors))
+        .route("/api/v1/strands/{strand}", get(get_strand))
+        .route("/api/v1/strands/{strand}/messages", get(list_messages))
+        .route("/api/v1/strands/{strand}/materials", post(strand_material))
+        .route("/api/v1/strands/{strand}/events", get(strand_events))
+        .route("/api/v1/strands/{strand}/send", post(send_strand))
+        .route("/api/v1/strands/{strand}/drive", post(drive_strand))
+        .route("/api/v1/strands/{strand}/fork", post(fork_strand))
+        .route("/api/v1/strands/{strand}/compact", post(compact_exec))
+        .route("/api/v1/strands/{strand}/budget", get(strand_budget))
+        .route("/api/v1/strands/{strand}/errors", get(strand_errors))
         .route("/api/v1/errors/events", get(error_events))
         .route("/api/v1/errors/{scope_kind}/{scope_id}", get(errors))
-        .route("/api/v1/receipts/{inbox_id}", get(receipt_status))
+        .route("/api/v1/receipts/{inbox}", get(receipt_status))
         .route(
             "/api/v1/effects/{effect_id}",
             get(super::effects::effect_status),
@@ -57,8 +54,8 @@ pub(super) fn router(service: Service) -> Router {
             "/api/v1/effects/{effect_id}/resolve",
             post(super::effects::resolve_effect),
         )
-        .route("/api/v1/compacts/{compact_id}", get(compact_query))
-        .route("/api/v1/strands/{strand_id}/runtime", get(runtime_snapshot))
+        .route("/api/v1/compacts/{compact}", get(compact_query))
+        .route("/api/v1/strands/{strand}/runtime", get(runtime_snapshot))
         .route("/api/v1/turn-events", get(turn_events))
         .route("/api/v1/turn-events/stream", get(turn_event_stream))
         .route(
@@ -67,7 +64,7 @@ pub(super) fn router(service: Service) -> Router {
         )
         .route("/api/v1/ingest", post(ingest))
         .route(
-            "/api/v1/bucket/{soul_id}/{strand_id}/{*key}",
+            "/api/v1/bucket/{soul}/{strand}/{*key}",
             get(crate::bucket::get_bucket_object),
         );
 
@@ -102,8 +99,8 @@ async fn missing() -> impl IntoResponse {
     )
 )]
 pub async fn health(State(service): State<Service>) -> impl IntoResponse {
-    let active_drive_incidents = service.active_drive_incident_count();
-    let degraded = service.is_drive_degraded() || active_drive_incidents > 0;
+    let incidents = service.active_drive_incident_count();
+    let degraded = service.is_drive_degraded() || incidents > 0;
     let status = if degraded {
         StatusCode::SERVICE_UNAVAILABLE
     } else {
@@ -115,7 +112,7 @@ pub async fn health(State(service): State<Service>) -> impl IntoResponse {
             ok: !degraded,
             degraded,
             service: "santi-api".to_string(),
-            active_drive_incidents,
+            incidents,
         }),
     )
 }

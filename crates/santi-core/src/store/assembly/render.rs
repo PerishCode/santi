@@ -14,41 +14,37 @@ struct Items<'a> {
 
 pub(super) fn assembly_input_with_preview(
     conn: &rusqlite::Connection,
-    strand_id: &str,
+    strand: &str,
     preview: Option<Preview<'_>>,
 ) -> Result<Vec<ProviderItem>, String> {
     let mut overlay: Vec<Overlay> = Vec::new();
     let items = Items {
         db: Database::new(conn),
     };
-    for compact in items.db.compacts_for_strand(strand_id)? {
+    for compact in items.db.compacts_for_strand(strand)? {
         if preview
             .as_ref()
             .is_some_and(|preview| preview.absorbed.iter().any(|id| id == &compact.id))
         {
             continue;
         }
-        if let (Some(from_seq), Some(to_seq)) = (
-            items
-                .db
-                .message_seq_in_strand(strand_id, &compact.start_message_id)?,
-            items
-                .db
-                .message_seq_in_strand(strand_id, &compact.end_message_id)?,
+        if let (Some(from), Some(to)) = (
+            items.db.message_seq_in_strand(strand, &compact.first)?,
+            items.db.message_seq_in_strand(strand, &compact.last)?,
         ) {
             overlay.push(Overlay {
                 span: Span {
-                    start_seq: from_seq,
-                    end_seq: to_seq,
+                    start_seq: from,
+                    end_seq: to,
                 },
                 content: render_compact_for_provider(
                     &compact,
                     Range {
                         span: Span {
-                            start_seq: from_seq,
-                            end_seq: to_seq,
+                            start_seq: from,
+                            end_seq: to,
                         },
-                        collapsed_count: to_seq.saturating_sub(from_seq).saturating_add(1),
+                        collapsed_count: to.saturating_sub(from).saturating_add(1),
                     },
                 ),
             });
@@ -76,7 +72,7 @@ pub(super) fn assembly_input_with_preview(
         )
         .map_err(|error| error.to_string())?;
     let rows = stmt
-        .query_map(params![strand_id], |row| {
+        .query_map(params![strand], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,
@@ -88,7 +84,7 @@ pub(super) fn assembly_input_with_preview(
     let mut overlay_index = 0usize;
     let mut overlay_emitted = false;
     for row in rows {
-        let (seq, target_type, target_id) = row.map_err(|error| error.to_string())?;
+        let (seq, kind, target) = row.map_err(|error| error.to_string())?;
         while overlay_index < overlay.len() && overlay[overlay_index].span.end_seq < seq {
             overlay_index += 1;
             overlay_emitted = false;
@@ -103,7 +99,7 @@ pub(super) fn assembly_input_with_preview(
             }
             continue;
         }
-        if let Some(item) = items.provider(&target_type, &target_id)? {
+        if let Some(item) = items.provider(&kind, &target)? {
             input.push(item);
         }
     }
@@ -111,64 +107,64 @@ pub(super) fn assembly_input_with_preview(
 }
 
 impl Items<'_> {
-    fn provider(&self, target_type: &str, target_id: &str) -> Result<Option<ProviderItem>, String> {
-        match target_type {
-            "message" => self.message(target_id),
-            "thinking" => self.thinking(target_id),
-            "tool_call" => self.tool_call(target_id),
-            "tool_result" => self.tool_result(target_id),
+    fn provider(&self, kind: &str, target: &str) -> Result<Option<ProviderItem>, String> {
+        match kind {
+            "message" => self.message(target),
+            "thinking" => self.thinking(target),
+            "tool_call" => self.tool_call(target),
+            "tool_result" => self.tool_result(target),
             _ => Ok(None),
         }
     }
 
-    fn message(&self, target_id: &str) -> Result<Option<ProviderItem>, String> {
-        let Some(message) = self.db.message_record_by_id(target_id)? else {
+    fn message(&self, target: &str) -> Result<Option<ProviderItem>, String> {
+        let Some(message) = self.db.message_record_by_id(target)? else {
             return Ok(None);
         };
         Ok(message_to_provider_item(&message))
     }
 
-    fn thinking(&self, target_id: &str) -> Result<Option<ProviderItem>, String> {
-        let Some(thinking) = self.db.thinking_span_by_id(target_id)? else {
+    fn thinking(&self, target: &str) -> Result<Option<ProviderItem>, String> {
+        let Some(thinking) = self.db.thinking_span_by_id(target)? else {
             return Ok(None);
         };
         let Some(content) = thinking.summary.filter(|text| !text.trim().is_empty()) else {
             return Ok(None);
         };
         Ok(Some(ProviderItem::Reasoning {
-            id: thinking.provider_response_id,
+            id: thinking.response,
             content,
         }))
     }
 
-    fn tool_call(&self, target_id: &str) -> Result<Option<ProviderItem>, String> {
-        let Some(tool_call) = self.db.tool_call_by_id(target_id)? else {
+    fn tool_call(&self, target: &str) -> Result<Option<ProviderItem>, String> {
+        let Some(tool_call) = self.db.tool_call_by_id(target)? else {
             return Ok(None);
         };
-        let (item, item_id) = self.db.regenerable_replay_material(&tool_call.id)?;
+        let (item, mark) = self.db.regenerable_replay_material(&tool_call.id)?;
         let arguments_raw =
             serde_json::to_string(&tool_call.arguments).map_err(|error| error.to_string())?;
         Ok(Some(ProviderItem::FunctionCall {
             call_id: tool_call.id,
-            name: tool_call.tool_name,
+            name: tool_call.tool,
             arguments_raw,
             item,
-            item_id,
+            mark,
         }))
     }
 
-    fn tool_result(&self, target_id: &str) -> Result<Option<ProviderItem>, String> {
-        let Some(tool_result) = self.db.tool_result_by_id(target_id)? else {
+    fn tool_result(&self, target: &str) -> Result<Option<ProviderItem>, String> {
+        let Some(tool_result) = self.db.tool_result_by_id(target)? else {
             return Ok(None);
         };
         let output = serde_json::to_string(&json!({
-            "ok": tool_result.error_text.is_none(),
+            "ok": tool_result.error.is_none(),
             "output": tool_result.output,
-            "error": tool_result.error_text,
+            "error": tool_result.error,
         }))
         .map_err(|error| error.to_string())?;
         Ok(Some(ProviderItem::FunctionCallOutput {
-            call_id: tool_result.tool_call_id,
+            call_id: tool_result.call,
             output,
         }))
     }
@@ -194,31 +190,31 @@ pub(super) fn render_compact_for_provider(
         .and_then(|range| range.get("collapsed_count"))
         .and_then(|value| value.as_i64());
     let pre_total = metadata
-        .and_then(|metadata| metadata.get("pre_estimate"))
-        .and_then(|estimate| estimate.get("total_bytes"))
+        .and_then(|metadata| metadata.get("before"))
+        .and_then(|estimate| estimate.get("total"))
         .and_then(|value| value.as_i64());
     let post_total = metadata
-        .and_then(|metadata| metadata.get("post_estimate"))
-        .and_then(|estimate| estimate.get("total_bytes"))
+        .and_then(|metadata| metadata.get("after"))
+        .and_then(|estimate| estimate.get("total"))
         .and_then(|value| value.as_i64());
     let budget = metadata
         .and_then(|metadata| metadata.get("budget"))
-        .and_then(|budget| budget.get("input_budget_bytes"))
+        .and_then(|budget| budget.get("bytes"))
         .and_then(|value| value.as_i64());
     let ratio = metadata
-        .and_then(|metadata| metadata.get("compression_ratio"))
+        .and_then(|metadata| metadata.get("ratio"))
         .and_then(|value| value.as_f64());
     let header = json!({
         "schema": "santi.compact_projection.visible_header.v1",
-        "compact_id": compact.id,
+        "compact": compact.id,
         "operation": metadata_str(metadata, "operation")
             .unwrap_or(if is_capsule { "manual_capsule" } else { "compact_projection" }),
         "declared_source": metadata_str(metadata, "declared_source").unwrap_or("not_declared"),
         "source_trust": metadata_str(metadata, "source_trust")
             .unwrap_or(if is_capsule { "caller_declared" } else { "not_declared" }),
         "covered_message_range": {
-            "start_message_id": compact.start_message_id,
-            "end_message_id": compact.end_message_id,
+            "first": compact.first,
+            "last": compact.last,
         },
         "covered_strand_seq": {
             "start_seq": start_seq.unwrap_or(fallback_range.span.start_seq),
@@ -236,7 +232,7 @@ pub(super) fn render_compact_for_provider(
             "pre_total_bytes": pre_total,
             "post_total_bytes": post_total,
             "budget_input_bytes": budget,
-            "compression_ratio": ratio,
+            "ratio": ratio,
         },
     });
     let header = serde_json::to_string_pretty(&header).unwrap_or_else(|_| header.to_string());

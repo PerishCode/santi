@@ -12,7 +12,7 @@ async fn maps_chat_body() {
         thinking: Some("disabled".to_string()),
         reasoning_effort: Some("high".to_string()),
         max_tokens: Some(512),
-        input_budget_bytes: None,
+        bytes: None,
     })
     .await;
 
@@ -35,7 +35,7 @@ async fn flattens_tool_items() {
             name: "shell".to_string(),
             arguments_raw: "{\"command\":\"pwd\"}".to_string(),
             item: None,
-            item_id: None,
+            mark: None,
         },
         ProviderItem::FunctionCallOutput {
             call_id: "call_shell".to_string(),
@@ -98,12 +98,12 @@ async fn parses_reasoning_text() {
         events.as_slice(),
         [
             ProviderEvent::ResponseStarted {
-                provider_response_id: Some(response_id),
+                response: Some(response_id),
             },
             ProviderEvent::ReasoningSummaryDelta(reasoning),
             ProviderEvent::TextDelta(text),
             ProviderEvent::Completed {
-                provider_response_id: Some(completed_id),
+                response: Some(completed_id),
             },
         ] if reasoning == "thinking"
             && text == "ok"

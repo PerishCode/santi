@@ -51,38 +51,38 @@ struct Shell<'a> {
 impl Service {
     pub(super) fn handle_tool_call(
         &self,
-        strand_id: &str,
-        turn_id: &str,
+        strand: &str,
+        turn: &str,
         call: ProviderFunctionCall,
         output_limit: Option<usize>,
     ) -> Result<(), String> {
-        let effect_type = (call.name == "shell").then_some("shell");
+        let kind = (call.name == "shell").then_some("shell");
         let provenance = crate::ToolCallProvenance {
-            provider_family: self.provider.metadata().provider.to_string(),
+            family: self.provider.metadata().provider.to_string(),
             item: Some(call.item.clone()),
-            item_id: call.item_id.clone(),
+            mark: call.mark.clone(),
             response_id: Some(call.response_id.clone()),
         };
         let (tool_call, effect) = self.store.append_effect_call(
             crate::Invocation {
-                turn: turn_id,
+                turn,
                 call: &call.call_id,
                 name: &call.name,
                 arguments: &call.arguments,
                 provenance: &provenance,
             },
-            effect_type,
+            kind,
         )?;
         self.publish_stream(
-            strand_id,
+            strand,
             SantiStreamPayload::ToolCallCreated {
                 tool_call: tool_call.clone(),
             },
         );
         let result = if let Some(effect) = effect {
             self.handle_shell_effect(Shell {
-                strand: strand_id,
-                turn: turn_id,
+                strand,
+                turn,
                 call: &call,
                 effect: &effect.id,
                 limit: output_limit,
@@ -98,7 +98,7 @@ impl Service {
             )?
         };
         self.publish_stream(
-            strand_id,
+            strand,
             SantiStreamPayload::ToolResultCreated {
                 tool_result: result,
             },
@@ -108,15 +108,15 @@ impl Service {
 
     fn handle_shell_effect(&self, shell: Shell<'_>) -> Result<crate::ToolResult, String> {
         let Shell {
-            strand: strand_id,
-            turn: turn_id,
+            strand,
+            turn,
             call,
             effect: effect_id,
             limit: output_limit,
         } = shell;
-        let soul_id = self.store.soul_id_for_strand(strand_id)?;
+        let soul = self.store.soul_id_for_strand(strand)?;
         let prepared = match parse_tool_args::<shell::Args>(&call.arguments)
-            .and_then(|args| self.prepare_shell(strand_id, turn_id, &soul_id, args))
+            .and_then(|args| self.prepare_shell(strand, turn, &soul, args))
         {
             Ok(prepared) => prepared,
             Err(error) => {
@@ -166,25 +166,24 @@ impl Service {
 
     fn prepare_shell(
         &self,
-        strand_id: &str,
-        turn_id: &str,
-        soul_id: &str,
+        strand: &str,
+        turn: &str,
+        soul: &str,
         args: shell::Args,
     ) -> Result<shell::Prepared, String> {
-        std::fs::create_dir_all(self.soul_memory_dir(soul_id))
+        std::fs::create_dir_all(self.soul_memory_dir(soul)).map_err(|error| error.to_string())?;
+        std::fs::create_dir_all(self.strand_memory_dir(strand))
             .map_err(|error| error.to_string())?;
-        std::fs::create_dir_all(self.strand_memory_dir(strand_id))
-            .map_err(|error| error.to_string())?;
-        let cwd = self.resolve_shell_cwd(strand_id, soul_id, args.cwd.as_deref())?;
+        let cwd = self.resolve_shell_cwd(strand, soul, args.cwd.as_deref())?;
         std::fs::create_dir_all(&cwd).map_err(|error| error.to_string())?;
         let mut command = shell::shell_command(&args.command);
         command
             .current_dir(&cwd)
-            .env("SANTI_SOUL_MEMORY_DIR", self.soul_memory_dir(soul_id))
-            .env("SANTI_STRAND_MEMORY_DIR", self.strand_memory_dir(strand_id))
-            .env("SANTI_SOUL_ID", soul_id)
-            .env("SANTI_STRAND_ID", strand_id)
-            .env("SANTI_TURN_ID", turn_id)
+            .env("SANTI_SOUL_MEMORY_DIR", self.soul_memory_dir(soul))
+            .env("SANTI_STRAND_MEMORY_DIR", self.strand_memory_dir(strand))
+            .env("SANTI_SOUL_ID", soul)
+            .env("SANTI_STRAND_ID", strand)
+            .env("SANTI_TURN_ID", turn)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         Ok(shell::Prepared { command, cwd })
@@ -192,8 +191,8 @@ impl Service {
 
     fn resolve_shell_cwd(
         &self,
-        strand_id: &str,
-        soul_id: &str,
+        strand: &str,
+        soul: &str,
         cwd: Option<&str>,
     ) -> Result<PathBuf, String> {
         let Some(cwd) = cwd else {
@@ -201,8 +200,8 @@ impl Service {
         };
         let uri = parse_workspace_uri(cwd)?;
         let root = match uri.root {
-            workspace::Root::Soul => self.soul_memory_dir(soul_id),
-            workspace::Root::Strand => self.strand_memory_dir(strand_id),
+            workspace::Root::Soul => self.soul_memory_dir(soul),
+            workspace::Root::Strand => self.strand_memory_dir(strand),
         };
         Ok(root.join(uri.path))
     }
@@ -215,26 +214,23 @@ impl Service {
         PathBuf::from(&self.config.execution_root)
     }
 
-    pub(super) fn soul_memory_dir(&self, soul_id: &str) -> PathBuf {
-        self.runtime_root()
-            .join("souls")
-            .join(soul_id)
-            .join("memory")
+    pub(super) fn soul_memory_dir(&self, soul: &str) -> PathBuf {
+        self.runtime_root().join("souls").join(soul).join("memory")
     }
 
-    pub(super) fn soul_memory_file(&self, soul_id: &str) -> PathBuf {
-        crate::store::soul_memory_file(self.runtime_root(), soul_id)
+    pub(super) fn soul_memory_file(&self, soul: &str) -> PathBuf {
+        crate::store::soul_memory_file(self.runtime_root(), soul)
     }
 
-    pub(super) fn strand_memory_dir(&self, strand_id: &str) -> PathBuf {
+    pub(super) fn strand_memory_dir(&self, strand: &str) -> PathBuf {
         self.runtime_root()
             .join("strands")
-            .join(strand_id)
+            .join(strand)
             .join("memory")
     }
 
-    pub(super) fn strand_memory_file(&self, strand_id: &str) -> PathBuf {
-        self.strand_memory_dir(strand_id).join("MEMORY.md")
+    pub(super) fn strand_memory_file(&self, strand: &str) -> PathBuf {
+        self.strand_memory_dir(strand).join("MEMORY.md")
     }
 
     pub(super) fn constitution_file(&self) -> PathBuf {

@@ -5,7 +5,6 @@ mod event;
 pub use event::{Prepared, Transition};
 mod inbox;
 mod lifecycle;
-mod migration;
 mod query;
 mod turn;
 pub use turn::TurnOutboxInsert;
@@ -14,7 +13,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use santi_model::{
     ActorType, MessageEvent, MessageKind, Soul, Strand, StrandEntry, StrandMessage,
-    StrandTargetType, WebhookSubscription, timestamp_now,
+    StrandTargetType, WebhookSubscription, now,
 };
 
 use super::rows::*;
@@ -33,11 +32,11 @@ impl<'a> Database<'a> {
 
     pub fn append_entry_in_tx(
         &self,
-        strand_id: &str,
-        target_type: StrandTargetType,
-        target_id: &str,
+        strand: &str,
+        kind: StrandTargetType,
+        target: &str,
     ) -> Result<StrandEntry, String> {
-        let now = timestamp_now();
+        let now = now();
         let allocated_seq = self
             .conn
             .query_row(
@@ -47,7 +46,7 @@ impl<'a> Database<'a> {
             WHERE id = ?1
             RETURNING next_seq - 1
             "#,
-                params![strand_id, now],
+                params![strand, now],
                 |row| row.get::<_, i64>(0),
             )
             .map_err(|error| error.to_string())?;
@@ -59,25 +58,19 @@ impl<'a> Database<'a> {
         )
         VALUES (?1, ?2, ?3, ?4, ?5)
         "#,
-                params![
-                    strand_id,
-                    target_type.encode(),
-                    target_id,
-                    allocated_seq,
-                    now
-                ],
+                params![strand, kind.encode(), target, allocated_seq, now],
             )
             .map_err(|error| error.to_string())?;
         Ok(StrandEntry {
-            strand_id: strand_id.to_string(),
-            target_type,
-            target_id: target_id.to_string(),
-            strand_seq: allocated_seq,
-            created_at: now,
+            strand: strand.to_string(),
+            kind,
+            target: target.to_string(),
+            seq: allocated_seq,
+            created: now,
         })
     }
 
-    pub fn message_events_for_strand(&self, strand_id: &str) -> Result<Vec<MessageEvent>, String> {
+    pub fn message_events_for_strand(&self, strand: &str) -> Result<Vec<MessageEvent>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -92,12 +85,12 @@ impl<'a> Database<'a> {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map(params![strand_id], MessageEvent::decode)
+            .query_map(params![strand], MessageEvent::decode)
             .map_err(|error| error.to_string())?;
         collect_rows(rows)
     }
 
-    pub fn soul_by_id(&self, soul_id: &str) -> Result<Option<Soul>, String> {
+    pub fn soul_by_id(&self, soul: &str) -> Result<Option<Soul>, String> {
         self.conn
             .query_row(
                 r#"
@@ -106,7 +99,7 @@ impl<'a> Database<'a> {
         WHERE id = ?1
         LIMIT 1
         "#,
-                params![soul_id],
+                params![soul],
                 Soul::decode,
             )
             .optional()
@@ -129,7 +122,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn strand_by_id(&self, strand_id: &str) -> Result<Option<Strand>, String> {
+    pub fn strand_by_id(&self, strand: &str) -> Result<Option<Strand>, String> {
         self.conn
             .query_row(
                 r#"
@@ -139,14 +132,14 @@ impl<'a> Database<'a> {
         WHERE id = ?1
         LIMIT 1
         "#,
-                params![strand_id],
+                params![strand],
                 Strand::decode,
             )
             .optional()
             .map_err(|error| error.to_string())
     }
 
-    pub fn strand_by_label(&self, soul_id: &str, label: &str) -> Result<Option<Strand>, String> {
+    pub fn strand_by_label(&self, soul: &str, label: &str) -> Result<Option<Strand>, String> {
         self.conn
             .query_row(
                 r#"
@@ -156,14 +149,14 @@ impl<'a> Database<'a> {
         WHERE soul_id = ?1 AND external_label = ?2
         LIMIT 1
         "#,
-                params![soul_id, label],
+                params![soul, label],
                 Strand::decode,
             )
             .optional()
             .map_err(|error| error.to_string())
     }
 
-    pub fn message_by_id(&self, message_id: &str) -> Result<Option<StrandMessage>, String> {
+    pub fn message_by_id(&self, message: &str) -> Result<Option<StrandMessage>, String> {
         self.conn
             .query_row(
                 r#"
@@ -175,7 +168,7 @@ impl<'a> Database<'a> {
         WHERE r.target_type = 'message' AND r.target_id = ?1
         LIMIT 1
         "#,
-                params![message_id],
+                params![message],
                 StrandMessage::decode,
             )
             .optional()
@@ -184,7 +177,7 @@ impl<'a> Database<'a> {
 
     pub fn message_record_by_id(
         &self,
-        message_id: &str,
+        message: &str,
     ) -> Result<Option<santi_model::Message>, String> {
         self.conn
             .query_row(
@@ -195,14 +188,14 @@ impl<'a> Database<'a> {
         WHERE id = ?1
         LIMIT 1
         "#,
-                params![message_id],
+                params![message],
                 santi_model::Message::decode,
             )
             .optional()
             .map_err(|error| error.to_string())
     }
 
-    pub fn strand_messages(&self, strand_id: &str) -> Result<Vec<StrandMessage>, String> {
+    pub fn strand_messages(&self, strand: &str) -> Result<Vec<StrandMessage>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -218,7 +211,7 @@ impl<'a> Database<'a> {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map(params![strand_id], StrandMessage::decode)
+            .query_map(params![strand], StrandMessage::decode)
             .map_err(|error| error.to_string())?;
         collect_rows(rows)
     }
@@ -227,12 +220,12 @@ impl<'a> Database<'a> {
 pub fn message_to_provider_item(
     message: &santi_model::Message,
 ) -> Option<santi_provider::ProviderItem> {
-    let role = match (&message.actor_type, &message.message_kind) {
+    let role = match (&message.role, &message.kind) {
         (ActorType::Soul, _) => "assistant",
         (ActorType::System, MessageKind::Text) => "user",
         (ActorType::System, MessageKind::SantiSystem) => "system",
     };
-    let content = message.content.content_text();
+    let content = message.content.rendered();
     if content.trim().is_empty() {
         None
     } else {

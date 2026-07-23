@@ -5,13 +5,13 @@ use crate::ForkStrandResponse;
 use super::Service;
 
 impl Service {
-    pub fn fork_strand(&self, parent_strand_id: &str) -> Result<ForkStrandResponse, String> {
+    pub fn fork_strand(&self, parent: &str) -> Result<ForkStrandResponse, String> {
         let parent = self
             .store
-            .strand(parent_strand_id)?
+            .strand(parent)?
             .ok_or_else(|| "parent strand not found".to_string())?;
-        let fork_point = parent.next_seq - 1;
-        let child = self.store.fork_strand(&parent.id, fork_point)?;
+        let fork = parent.next - 1;
+        let child = self.store.fork_strand(&parent.id, fork)?;
         if let Err(error) = self.sync_fork_workspace(&parent.id, &child.id) {
             let child_memory_dir = self.strand_memory_dir(&child.id);
             if let Some(child_root) = child_memory_dir.parent() {
@@ -25,12 +25,8 @@ impl Service {
         Ok(ForkStrandResponse { strand: child })
     }
 
-    fn sync_fork_workspace(
-        &self,
-        parent_strand_id: &str,
-        child_strand_id: &str,
-    ) -> Result<(), String> {
-        let parent_dir = self.strand_memory_dir(parent_strand_id);
+    fn sync_fork_workspace(&self, parent: &str, child_strand_id: &str) -> Result<(), String> {
+        let parent_dir = self.strand_memory_dir(parent);
         let child_dir = self.strand_memory_dir(child_strand_id);
         if child_dir.exists() {
             return Err(format!(

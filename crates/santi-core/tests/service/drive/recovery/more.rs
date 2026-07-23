@@ -43,9 +43,9 @@ async fn drive_failure_recovers() {
     let warning = accepted.receipt.warning.as_deref().expect("drive warning");
     assert_eq!(warning.code, "runtime.strand.drive_failed");
     assert_eq!(warning.context["accepted_before_failure"], true);
-    assert_eq!(warning.context["inbox_id"], accepted.receipt.inbox_id);
+    assert_eq!(warning.context["inbox"], accepted.receipt.inbox);
     assert_eq!(warning.context["recovery"]["resend"], false);
-    let receipt_id = accepted.receipt.inbox_id.clone();
+    let receipt_id = accepted.receipt.inbox.clone();
     let receipt = service
         .receipt_status(&receipt_id)
         .expect("receipt status")
@@ -104,7 +104,7 @@ async fn drive_failure_recovers() {
         runtime
             .messages
             .iter()
-            .any(|message| message.content_text == "accepted before drive failure")
+            .any(|message| message.text == "accepted before drive failure")
     );
     let receipt = service
         .receipt_status(&receipt_id)
@@ -132,7 +132,7 @@ async fn drive_failure_recovers() {
         runtime
             .messages
             .iter()
-            .all(|message| message.content_text != "must not enter inbox")
+            .all(|message| message.text != "must not enter inbox")
     );
     let transitions: i64 = conn
         .query_row("SELECT COUNT(*) FROM error_transitions", [], |row| {

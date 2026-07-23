@@ -23,9 +23,9 @@ pub fn register_attempt_handover_budgets(
 ) -> Result<usize, String> {
     let mut registered = 0;
     for strand in service.list_strands()? {
-        let expected_prefix = format!("soul:{}:ops:upgrade:", strand.soul_id);
+        let expected_prefix = format!("soul:{}:ops:upgrade:", strand.soul);
         let is_attempt_handover = strand
-            .external_label
+            .label
             .as_deref()
             .and_then(|label| label.strip_prefix(&expected_prefix))
             .is_some_and(|attempt_id| !attempt_id.is_empty());
@@ -36,10 +36,10 @@ pub fn register_attempt_handover_budgets(
             &strand.id,
             santi_core::Execution {
                 profile: HANDOVER_BUDGET_PROFILE.to_string(),
-                max_provider_rounds: HANDOVER_MAX_PROVIDER_ROUNDS,
-                max_tool_calls: HANDOVER_MAX_TOOL_CALLS,
-                max_tool_output_bytes: HANDOVER_MAX_TOOL_OUTPUT_BYTES,
-                max_shell_output_bytes: HANDOVER_MAX_SHELL_OUTPUT_BYTES,
+                rounds: HANDOVER_MAX_PROVIDER_ROUNDS,
+                calls: HANDOVER_MAX_TOOL_CALLS,
+                output: HANDOVER_MAX_TOOL_OUTPUT_BYTES,
+                shell: HANDOVER_MAX_SHELL_OUTPUT_BYTES,
             },
         )?;
         registered += 1;
@@ -133,7 +133,7 @@ pub struct UpgradeFinalizeRequest {
     #[serde(default)]
     pub readiness: UpgradeReadiness,
     pub wake: bool,
-    pub soul_id: String,
+    pub soul: String,
     pub configured_strand_id: Option<String>,
 }
 
@@ -163,7 +163,7 @@ pub struct UpgradeReport {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SeedOutcome {
-    pub strand_id: String,
+    pub strand: String,
     pub warnings: Vec<String>,
 }
 

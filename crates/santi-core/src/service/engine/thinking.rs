@@ -19,7 +19,7 @@ impl Service {
     ) -> Result<(), String> {
         if let Some(thinking) = progress.current {
             if progress.response.is_some()
-                && thinking.provider_response_id != progress.response
+                && thinking.response != progress.response
                 && let Some(updated) = self
                     .store
                     .update_thinking_span_response(&thinking.id, progress.response)?
@@ -50,7 +50,7 @@ impl Service {
 
     pub(in crate::service) fn update_thinking_span_summary(
         &self,
-        strand_id: &str,
+        strand: &str,
         summary_target: &mut Option<ThinkingSpan>,
         summary: String,
     ) -> Result<(), String> {
@@ -66,7 +66,7 @@ impl Service {
         {
             *thinking = updated.clone();
             self.publish_stream(
-                strand_id,
+                strand,
                 SantiStreamPayload::ThinkingUpdated { thinking: updated },
             );
         }
@@ -75,7 +75,7 @@ impl Service {
 
     pub(in crate::service) fn complete_current_thinking_span(
         &self,
-        strand_id: &str,
+        strand: &str,
         current: &mut Option<ThinkingSpan>,
         completion_reason: ThinkingCompletionReason,
     ) -> Result<(), String> {
@@ -87,7 +87,7 @@ impl Service {
             .complete_thinking_span(&thinking.id, completion_reason)?
         {
             self.publish_stream(
-                strand_id,
+                strand,
                 SantiStreamPayload::ThinkingCompleted {
                     thinking: completed,
                 },
@@ -98,16 +98,16 @@ impl Service {
 
     pub(in crate::service) fn fail_current_thinking_span(
         &self,
-        strand_id: &str,
+        strand: &str,
         current: &mut Option<ThinkingSpan>,
-        error_text: String,
+        error: String,
     ) -> Result<(), String> {
         let Some(thinking) = current.take() else {
             return Ok(());
         };
-        if let Some(failed) = self.store.fail_thinking_span(&thinking.id, error_text)? {
+        if let Some(failed) = self.store.fail_thinking_span(&thinking.id, error)? {
             self.publish_stream(
-                strand_id,
+                strand,
                 SantiStreamPayload::ThinkingCompleted { thinking: failed },
             );
         }
@@ -116,18 +116,18 @@ impl Service {
 
     pub(in crate::service) fn publish_turn_activity(
         &self,
-        strand_id: &str,
-        turn_id: &str,
+        strand: &str,
+        turn: &str,
         state: TurnActivityState,
-        provider_response_id: Option<String>,
+        response: Option<String>,
     ) {
         self.publish_stream(
-            strand_id,
+            strand,
             SantiStreamPayload::TurnActivity {
                 activity: TurnActivity {
-                    turn_id: turn_id.to_string(),
+                    turn: turn.to_string(),
                     state,
-                    provider_response_id,
+                    response,
                 },
             },
         );

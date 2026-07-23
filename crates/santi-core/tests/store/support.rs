@@ -39,7 +39,7 @@ pub(crate) fn append_timeline_message(line: Line<'_>) {
                 .expect("enqueue inbox");
         }
         MessageIntake::Record => {
-            let actor_id = match line.actor {
+            let actor = match line.actor {
                 ActorType::Soul => line.store.default_soul_id(),
                 ActorType::System => line.store.system_actor_id(),
             };
@@ -47,7 +47,7 @@ pub(crate) fn append_timeline_message(line: Line<'_>) {
                 .append_message(Draft {
                     strand: line.strand,
                     actor: line.actor,
-                    id: actor_id,
+                    id: actor,
                     content: MessageContent::text(line.text),
                     state: MessageState::Fixed,
                     intake: line.intake,

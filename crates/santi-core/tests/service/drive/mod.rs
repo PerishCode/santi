@@ -71,7 +71,7 @@ async fn reminder_no_repoke() {
         runtime
             .messages
             .iter()
-            .filter(|message| message.content_text.contains("kind: compact_reminder"))
+            .filter(|message| message.text.contains("kind: compact_reminder"))
             .count(),
         1,
         "large input should materialize exactly one compact reminder Record"
@@ -109,16 +109,16 @@ async fn concurrent_request_follows() {
     let first_turn_id = accepted_turn(&first).id.clone();
     assert_eq!(
         first
-            .user_message
+            .message
             .as_ref()
             .expect("first send drove synchronously")
-            .content_text,
+            .text,
         "first request"
     );
 
     provider.wait_for_first_request().await;
     let first_receipt = service
-        .receipt_status(&first.receipt.inbox_id)
+        .receipt_status(&first.receipt.inbox)
         .expect("first receipt query")
         .expect("first receipt");
     assert_eq!(first_receipt.state, santi_core::ReceiptState::Driving);
@@ -140,11 +140,11 @@ async fn concurrent_request_follows() {
         "a send during a running turn should report the turn it coalesced into"
     );
     assert!(
-        second.user_message.is_none(),
+        second.message.is_none(),
         "coalesced send is still in the inbox, not yet a timeline message"
     );
     let second_receipt = service
-        .receipt_status(&second.receipt.inbox_id)
+        .receipt_status(&second.receipt.inbox)
         .expect("second receipt query")
         .expect("second receipt");
     assert_eq!(second_receipt.state, santi_core::ReceiptState::Accepted);
@@ -190,9 +190,9 @@ async fn concurrent_request_follows() {
     );
     drop(requests);
 
-    for inbox_id in [&first.receipt.inbox_id, &second.receipt.inbox_id] {
+    for inbox in [&first.receipt.inbox, &second.receipt.inbox] {
         let receipt = service
-            .receipt_status(inbox_id)
+            .receipt_status(inbox)
             .expect("receipt query")
             .expect("receipt");
         assert_eq!(receipt.state, santi_core::ReceiptState::Completed);

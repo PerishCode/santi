@@ -10,7 +10,7 @@ use axum::{
 };
 use futures_core::Stream;
 use santi_core::service::Service;
-use santi_core::{SantiStreamEvent, SantiStreamPayload, Transition, prefixed_id, timestamp_now};
+use santi_core::{SantiStreamEvent, SantiStreamPayload, Transition, now, tag};
 use tokio::sync::broadcast;
 
 use super::ApiError;
@@ -18,25 +18,25 @@ use super::routes::bearer;
 
 pub(super) async fn strand_events(
     State(service): State<Service>,
-    Path(strand_id): Path<String>,
+    Path(strand): Path<String>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
-    let strand = service
-        .strand(&strand_id)
+    let held = service
+        .strand(&strand)
         .map_err(ApiError::from_service)?
         .ok_or_else(|| ApiError::not_found("strand not found"))?;
-    drop(strand);
+    drop(held);
 
     let mut receiver = service.subscribe_stream();
-    let open_strand_id = strand_id.clone();
+    let opened = strand.clone();
     let stream = async_stream::stream! {
         yield Ok(sse_event(SantiStreamEvent {
-            event_id: prefixed_id("stream"),
-            strand_id: open_strand_id,
-            created_at: timestamp_now(),
+            id: tag("stream"),
+            strand: opened,
+            created: now(),
             payload: SantiStreamPayload::StreamOpen,
         }));
 
-        while let Some(event) = receive_strand(&mut receiver, &strand_id).await {
+        while let Some(event) = receive_strand(&mut receiver, &strand).await {
             yield Ok(sse_event(event));
         }
     };
@@ -79,7 +79,7 @@ pub(super) async fn turn_event_stream(
         .ok_or_else(|| ApiError::unauthorized("invalid or missing credential"))?;
     let mut receiver = service.subscribe_stream();
     let stream = async_stream::stream! {
-        while receive_turn(&mut receiver, &principal.label_prefix).await {
+        while receive_turn(&mut receiver, &principal.prefix).await {
             yield Ok(Event::default().event("turn_event_available").data("{}"));
         }
     };
@@ -88,29 +88,25 @@ pub(super) async fn turn_event_stream(
 
 async fn receive_strand(
     receiver: &mut broadcast::Receiver<SantiStreamEvent>,
-    strand_id: &str,
+    strand: &str,
 ) -> Option<SantiStreamEvent> {
     loop {
         let event = receive(receiver).await?;
-        if event.strand_id == strand_id {
+        if event.strand == strand {
             return Some(event);
         }
     }
 }
 
-async fn receive_turn(
-    receiver: &mut broadcast::Receiver<SantiStreamEvent>,
-    label_prefix: &str,
-) -> bool {
+async fn receive_turn(receiver: &mut broadcast::Receiver<SantiStreamEvent>, prefix: &str) -> bool {
     loop {
         let Some(event) = receive(receiver).await else {
             return false;
         };
         if let SantiStreamPayload::TurnCompleted {
-            external_label: Some(label),
-            ..
+            label: Some(label), ..
         } = event.payload
-            && label.starts_with(label_prefix)
+            && label.starts_with(prefix)
         {
             return true;
         }
@@ -136,7 +132,7 @@ fn error_sse_event(transition: Transition) -> Event {
 
 fn sse_event(event: SantiStreamEvent) -> Event {
     Event::default()
-        .id(event.event_id.clone())
+        .id(event.id.clone())
         .event(sse_event_name(&event.payload))
         .data(serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string()))
 }

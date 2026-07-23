@@ -12,7 +12,7 @@ async fn shutdown_pauses_consumption() {
     };
     let provider = Arc::new(FakeProvider::default());
 
-    let strand_id = {
+    let strand = {
         let service = Service::open(config.clone(), provider.clone()).expect("open service");
         service.begin_shutdown();
         assert!(service.is_shutting_down());
@@ -24,7 +24,7 @@ async fn shutdown_pauses_consumption() {
             )
             .expect("ingest during shutdown");
         match outcome {
-            santi_core::IngestOutcome::Accepted { receipt } => receipt.strand_id,
+            santi_core::IngestOutcome::Accepted { receipt } => receipt.strand,
             other => panic!("expected accepted, got {other:?}"),
         }
     };
@@ -39,19 +39,19 @@ async fn shutdown_pauses_consumption() {
         store
             .strands_with_pending_requests()
             .expect("pending")
-            .contains(&strand_id),
+            .contains(&strand),
         "the ingested record must still be durably queued"
     );
     drop(store);
 
     let service = Service::open(config, provider.clone()).expect("reopen service");
     service.resume_pending().expect("resume pending");
-    let runtime = Probe::new(&service).any_completed(&strand_id).await;
+    let runtime = Probe::new(&service).any_completed(&strand).await;
     assert!(
         runtime
             .messages
             .iter()
-            .any(|message| message.content_text == "arrived while quiescing")
+            .any(|message| message.text == "arrived while quiescing")
     );
 }
 
@@ -80,7 +80,7 @@ async fn send_targets_soul() {
     assert_ne!(secretary.id, default_soul);
 
     let strand = service.create_strand().expect("create strand").strand;
-    assert_eq!(strand.soul_id, default_soul);
+    assert_eq!(strand.soul, default_soul);
     let response = service
         .send_strand(
             &strand.id,
@@ -92,7 +92,7 @@ async fn send_targets_soul() {
         )
         .await
         .expect("send strand");
-    assert_eq!(response.strand.soul_id, default_soul);
+    assert_eq!(response.strand.soul, default_soul);
 
     let santi_core::IngestOutcome::Accepted {
         receipt: secretary_receipt,
@@ -106,7 +106,7 @@ async fn send_targets_soul() {
     else {
         panic!("expected accepted");
     };
-    let secretary_strand_id = secretary_receipt.strand_id;
+    let secretary_strand_id = secretary_receipt.strand;
     let secretary_response = service
         .send_strand(
             &secretary_strand_id,
@@ -118,7 +118,7 @@ async fn send_targets_soul() {
         )
         .await
         .expect("send strand");
-    assert_eq!(secretary_response.strand.soul_id, secretary.id);
+    assert_eq!(secretary_response.strand.soul, secretary.id);
 
     let error = service
         .send_strand(

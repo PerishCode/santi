@@ -8,14 +8,14 @@ pub(super) fn finalize_handover(
 ) -> Result<UpgradeFinalizeReport, Box<santi_core::Fault>> {
     let record = compose_record(&request.attempt_id);
     let seed = paths.seed_attempt_handover(
-        &request.soul_id,
+        &request.soul,
         &request.attempt_id,
         request.configured_strand_id.as_deref(),
         &record,
     );
     let (seeded, seeded_strand_id, handover_failure) = match seed {
-        Ok(seed) if seed.warnings.is_empty() => (true, Some(seed.strand_id), None),
-        Ok(seed) => (true, Some(seed.strand_id), Some(seed.warnings.join("; "))),
+        Ok(seed) if seed.warnings.is_empty() => (true, Some(seed.strand), None),
+        Ok(seed) => (true, Some(seed.strand), Some(seed.warnings.join("; "))),
         Err(error) => (false, None, Some(error)),
     };
     if let Some(detail) = handover_failure {
@@ -73,34 +73,34 @@ pub(super) fn finalize_handover(
     })
 }
 
-pub(super) fn attempt_ops_label(soul_id: &str, attempt_id: &str) -> String {
-    format!("soul:{soul_id}:ops:upgrade:{attempt_id}")
+pub(super) fn attempt_ops_label(soul: &str, attempt_id: &str) -> String {
+    format!("soul:{soul}:ops:upgrade:{attempt_id}")
 }
 
-pub(super) fn self_ops_label(soul_id: &str) -> String {
-    format!("soul:{soul_id}:ops")
+pub(super) fn self_ops_label(soul: &str) -> String {
+    format!("soul:{soul}:ops")
 }
 
 impl RuntimePaths {
     pub fn seed_come_look(
         &self,
-        soul_id: &str,
+        soul: &str,
         configured_strand: Option<&str>,
         text: &str,
     ) -> Result<SeedOutcome, String> {
-        self.seed_handover_label(soul_id, &self_ops_label(soul_id), configured_strand, text)
+        self.seed_handover_label(soul, &self_ops_label(soul), configured_strand, text)
     }
 
     pub fn seed_attempt_handover(
         &self,
-        soul_id: &str,
+        soul: &str,
         attempt_id: &str,
         configured_strand: Option<&str>,
         text: &str,
     ) -> Result<SeedOutcome, String> {
         self.seed_handover_label(
-            soul_id,
-            &attempt_ops_label(soul_id, attempt_id),
+            soul,
+            &attempt_ops_label(soul, attempt_id),
             configured_strand,
             text,
         )
@@ -108,7 +108,7 @@ impl RuntimePaths {
 
     fn seed_handover_label(
         &self,
-        soul_id: &str,
+        soul: &str,
         label: &str,
         configured_strand: Option<&str>,
         text: &str,
@@ -117,9 +117,9 @@ impl RuntimePaths {
             .map(str::trim)
             .filter(|value| !value.is_empty());
 
-        match self.inbox_seed_label(soul_id, label, text) {
+        match self.inbox_seed_label(soul, label, text) {
             Ok(report) if report.accepted => Ok(SeedOutcome {
-                strand_id: report.strand_id,
+                strand: report.strand,
                 warnings: Vec::new(),
             }),
             Ok(report) => self.seed_via_configured_strand(
@@ -147,26 +147,26 @@ impl RuntimePaths {
         text: &str,
         label_error: String,
     ) -> Result<SeedOutcome, String> {
-        let Some(strand_id) = configured_strand else {
+        let Some(strand) = configured_strand else {
             return Err(label_error);
         };
 
-        match self.inbox_seed(strand_id, text) {
+        match self.inbox_seed(strand, text) {
             Ok(report) if report.accepted => Ok(SeedOutcome {
-                strand_id: report.strand_id,
+                strand: report.strand,
                 warnings: vec![format!(
-                    "{label_error}; fell back to configured SANTI_STRAND_ID {strand_id}"
+                    "{label_error}; fell back to configured SANTI_STRAND_ID {strand}"
                 )],
             }),
             Ok(report) => Err(format!(
-                "{label_error}; configured SANTI_STRAND_ID {strand_id} also rejected the come-look seed: {}",
+                "{label_error}; configured SANTI_STRAND_ID {strand} also rejected the come-look seed: {}",
                 report
                     .error
                     .map(|error| error.to_string())
                     .unwrap_or_else(|| "seed rejected".to_string())
             )),
             Err(error) => Err(format!(
-                "{label_error}; configured SANTI_STRAND_ID {strand_id} also could not receive the come-look seed: {error}"
+                "{label_error}; configured SANTI_STRAND_ID {strand} also could not receive the come-look seed: {error}"
             )),
         }
     }

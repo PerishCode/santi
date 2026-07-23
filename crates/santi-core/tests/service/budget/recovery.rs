@@ -7,7 +7,7 @@ async fn compact_redrives_receipt() {
     let db = temp.path().join("santi.sqlite");
     let provider = Arc::new(LargeToolCallProvider {
         requests: Arc::new(Mutex::new(Vec::new())),
-        input_budget_bytes: 100_000,
+        bytes: 100_000,
     });
     let service = service_with_budget(&temp, provider.clone());
     let strand = service.create_strand().expect("create strand").strand;
@@ -26,15 +26,15 @@ async fn compact_redrives_receipt() {
         .failed_turn(&strand.id, &accepted_turn(&response).id)
         .await;
     let receipt = service
-        .receipt_status(&response.receipt.inbox_id)
+        .receipt_status(&response.receipt.inbox)
         .expect("receipt query")
         .expect("receipt");
     assert_eq!(receipt.state, santi_core::ReceiptState::TurnFailed);
 
-    let start_message_id = runtime
+    let first = runtime
         .messages
         .iter()
-        .find(|message| message.content_text == "one compact-recoverable obligation")
+        .find(|message| message.text == "one compact-recoverable obligation")
         .expect("user message")
         .message
         .id
@@ -56,13 +56,13 @@ async fn compact_redrives_receipt() {
         .compact_exec(
             &strand.id,
             santi_core::CompactExecRequest {
-                from_message_id: Some(start_message_id),
-                to_message_id: Some(boundary.message.id),
-                from_seq: None,
-                to_seq: None,
+                first: Some(first),
+                last: Some(boundary.message.id),
+                from: None,
+                to: None,
                 summary: "Failed tool exchange compacted for explicit recovery.".to_string(),
                 capsule: None,
-                dry_run: false,
+                dry: false,
             },
         )
         .expect("compact should resolve and redrive");
@@ -74,7 +74,7 @@ async fn compact_redrives_receipt() {
     assert_eq!(runtime.effects[0].state, EffectState::Confirmed);
     assert_eq!(runtime.errors[0].status, santi_core::Status::Resolved);
     let receipt = service
-        .receipt_status(&response.receipt.inbox_id)
+        .receipt_status(&response.receipt.inbox)
         .expect("receipt query")
         .expect("receipt");
     assert_eq!(receipt.state, santi_core::ReceiptState::Completed);

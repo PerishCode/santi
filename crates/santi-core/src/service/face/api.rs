@@ -3,7 +3,7 @@ use crate::{
     CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, EffectResolutionOutcome,
     EffectStatus, Incident, IngestOutcome, ReceiptStatus, SantiStreamEvent, SantiStreamPayload,
     Soul, Strand, StrandBudgetSnapshot, StrandDetail, StrandRuntimeSnapshot, WebhookSubscription,
-    engine, prefixed_id, timestamp_now,
+    engine, now, tag,
 };
 
 pub enum Admission {
@@ -40,8 +40,8 @@ impl Service {
         self.store.list_souls()
     }
 
-    pub fn soul(&self, soul_id: &str) -> Result<Option<Soul>, String> {
-        self.store.soul(soul_id)
+    pub fn soul(&self, soul: &str) -> Result<Option<Soul>, String> {
+        self.store.soul(soul)
     }
 
     pub fn create_webhook(
@@ -50,35 +50,35 @@ impl Service {
     ) -> Result<WebhookSubscription, String> {
         let name = request.name.trim();
         let adaptor = request.adaptor.trim();
-        let soul_id = request.soul_id.trim();
-        let secret_env = request.secret_env.trim();
+        let soul = request.soul.trim();
+        let credential = request.credential.trim();
         if name.is_empty() {
             return Err("webhook name must not be empty".to_string());
         }
         if adaptor.is_empty() {
             return Err("webhook adaptor must not be empty".to_string());
         }
-        if secret_env.is_empty() {
-            return Err("webhook secret_env must not be empty".to_string());
+        if credential.is_empty() {
+            return Err("webhook credential must not be empty".to_string());
         }
-        if self.store.soul(soul_id)?.is_none() {
+        if self.store.soul(soul)?.is_none() {
             return Err("soul not found".to_string());
         }
-        let strand_strategy = request
-            .strand_strategy
+        let strategy = request
+            .strategy
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .unwrap_or("per_thread");
-        if !matches!(strand_strategy, "per_thread" | "single") {
-            return Err("strand_strategy must be 'per_thread' or 'single'".to_string());
+        if !matches!(strategy, "per_thread" | "single") {
+            return Err("strategy must be 'per_thread' or 'single'".to_string());
         }
         self.store.create_webhook(CreateWebhookRequest {
             name: name.to_string(),
             adaptor: adaptor.to_string(),
-            soul_id: soul_id.to_string(),
-            strand_strategy: Some(strand_strategy.to_string()),
-            secret_env: secret_env.to_string(),
+            soul: soul.to_string(),
+            strategy: Some(strategy.to_string()),
+            credential: credential.to_string(),
         })
     }
 
@@ -93,41 +93,34 @@ impl Service {
         self.store.list_strands()
     }
 
-    pub fn strand(&self, strand_id: &str) -> Result<Option<StrandDetail>, String> {
-        let Some(strand) = self.store.strand(strand_id)? else {
+    pub fn strand(&self, strand: &str) -> Result<Option<StrandDetail>, String> {
+        let Some(strand) = self.store.strand(strand)? else {
             return Ok(None);
         };
         Ok(Some(StrandDetail {
-            messages: self.store.strand_messages(strand_id)?,
+            messages: self.store.strand_messages(&strand.id)?,
             strand,
         }))
     }
 
-    pub fn runtime_snapshot(
-        &self,
-        strand_id: &str,
-    ) -> Result<Option<StrandRuntimeSnapshot>, String> {
-        self.store.runtime_snapshot(strand_id)
+    pub fn runtime_snapshot(&self, strand: &str) -> Result<Option<StrandRuntimeSnapshot>, String> {
+        self.store.runtime_snapshot(strand)
     }
 
-    pub fn strand_budget(&self, strand_id: &str) -> Result<Option<StrandBudgetSnapshot>, String> {
-        let Some(strand) = self.store.strand(strand_id)? else {
+    pub fn strand_budget(&self, strand: &str) -> Result<Option<StrandBudgetSnapshot>, String> {
+        let Some(strand) = self.store.strand(strand)? else {
             return Ok(None);
         };
         Ok(Some(StrandBudgetSnapshot {
-            strand_id: strand.id.clone(),
+            strand: strand.id.clone(),
             estimate: self.current_context_estimate(&strand.id)?,
             budget: self.context_budget(),
-            active_incident: self.store.active_context_incident(&strand.id)?,
+            incident: self.store.active_context_incident(&strand.id)?,
         }))
     }
 
-    pub fn strand_errors(
-        &self,
-        strand_id: &str,
-        limit: i64,
-    ) -> Result<Option<Vec<Incident>>, String> {
-        let Some(strand) = self.store.strand(strand_id)? else {
+    pub fn strand_errors(&self, strand: &str, limit: i64) -> Result<Option<Vec<Incident>>, String> {
+        let Some(strand) = self.store.strand(strand)? else {
             return Ok(None);
         };
         self.store
@@ -139,8 +132,8 @@ impl Service {
         self.store.error_incidents(scope, limit)
     }
 
-    pub fn receipt_status(&self, inbox_id: &str) -> Result<Option<ReceiptStatus>, String> {
-        self.store.receipt_status(inbox_id)
+    pub fn receipt_status(&self, inbox: &str) -> Result<Option<ReceiptStatus>, String> {
+        self.store.receipt_status(inbox)
     }
 
     pub fn effect_status(&self, effect_id: &str) -> Result<Option<EffectStatus>, String> {
@@ -156,20 +149,20 @@ impl Service {
         self.store.resolve_effect(effect_id, outcome, evidence)
     }
 
-    pub(crate) fn publish_stream(&self, strand_id: &str, payload: SantiStreamPayload) {
-        let _ = self.send_stream(strand_id, payload);
+    pub(crate) fn publish_stream(&self, strand: &str, payload: SantiStreamPayload) {
+        let _ = self.send_stream(strand, payload);
     }
 
     pub(in crate::service) fn send_stream(
         &self,
-        strand_id: &str,
+        strand: &str,
         payload: SantiStreamPayload,
     ) -> Result<(), ()> {
         self.stream_events
             .send(SantiStreamEvent {
-                event_id: prefixed_id("stream"),
-                strand_id: strand_id.to_string(),
-                created_at: timestamp_now(),
+                id: tag("stream"),
+                strand: strand.to_string(),
+                created: now(),
                 payload,
             })
             .map(|_| ())
@@ -179,10 +172,10 @@ impl Service {
     pub fn turn_events_since(
         &self,
         after_seq: i64,
-        label_prefix: &str,
+        prefix: &str,
         limit: usize,
     ) -> Result<crate::TurnEventBatch, String> {
-        self.store.turn_events_since(after_seq, label_prefix, limit)
+        self.store.turn_events_since(after_seq, prefix, limit)
     }
 
     pub(in crate::service) fn dispatch_error_events(&self) {

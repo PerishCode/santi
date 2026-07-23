@@ -18,12 +18,12 @@ use descriptions::COMPONENT_DESCRIPTIONS;
 const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 12] = [
     (
         "CreateDownstreamRequest",
-        "credential_sha256",
+        "digest",
         "Lowercase or uppercase SHA-256 hex of a high-entropy Bearer token. The digest is stored but never returned.",
     ),
     (
         "IngestRequest",
-        "request_id",
+        "request",
         "Stable idempotency key, unique within the authenticated downstream. Reuse with a changed payload is a conflict.",
     ),
     (
@@ -33,27 +33,27 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 12] = [
     ),
     (
         "HealthResponse",
-        "active_drive_incidents",
+        "incidents",
         "Aggregate only: `/health` is public and must never expose strand,\nreceipt, or incident locators.",
     ),
     (
         "Strand",
-        "external_label",
+        "label",
         "Opaque external anchor (e.g. a webhook thread key). Unique per soul;\nabsent for strands reached only by id (e.g. CLI-created ones).",
     ),
     (
         "CreateWebhookRequest",
-        "strand_strategy",
+        "strategy",
         "`per_thread` (default) or `single`.",
     ),
     (
         "SendStrandAcceptedResponse",
-        "user_message",
+        "message",
         "The content this send just enqueued, once the driver has actually\ncommitted it to the timeline. Absent when this send coalesced into an\nalready-running turn — durably enqueued, but the driver has not drained\nit yet (it will, when that turn completes and re-pokes).",
     ),
     (
         "ReceiptTransition",
-        "reconstructed_from",
+        "rebuilt",
         "Present only when schema migration reconstructed this evidence from a\ndurable v24 source row. Live transitions leave it unset.",
     ),
     (
@@ -63,7 +63,7 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 12] = [
     ),
     (
         "StrandEffect",
-        "tool_call_id",
+        "call",
         "Absent only for an imported legacy row whose old schema had no neutral\ntool-call locator.",
     ),
     (
@@ -73,7 +73,7 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 12] = [
     ),
     (
         "EffectStatus",
-        "receipt_ids",
+        "receipts",
         "Obligation roots whose attempts include this effect's turn.",
     ),
 ];

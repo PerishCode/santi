@@ -27,7 +27,7 @@ async fn admission_opens_incident() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     let provider = Arc::new(FakeProvider {
-        input_budget_bytes: Some(1),
+        bytes: Some(1),
         ..FakeProvider::default()
     });
     let service = service_with_budget(&temp, provider.clone());
@@ -97,7 +97,7 @@ async fn remeasures_hot_memory() {
     fs::create_dir_all(memory_path.parent().expect("memory parent")).expect("create memory parent");
     fs::write(&memory_path, "m".repeat(9_000)).expect("write initial memory");
     let provider = Arc::new(FakeProvider {
-        input_budget_bytes: Some(20_000),
+        bytes: Some(20_000),
         ..FakeProvider::default()
     });
     let service = Service::open(
@@ -150,7 +150,7 @@ async fn remeasures_hot_memory() {
             .strand_budget(&strand.id)
             .expect("strand budget")
             .expect("strand")
-            .active_incident
+            .incident
             .is_none()
     );
     let incidents = service
@@ -166,7 +166,7 @@ async fn repeats_are_idempotent() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     let provider = Arc::new(FakeProvider {
-        input_budget_bytes: Some(1),
+        bytes: Some(1),
         ..FakeProvider::default()
     });
     let service = service_with_budget(&temp, provider);
@@ -244,7 +244,7 @@ async fn store_cannot_bypass() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     let provider = Arc::new(FakeProvider {
-        input_budget_bytes: Some(1),
+        bytes: Some(1),
         ..FakeProvider::default()
     });
     let service = service_with_budget(&temp, provider);

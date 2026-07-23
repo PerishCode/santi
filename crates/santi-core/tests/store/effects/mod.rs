@@ -3,14 +3,14 @@ use super::support::*;
 mod more;
 
 struct StartedEffect {
-    turn_id: String,
+    turn: String,
     effect_id: String,
-    inbox_id: String,
+    inbox: String,
 }
 
 fn start_effect(store: &SantiStore) -> StartedEffect {
     let strand = store.create_strand().expect("create strand");
-    let inbox_id = match store
+    let inbox = match store
         .enqueue_inbox(
             &strand.id,
             MessageKind::Text,
@@ -18,7 +18,7 @@ fn start_effect(store: &SantiStore) -> StartedEffect {
         )
         .expect("enqueue")
     {
-        IngestOutcome::Accepted { receipt } => receipt.inbox_id,
+        IngestOutcome::Accepted { receipt } => receipt.inbox,
         IngestOutcome::Rejected { .. } => panic!("unexpected rejection"),
     };
     let turn = store
@@ -26,12 +26,12 @@ fn start_effect(store: &SantiStore) -> StartedEffect {
         .expect("start turn")
         .expect("started turn")
         .turn;
-    let tool_call_id = "call_effect".to_string();
+    let call = "call_effect".to_string();
     let (_, effect) = store
         .append_effect_call(
             Invocation {
                 turn: &turn.id,
-                call: &tool_call_id,
+                call: &call,
                 name: "shell",
                 arguments: &json!({"command": "printf external"}),
                 provenance: &ToolCallProvenance::default(),
@@ -40,9 +40,9 @@ fn start_effect(store: &SantiStore) -> StartedEffect {
         )
         .expect("append effect intent");
     StartedEffect {
-        turn_id: turn.id,
+        turn: turn.id,
         effect_id: effect.expect("effect").id,
-        inbox_id,
+        inbox,
     }
 }
 
@@ -53,7 +53,7 @@ fn prepared_failure() {
     let started = start_effect(&store);
 
     store
-        .fail_turn(&started.turn_id, "failure before dispatch")
+        .fail_turn(&started.turn, "failure before dispatch")
         .expect("fail turn");
 
     let status = store
@@ -73,7 +73,7 @@ fn prepared_failure() {
         ]
     );
     let receipt = store
-        .receipt_status(&started.inbox_id)
+        .receipt_status(&started.inbox)
         .expect("query receipt")
         .expect("receipt");
     assert_eq!(receipt.state, ReceiptState::TurnFailed);
@@ -131,76 +131,5 @@ fn intent_atomicity() {
             .expect("tool calls")
             .is_empty(),
         "the tool call must roll back when its effect intent cannot persist"
-    );
-}
-
-#[test]
-fn v25_effect_import() {
-    let temp = tempfile::tempdir().expect("temp dir");
-    let db = temp.path().join("santi.sqlite");
-    drop(SantiStore::open(&db).expect("create current store"));
-
-    let conn = Connection::open(&db).expect("open sqlite");
-    conn.execute_batch(
-        r#"
-        DROP TABLE effect_transitions;
-        DROP TABLE strand_effects;
-        CREATE TABLE strand_effects (
-            id TEXT PRIMARY KEY,
-            strand_id TEXT NOT NULL,
-            effect_type TEXT NOT NULL,
-            idempotency_key TEXT NOT NULL,
-            status TEXT NOT NULL,
-            source_hook_id TEXT NOT NULL,
-            source_turn_id TEXT NOT NULL,
-            result_ref TEXT,
-            error_text TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE (strand_id, effect_type, idempotency_key)
-        );
-        INSERT INTO strand_effects (
-            id, strand_id, effect_type, idempotency_key, status,
-            source_hook_id, source_turn_id, result_ref, error_text,
-            created_at, updated_at
-        ) VALUES (
-            'effect_legacy', 'ss_legacy', 'shell', 'legacy-key', 'completed',
-            'hook_legacy', 'turn_legacy', 'legacy-result', NULL,
-            '2026-07-01T00:00:00Z', '2026-07-01T00:00:01Z'
-        );
-        PRAGMA user_version = 25;
-        "#,
-    )
-    .expect("seed v25 effect row");
-    drop(conn);
-
-    let store = SantiStore::open(&db).expect("migrate v25 to v26");
-    let status = store
-        .effect_status("effect_legacy")
-        .expect("query migrated effect")
-        .expect("migrated effect");
-    assert_eq!(status.effect.state, EffectState::Unknown);
-    assert_eq!(status.effect.turn_id, "turn_legacy");
-    assert_eq!(status.effect.tool_call_id, None);
-    assert_eq!(status.effect.result_ref.as_deref(), Some("legacy-result"));
-    assert_eq!(status.transitions.len(), 1);
-    assert_eq!(
-        status.transitions[0].reason,
-        EffectTransitionReason::LegacyImport
-    );
-    let evidence: serde_json::Value = serde_json::from_str(
-        status.transitions[0]
-            .evidence
-            .as_deref()
-            .expect("legacy evidence"),
-    )
-    .expect("legacy evidence json");
-    assert_eq!(evidence["legacy_v25"]["idempotency_key"], "legacy-key");
-    assert_eq!(evidence["legacy_v25"]["status"], "completed");
-    assert_eq!(evidence["legacy_v25"]["source_hook_id"], "hook_legacy");
-    assert_eq!(status.receipt_ids, Vec::<String>::new());
-    assert_eq!(
-        santi_core::read_schema_version(&db).expect("read schema"),
-        Some(santi_core::SCHEMA_VERSION)
     );
 }

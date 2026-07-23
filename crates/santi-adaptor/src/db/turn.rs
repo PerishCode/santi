@@ -34,7 +34,7 @@ impl Database<'_> {
     pub fn turn_events_since(
         &self,
         after_seq: i64,
-        label_prefix: &str,
+        prefix: &str,
         limit: usize,
     ) -> Result<(i64, Vec<(i64, String)>), String> {
         let high_water = self
@@ -61,7 +61,7 @@ impl Database<'_> {
             .map_err(|error| error.to_string())?;
         let rows = stmt
             .query_map(
-                params![after_seq, high_water, label_prefix, limit as i64 + 1],
+                params![after_seq, high_water, prefix, limit as i64 + 1],
                 |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
             )
             .map_err(|error| error.to_string())?;

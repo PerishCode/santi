@@ -21,10 +21,10 @@ impl ProviderConfig {
         }
     }
 
-    pub fn input_budget_bytes(&self) -> usize {
+    pub fn bytes(&self) -> usize {
         match self {
-            Self::OpenAiResponses(config) => config.input_budget_bytes,
-            Self::ChatCompletions(config) => config.input_budget_bytes,
+            Self::OpenAiResponses(config) => config.bytes,
+            Self::ChatCompletions(config) => config.bytes,
         }
     }
 }
@@ -37,7 +37,7 @@ pub struct OpenAiResponsesConfig {
     pub reasoning_effort: Option<String>,
     pub reasoning_summary: Option<String>,
     pub max_output_tokens: Option<u32>,
-    pub input_budget_bytes: usize,
+    pub bytes: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,7 +49,7 @@ pub struct ChatCompletionsConfig {
     pub thinking: Option<String>,
     pub reasoning_effort: Option<String>,
     pub max_tokens: Option<u32>,
-    pub input_budget_bytes: usize,
+    pub bytes: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -69,7 +69,7 @@ pub enum Profile {
         #[serde(default)]
         max_output_tokens: Option<u32>,
         #[serde(default)]
-        input_budget_bytes: Option<usize>,
+        bytes: Option<usize>,
     },
     ChatCompletions {
         #[serde(default)]
@@ -85,7 +85,7 @@ pub enum Profile {
         #[serde(default)]
         max_tokens: Option<u32>,
         #[serde(default)]
-        input_budget_bytes: Option<usize>,
+        bytes: Option<usize>,
     },
 }
 
@@ -107,7 +107,7 @@ pub(super) fn resolve_openai(provider: &str, profile: &Profile) -> Result<Provid
         reasoning_effort,
         reasoning_summary,
         max_output_tokens,
-        input_budget_bytes,
+        bytes,
     } = profile
     else {
         unreachable!("openai profile")
@@ -124,11 +124,7 @@ pub(super) fn resolve_openai(provider: &str, profile: &Profile) -> Result<Provid
             "reasoning_summary",
         )?,
         max_output_tokens: *max_output_tokens,
-        input_budget_bytes: required_positive_usize(
-            *input_budget_bytes,
-            provider,
-            "input_budget_bytes",
-        )?,
+        bytes: required_positive_usize(*bytes, provider, "bytes")?,
     }))
 }
 
@@ -143,7 +139,7 @@ pub(super) fn resolve_chat_completions(
         thinking,
         reasoning_effort,
         max_tokens,
-        input_budget_bytes,
+        bytes,
     } = profile
     else {
         unreachable!("chat completions profile")
@@ -156,11 +152,7 @@ pub(super) fn resolve_chat_completions(
         thinking: optional_profile_string(thinking, provider, "thinking")?,
         reasoning_effort: optional_profile_string(reasoning_effort, provider, "reasoning_effort")?,
         max_tokens: *max_tokens,
-        input_budget_bytes: required_positive_usize(
-            *input_budget_bytes,
-            provider,
-            "input_budget_bytes",
-        )?,
+        bytes: required_positive_usize(*bytes, provider, "bytes")?,
     }))
 }
 

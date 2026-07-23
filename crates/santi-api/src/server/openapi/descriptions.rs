@@ -9,7 +9,7 @@ pub const COMPONENT_DESCRIPTIONS: [(&str, &str); 7] = [
     ),
     (
         "WebhookSubscription",
-        "An API-managed webhook subscription: how an external source reaches a soul.\n`adaptor` selects the boundary normalizer (integration knowledge); `soul_id`\nis who receives the resulting turn; `strand_strategy` picks where the thread\nlives (`per_thread` = one strand per adaptor-derived label, `single` = one\nstrand per subscription); `secret_env` names the env var holding the signing\nsecret (the secret itself is never stored). The `name` is the URL path segment.",
+        "An API-managed webhook subscription: how an external source reaches a soul.\n`adaptor` selects the boundary normalizer (integration knowledge); `soul`\nis who receives the resulting turn; `strategy` picks where the thread\nlives (`per_thread` = one strand per adaptor-derived label, `single` = one\nstrand per subscription); `credential` names the env var holding the signing\nsecret (the secret itself is never stored). The `name` is the URL path segment.",
     ),
     (
         "ReceiptState",
@@ -25,6 +25,6 @@ pub const COMPONENT_DESCRIPTIONS: [(&str, &str); 7] = [
     ),
     (
         "ActorType",
-        "No user/account actor: santi is individual-first, not multi-tenant. All\ninbound (a CLI send, a webhook event) arrives as `System` — the sender's\nidentity is metainfo carried in the content, opaque to core, not a distinct\nactor kind. `(actor, message_kind)` is the full marker at the provider\nboundary (see `message_to_provider_item`): Soul→assistant, System+Text→user\n(world-inbound), System+SantiSystem→system (runtime-meta, not user speech).",
+        "No user/account actor: santi is individual-first, not multi-tenant. All\ninbound (a CLI send, a webhook event) arrives as `System` — the sender's\nidentity is metainfo carried in the content, opaque to core, not a distinct\nactor kind. `(actor, kind)` is the full marker at the provider\nboundary (see `message_to_provider_item`): Soul→assistant, System+Text→user\n(world-inbound), System+SantiSystem→system (runtime-meta, not user speech).",
     ),
 ];

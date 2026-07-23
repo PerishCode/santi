@@ -50,7 +50,7 @@ async fn failed_receipt_redrives() {
     assert_eq!(provider.requests.lock().unwrap().len(), 2);
     assert_eq!(count_messages(&runtime, "one durable obligation"), 1);
     let receipt = service
-        .receipt_status(&failed.receipt.inbox_id)
+        .receipt_status(&failed.receipt.inbox)
         .expect("receipt query")
         .expect("receipt");
     assert_eq!(receipt.state, santi_core::ReceiptState::Completed);
@@ -165,14 +165,14 @@ async fn cold_start_recovers() {
         runtime
             .messages
             .iter()
-            .any(|message| message.content_text == "pending across restart")
+            .any(|message| message.text == "pending across restart")
     );
 }
 
-fn pending_count(conn: &Connection, strand_id: &str) -> i64 {
+fn pending_count(conn: &Connection, strand: &str) -> i64 {
     conn.query_row(
         "SELECT COUNT(*) FROM strand_inbox WHERE strand_id = ?1",
-        [strand_id],
+        [strand],
         |row| row.get(0),
     )
     .expect("pending count")

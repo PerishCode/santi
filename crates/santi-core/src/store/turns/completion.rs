@@ -3,7 +3,7 @@ use serde_json::json;
 
 use super::{provider_incident_key, runtime_incident_key};
 use crate::store::{SantiStore, db::Database, execution_budget_incident_key};
-use crate::{StrandMessage, Turn, prefixed_id, timestamp_now};
+use crate::{StrandMessage, Turn, now, tag};
 
 pub struct Completion<'a> {
     pub turn: &'a str,
@@ -24,21 +24,21 @@ impl SantiStore {
         message: Option<&StrandMessage>,
     ) -> Result<(Turn, Option<crate::TurnEvent>), String> {
         let mut conn = self.conn.lock().unwrap();
-        let now = timestamp_now();
-        let provider_state = completion.response.as_ref().map(|response| {
+        let now = now();
+        let state = completion.response.as_ref().map(|response| {
             json!({
                 "provider": completion.provider,
                 "opaque": { "response_id": response },
                 "schema_version": "santi-v1"
             })
         });
-        let provider_state = provider_state
+        let state = state
             .as_ref()
             .map(serde_json::to_string)
             .transpose()
             .map_err(|error| error.to_string())?;
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let (strand_id, external_label): (String, Option<String>) = tx
+        let (strand, label): (String, Option<String>) = tx
             .query_row(
                 r#"
                 SELECT turn.strand_id, strand.external_label
@@ -72,55 +72,55 @@ impl SantiStore {
                 updated_at = ?4
             WHERE id = (SELECT strand_id FROM turns WHERE id = ?1)
             "#,
-            params![completion.turn, completion.sequence, provider_state, now],
+            params![completion.turn, completion.sequence, state, now],
         )
         .map_err(|error| error.to_string())?;
         Database::new(&tx).complete_turn(completion.turn, &now)?;
         Database::new(&tx).resolve_incident(
-            &provider_incident_key(&strand_id),
+            &provider_incident_key(&strand),
             "provider.turn_succeeded",
             json!({
-                "turn_id": completion.turn,
+                "turn": completion.turn,
                 "provider": completion.provider,
                 "model": completion.model,
-                "provider_response_id": completion.response,
+                "response": completion.response,
             }),
         )?;
         Database::new(&tx).resolve_incident(
-            &runtime_incident_key(&strand_id),
+            &runtime_incident_key(&strand),
             "runtime.turn_succeeded",
             json!({
-                "turn_id": completion.turn,
+                "turn": completion.turn,
                 "provider": completion.provider,
                 "model": completion.model,
             }),
         )?;
         Database::new(&tx).resolve_incident(
-            &execution_budget_incident_key(&strand_id),
+            &execution_budget_incident_key(&strand),
             "execution_budget.turn_succeeded",
             json!({
-                "turn_id": completion.turn,
+                "turn": completion.turn,
                 "provider": completion.provider,
                 "model": completion.model,
             }),
         )?;
         let turn_event = if let (Some(label), Some(reply)) = (
-            external_label.as_deref(),
-            message.filter(|message| !message.content_text.trim().is_empty()),
+            label.as_deref(),
+            message.filter(|message| !message.text.trim().is_empty()),
         ) {
             let event = crate::TurnEvent {
-                id: prefixed_id("tev"),
-                strand_id: strand_id.clone(),
-                turn_id: completion.turn.to_string(),
-                external_label: label.to_string(),
-                final_text: reply.content_text.clone(),
-                completed_at: now.clone(),
+                id: tag("tev"),
+                strand: strand.clone(),
+                turn: completion.turn.to_string(),
+                label: label.to_string(),
+                text: reply.text.clone(),
+                completed: now.clone(),
             };
             let payload = serde_json::to_string(&event).map_err(|error| error.to_string())?;
             Database::new(&tx).insert_turn_outbox(crate::store::db::TurnOutboxInsert {
                 id: &event.id,
-                turn: &event.turn_id,
-                label: &event.external_label,
+                turn: &event.turn,
+                label: &event.label,
                 payload: &payload,
                 created: &now,
             })?;

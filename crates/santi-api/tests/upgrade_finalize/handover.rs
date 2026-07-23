@@ -29,7 +29,7 @@ fn full_handover_is_idempotent() {
                NULL, NULL, NULL, 'fixture'
         FROM seq
         "#,
-        [&seeded.strand_id],
+        [&seeded.strand],
     )
     .expect("fill inbox fixture");
 

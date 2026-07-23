@@ -2,9 +2,7 @@ use rusqlite::{OptionalExtension, params};
 
 use super::Database;
 use crate::rows::{Decode, collect_rows};
-use santi_model::{
-    EffectState, EffectTransition, EffectTransitionReason, StrandEffect, prefixed_id,
-};
+use santi_model::{EffectState, EffectTransition, EffectTransitionReason, StrandEffect, tag};
 
 const EFFECT_COLUMNS: &str = r#"
     id, strand_id, turn_id, tool_call_id, effect_type, state,
@@ -28,7 +26,7 @@ pub struct Transition<'a> {
 
 impl Database<'_> {
     pub fn insert_prepared(&self, prepared: Prepared<'_>) -> Result<String, String> {
-        let effect_id = prefixed_id("effect");
+        let effect_id = tag("effect");
         self.conn
             .execute(
                 r#"
@@ -76,7 +74,7 @@ impl Database<'_> {
         FROM effect_transitions WHERE effect_id = ?2
         "#,
                 params![
-                    prefixed_id("efx"),
+                    tag("efx"),
                     effect_id,
                     transition.state.encode(),
                     transition.reason.encode(),
@@ -99,7 +97,7 @@ impl Database<'_> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn effects_for_receipt(&self, inbox_id: &str) -> Result<Vec<StrandEffect>, String> {
+    pub fn effects_for_receipt(&self, inbox: &str) -> Result<Vec<StrandEffect>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -116,7 +114,7 @@ impl Database<'_> {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map(params![inbox_id], StrandEffect::decode)
+            .query_map(params![inbox], StrandEffect::decode)
             .map_err(|error| error.to_string())?;
         collect_rows(rows)
     }
@@ -148,7 +146,7 @@ impl Database<'_> {
         collect_rows(rows)
     }
 
-    pub fn receipt_ids(&self, effect_id: &str) -> Result<Vec<String>, String> {
+    pub fn receipts(&self, effect_id: &str) -> Result<Vec<String>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -170,7 +168,7 @@ impl Database<'_> {
 
     pub fn reconcile_effects(
         &self,
-        turn_id: &str,
+        turn: &str,
         prepared_reason: EffectTransitionReason,
         dispatching_reason: EffectTransitionReason,
         occurred: &str,
@@ -186,7 +184,7 @@ impl Database<'_> {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map(params![turn_id], |row| {
+            .query_map(params![turn], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })
             .map_err(|error| error.to_string())?

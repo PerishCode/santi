@@ -77,11 +77,11 @@ fn drain_commits_pending() {
         .expect("try")
         .expect("turn started");
     assert_eq!(started.drained_messages.len(), 3);
-    assert_eq!(started.drained_messages[0].content_text, "first");
-    assert_eq!(started.drained_messages[1].content_text, "second");
-    assert_eq!(started.drained_messages[2].content_text, "third");
+    assert_eq!(started.drained_messages[0].text, "first");
+    assert_eq!(started.drained_messages[1].text, "second");
+    assert_eq!(started.drained_messages[2].text, "third");
     for (index, message) in started.drained_messages.iter().enumerate() {
-        assert_eq!(message.relation.strand_seq, (index + 1) as i64);
+        assert_eq!(message.relation.seq, (index + 1) as i64);
     }
 
     assert!(
@@ -113,7 +113,7 @@ fn drain_records_provenance() {
         .expect("enqueue with source");
 
     let conn = Connection::open(&db).expect("open sqlite");
-    let (inbox_id, enqueued_at): (String, String) = conn
+    let (inbox, enqueued_at): (String, String) = conn
         .query_row(
             "SELECT id, created_at FROM strand_inbox WHERE strand_id = ?1",
             [&strand.id],
@@ -133,20 +133,20 @@ fn drain_records_provenance() {
         .runtime_snapshot(&strand.id)
         .expect("runtime snapshot")
         .expect("strand runtime");
-    assert_eq!(runtime.message_events.len(), 1);
-    let event = &runtime.message_events[0];
+    assert_eq!(runtime.events.len(), 1);
+    let event = &runtime.events[0];
     assert_eq!(event.action, "insert");
-    assert_eq!(event.message_id, drained.message.id);
-    assert_eq!(event.created_at, drained.message.created_at);
+    assert_eq!(event.message, drained.message.id);
+    assert_eq!(event.created, drained.message.created);
 
     let payload = &event.payload;
     assert_eq!(payload["kind"], "inbox_drain");
-    assert_eq!(payload["inbox_id"], inbox_id);
+    assert_eq!(payload["inbox"], inbox);
     assert_eq!(payload["enqueued_at"], enqueued_at);
-    assert_eq!(payload["drained_at"], drained.message.created_at);
+    assert_eq!(payload["drained_at"], drained.message.created);
     assert_eq!(payload["committing_turn_id"], started.turn.id);
-    assert_eq!(payload["message_id"], drained.message.id);
-    assert_eq!(payload["strand_seq"], drained.relation.strand_seq);
+    assert_eq!(payload["message"], drained.message.id);
+    assert_eq!(payload["seq"], drained.relation.seq);
     assert_eq!(payload["source"]["type"], "test");
     assert_eq!(payload["source"]["ref"], "caller-1");
     assert_eq!(payload["source"]["metadata"]["adaptor"], "fake");
@@ -189,17 +189,17 @@ fn inbox_gate_rejects() {
             )
             .expect("prepare receipt transition seed");
         for index in 0..500 {
-            let inbox_id = format!("inbox_gate_seed_{index}");
+            let inbox = format!("inbox_gate_seed_{index}");
             insert_inbox
-                .execute(rusqlite::params![&inbox_id, &strand.id])
+                .execute(rusqlite::params![&inbox, &strand.id])
                 .expect("seed inbox row");
             insert_receipt
-                .execute(rusqlite::params![&inbox_id, &strand.id])
+                .execute(rusqlite::params![&inbox, &strand.id])
                 .expect("seed inbox receipt");
             insert_transition
                 .execute(rusqlite::params![
                     format!("receipt_transition_seed_{index}"),
-                    &inbox_id
+                    &inbox
                 ])
                 .expect("seed receipt transition");
         }

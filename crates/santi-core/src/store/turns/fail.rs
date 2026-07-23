@@ -1,5 +1,5 @@
 use crate::store::{ProviderFault, RuntimeFault, SantiStore, db::Database};
-use crate::{EffectTransitionReason, Fault, Turn, catalog, timestamp_now};
+use crate::{EffectTransitionReason, Fault, Turn, catalog, now};
 use rusqlite::params;
 use serde_json::json;
 
@@ -8,141 +8,137 @@ use super::*;
 impl SantiStore {
     pub(crate) fn fail_provider_turn(
         &self,
-        turn_id: &str,
-        error_text: &str,
+        turn: &str,
+        error: &str,
         failure: ProviderFault<'_>,
     ) -> Result<(Turn, Fault), String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let strand_id: String = tx
+        let strand: String = tx
             .query_row(
                 "SELECT strand_id FROM turns WHERE id = ?1",
-                params![turn_id],
+                params![turn],
                 |row| row.get(0),
             )
             .map_err(|error| error.to_string())?;
-        let now = timestamp_now();
+        let now = now();
         tx.execute(
             r#"
             UPDATE turns
             SET status = 'failed', error_text = ?2, updated_at = ?3, finished_at = ?3
             WHERE id = ?1
             "#,
-            params![turn_id, error_text, now],
+            params![turn, error, now],
         )
         .map_err(|error| error.to_string())?;
         let error = Database::new(&tx).open_incident(santi_error::Draft {
-            key: provider_incident_key(&strand_id),
+            key: provider_incident_key(&strand),
             descriptor: catalog::PROVIDER_TURN_FAILED,
-            scope: santi_error::Scope::new("strand", &strand_id),
+            scope: santi_error::Scope::new("strand", &strand),
             source: santi_error::Source::new("santi-provider", failure.operation),
             message: format!("provider {} failed", failure.stage),
             context: json!({
-                "turn_id": turn_id,
+                "turn": turn,
                 "provider": failure.provider,
                 "model": failure.model,
                 "stage": failure.stage,
                 "round": failure.round,
                 "detail": bounded_provider_detail(failure.detail),
-                "trace": format!("log://turn/{turn_id}"),
+                "trace": format!("log://turn/{turn}"),
             }),
         })?;
         Database::new(&tx).reconcile_effects(
-            turn_id,
+            turn,
             EffectTransitionReason::TurnFailedBeforeDispatch,
             EffectTransitionReason::TurnFailedDuringDispatch,
             &now,
         )?;
-        Database::new(&tx).fail_turn(turn_id, error.incident.as_deref(), &now)?;
+        Database::new(&tx).fail_turn(turn, error.incident.as_deref(), &now)?;
         tx.commit().map_err(|error| error.to_string())?;
         let turn = Database::new(&conn)
-            .turn_by_id(turn_id)?
+            .turn_by_id(turn)?
             .ok_or_else(|| "failed turn missing".to_string())?;
         Ok((turn, error))
     }
 
     pub(crate) fn fail_runtime_turn(
         &self,
-        turn_id: &str,
-        error_text: &str,
+        turn: &str,
+        error: &str,
         failure: RuntimeFault<'_>,
     ) -> Result<(Turn, Fault), String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let strand_id: String = tx
+        let strand: String = tx
             .query_row(
                 "SELECT strand_id FROM turns WHERE id = ?1",
-                params![turn_id],
+                params![turn],
                 |row| row.get(0),
             )
             .map_err(|error| error.to_string())?;
-        let now = timestamp_now();
+        let now = now();
         tx.execute(
             r#"
             UPDATE turns
             SET status = 'failed', error_text = ?2, updated_at = ?3, finished_at = ?3
             WHERE id = ?1
             "#,
-            params![turn_id, error_text, now],
+            params![turn, error, now],
         )
         .map_err(|error| error.to_string())?;
-        let error = open_runtime_incident(&tx, &strand_id, turn_id, failure)?;
+        let error = open_runtime_incident(&tx, &strand, turn, failure)?;
         Database::new(&tx).reconcile_effects(
-            turn_id,
+            turn,
             EffectTransitionReason::TurnFailedBeforeDispatch,
             EffectTransitionReason::TurnFailedDuringDispatch,
             &now,
         )?;
-        Database::new(&tx).fail_turn(turn_id, error.incident.as_deref(), &now)?;
+        Database::new(&tx).fail_turn(turn, error.incident.as_deref(), &now)?;
         tx.commit().map_err(|error| error.to_string())?;
         let turn = Database::new(&conn)
-            .turn_by_id(turn_id)?
+            .turn_by_id(turn)?
             .ok_or_else(|| "failed turn missing".to_string())?;
         Ok((turn, error))
     }
 
-    pub fn fail_turn(&self, turn_id: &str, error_text: &str) -> Result<Turn, String> {
-        self.fail_turn_with_incident(turn_id, error_text, None)
+    pub fn fail_turn(&self, turn: &str, error: &str) -> Result<Turn, String> {
+        self.fail_turn_with_incident(turn, error, None)
     }
 
     pub(crate) fn fail_turn_with_incident(
         &self,
-        turn_id: &str,
-        error_text: &str,
+        turn: &str,
+        error: &str,
         incident: Option<&str>,
     ) -> Result<Turn, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let now = timestamp_now();
+        let now = now();
         tx.execute(
             r#"
             UPDATE turns
             SET status = 'failed', error_text = ?2, updated_at = ?3, finished_at = ?3
             WHERE id = ?1
             "#,
-            params![turn_id, error_text, now],
+            params![turn, error, now],
         )
         .map_err(|error| error.to_string())?;
         Database::new(&tx).reconcile_effects(
-            turn_id,
+            turn,
             EffectTransitionReason::TurnFailedBeforeDispatch,
             EffectTransitionReason::TurnFailedDuringDispatch,
             &now,
         )?;
-        Database::new(&tx).fail_turn(turn_id, incident, &now)?;
+        Database::new(&tx).fail_turn(turn, incident, &now)?;
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .turn_by_id(turn_id)?
+            .turn_by_id(turn)?
             .ok_or_else(|| "failed turn missing".to_string())
     }
 
-    pub fn finish_failed_turn_context(
-        &self,
-        turn_id: &str,
-        last_seen_strand_seq: i64,
-    ) -> Result<Turn, String> {
+    pub fn finish_failed_turn_context(&self, turn: &str, seen: i64) -> Result<Turn, String> {
         let conn = self.conn.lock().unwrap();
-        let now = timestamp_now();
+        let now = now();
         conn.execute(
             r#"
             UPDATE turns
@@ -152,7 +148,7 @@ impl SantiStore {
                 updated_at = ?2
             WHERE id = ?1 AND status = 'failed'
             "#,
-            params![turn_id, now],
+            params![turn, now],
         )
         .map_err(|error| error.to_string())?;
         conn.execute(
@@ -165,41 +161,41 @@ impl SantiStore {
                 updated_at = ?3
             WHERE id = (SELECT strand_id FROM turns WHERE id = ?1)
             "#,
-            params![turn_id, last_seen_strand_seq, now],
+            params![turn, seen, now],
         )
         .map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .turn_by_id(turn_id)?
+            .turn_by_id(turn)?
             .ok_or_else(|| "failed turn missing".to_string())
     }
 }
 
-pub(super) fn provider_incident_key(strand_id: &str) -> String {
-    format!("{}:strand:{strand_id}", catalog::PROVIDER_TURN_FAILED.code)
+pub(super) fn provider_incident_key(strand: &str) -> String {
+    format!("{}:strand:{strand}", catalog::PROVIDER_TURN_FAILED.code)
 }
 
-pub(super) fn runtime_incident_key(strand_id: &str) -> String {
-    format!("{}:strand:{strand_id}", catalog::RUNTIME_TURN_FAILED.code)
+pub(super) fn runtime_incident_key(strand: &str) -> String {
+    format!("{}:strand:{strand}", catalog::RUNTIME_TURN_FAILED.code)
 }
 
 pub(super) fn open_runtime_incident(
     conn: &rusqlite::Connection,
-    strand_id: &str,
-    turn_id: &str,
+    strand: &str,
+    turn: &str,
     failure: RuntimeFault<'_>,
 ) -> Result<Fault, String> {
     Database::new(conn).open_incident(santi_error::Draft {
-        key: runtime_incident_key(strand_id),
+        key: runtime_incident_key(strand),
         descriptor: catalog::RUNTIME_TURN_FAILED,
-        scope: santi_error::Scope::new("strand", strand_id),
+        scope: santi_error::Scope::new("strand", strand),
         source: santi_error::Source::new("santi-core", failure.operation),
         message: "turn failed inside the runtime".to_string(),
         context: json!({
             "schema": "santi.error.runtime_turn.v1",
-            "turn_id": turn_id,
+            "turn": turn,
             "operation": failure.operation,
             "detail": bounded_provider_detail(failure.detail),
-            "trace": format!("log://turn/{turn_id}"),
+            "trace": format!("log://turn/{turn}"),
         }),
     })
 }

@@ -41,10 +41,10 @@ fn errors_replaces_rejections() {
 #[test]
 fn parses_receipt_query() {
     let parsed = Cli::try_parse_from(["santi", "receipt", "inbox_123"]).unwrap();
-    let Command::Receipt { inbox_id } = parsed.command else {
+    let Command::Receipt { inbox } = parsed.command else {
         panic!("expected receipt command");
     };
-    assert_eq!(inbox_id, "inbox_123");
+    assert_eq!(inbox, "inbox_123");
 }
 
 #[test]
@@ -134,9 +134,9 @@ fn parses_capsule() {
         "santi",
         "compact",
         "capsule",
-        "--from-seq",
+        "--from",
         "1",
-        "--to-seq",
+        "--to",
         "9",
         "--summary-file",
         "summary.md",
@@ -146,27 +146,27 @@ fn parses_capsule() {
         "recover budget",
         "--risk",
         "summary may omit detail",
-        "--dry-run",
+        "--dry",
     ])
     .unwrap();
     let Command::Compact(CompactCommand::Capsule {
-        from_seq,
-        to_seq,
+        from,
+        to,
         summary_file,
         source,
         reason,
         risk,
-        dry_run,
+        dry,
         ..
     }) = parsed.command
     else {
         panic!("expected compact capsule command");
     };
-    assert_eq!(from_seq, Some(1));
-    assert_eq!(to_seq, Some(9));
+    assert_eq!(from, Some(1));
+    assert_eq!(to, Some(9));
     assert_eq!(summary_file.as_deref(), Some("summary.md"));
     assert_eq!(source, "operator");
     assert_eq!(reason, "recover budget");
     assert_eq!(risk, "summary may omit detail");
-    assert!(dry_run);
+    assert!(dry);
 }

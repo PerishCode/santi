@@ -35,17 +35,17 @@ pub enum EffectTransitionReason {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct StrandEffect {
     pub id: String,
-    pub strand_id: String,
-    pub turn_id: String,
-    pub tool_call_id: Option<String>,
-    pub effect_type: String,
+    pub strand: String,
+    pub turn: String,
+    pub call: Option<String>,
+    pub kind: String,
     pub state: EffectState,
-    pub result_ref: Option<String>,
-    pub error_text: Option<String>,
-    pub created_at: Timestamp,
-    pub updated_at: Timestamp,
-    pub dispatched_at: Option<Timestamp>,
-    pub settled_at: Option<Timestamp>,
+    pub result: Option<String>,
+    pub error: Option<String>,
+    pub created: Timestamp,
+    pub updated: Timestamp,
+    pub dispatched: Option<Timestamp>,
+    pub settled: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -62,7 +62,7 @@ pub struct EffectTransition {
 pub struct EffectStatus {
     pub effect: StrandEffect,
     pub transitions: Vec<EffectTransition>,
-    pub receipt_ids: Vec<String>,
+    pub receipts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]

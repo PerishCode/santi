@@ -29,7 +29,7 @@ async fn drain_preserves_provenance() {
         .await
         .expect("send first request");
     let first_message_id = first
-        .user_message
+        .message
         .as_ref()
         .expect("first send drains immediately")
         .message
@@ -49,7 +49,7 @@ async fn drain_preserves_provenance() {
         )
         .await
         .expect("send second request while first runs");
-    assert!(second.user_message.is_none());
+    assert!(second.message.is_none());
 
     provider.release_first_request();
     let runtime = Probe::new(&service).completed_count(&strand.id, 2).await;
@@ -57,24 +57,21 @@ async fn drain_preserves_provenance() {
     let second_message = runtime
         .messages
         .iter()
-        .find(|message| message.content_text == "second request")
+        .find(|message| message.text == "second request")
         .expect("second message drained after first turn");
     let second_event = runtime
-        .message_events
+        .events
         .iter()
-        .find(|event| event.message_id == second_message.message.id)
+        .find(|event| event.message == second_message.message.id)
         .expect("second message drain event");
 
     assert_eq!(second_event.payload["kind"], "inbox_drain");
-    assert_eq!(
-        second_event.payload["message_id"],
-        second_message.message.id
-    );
+    assert_eq!(second_event.payload["message"], second_message.message.id);
     assert_eq!(
         second_event.payload["drained_at"],
-        second_message.message.created_at
+        second_message.message.created
     );
-    assert_eq!(second_event.created_at, second_message.message.created_at);
+    assert_eq!(second_event.created, second_message.message.created);
     assert_eq!(
         second_event.payload["source"]["type"], "strand_send",
         "direct sends should carry caller/source shape"
@@ -95,17 +92,17 @@ async fn drain_preserves_provenance() {
         .as_str()
         .expect("enqueued_at string");
     assert!(
-        enqueued_at <= second_message.message.created_at.as_str(),
+        enqueued_at <= second_message.message.created.as_str(),
         "enqueue time should not be later than drain/message time"
     );
 
     let first_event = runtime
-        .message_events
+        .events
         .iter()
-        .find(|event| event.message_id == first_message_id)
+        .find(|event| event.message == first_message_id)
         .expect("first message drain event");
     assert_ne!(
-        first_event.payload["inbox_id"], second_event.payload["inbox_id"],
+        first_event.payload["inbox"], second_event.payload["inbox"],
         "each inbound request should keep its own inbox id provenance"
     );
 }

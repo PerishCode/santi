@@ -26,7 +26,7 @@ pub struct ProviderDoctorReport {
     pub profile: Option<String>,
     pub kind: Option<String>,
     pub model: Option<String>,
-    pub input_budget_bytes: Option<usize>,
+    pub bytes: Option<usize>,
     pub budget_source: Option<String>,
     pub ok: bool,
     pub error: Option<String>,
@@ -39,34 +39,34 @@ pub fn doctor() -> Result<DoctorReport, String> {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SeedReport {
-    pub strand_id: String,
+    pub strand: String,
     pub accepted: bool,
     pub error: Option<santi_core::Fault>,
 }
 
-pub fn inbox_seed(strand_id: &str, text: &str) -> Result<SeedReport, String> {
-    runtime::held().paths.inbox_seed(strand_id, text)
+pub fn inbox_seed(strand: &str, text: &str) -> Result<SeedReport, String> {
+    runtime::held().paths.inbox_seed(strand, text)
 }
 
 fn inbox_seed_existing_strand(
     store: &santi_core::SantiStore,
-    strand_id: &str,
+    strand: &str,
     text: &str,
 ) -> Result<SeedReport, String> {
     let outcome = store.enqueue_inbox_with_source(
-        strand_id,
+        strand,
         santi_core::MessageKind::SantiSystem,
         santi_core::MessageContent::text(text),
         Some(santi_core::InboxSource::new("offline_inbox_seed")),
     )?;
     Ok(match outcome {
         santi_core::IngestOutcome::Accepted { receipt } => SeedReport {
-            strand_id: receipt.strand_id,
+            strand: receipt.strand,
             accepted: true,
             error: receipt.warning.map(|warning| *warning),
         },
         santi_core::IngestOutcome::Rejected { error } => SeedReport {
-            strand_id: strand_id.to_string(),
+            strand: strand.to_string(),
             accepted: false,
             error: Some(*error),
         },
@@ -85,7 +85,7 @@ impl RuntimePaths {
                 profile,
                 kind: Some(provider.kind().to_string()),
                 model: Some(provider.model().to_string()),
-                input_budget_bytes: Some(provider.input_budget_bytes()),
+                bytes: Some(provider.bytes()),
                 budget_source: Some("provider_config".to_string()),
                 ok: true,
                 error: None,
@@ -94,7 +94,7 @@ impl RuntimePaths {
                 profile,
                 kind: None,
                 model: None,
-                input_budget_bytes: None,
+                bytes: None,
                 budget_source: None,
                 ok: false,
                 error: Some(error.to_string()),
@@ -136,22 +136,22 @@ impl RuntimePaths {
         })
     }
 
-    pub fn inbox_seed(&self, strand_id: &str, text: &str) -> Result<SeedReport, String> {
+    pub fn inbox_seed(&self, strand: &str, text: &str) -> Result<SeedReport, String> {
         let store = santi_core::SantiStore::open(&self.database_path)?;
-        if store.strand(strand_id)?.is_none() {
-            return Err(format!("unknown strand: {strand_id}"));
+        if store.strand(strand)?.is_none() {
+            return Err(format!("unknown strand: {strand}"));
         }
-        inbox_seed_existing_strand(&store, strand_id, text)
+        inbox_seed_existing_strand(&store, strand, text)
     }
 
     pub fn inbox_seed_label(
         &self,
-        soul_id: &str,
+        soul: &str,
         label: &str,
         text: &str,
     ) -> Result<SeedReport, String> {
         let store = santi_core::SantiStore::open(&self.database_path)?;
-        let strand = store.find_labeled_strand(soul_id, label)?;
+        let strand = store.find_labeled_strand(soul, label)?;
         inbox_seed_existing_strand(&store, &strand.id, text)
     }
 }

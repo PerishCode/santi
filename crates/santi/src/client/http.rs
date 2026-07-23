@@ -4,17 +4,17 @@ use super::*;
 
 pub(super) fn compact_capsule_body(capsule: Capsule<'_>) -> Result<serde_json::Value> {
     let Capsule {
+        first,
+        last,
         from,
         to,
-        start: from_seq,
-        end: to_seq,
         summary,
         file: summary_file,
         source,
         reason,
         risk,
         queryability,
-        preview: dry_run,
+        preview: dry,
         soul,
     } = capsule;
     let summary = match summary_file {
@@ -22,10 +22,10 @@ pub(super) fn compact_capsule_body(capsule: Capsule<'_>) -> Result<serde_json::V
         None => summary.expect("clap requires summary or summary_file"),
     };
     let mut body = serde_json::json!({
-        "from_message_id": from,
-        "to_message_id": to,
-        "from_seq": from_seq,
-        "to_seq": to_seq,
+        "first": first,
+        "last": last,
+        "from": from,
+        "to": to,
         "summary": summary,
         "capsule": {
             "source": source,
@@ -33,10 +33,10 @@ pub(super) fn compact_capsule_body(capsule: Capsule<'_>) -> Result<serde_json::V
             "risk": risk,
             "queryability": queryability,
         },
-        "dry_run": dry_run,
+        "dry": dry,
     });
     if let Some(soul) = soul {
-        body["soul_id"] = serde_json::Value::from(soul);
+        body["soul"] = serde_json::Value::from(soul);
     }
     Ok(body)
 }
@@ -145,7 +145,7 @@ pub(super) fn strand_send_body(text: String, soul: Option<&str>) -> serde_json::
         "content": [{ "type": "text", "text": text }]
     });
     if let Some(soul) = soul {
-        content["soul_id"] = serde_json::Value::from(soul);
+        content["soul"] = serde_json::Value::from(soul);
     }
     content
 }

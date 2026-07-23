@@ -102,14 +102,14 @@ impl UpgradeHost for FakeHost {
         let record = compose_record(&request.attempt_id);
         self.seeded_text = Some(record.clone());
         let (seeded, seeded_strand_id) = match self.seed_result.clone() {
-            Ok(seed) if seed.warnings.is_empty() => (true, Some(seed.strand_id)),
+            Ok(seed) if seed.warnings.is_empty() => (true, Some(seed.strand)),
             Ok(seed) => {
                 errors.push(fake_error(
                     catalog::UPGRADE_HANDOVER_FAILED,
                     "upgrade.handover",
                     &seed.warnings.join("; "),
                 ));
-                (true, Some(seed.strand_id))
+                (true, Some(seed.strand))
             }
             Err(error) => {
                 errors.push(fake_error(
@@ -153,7 +153,7 @@ fn fake_error(descriptor: santi_core::Descriptor, operation: &str, detail: &str)
 
 fn fake_seed() -> SeedOutcome {
     SeedOutcome {
-        strand_id: "ss_seeded".to_string(),
+        strand: "ss_seeded".to_string(),
         warnings: Vec::new(),
     }
 }

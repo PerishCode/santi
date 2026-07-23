@@ -44,7 +44,7 @@ impl ProviderClient for MemoryOrganizingProvider {
             provider: Arc::from("memory-organizing-provider"),
             model: "memory-organizing-model".to_string(),
             context_budget: Some(ProviderContextBudget {
-                input_budget_bytes: INPUT_BUDGET_BYTES,
+                bytes: INPUT_BUDGET_BYTES,
                 source: "test".to_string(),
             }),
         }
@@ -70,7 +70,7 @@ impl ProviderClient for MemoryOrganizingProvider {
                 "provider response {request_index}"
             ))),
             Ok(ProviderEvent::Completed {
-                provider_response_id: Some(format!("memory-response-{request_index}")),
+                response: Some(format!("memory-response-{request_index}")),
             }),
         ])))
     }
@@ -145,12 +145,12 @@ async fn pressure_lifecycle() {
     let strands = service.list_strands().expect("list strands");
     let maintenance = strands
         .iter()
-        .find(|strand| strand.external_label.as_deref() == Some(MAINTENANCE_LABEL))
+        .find(|strand| strand.label.as_deref() == Some(MAINTENANCE_LABEL))
         .expect("dedicated maintenance strand");
     assert_eq!(
         strands
             .iter()
-            .filter(|strand| strand.external_label.as_deref() == Some(MAINTENANCE_LABEL))
+            .filter(|strand| strand.label.as_deref() == Some(MAINTENANCE_LABEL))
             .count(),
         1,
         "one soul gets exactly one maintenance strand"
@@ -163,9 +163,7 @@ async fn pressure_lifecycle() {
         maintenance_runtime
             .messages
             .iter()
-            .filter(|message| message
-                .content_text
-                .contains("kind: soul_memory_maintenance"))
+            .filter(|message| message.text.contains("kind: soul_memory_maintenance"))
             .count(),
         1,
         "the same source revision must not enqueue duplicate metaprompts"
@@ -173,7 +171,7 @@ async fn pressure_lifecycle() {
     assert!(
         maintenance_runtime.messages.iter().any(|message| {
             message
-                .content_text
+                .text
                 .contains("Do not echo the whole file into provider context")
         }),
         "metaprompt must teach bounded inspection"
@@ -244,7 +242,7 @@ async fn pressure_lifecycle() {
             runtime
                 .messages
                 .iter()
-                .any(|message| message.content_text == expected)
+                .any(|message| message.text == expected)
         );
         assert_eq!(
             runtime

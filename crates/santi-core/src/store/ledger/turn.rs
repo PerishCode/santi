@@ -7,12 +7,11 @@ impl SantiStore {
     pub fn turn_events_since(
         &self,
         after_seq: i64,
-        label_prefix: &str,
+        prefix: &str,
         limit: usize,
     ) -> Result<TurnEventBatch, String> {
         let conn = self.conn.lock().unwrap();
-        let (cursor, rows) =
-            Database::new(&conn).turn_events_since(after_seq, label_prefix, limit)?;
+        let (cursor, rows) = Database::new(&conn).turn_events_since(after_seq, prefix, limit)?;
         let events = rows
             .into_iter()
             .map(|(_, payload)| {

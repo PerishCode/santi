@@ -23,11 +23,11 @@ impl Service {
 
     pub fn get_bucket_object(
         &self,
-        soul_id: &str,
-        strand_id: &str,
+        soul: &str,
+        strand: &str,
         key: &str,
     ) -> Result<Option<object::Payload>, String> {
-        let uri = self.object_uri(soul_id, strand_id, key)?;
+        let uri = self.object_uri(soul, strand, key)?;
         self.object_store().get(&uri)
     }
 
@@ -54,8 +54,8 @@ impl Service {
         object::Store::new(PathBuf::from(&self.config.runtime_root))
     }
 
-    fn object_uri(&self, soul_id: &str, strand_id: &str, key: &str) -> Result<object::Uri, String> {
-        let bucket = object::Bucket::new(soul_id, strand_id)?;
+    fn object_uri(&self, soul: &str, strand: &str, key: &str) -> Result<object::Uri, String> {
+        let bucket = object::Bucket::new(soul, strand)?;
         self.ensure_object_bucket(&bucket)?;
         object::Uri::new(bucket, key)
     }
@@ -65,7 +65,7 @@ impl Service {
             .store
             .strand(&bucket.strand)?
             .ok_or_else(|| "strand not found".to_string())?;
-        if strand.soul_id != bucket.soul {
+        if strand.soul != bucket.soul {
             return Err("soul not found".to_string());
         }
         Ok(())

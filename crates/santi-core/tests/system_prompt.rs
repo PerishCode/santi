@@ -44,8 +44,8 @@ fn renders_material_shape() {
     ));
     assert!(text.contains("[santi-meta]"));
     assert!(!text.contains("channel: santi"));
-    assert!(text.contains("soul_id: soul_default"));
-    assert!(text.contains("strand_id: "));
+    assert!(text.contains("soul: soul_default"));
+    assert!(text.contains("strand: "));
     assert!(!text.contains("soul_name"));
     assert!(text.contains(&format!(
         "{} will always be displayed in [santi-soul].",
@@ -162,8 +162,8 @@ async fn external_labels_stay_out_of_prompt() {
     else {
         panic!("second ingest rejected");
     };
-    let first_text = harness.system_prompt_for(&first_receipt.strand_id).text;
-    let second_text = harness.system_prompt_for(&second_receipt.strand_id).text;
+    let first_text = harness.system_prompt_for(&first_receipt.strand).text;
+    let second_text = harness.system_prompt_for(&second_receipt.strand).text;
     assert!(!first_text.contains("stim:operator"));
     assert!(!second_text.contains("github:ops:issue:PerishCode/santi#1"));
 }
@@ -171,7 +171,7 @@ async fn external_labels_stay_out_of_prompt() {
 struct PromptHarness {
     _temp: tempfile::TempDir,
     service: Service,
-    strand_id: String,
+    strand: String,
     runtime_root: std::path::PathBuf,
 }
 
@@ -190,11 +190,11 @@ impl PromptHarness {
             Arc::new(FakeProvider),
         )
         .expect("open service");
-        let strand_id = service.create_strand().expect("create strand").strand.id;
+        let strand = service.create_strand().expect("create strand").strand.id;
         Self {
             _temp: temp,
             service,
-            strand_id,
+            strand,
             runtime_root,
         }
     }
@@ -213,7 +213,7 @@ impl PromptHarness {
         let path = self
             .runtime_root
             .join("strands")
-            .join(&self.strand_id)
+            .join(&self.strand)
             .join("memory");
         fs::create_dir_all(&path).expect("create strand dir");
         fs::write(path.join("MEMORY.md"), text).expect("write strand");
@@ -225,13 +225,13 @@ impl PromptHarness {
     }
 
     fn system_prompt(&self) -> StrandMaterial {
-        self.system_prompt_for(&self.strand_id)
+        self.system_prompt_for(&self.strand)
     }
 
-    fn system_prompt_for(&self, strand_id: &str) -> StrandMaterial {
+    fn system_prompt_for(&self, strand: &str) -> StrandMaterial {
         self.service
             .strand_material(
-                strand_id,
+                strand,
                 MaterialRequest {
                     kind: MaterialKind::SystemPrompt,
                 },

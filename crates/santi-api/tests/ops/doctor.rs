@@ -18,7 +18,7 @@ fn reports_budget() {
     assert_eq!(provider.profile.as_deref(), Some("openai"));
     assert_eq!(provider.kind.as_deref(), Some("openai_responses"));
     assert_eq!(provider.model.as_deref(), Some("gpt-5.5"));
-    assert_eq!(provider.input_budget_bytes, Some(120000));
+    assert_eq!(provider.bytes, Some(120000));
     assert_eq!(provider.budget_source.as_deref(), Some("provider_config"));
 }
 
@@ -36,7 +36,7 @@ fn rejects_missing_budget() {
     assert_eq!(provider.profile.as_deref(), Some("openai"));
     assert_eq!(
         provider.error.as_deref(),
-        Some("provider openai field input_budget_bytes is required")
+        Some("provider openai field bytes is required")
     );
 }
 
@@ -54,7 +54,7 @@ fn runtime_under(root: &Path, budget: Option<usize>) -> Runtime {
         providers: BTreeMap<String, Profile>,
     }
     let budget = budget
-        .map(|value| format!("input_budget_bytes = {value}"))
+        .map(|value| format!("bytes = {value}"))
         .unwrap_or_default();
     let file: File = toml::from_str(&format!(
         r#"

@@ -1,28 +1,26 @@
 use rusqlite::params;
 
 use super::{SantiStore, db::Database};
-use crate::{Strand, prefixed_id, timestamp_now};
+use crate::{Strand, now, tag};
 
 impl SantiStore {
-    pub fn fork_strand(&self, parent_strand_id: &str, fork_point: i64) -> Result<Strand, String> {
-        if fork_point < 0 {
-            return Err("fork_point must be >= 0".to_string());
+    pub fn fork_strand(&self, parent: &str, fork: i64) -> Result<Strand, String> {
+        if fork < 0 {
+            return Err("fork must be >= 0".to_string());
         }
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let database = Database::new(&tx);
         let parent = database
-            .strand_by_id(parent_strand_id)?
+            .strand_by_id(parent)?
             .ok_or_else(|| "parent strand not found".to_string())?;
-        let parent_last_seq = parent.next_seq - 1;
-        if fork_point > parent_last_seq {
-            return Err(format!(
-                "fork_point {fork_point} is past parent end {parent_last_seq}"
-            ));
+        let parent_last_seq = parent.next - 1;
+        if fork > parent_last_seq {
+            return Err(format!("fork {fork} is past parent end {parent_last_seq}"));
         }
 
-        let child_id = prefixed_id("ss");
-        let now = timestamp_now();
+        let child_id = tag("ss");
+        let now = now();
         tx.execute(
             r#"
             INSERT INTO strands (
@@ -33,11 +31,11 @@ impl SantiStore {
             "#,
             params![
                 child_id,
-                parent.soul_id,
-                fork_point + 1,
-                parent.last_seen_strand_seq.min(fork_point),
+                parent.soul,
+                fork + 1,
+                parent.seen.min(fork),
                 parent.id,
-                fork_point,
+                fork,
                 now,
             ],
         )
@@ -56,7 +54,7 @@ impl SantiStore {
                 )
                 .map_err(|error| error.to_string())?;
             let rows = stmt
-                .query_map(params![parent_strand_id, fork_point], |row| {
+                .query_map(params![parent.id, fork], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
@@ -69,7 +67,7 @@ impl SantiStore {
                 entries.push(row.map_err(|error| error.to_string())?);
             }
         }
-        for (target_type, target_id, strand_seq, created_at) in entries {
+        for (kind, target, seq, created) in entries {
             tx.execute(
                 r#"
                 INSERT INTO r_strand_entries (
@@ -77,23 +75,20 @@ impl SantiStore {
                 )
                 VALUES (?1, ?2, ?3, ?4, ?5)
                 "#,
-                params![child_id, target_type, target_id, strand_seq, created_at],
+                params![child_id, kind, target, seq, created],
             )
             .map_err(|error| error.to_string())?;
         }
 
-        for compact in database.compacts_for_strand(parent_strand_id)? {
-            let Some(start_seq) =
-                database.message_seq_in_strand(parent_strand_id, &compact.start_message_id)?
+        for compact in database.compacts_for_strand(&parent.id)? {
+            let Some(start_seq) = database.message_seq_in_strand(&parent.id, &compact.first)?
             else {
                 continue;
             };
-            let Some(end_seq) =
-                database.message_seq_in_strand(parent_strand_id, &compact.end_message_id)?
-            else {
+            let Some(end_seq) = database.message_seq_in_strand(&parent.id, &compact.last)? else {
                 continue;
             };
-            if start_seq <= fork_point && end_seq <= fork_point {
+            if start_seq <= fork && end_seq <= fork {
                 tx.execute(
                     r#"
                     INSERT INTO compacts (
@@ -102,12 +97,12 @@ impl SantiStore {
                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                     "#,
                     params![
-                        prefixed_id("cmp"),
+                        tag("cmp"),
                         child_id,
                         compact.summary,
-                        compact.start_message_id,
-                        compact.end_message_id,
-                        compact.created_at,
+                        compact.first,
+                        compact.last,
+                        compact.created,
                         compact.metadata.map(|value| value.to_string()),
                     ],
                 )
@@ -127,7 +122,7 @@ impl SantiStore {
         let child = Database::new(&tx)
             .strand_by_id(child_strand_id)?
             .ok_or_else(|| "fork child not found".to_string())?;
-        if child.parent_strand_id.is_none() {
+        if child.parent.is_none() {
             return Err("refusing to delete a non-fork strand".to_string());
         }
         let turns: i64 = tx

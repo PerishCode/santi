@@ -31,18 +31,18 @@ async fn emits_turn_completed() {
         .await
         .expect("send strand");
 
-    let turn_id = accepted_turn(&response).id.clone();
+    let turn = accepted_turn(&response).id.clone();
     let completed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events.recv().await.expect("stream event").payload {
-                santi_core::SantiStreamPayload::TurnCompleted { turn_id, .. } => break turn_id,
+                santi_core::SantiStreamPayload::TurnCompleted { turn, .. } => break turn,
                 _ => continue,
             }
         }
     })
     .await
     .expect("turn_completed within timeout");
-    assert_eq!(completed, turn_id);
+    assert_eq!(completed, turn);
 }
 
 #[tokio::test]
@@ -62,10 +62,10 @@ async fn labeled_turn_emits_envelope_and_records_outbox() {
     .expect("open service");
 
     let mut events = service.subscribe_stream();
-    let soul_id = service.list_souls().expect("list souls")[0].id.clone();
+    let soul = service.list_souls().expect("list souls")[0].id.clone();
     let label = "github:ops:issue:PerishCode/santi#7";
     let santi_core::IngestOutcome::Accepted { .. } = service
-        .ingest_external_event(&soul_id, label, "external request".to_string())
+        .ingest_external_event(&soul, label, "external request".to_string())
         .expect("ingest event")
     else {
         panic!("expected accepted");
@@ -73,13 +73,10 @@ async fn labeled_turn_emits_envelope_and_records_outbox() {
 
     let (label_seen, text_seen) = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if let santi_core::SantiStreamPayload::TurnCompleted {
-                external_label,
-                final_text,
-                ..
-            } = events.recv().await.expect("stream event").payload
+            if let santi_core::SantiStreamPayload::TurnCompleted { label, text, .. } =
+                events.recv().await.expect("stream event").payload
             {
-                break (external_label, final_text);
+                break (label, text);
             }
         }
     })
@@ -94,9 +91,9 @@ async fn labeled_turn_emits_envelope_and_records_outbox() {
     let event = recorded
         .events
         .iter()
-        .find(|event| event.external_label == label)
+        .find(|event| event.label == label)
         .expect("outbox turn event for the labeled strand");
-    assert!(!event.final_text.is_empty());
+    assert!(!event.text.is_empty());
 }
 
 #[tokio::test]
@@ -113,16 +110,15 @@ async fn downstream_batch_isolates_zone_and_advances_over_other_zones() {
         Arc::new(FakeProvider::default()),
     )
     .expect("open service");
-    let soul_id = service.list_souls().expect("list souls")[0].id.clone();
+    let soul = service.list_souls().expect("list souls")[0].id.clone();
     let mut stream = service.subscribe_stream();
     service
-        .ingest_external_event(&soul_id, "github:issue:1", "github".to_string())
+        .ingest_external_event(&soul, "github:issue:1", "github".to_string())
         .expect("ingest github");
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             if let santi_core::SantiStreamPayload::TurnCompleted {
-                external_label: Some(label),
-                ..
+                label: Some(label), ..
             } = stream.recv().await.expect("stream event").payload
                 && label == "github:issue:1"
             {
@@ -140,13 +136,12 @@ async fn downstream_batch_isolates_zone_and_advances_over_other_zones() {
     assert!(empty.cursor > 0);
 
     service
-        .ingest_external_event(&soul_id, "stim:alice", "stim".to_string())
+        .ingest_external_event(&soul, "stim:alice", "stim".to_string())
         .expect("ingest stim");
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             if let santi_core::SantiStreamPayload::TurnCompleted {
-                external_label: Some(label),
-                ..
+                label: Some(label), ..
             } = stream.recv().await.expect("stream event").payload
                 && label == "stim:alice"
             {
@@ -161,13 +156,13 @@ async fn downstream_batch_isolates_zone_and_advances_over_other_zones() {
         .turn_events_since(empty.cursor, "stim:", 10)
         .expect("stim batch");
     assert_eq!(stim.events.len(), 1);
-    assert_eq!(stim.events[0].external_label, "stim:alice");
+    assert_eq!(stim.events[0].label, "stim:alice");
     assert!(stim.cursor > empty.cursor);
     let github = service
         .turn_events_since(0, "github:", 10)
         .expect("github batch");
     assert_eq!(github.events.len(), 1);
-    assert_eq!(github.events[0].external_label, "github:issue:1");
+    assert_eq!(github.events[0].label, "github:issue:1");
     assert_eq!(github.cursor, stim.cursor);
 }
 

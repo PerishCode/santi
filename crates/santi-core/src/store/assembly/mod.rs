@@ -6,31 +6,31 @@ mod render;
 use render::*;
 
 impl SantiStore {
-    pub fn assembly_input(&self, strand_id: &str) -> Result<Vec<ProviderItem>, String> {
+    pub fn assembly_input(&self, strand: &str) -> Result<Vec<ProviderItem>, String> {
         let conn = self.conn.lock().unwrap();
-        assembly_input_in_conn(&conn, strand_id)
+        assembly_input_in_conn(&conn, strand)
     }
 
     pub(crate) fn assembly_input_preview(
         &self,
-        strand_id: &str,
+        strand: &str,
         response: &crate::CompactExecResponse,
         summary: &str,
         metadata: serde_json::Value,
     ) -> Result<Vec<ProviderItem>, String> {
         let conn = self.conn.lock().unwrap();
         let preview = crate::Compact {
-            id: response.compact_id.clone(),
-            strand_id: strand_id.to_string(),
+            id: response.compact.clone(),
+            strand: strand.to_string(),
             summary: summary.to_string(),
-            start_message_id: response.start_message_id.clone(),
-            end_message_id: response.end_message_id.clone(),
-            created_at: None,
+            first: response.first.clone(),
+            last: response.last.clone(),
+            created: None,
             metadata: Some(metadata),
         };
         assembly_input_with_preview(
             &conn,
-            strand_id,
+            strand,
             Some(Preview {
                 span: Span {
                     start_seq: response.start_seq,
@@ -54,9 +54,9 @@ impl SantiStore {
 
 pub(super) fn assembly_input_in_conn(
     conn: &rusqlite::Connection,
-    strand_id: &str,
+    strand: &str,
 ) -> Result<Vec<ProviderItem>, String> {
-    assembly_input_with_preview(conn, strand_id, None)
+    assembly_input_with_preview(conn, strand, None)
 }
 
 struct Preview<'a> {

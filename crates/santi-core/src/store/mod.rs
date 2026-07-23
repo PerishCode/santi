@@ -4,7 +4,7 @@ use rusqlite::{Connection, params};
 
 use crate::{
     ActorType, Fault, MessageContent, MessageIntake, MessageKind, MessageState, Strand,
-    StrandMessage, StrandTargetType, Turn, prefixed_id, timestamp_now,
+    StrandMessage, StrandTargetType, Turn, now, tag,
 };
 
 mod assembly;
@@ -33,12 +33,12 @@ const STRAND_INBOX_GATE: i64 = 500;
 
 pub fn soul_memory_file(
     runtime_root: impl AsRef<std::path::Path>,
-    soul_id: &str,
+    soul: &str,
 ) -> std::path::PathBuf {
     runtime_root
         .as_ref()
         .join("souls")
-        .join(soul_id)
+        .join(soul)
         .join("memory")
         .join(crate::workspace::MEMORY_FILE)
 }
@@ -118,8 +118,8 @@ impl SantiStore {
 
     pub fn create_strand(&self) -> Result<Strand, String> {
         let conn = self.conn.lock().unwrap();
-        let strand_id = prefixed_id("ss");
-        let now = timestamp_now();
+        let strand = tag("ss");
+        let now = now();
         conn.execute(
             r#"
             INSERT INTO strands (
@@ -128,38 +128,38 @@ impl SantiStore {
             )
             VALUES (?1, ?2, NULL, '', NULL, 1, 0, NULL, NULL, ?3, ?3)
             "#,
-            params![strand_id, DEFAULT_SOUL_ID, now],
+            params![strand, DEFAULT_SOUL_ID, now],
         )
         .map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .strand_by_id(&strand_id)?
+            .strand_by_id(&strand)?
             .ok_or_else(|| "created strand missing".to_string())
     }
 
-    pub fn strand_messages(&self, strand_id: &str) -> Result<Vec<StrandMessage>, String> {
+    pub fn strand_messages(&self, strand: &str) -> Result<Vec<StrandMessage>, String> {
         let conn = self.conn.lock().unwrap();
-        Database::new(&conn).strand_messages(strand_id)
+        Database::new(&conn).strand_messages(strand)
     }
 
     pub fn runtime_snapshot(
         &self,
-        strand_id: &str,
+        strand: &str,
     ) -> Result<Option<crate::StrandRuntimeSnapshot>, String> {
         let conn = self.conn.lock().unwrap();
         let database = Database::new(&conn);
-        let Some(strand) = database.strand_by_id(strand_id)? else {
+        let Some(strand) = database.strand_by_id(strand)? else {
             return Ok(None);
         };
         Ok(Some(crate::StrandRuntimeSnapshot {
-            messages: database.strand_messages(strand_id)?,
-            message_events: database.message_events_for_strand(strand_id)?,
+            messages: database.strand_messages(&strand.id)?,
+            events: database.message_events_for_strand(&strand.id)?,
             turns: database.turns_for_strand(&strand.id)?,
-            thinking_spans: database.soul_thinking_spans(&strand.id)?,
-            tool_calls: database.soul_tool_calls(&strand.id)?,
-            tool_results: database.soul_tool_results(&strand.id)?,
+            thinking: database.soul_thinking_spans(&strand.id)?,
+            calls: database.soul_tool_calls(&strand.id)?,
+            results: database.soul_tool_results(&strand.id)?,
             compacts: database.compacts_for_strand(&strand.id)?,
-            effects: database.strand_effects(strand_id)?,
-            errors: database.list_incidents("strand", strand_id, 100)?,
+            effects: database.strand_effects(&strand.id)?,
+            errors: database.list_incidents("strand", &strand.id, 100)?,
             strand,
         }))
     }
@@ -170,13 +170,13 @@ impl SantiStore {
 
     pub fn append_santi_system_message(
         &self,
-        strand_id: &str,
+        strand: &str,
         content: MessageContent,
         intake: MessageIntake,
     ) -> Result<AppendedMessage, String> {
         self.append_message_with_kind(
             Draft {
-                strand: strand_id,
+                strand,
                 actor: ActorType::System,
                 id: SANTI_SYSTEM_ACTOR_ID,
                 content,
@@ -194,8 +194,8 @@ impl SantiStore {
     ) -> Result<AppendedMessage, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let message_id = prefixed_id("msg");
-        let now = timestamp_now();
+        let message = tag("msg");
+        let now = now();
         let content_json =
             serde_json::to_string(&draft.content).map_err(|error| error.to_string())?;
         tx.execute(
@@ -207,7 +207,7 @@ impl SantiStore {
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, NULL, ?8, ?8)
             "#,
             params![
-                message_id,
+                message,
                 draft.actor.encode(),
                 draft.id,
                 kind.encode(),
@@ -218,15 +218,11 @@ impl SantiStore {
             ],
         )
         .map_err(|error| error.to_string())?;
-        Database::new(&tx).append_entry_in_tx(
-            draft.strand,
-            StrandTargetType::Message,
-            &message_id,
-        )?;
+        Database::new(&tx).append_entry_in_tx(draft.strand, StrandTargetType::Message, &message)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(AppendedMessage {
             strand_message: Database::new(&conn)
-                .message_by_id(&message_id)?
+                .message_by_id(&message)?
                 .ok_or_else(|| "created message missing".to_string())?,
         })
     }

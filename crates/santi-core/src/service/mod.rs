@@ -65,26 +65,22 @@ impl Service {
 
     pub fn set_strand_execution_budget(
         &self,
-        strand_id: &str,
+        strand: &str,
         budget: Execution,
     ) -> Result<(), String> {
         budget.validate()?;
-        if self.store.strand(strand_id)?.is_none() {
+        if self.store.strand(strand)?.is_none() {
             return Err("strand not found".to_string());
         }
         self.execution_budgets
             .lock()
             .unwrap()
-            .insert(strand_id.to_string(), budget);
+            .insert(strand.to_string(), budget);
         Ok(())
     }
 
-    pub(in crate::service) fn strand_execution_budget(&self, strand_id: &str) -> Option<Execution> {
-        self.execution_budgets
-            .lock()
-            .unwrap()
-            .get(strand_id)
-            .cloned()
+    pub(in crate::service) fn strand_execution_budget(&self, strand: &str) -> Option<Execution> {
+        self.execution_budgets.lock().unwrap().get(strand).cloned()
     }
 
     pub fn begin_shutdown(&self) {
@@ -119,13 +115,13 @@ impl Service {
     pub fn resume_pending(&self) -> Result<(), String> {
         self.dispatch_error_events();
         let pending = self.store.strands_with_pending_requests()?;
-        for strand_id in pending {
-            let outcome = self.poke(&strand_id, "strand_send", None, "cold_start_resume");
+        for strand in pending {
+            let outcome = self.poke(&strand, "strand_send", None, "cold_start_resume");
             if let drive::Outcome::Failed(error) = outcome
                 && error.code == crate::catalog::ERROR_ENGINE_PERSISTENCE_FAILED.code
             {
                 return Err(format!(
-                    "cold-start recovery could not persist driver truth for strand {strand_id}: {}",
+                    "cold-start recovery could not persist driver truth for strand {strand}: {}",
                     error.message
                 ));
             }

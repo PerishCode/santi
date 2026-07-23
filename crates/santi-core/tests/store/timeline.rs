@@ -17,7 +17,7 @@ fn appends_relations_in_order() {
         .expect("append user")
         .strand_message;
 
-    assert_eq!(user.relation.strand_seq, 1);
+    assert_eq!(user.relation.seq, 1);
     let input = store.assembly_input(&strand.id).expect("assembly input");
     assert_eq!(input.len(), 1);
     assert_text(&input[0], "user", "hello ordering");
@@ -37,8 +37,8 @@ fn maps_santi_system_input() {
         .expect("append santi system")
         .strand_message;
 
-    assert_eq!(message.message.actor_type, ActorType::System);
-    assert_eq!(message.message.message_kind, MessageKind::SantiSystem);
+    assert_eq!(message.message.role, ActorType::System);
+    assert_eq!(message.message.kind, MessageKind::SantiSystem);
     let input = store.assembly_input(&strand.id).expect("assembly input");
     assert_eq!(input.len(), 1);
     assert_text(
@@ -84,18 +84,15 @@ fn thinking_becomes_reasoning() {
         .runtime_snapshot(&strand.id)
         .expect("runtime snapshot")
         .expect("strand exists");
-    assert_eq!(snapshot.thinking_spans.len(), 1);
-    assert_eq!(snapshot.thinking_spans[0].id, thinking.id);
+    assert_eq!(snapshot.thinking.len(), 1);
+    assert_eq!(snapshot.thinking[0].id, thinking.id);
+    assert_eq!(snapshot.thinking[0].response.as_deref(), Some("resp_test"));
     assert_eq!(
-        snapshot.thinking_spans[0].provider_response_id.as_deref(),
-        Some("resp_test")
-    );
-    assert_eq!(
-        snapshot.thinking_spans[0].summary.as_deref(),
+        snapshot.thinking[0].summary.as_deref(),
         Some("Looked at the prompt.")
     );
     assert_eq!(
-        snapshot.thinking_spans[0].completion_reason,
+        snapshot.thinking[0].completion_reason,
         Some(ThinkingCompletionReason::FirstTextDelta)
     );
 
@@ -139,9 +136,9 @@ fn timeline_interleaves() {
             name: "shell",
             arguments: &serde_json::json!({ "command": "echo hi" }),
             provenance: &ToolCallProvenance {
-                provider_family: "openai".to_string(),
+                family: "openai".to_string(),
                 item: Some(serde_json::json!({ "type": "function_call", "id": "fc_1" })),
-                item_id: Some("fc_1".to_string()),
+                mark: Some("fc_1".to_string()),
                 response_id: Some("resp_1".to_string()),
             },
         })
@@ -166,12 +163,12 @@ fn timeline_interleaves() {
             name,
             arguments_raw,
             item,
-            item_id,
+            mark,
         } => {
             assert_eq!(call_id, "call_1");
             assert_eq!(name, "shell");
             assert!(arguments_raw.contains("echo hi"));
-            assert_eq!(item_id.as_deref(), Some("fc_1"));
+            assert_eq!(mark.as_deref(), Some("fc_1"));
             assert_eq!(item.as_ref().expect("raw item")["id"], "fc_1");
         }
         other => panic!("expected function call, got {other:?}"),

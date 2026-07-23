@@ -185,8 +185,8 @@ fn fork_prompt_topology() {
         .text;
 
     assert!(text.contains("[santi-fork]"));
-    assert!(text.contains(&format!("parent_strand_id: {}", parent.id)));
-    assert!(text.contains("fork_point: 1"));
+    assert!(text.contains(&format!("parent: {}", parent.id)));
+    assert!(text.contains("fork: 1"));
     assert!(!text.contains("merge"));
     assert!(!text.contains("sandbox"));
     assert!(!text.contains("recommend"));

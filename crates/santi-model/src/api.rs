@@ -8,39 +8,39 @@ use super::*;
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DownstreamCredential {
     pub id: String,
-    pub label_prefix: String,
+    pub prefix: String,
     #[serde(skip)]
     #[schema(ignore)]
-    pub credential_sha256: String,
-    pub created_at: Timestamp,
-    pub updated_at: Timestamp,
+    pub digest: String,
+    pub created: Timestamp,
+    pub updated: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CreateDownstreamRequest {
     pub id: String,
-    pub label_prefix: String,
-    pub credential_sha256: String,
+    pub prefix: String,
+    pub digest: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IngestRequest {
-    pub soul_id: String,
+    pub soul: String,
     pub label: String,
     pub text: String,
-    pub request_id: String,
+    pub request: String,
     #[serde(default)]
-    pub source_ref: Option<String>,
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TurnEvent {
     pub id: String,
-    pub strand_id: String,
-    pub turn_id: String,
-    pub external_label: String,
-    pub final_text: String,
-    pub completed_at: Timestamp,
+    pub strand: String,
+    pub turn: String,
+    pub label: String,
+    pub text: String,
+    pub completed: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -59,21 +59,21 @@ pub struct CreateSoulRequest {
 pub struct WebhookSubscription {
     pub name: String,
     pub adaptor: String,
-    pub soul_id: String,
-    pub strand_strategy: String,
-    pub secret_env: String,
-    pub created_at: Timestamp,
-    pub updated_at: Timestamp,
+    pub soul: String,
+    pub strategy: String,
+    pub credential: String,
+    pub created: Timestamp,
+    pub updated: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CreateWebhookRequest {
     pub name: String,
     pub adaptor: String,
-    pub soul_id: String,
+    pub soul: String,
     #[serde(default)]
-    pub strand_strategy: Option<String>,
-    pub secret_env: String,
+    pub strategy: Option<String>,
+    pub credential: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -102,7 +102,7 @@ impl SendStrandRequest {
         MessageContent {
             parts: self.content.clone(),
         }
-        .content_text()
+        .rendered()
     }
 }
 
@@ -111,13 +111,13 @@ pub struct SendStrandAcceptedResponse {
     pub strand: Strand,
     pub receipt: IngestReceipt,
     pub turn: Option<Turn>,
-    pub user_message: Option<StrandMessage>,
+    pub message: Option<StrandMessage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IngestReceipt {
-    pub strand_id: String,
-    pub inbox_id: String,
+    pub strand: String,
+    pub inbox: String,
     pub warning: Option<Box<Fault>>,
 }
 
@@ -136,19 +136,19 @@ pub struct ReceiptTransition {
     pub id: String,
     pub sequence: i64,
     pub state: ReceiptState,
-    pub turn_id: Option<String>,
+    pub turn: Option<String>,
     pub incident: Option<String>,
-    pub reconstructed_from: Option<String>,
+    pub rebuilt: Option<String>,
     pub occurred: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ReceiptStatus {
-    pub inbox_id: String,
-    pub strand_id: String,
+    pub inbox: String,
+    pub strand: String,
     pub state: ReceiptState,
-    pub accepted_at: Timestamp,
-    pub updated_at: Timestamp,
+    pub accepted: Timestamp,
+    pub updated: Timestamp,
     pub transitions: Vec<ReceiptTransition>,
     pub effects: Vec<StrandEffect>,
 }
@@ -164,7 +164,7 @@ pub enum DriveStrandState {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DriveStrandResponse {
-    pub strand_id: String,
+    pub strand: String,
     pub state: DriveStrandState,
     pub turn: Option<Turn>,
 }
@@ -172,7 +172,7 @@ pub struct DriveStrandResponse {
 #[derive(Debug, Clone)]
 pub enum StrandSelector {
     ById(String),
-    ByLabel { soul_id: String, label: String },
+    ByLabel { soul: String, label: String },
 }
 
 #[derive(Debug, Clone)]
@@ -183,22 +183,22 @@ pub enum IngestOutcome {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct InboxSource {
-    pub source_type: String,
-    pub source_ref: Option<String>,
+    pub kind: String,
+    pub source: Option<String>,
     pub metadata: Option<Value>,
 }
 
 impl InboxSource {
-    pub fn new(source_type: impl Into<String>) -> Self {
+    pub fn new(kind: impl Into<String>) -> Self {
         Self {
-            source_type: source_type.into(),
-            source_ref: None,
+            kind: kind.into(),
+            source: None,
             metadata: None,
         }
     }
 
-    pub fn with_ref(mut self, source_ref: impl Into<String>) -> Self {
-        self.source_ref = Some(source_ref.into());
+    pub fn with_ref(mut self, source: impl Into<String>) -> Self {
+        self.source = Some(source.into());
         self
     }
 

@@ -17,9 +17,9 @@ impl Database<'_> {
     pub fn insert_downstream(
         &self,
         id: &str,
-        label_prefix: &str,
-        credential_sha256: &str,
-        created_at: &str,
+        prefix: &str,
+        digest: &str,
+        created: &str,
     ) -> Result<(), String> {
         self.conn
             .execute(
@@ -29,7 +29,7 @@ impl Database<'_> {
                 )
                 VALUES (?1, ?2, ?3, ?4, ?4)
                 "#,
-                params![id, label_prefix, credential_sha256, created_at],
+                params![id, prefix, digest, created],
             )
             .map_err(|error| error.to_string())?;
         Ok(())

@@ -135,7 +135,7 @@ impl Failure {
 }
 
 impl Service {
-    pub(super) fn fail_background_turn(&self, strand_id: &str, turn_id: &str, failure: Failure) {
+    pub(super) fn fail_background_turn(&self, strand: &str, turn: &str, failure: Failure) {
         let Failure {
             error,
             partial_assistant_text,
@@ -143,38 +143,38 @@ impl Service {
         } = failure;
         let persist_budget = |canonical_error: Fault, budget: &str| match self
             .store
-            .fail_turn_with_incident(turn_id, &error, canonical_error.incident.as_deref())
+            .fail_turn_with_incident(turn, &error, canonical_error.incident.as_deref())
         {
             Ok(turn) => (Some(turn), canonical_error),
             Err(persistence_error) => {
                 eprintln!(
-                    "santi: {budget}-budget turn persistence failed for {turn_id}: {persistence_error}"
+                    "santi: {budget}-budget turn persistence failed for {turn}: {persistence_error}"
                 );
                 (
                     None,
-                    terminal_runtime_error(strand_id, turn_id, persistence_error),
+                    terminal_runtime_error(strand, turn, persistence_error),
                 )
             }
         };
-        let (turn, canonical_error) = match cause {
+        let (finished, canonical_error) = match cause {
             Cause::Provider(metadata) => {
-                self.persist_provider_failure(strand_id, turn_id, &error, metadata)
+                self.persist_provider_failure(strand, turn, &error, metadata)
             }
             Cause::Budget(Admission::Context, error) => persist_budget(*error, "context"),
             Cause::Budget(Admission::Execution, error) => persist_budget(*error, "execution"),
             Cause::Runtime(operation) => {
-                self.persist_runtime_failure(strand_id, turn_id, &error, operation)
+                self.persist_runtime_failure(strand, turn, &error, operation)
             }
         };
 
-        if let Some(turn) = turn {
-            self.persist_partial_output(strand_id, turn_id, &turn, partial_assistant_text);
+        if let Some(held) = finished {
+            self.persist_partial_output(strand, &held.id, &held, partial_assistant_text);
         }
         self.dispatch_error_events();
         self.publish_stream(
-            strand_id,
+            strand,
             SantiStreamPayload::TurnFailed {
-                turn_id: turn_id.to_string(),
+                turn: turn.to_string(),
                 error: Box::new(canonical_error),
             },
         );
@@ -182,13 +182,13 @@ impl Service {
 
     fn persist_provider_failure(
         &self,
-        strand_id: &str,
-        turn_id: &str,
+        strand: &str,
+        turn: &str,
         error: &str,
         metadata: Metadata,
     ) -> (Option<Turn>, Fault) {
         match self.store.fail_provider_turn(
-            turn_id,
+            turn,
             error,
             ProviderFault {
                 provider: &metadata.provider,
@@ -202,12 +202,12 @@ impl Service {
             Ok((turn, error)) => (Some(turn), error),
             Err(persistence_error) => {
                 eprintln!(
-                    "santi: provider failure incident persistence failed for {turn_id}: {persistence_error}"
+                    "santi: provider failure incident persistence failed for {turn}: {persistence_error}"
                 );
-                let turn = self.store.fail_turn(turn_id, error).ok();
+                let held = self.store.fail_turn(turn, error).ok();
                 (
-                    turn,
-                    terminal_persistence_error(strand_id, turn_id, persistence_error),
+                    held,
+                    terminal_persistence_error(strand, turn, persistence_error),
                 )
             }
         }
@@ -215,13 +215,13 @@ impl Service {
 
     fn persist_runtime_failure(
         &self,
-        strand_id: &str,
-        turn_id: &str,
+        strand: &str,
+        turn: &str,
         error: &str,
         operation: Operation,
     ) -> (Option<Turn>, Fault) {
         match self.store.fail_runtime_turn(
-            turn_id,
+            turn,
             error,
             RuntimeFault {
                 operation: operation.name(),
@@ -231,11 +231,11 @@ impl Service {
             Ok((turn, error)) => (Some(turn), error),
             Err(persistence_error) => {
                 eprintln!(
-                    "santi: runtime turn failure persistence failed for {turn_id}: {persistence_error}"
+                    "santi: runtime turn failure persistence failed for {turn}: {persistence_error}"
                 );
                 (
                     None,
-                    terminal_runtime_error(strand_id, turn_id, persistence_error),
+                    terminal_runtime_error(strand, turn, persistence_error),
                 )
             }
         }
@@ -243,16 +243,16 @@ impl Service {
 
     fn persist_partial_output(
         &self,
-        strand_id: &str,
-        turn_id: &str,
-        turn: &Turn,
+        strand: &str,
+        turn: &str,
+        held: &Turn,
         partial_assistant_text: String,
     ) {
         if partial_assistant_text.trim().is_empty() {
             return;
         }
         match self.store.append_message(crate::Draft {
-            strand: &turn.strand_id,
+            strand: &held.strand,
             actor: ActorType::Soul,
             id: self.store.default_soul_id(),
             content: MessageContent::text(partial_assistant_text),
@@ -260,40 +260,40 @@ impl Service {
             intake: MessageIntake::Record,
         }) {
             Ok(message) => {
-                let seq = message.strand_message.relation.strand_seq;
+                let seq = message.strand_message.relation.seq;
                 self.publish_stream(
-                    strand_id,
+                    strand,
                     SantiStreamPayload::MessageCreated {
                         message: message.strand_message,
                     },
                 );
-                if let Err(error) = self.store.finish_failed_turn_context(turn_id, seq) {
-                    eprintln!("santi: failed to finalize partial output for {turn_id}: {error}");
+                if let Err(error) = self.store.finish_failed_turn_context(turn, seq) {
+                    eprintln!("santi: failed to finalize partial output for {turn}: {error}");
                 }
             }
             Err(error) => {
-                eprintln!("santi: failed to persist partial output for {turn_id}: {error}");
+                eprintln!("santi: failed to persist partial output for {turn}: {error}");
             }
         }
     }
 }
 
-fn terminal_persistence_error(strand_id: &str, turn_id: &str, detail: String) -> Fault {
+fn terminal_persistence_error(strand: &str, turn: &str, detail: String) -> Fault {
     engine().transient(crate::Signal {
         descriptor: catalog::ERROR_ENGINE_PERSISTENCE_FAILED,
         source: santi_error::Source::new("santi-core", "provider_turn_failure"),
-        scope: Some(santi_error::Scope::new("strand", strand_id)),
+        scope: Some(santi_error::Scope::new("strand", strand)),
         message: "failed to persist provider failure incident".to_string(),
-        context: serde_json::json!({ "turn_id": turn_id, "detail": detail }),
+        context: serde_json::json!({ "turn": turn, "detail": detail }),
     })
 }
 
-fn terminal_runtime_error(strand_id: &str, turn_id: &str, detail: String) -> Fault {
+fn terminal_runtime_error(strand: &str, turn: &str, detail: String) -> Fault {
     engine().transient(crate::Signal {
         descriptor: catalog::INTERNAL,
         source: santi_error::Source::new("santi-core", "turn_failure_persistence"),
-        scope: Some(santi_error::Scope::new("strand", strand_id)),
+        scope: Some(santi_error::Scope::new("strand", strand)),
         message: "failed to persist turn failure".to_string(),
-        context: serde_json::json!({ "turn_id": turn_id, "detail": detail }),
+        context: serde_json::json!({ "turn": turn, "detail": detail }),
     })
 }

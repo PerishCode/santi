@@ -2,14 +2,14 @@ use santi_model::{DownstreamCredential, IngestReceipt};
 
 use super::SantiStore;
 use super::db::Database;
-use crate::timestamp_now;
+use crate::now;
 
 impl SantiStore {
     pub fn create_downstream(
         &self,
         id: &str,
-        label_prefix: &str,
-        credential_sha256: &str,
+        prefix: &str,
+        digest: &str,
     ) -> Result<DownstreamCredential, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn
@@ -17,28 +17,25 @@ impl SantiStore {
             .map_err(|error| error.to_string())?;
         let downstreams = Database::new(&tx).list_downstreams()?;
         if let Some(existing) = downstreams.iter().find(|downstream| downstream.id == id) {
-            if existing.label_prefix == label_prefix
-                && existing.credential_sha256 == credential_sha256
-            {
+            if existing.prefix == prefix && existing.digest == digest {
                 tx.commit().map_err(|error| error.to_string())?;
                 return Ok(existing.clone());
             }
             return Err("downstream id conflicts with an existing registration".to_string());
         }
         if downstreams.iter().any(|downstream| {
-            downstream.label_prefix.starts_with(label_prefix)
-                || label_prefix.starts_with(&downstream.label_prefix)
+            downstream.prefix.starts_with(prefix) || prefix.starts_with(&downstream.prefix)
         }) {
-            return Err("downstream label_prefix overlaps an existing registration".to_string());
+            return Err("downstream prefix overlaps an existing registration".to_string());
         }
         if downstreams
             .iter()
-            .any(|downstream| downstream.credential_sha256 == credential_sha256)
+            .any(|downstream| downstream.digest == digest)
         {
-            return Err("downstream credential_sha256 is already registered".to_string());
+            return Err("downstream digest is already registered".to_string());
         }
-        let now = timestamp_now();
-        Database::new(&tx).insert_downstream(id, label_prefix, credential_sha256, &now)?;
+        let now = now();
+        Database::new(&tx).insert_downstream(id, prefix, digest, &now)?;
         let downstream = Database::new(&tx)
             .downstream_by_id(id)?
             .ok_or_else(|| "created downstream missing".to_string())?;
@@ -58,16 +55,15 @@ impl SantiStore {
         digest: &str,
     ) -> Result<Option<IngestReceipt>, String> {
         let conn = self.conn.lock().unwrap();
-        let Some((accepted, strand_id, inbox_id)) = Database::new(&conn).replay(owner, request)?
-        else {
+        let Some((accepted, strand, inbox)) = Database::new(&conn).replay(owner, request)? else {
             return Ok(None);
         };
         if accepted != digest {
             return Err("downstream request conflicts with an accepted payload".to_string());
         }
         Ok(Some(IngestReceipt {
-            strand_id,
-            inbox_id,
+            strand,
+            inbox,
             warning: None,
         }))
     }

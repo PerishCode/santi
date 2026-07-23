@@ -2,8 +2,8 @@ use super::*;
 
 #[utoipa::path(
     get,
-    path = "/api/v1/receipts/{inbox_id}",
-    params(("inbox_id" = String, Path)),
+    path = "/api/v1/receipts/{inbox}",
+    params(("inbox" = String, Path)),
     responses(
         (status = 200, body = ReceiptStatus),
         (status = 404, body = Fault),
@@ -12,10 +12,10 @@ use super::*;
 )]
 pub async fn receipt_status(
     State(service): State<Service>,
-    Path(inbox_id): Path<String>,
+    Path(inbox): Path<String>,
 ) -> Result<Json<ReceiptStatus>, ApiError> {
     let receipt = service
-        .receipt_status(&inbox_id)
+        .receipt_status(&inbox)
         .map_err(ApiError::from_service)?
         .ok_or_else(|| ApiError::not_found("receipt not found"))?;
     Ok(Json(receipt))
@@ -81,8 +81,8 @@ pub(super) async fn list_souls(
 
 #[utoipa::path(
     get,
-    path = "/api/v1/souls/{soul_id}",
-    params(("soul_id" = String, Path)),
+    path = "/api/v1/souls/{soul}",
+    params(("soul" = String, Path)),
     responses(
         (status = 200, body = Soul),
         (status = 404, body = Fault),
@@ -91,9 +91,9 @@ pub(super) async fn list_souls(
 )]
 pub(super) async fn get_soul(
     State(service): State<Service>,
-    Path(soul_id): Path<String>,
+    Path(soul): Path<String>,
 ) -> Result<Json<Soul>, ApiError> {
-    match service.soul(&soul_id).map_err(ApiError::from_service)? {
+    match service.soul(&soul).map_err(ApiError::from_service)? {
         Some(soul) => Ok(Json(soul)),
         None => Err(ApiError::not_found("soul not found")),
     }
@@ -131,8 +131,8 @@ pub(super) async fn list_webhooks(
 
 #[utoipa::path(
     get,
-    path = "/api/v1/strands/{strand_id}",
-    params(("strand_id" = String, Path)),
+    path = "/api/v1/strands/{strand}",
+    params(("strand" = String, Path)),
     responses(
         (status = 200, body = StrandDetail),
         (status = 404, body = Fault),
@@ -141,10 +141,10 @@ pub(super) async fn list_webhooks(
 )]
 pub(super) async fn get_strand(
     State(service): State<Service>,
-    Path(strand_id): Path<String>,
+    Path(strand): Path<String>,
 ) -> Result<Json<StrandDetail>, ApiError> {
     service
-        .strand(&strand_id)
+        .strand(&strand)
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("strand not found"))
@@ -152,8 +152,8 @@ pub(super) async fn get_strand(
 
 #[utoipa::path(
     get,
-    path = "/api/v1/strands/{strand_id}/messages",
-    params(("strand_id" = String, Path)),
+    path = "/api/v1/strands/{strand}/messages",
+    params(("strand" = String, Path)),
     responses(
         (status = 200, body = [santi_core::StrandMessage]),
         (status = 404, body = Fault),
@@ -162,10 +162,10 @@ pub(super) async fn get_strand(
 )]
 pub(super) async fn list_messages(
     State(service): State<Service>,
-    Path(strand_id): Path<String>,
+    Path(strand): Path<String>,
 ) -> Result<Json<Vec<santi_core::StrandMessage>>, ApiError> {
     service
-        .strand(&strand_id)
+        .strand(&strand)
         .map_err(ApiError::from_service)?
         .map(|detail| Json(detail.messages))
         .ok_or_else(|| ApiError::not_found("strand not found"))
@@ -173,8 +173,8 @@ pub(super) async fn list_messages(
 
 #[utoipa::path(
     post,
-    path = "/api/v1/strands/{strand_id}/materials",
-    params(("strand_id" = String, Path)),
+    path = "/api/v1/strands/{strand}/materials",
+    params(("strand" = String, Path)),
     request_body = MaterialRequest,
     responses(
         (status = 200, body = StrandMaterial),
@@ -184,11 +184,11 @@ pub(super) async fn list_messages(
 )]
 pub(super) async fn strand_material(
     State(service): State<Service>,
-    Path(strand_id): Path<String>,
+    Path(strand): Path<String>,
     Json(request): Json<MaterialRequest>,
 ) -> Result<Json<StrandMaterial>, ApiError> {
     service
-        .strand_material(&strand_id, request)
+        .strand_material(&strand, request)
         .map(Json)
         .map_err(ApiError::from_service)
 }

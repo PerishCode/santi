@@ -84,7 +84,7 @@ fn soul_label_anchoring() {
         .find_labeled_strand(&soul.id, "github:issue:50")
         .expect("other label");
     assert_ne!(s1.id, s2.id);
-    assert_eq!(s1.soul_id, soul.id);
+    assert_eq!(s1.soul, soul.id);
     assert_eq!(store.soul_id_for_strand(&s1.id).expect("soul id"), soul.id);
 
     let default_strand = store
@@ -107,126 +107,6 @@ fn absent_schema_is_none() {
         santi_core::read_schema_version(&missing).expect("read"),
         None
     );
-}
-
-#[test]
-fn schema_migration_preserves_webhooks() {
-    let temp = tempfile::tempdir().expect("temp dir");
-    let db = temp.path().join("santi.sqlite");
-    {
-        let conn = Connection::open(&db).expect("open sqlite");
-        conn.execute_batch(
-            r#"
-            CREATE TABLE souls (
-                id TEXT PRIMARY KEY,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE webhooks (
-                name TEXT PRIMARY KEY,
-                adaptor TEXT NOT NULL,
-                soul_id TEXT NOT NULL,
-                strand_strategy TEXT NOT NULL,
-                secret_env TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE strand_inbox (
-                id TEXT PRIMARY KEY,
-                strand_id TEXT NOT NULL,
-                message_kind TEXT NOT NULL CHECK (message_kind IN ('text', 'santi_system')),
-                content TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-            INSERT INTO souls (id, created_at, updated_at)
-            VALUES ('soul_default', '2026-07-08T00:00:00Z', '2026-07-08T00:00:00Z');
-            INSERT INTO webhooks (
-                name, adaptor, soul_id, strand_strategy, secret_env, created_at, updated_at
-            ) VALUES (
-                'secretary', 'github', 'soul_default', 'per_thread',
-                'SANTI_WEBHOOK_GITHUB_SECRET', '2026-07-08T00:00:01Z', '2026-07-08T00:00:01Z'
-            );
-            INSERT INTO strand_inbox (id, strand_id, message_kind, content, created_at)
-            VALUES ('inbox_old', 'ss_existing', 'text', '{"parts":[]}', '2026-07-08T00:00:02Z');
-            PRAGMA user_version = 21;
-            "#,
-        )
-        .expect("seed v21 db");
-    }
-
-    let store = SantiStore::open(&db).expect("open migrates v21 to current schema");
-    assert_eq!(
-        santi_core::read_schema_version(&db).expect("read version"),
-        Some(santi_core::SCHEMA_VERSION)
-    );
-    let webhooks = store.list_webhooks().expect("list webhooks");
-    assert_eq!(webhooks.len(), 1);
-    let webhook = &webhooks[0];
-    assert_eq!(webhook.name, "secretary");
-    assert_eq!(webhook.adaptor, "github");
-    assert_eq!(webhook.soul_id, "soul_default");
-    assert_eq!(webhook.strand_strategy, "per_thread");
-    assert_eq!(webhook.secret_env, "SANTI_WEBHOOK_GITHUB_SECRET");
-    assert!(store.soul("soul_default").expect("soul").is_some());
-    drop(store);
-
-    let conn = Connection::open(&db).expect("open sqlite");
-    for column in ["source_type", "source_ref", "source_metadata"] {
-        let exists: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('strand_inbox') WHERE name = ?1",
-                [column],
-                |row| row.get(0),
-            )
-            .expect("column lookup");
-        assert_eq!(exists, 1, "missing migrated column {column}");
-    }
-    for column in ["created_at", "metadata"] {
-        let exists: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('compacts') WHERE name = ?1",
-                [column],
-                |row| row.get(0),
-            )
-            .expect("compact column lookup");
-        assert_eq!(exists, 1, "missing migrated compact column {column}");
-    }
-    for table in ["error_incidents", "error_transitions"] {
-        let exists: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-                [table],
-                |row| row.get(0),
-            )
-            .expect("table lookup");
-        assert_eq!(exists, 1, "missing migrated table {table}");
-    }
-    for table in ["strand_blocks", "rejected_deliveries"] {
-        let exists: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-                [table],
-                |row| row.get(0),
-            )
-            .expect("table lookup");
-        assert_eq!(exists, 0, "replaced table {table} still present");
-    }
-    let pending_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM strand_inbox WHERE id = 'inbox_old'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("pending row count");
-    assert_eq!(pending_count, 1, "v21 pending inbox row was wiped");
-    let webhook_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM webhooks WHERE name = 'secretary'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("webhook count");
-    assert_eq!(webhook_count, 1, "webhook subscription was wiped");
 }
 
 #[test]

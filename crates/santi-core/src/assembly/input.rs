@@ -4,7 +4,7 @@ use crate::SantiStore;
 
 pub(crate) fn provider_input(
     store: &SantiStore,
-    strand_id: &str,
+    strand: &str,
 ) -> Result<Vec<ProviderItem>, String> {
-    store.assembly_input(strand_id)
+    store.assembly_input(strand)
 }

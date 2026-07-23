@@ -10,12 +10,12 @@ pub enum CompactCommand {
             help = "First message of the range (a fixed projected message id)",
             long
         )]
-        from: String,
+        first: String,
         #[arg(
             help = "Last message of the range (a fixed projected message id)",
             long
         )]
-        to: String,
+        last: String,
         #[arg(help = "The summary text. Mutually exclusive with --summary-file")]
         #[arg(
             long,
@@ -34,19 +34,23 @@ pub enum CompactCommand {
         #[arg(
             help = "First message of the range (a fixed projected message id)",
             long,
-            conflicts_with = "from_seq"
+            conflicts_with = "from"
         )]
-        from: Option<String>,
+        first: Option<String>,
         #[arg(
             help = "Last message of the range (a fixed projected message id)",
             long,
-            conflicts_with = "to_seq"
+            conflicts_with = "to"
         )]
-        to: Option<String>,
-        #[arg(help = "First message seq of the range", long, conflicts_with = "from")]
-        from_seq: Option<i64>,
-        #[arg(help = "Last message seq of the range", long, conflicts_with = "to")]
-        to_seq: Option<i64>,
+        last: Option<String>,
+        #[arg(
+            help = "First message seq of the range",
+            long,
+            conflicts_with = "first"
+        )]
+        from: Option<i64>,
+        #[arg(help = "Last message seq of the range", long, conflicts_with = "last")]
+        to: Option<i64>,
         #[arg(help = "The summary text. Mutually exclusive with --summary-file")]
         #[arg(
             long,
@@ -79,12 +83,12 @@ pub enum CompactCommand {
             help = "Validate and preview the capsule plan without writing a compact",
             long
         )]
-        dry_run: bool,
+        dry: bool,
     },
     #[command(about = "GET /api/v1/compacts/{id} — expand a compact's covered range (paginated)")]
     Query {
         #[arg(long)]
-        compact_id: String,
+        compact: String,
         #[arg(long)]
         keyword: Option<String>,
         #[arg(long, default_value_t = 0)]

@@ -1,6 +1,6 @@
 {
   "schema": "santi.wire_schema.v2",
-  "digest": "3173924caad56b6ed5e455786d69ca1c49bb526191324cce0b808f62c396494f",
+  "digest": "6ff5be846003bdf3be5021284f5b1946a8481cb58de7f4af8862f1db0ad13ad6",
   "components": [
     "ActorType",
     "Category",
@@ -84,12 +84,12 @@
     "ActorType": [],
     "Category": [],
     "Compact": [
-      "created_at",
-      "end_message_id",
+      "created",
+      "first",
       "id",
+      "last",
       "metadata",
-      "start_message_id",
-      "strand_id",
+      "strand",
       "summary"
     ],
     "CompactCapsuleOptions": [
@@ -100,58 +100,58 @@
     ],
     "CompactExecRequest": [
       "capsule",
-      "dry_run",
-      "from_message_id",
-      "from_seq",
+      "dry",
+      "first",
+      "from",
+      "last",
       "summary",
-      "to_message_id",
-      "to_seq"
+      "to"
     ],
     "CompactExecResponse": [
       "absorbed",
       "active_incident_resolved",
+      "after",
+      "before",
       "collapsed_count",
-      "compact_id",
-      "compression_ratio",
-      "dry_run",
-      "end_message_id",
+      "compact",
+      "dry",
       "end_seq",
-      "post_estimate",
-      "pre_estimate",
-      "start_message_id",
+      "first",
+      "last",
+      "ratio",
       "start_seq"
     ],
     "CompactQueryEntry": [
-      "strand_seq",
-      "target_id",
-      "target_type",
+      "kind",
+      "seq",
+      "target",
       "text"
     ],
     "CompactQueryResponse": [
-      "compact_id",
-      "end_message_id",
+      "compact",
       "entries",
+      "first",
+      "last",
       "page_index",
       "page_size",
-      "start_message_id",
       "total"
     ],
     "ContextBudget": [
-      "input_budget_bytes",
+      "bytes",
       "source"
     ],
     "ContextEstimate": [
       "estimator",
-      "input_bytes",
-      "input_items",
-      "instructions_bytes",
-      "tools_bytes",
-      "total_bytes"
+      "input",
+      "instructions",
+      "items",
+      "tools",
+      "total"
     ],
     "CreateDownstreamRequest": [
-      "credential_sha256",
+      "digest",
       "id",
-      "label_prefix"
+      "prefix"
     ],
     "CreateSoulRequest": [
       "memory"
@@ -161,20 +161,20 @@
     ],
     "CreateWebhookRequest": [
       "adaptor",
+      "credential",
       "name",
-      "secret_env",
-      "soul_id",
-      "strand_strategy"
+      "soul",
+      "strategy"
     ],
     "DownstreamCredential": [
-      "created_at",
+      "created",
       "id",
-      "label_prefix",
-      "updated_at"
+      "prefix",
+      "updated"
     ],
     "DriveStrandResponse": [
       "state",
-      "strand_id",
+      "strand",
       "turn"
     ],
     "DriveStrandState": [],
@@ -182,7 +182,7 @@
     "EffectState": [],
     "EffectStatus": [
       "effect",
-      "receipt_ids",
+      "receipts",
       "transitions"
     ],
     "EffectTransition": [
@@ -216,8 +216,8 @@
       "strand"
     ],
     "HealthResponse": [
-      "active_drive_incidents",
       "degraded",
+      "incidents",
       "ok",
       "service"
     ],
@@ -238,15 +238,15 @@
       "status"
     ],
     "IngestReceipt": [
-      "inbox_id",
-      "strand_id",
+      "inbox",
+      "strand",
       "warning"
     ],
     "IngestRequest": [
       "label",
-      "request_id",
-      "soul_id",
-      "source_ref",
+      "request",
+      "soul",
+      "source",
       "text"
     ],
     "Kind": [],
@@ -256,19 +256,19 @@
     ],
     "MaterialUpdated": [
       "kind",
-      "strand_id",
-      "updated_at"
+      "strand",
+      "updated"
     ],
     "Message": [
-      "actor_id",
-      "actor_type",
+      "actor",
       "content",
-      "created_at",
-      "deleted_at",
+      "created",
+      "deleted",
       "id",
-      "message_kind",
+      "kind",
+      "role",
       "state",
-      "updated_at",
+      "updated",
       "version"
     ],
     "MessageContent": [
@@ -276,13 +276,13 @@
     ],
     "MessageEvent": [
       "action",
-      "actor_id",
-      "actor_type",
+      "actor",
       "base_version",
-      "created_at",
+      "created",
       "id",
-      "message_id",
-      "payload"
+      "message",
+      "payload",
+      "role"
     ],
     "MessageKind": [],
     "MessagePart": [
@@ -294,22 +294,22 @@
     "MessageState": [],
     "ReceiptState": [],
     "ReceiptStatus": [
-      "accepted_at",
+      "accepted",
       "effects",
-      "inbox_id",
+      "inbox",
       "state",
-      "strand_id",
+      "strand",
       "transitions",
-      "updated_at"
+      "updated"
     ],
     "ReceiptTransition": [
       "id",
       "incident",
       "occurred",
-      "reconstructed_from",
+      "rebuilt",
       "sequence",
       "state",
-      "turn_id"
+      "turn"
     ],
     "Report": [
       "context",
@@ -331,19 +331,19 @@
       "kind"
     ],
     "SendStrandAcceptedResponse": [
+      "message",
       "receipt",
       "strand",
-      "turn",
-      "user_message"
+      "turn"
     ],
     "SendStrandRequest": [
       "content"
     ],
     "Severity": [],
     "Soul": [
-      "created_at",
+      "created",
       "id",
-      "updated_at"
+      "updated"
     ],
     "Source": [
       "component",
@@ -351,70 +351,70 @@
     ],
     "Status": [],
     "Strand": [
-      "created_at",
-      "external_label",
-      "fork_point",
+      "created",
+      "fork",
       "id",
-      "last_seen_strand_seq",
-      "next_seq",
-      "parent_strand_id",
-      "provider_state",
-      "soul_id",
-      "strand_memory",
-      "updated_at"
+      "label",
+      "memory",
+      "next",
+      "parent",
+      "seen",
+      "soul",
+      "state",
+      "updated"
     ],
     "StrandBudgetSnapshot": [
-      "active_incident",
       "budget",
       "estimate",
-      "strand_id"
+      "incident",
+      "strand"
     ],
     "StrandDetail": [
       "messages",
       "strand"
     ],
     "StrandEffect": [
-      "created_at",
-      "dispatched_at",
-      "effect_type",
-      "error_text",
+      "call",
+      "created",
+      "dispatched",
+      "error",
       "id",
-      "result_ref",
-      "settled_at",
+      "kind",
+      "result",
+      "settled",
       "state",
-      "strand_id",
-      "tool_call_id",
-      "turn_id",
-      "updated_at"
+      "strand",
+      "turn",
+      "updated"
     ],
     "StrandMaterial": [
       "content_type",
       "kind",
-      "strand_id",
+      "strand",
       "text",
-      "updated_at"
+      "updated"
     ],
     "StrandMessage": [
-      "content_text",
       "message",
-      "relation"
+      "relation",
+      "text"
     ],
     "StrandMessageRef": [
-      "created_at",
-      "message_id",
-      "strand_id",
-      "strand_seq"
+      "created",
+      "message",
+      "seq",
+      "strand"
     ],
     "StrandRuntimeSnapshot": [
+      "calls",
       "compacts",
       "effects",
       "errors",
-      "message_events",
+      "events",
       "messages",
+      "results",
       "strand",
-      "thinking_spans",
-      "tool_calls",
-      "tool_results",
+      "thinking",
       "turns"
     ],
     "StrandTargetType": [],
@@ -422,30 +422,30 @@
     "ThinkingCompletionReason": [],
     "ThinkingSpan": [
       "completion_reason",
-      "created_at",
-      "error_text",
-      "finished_at",
+      "created",
+      "error",
+      "finished",
       "id",
-      "provider_response_id",
+      "response",
       "state",
       "summary",
-      "turn_id",
-      "updated_at"
+      "turn",
+      "updated"
     ],
     "ThinkingSpanState": [],
     "ToolCall": [
       "arguments",
-      "created_at",
+      "created",
       "id",
-      "tool_name",
-      "turn_id"
+      "tool",
+      "turn"
     ],
     "ToolResult": [
-      "created_at",
-      "error_text",
+      "call",
+      "created",
+      "error",
       "id",
-      "output",
-      "tool_call_id"
+      "output"
     ],
     "Transition": [
       "held",
@@ -456,31 +456,31 @@
       "revision"
     ],
     "Turn": [
-      "base_strand_seq",
-      "created_at",
-      "end_strand_seq",
-      "error_text",
-      "finished_at",
+      "created",
+      "error",
+      "finished",
+      "from",
       "id",
+      "source",
       "status",
-      "strand_id",
-      "trigger_ref",
-      "trigger_type",
-      "updated_at"
+      "strand",
+      "to",
+      "trigger",
+      "updated"
     ],
     "TurnActivity": [
-      "provider_response_id",
+      "response",
       "state",
-      "turn_id"
+      "turn"
     ],
     "TurnActivityState": [],
     "TurnEvent": [
-      "completed_at",
-      "external_label",
-      "final_text",
+      "completed",
       "id",
-      "strand_id",
-      "turn_id"
+      "label",
+      "strand",
+      "text",
+      "turn"
     ],
     "TurnEventBatch": [
       "cursor",
@@ -490,12 +490,12 @@
     "TurnTriggerType": [],
     "WebhookSubscription": [
       "adaptor",
-      "created_at",
+      "created",
+      "credential",
       "name",
-      "secret_env",
-      "soul_id",
-      "strand_strategy",
-      "updated_at"
+      "soul",
+      "strategy",
+      "updated"
     ]
   }
 }

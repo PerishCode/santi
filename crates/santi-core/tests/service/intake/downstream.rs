@@ -21,8 +21,8 @@ fn register(service: &Service, id: &str, prefix: &str, token: &str) {
     service
         .create_downstream(santi_core::CreateDownstreamRequest {
             id: id.to_string(),
-            label_prefix: prefix.to_string(),
-            credential_sha256: hex::encode(Sha256::digest(token.as_bytes())),
+            prefix: prefix.to_string(),
+            digest: hex::encode(Sha256::digest(token.as_bytes())),
         })
         .expect("create downstream");
 }
@@ -39,13 +39,13 @@ fn receipt(admission: service::Admission) -> santi_core::IngestReceipt {
 async fn credential_and_zone_gate_ingest() {
     let (_temp, service) = open();
     register(&service, "stim", "stim:", "s3cret");
-    let soul_id = service.list_souls().expect("list souls")[0].id.clone();
+    let soul = service.list_souls().expect("list souls")[0].id.clone();
     let request = santi_core::IngestRequest {
-        soul_id: soul_id.clone(),
+        soul: soul.clone(),
         label: "stim:alice".to_string(),
         text: "hello".to_string(),
-        request_id: "stim-message-1".to_string(),
-        source_ref: None,
+        request: "stim-message-1".to_string(),
+        source: None,
     };
     assert!(matches!(
         service
@@ -65,7 +65,7 @@ async fn credential_and_zone_gate_ingest() {
                 "s3cret",
                 santi_core::IngestRequest {
                     label: "other:bob".to_string(),
-                    request_id: "stim-message-2".to_string(),
+                    request: "stim-message-2".to_string(),
                     ..request
                 },
             )
@@ -78,13 +78,13 @@ async fn credential_and_zone_gate_ingest() {
 async fn request_key_replays_receipt_and_rejects_changed_payload() {
     let (_temp, service) = open();
     register(&service, "stim", "stim:", "s3cret");
-    let soul_id = service.list_souls().expect("list souls")[0].id.clone();
+    let soul = service.list_souls().expect("list souls")[0].id.clone();
     let request = santi_core::IngestRequest {
-        soul_id,
+        soul,
         label: "stim:alice".to_string(),
         text: "hello".to_string(),
-        request_id: "stim-message-1".to_string(),
-        source_ref: Some("message-1".to_string()),
+        request: "stim-message-1".to_string(),
+        source: Some("message-1".to_string()),
     };
     let first = receipt(
         service
@@ -96,8 +96,8 @@ async fn request_key_replays_receipt_and_rejects_changed_payload() {
             .ingest_downstream("s3cret", request.clone())
             .expect("repeated ingest"),
     );
-    assert_eq!(repeated.strand_id, first.strand_id);
-    assert_eq!(repeated.inbox_id, first.inbox_id);
+    assert_eq!(repeated.strand, first.strand);
+    assert_eq!(repeated.inbox, first.inbox);
     let strand_count = service.list_strands().expect("list strands").len();
     let error = match service.ingest_downstream(
         "s3cret",
@@ -123,8 +123,8 @@ fn registration_is_unique_idempotent_and_secret_free() {
     let digest = hex::encode(Sha256::digest(b"s3cret"));
     let request = santi_core::CreateDownstreamRequest {
         id: "stim".to_string(),
-        label_prefix: "stim:".to_string(),
-        credential_sha256: digest.clone(),
+        prefix: "stim:".to_string(),
+        digest: digest.clone(),
     };
     let created = service
         .create_downstream(request.clone())
@@ -134,23 +134,23 @@ fn registration_is_unique_idempotent_and_secret_free() {
         .expect("repeat registration");
     assert_eq!(repeated.id, created.id);
     let exposed = serde_json::to_value(&created).expect("serialize downstream");
-    assert!(exposed.get("credential_sha256").is_none());
+    assert!(exposed.get("digest").is_none());
     let decoded: santi_core::DownstreamCredential =
         serde_json::from_value(exposed).expect("deserialize public downstream");
-    assert!(decoded.credential_sha256.is_empty());
+    assert!(decoded.digest.is_empty());
     let overlap = service
         .create_downstream(santi_core::CreateDownstreamRequest {
             id: "nested".to_string(),
-            label_prefix: "stim:nested:".to_string(),
-            credential_sha256: hex::encode(Sha256::digest(b"nested")),
+            prefix: "stim:nested:".to_string(),
+            digest: hex::encode(Sha256::digest(b"nested")),
         })
         .expect_err("overlap must fail");
     assert!(overlap.contains("overlaps"));
     let reused = service
         .create_downstream(santi_core::CreateDownstreamRequest {
             id: "github".to_string(),
-            label_prefix: "github:".to_string(),
-            credential_sha256: digest,
+            prefix: "github:".to_string(),
+            digest,
         })
         .expect_err("credential reuse must fail");
     assert!(reused.contains("already registered"));

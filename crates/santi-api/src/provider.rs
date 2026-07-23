@@ -22,7 +22,7 @@ fn openai_provider(config: OpenAiResponsesConfig) -> Arc<dyn ProviderClient> {
         reasoning_effort: config.reasoning_effort,
         reasoning_summary: config.reasoning_summary,
         max_output_tokens: config.max_output_tokens,
-        input_budget_bytes: Some(config.input_budget_bytes),
+        bytes: Some(config.bytes),
     }))
 }
 
@@ -36,7 +36,7 @@ fn chat_completions_provider(config: ChatCompletionsConfig) -> Arc<dyn ProviderC
             thinking: config.thinking,
             reasoning_effort: config.reasoning_effort,
             max_tokens: config.max_tokens,
-            input_budget_bytes: Some(config.input_budget_bytes),
+            bytes: Some(config.bytes),
         },
     ))
 }

@@ -2,7 +2,7 @@ use rusqlite::params;
 use santi_error::{Fault, Incident, Outbox, Transition};
 
 use super::{SantiStore, db::Database};
-use crate::timestamp_now;
+use crate::now;
 
 pub(crate) mod drive;
 
@@ -39,15 +39,15 @@ impl SantiStore {
 
     pub(crate) fn active_error_incident(&self, key: &str) -> Result<Option<Incident>, String> {
         let conn = self.conn.lock().unwrap();
-        Database::new(&conn).active_incident(key)
+        Database::new(&conn).incident(key)
     }
 
     pub(crate) fn error_incidents_for_strand(
         &self,
-        strand_id: &str,
+        strand: &str,
         limit: i64,
     ) -> Result<Vec<Incident>, String> {
-        self.error_incidents(&santi_error::Scope::new("strand", strand_id), limit)
+        self.error_incidents(&santi_error::Scope::new("strand", strand), limit)
     }
 }
 
@@ -82,7 +82,7 @@ impl Outbox for SantiStore {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE error_transitions SET delivered_at = ?2 WHERE id = ?1 AND delivered_at IS NULL",
-            params![transition_id, timestamp_now()],
+            params![transition_id, now()],
         )
         .map_err(|error| error.to_string())?;
         Ok(())

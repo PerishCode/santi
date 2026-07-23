@@ -23,32 +23,32 @@ pub(in crate::service) struct External<'a> {
 }
 
 struct Audit {
-    source_type: String,
-    source_ref: String,
+    kind: String,
+    source: String,
     content_bytes: usize,
 }
 
 impl Audit {
     fn new(content: &MessageContent, source: &Option<InboxSource>) -> Self {
         Self {
-            source_type: source
+            kind: source
                 .as_ref()
-                .map(|source| source.source_type.as_str())
+                .map(|source| source.kind.as_str())
                 .unwrap_or("unknown")
                 .to_string(),
-            source_ref: source
+            source: source
                 .as_ref()
-                .and_then(|source| source.source_ref.as_deref())
+                .and_then(|source| source.source.as_deref())
                 .unwrap_or("-")
                 .to_string(),
-            content_bytes: content.content_text().len(),
+            content_bytes: content.rendered().len(),
         }
     }
 }
 
 #[derive(Clone, Copy)]
 struct Drive<'a> {
-    trigger_type: &'a str,
+    trigger: &'a str,
     accepted_inbox_id: Option<&'a str>,
     operation: &'a str,
     recover_failed_receipts: bool,
@@ -60,14 +60,14 @@ impl Service {
         selector: StrandSelector,
         content: MessageContent,
         kind: MessageKind,
-        trigger_type: &str,
+        trigger: &str,
     ) -> Result<IngestOutcome, String> {
         self.accept(
             selector,
             Ingest {
                 content,
                 kind,
-                trigger: trigger_type,
+                trigger,
                 source: None,
                 replay: None,
             },
@@ -143,7 +143,7 @@ impl Service {
             IngestOutcome::Accepted { receipt } if intake.inserted => self.poke(
                 &strand.id,
                 input.trigger,
-                Some(&receipt.inbox_id),
+                Some(&receipt.inbox),
                 "ingest_poke",
             ),
             IngestOutcome::Accepted { .. } | IngestOutcome::Rejected { .. } => drive::Outcome::Idle,
@@ -162,22 +162,22 @@ impl Service {
 
     pub fn ingest_external_event(
         &self,
-        soul_id: &str,
+        soul: &str,
         label: &str,
         system_text: String,
     ) -> Result<IngestOutcome, String> {
-        self.ingest_external_source(soul_id, label, system_text, None)
+        self.ingest_external_source(soul, label, system_text, None)
     }
 
     pub fn ingest_external_source(
         &self,
-        soul_id: &str,
+        soul: &str,
         label: &str,
         system_text: String,
         source: Option<InboxSource>,
     ) -> Result<IngestOutcome, String> {
         self.ingest_external(External {
-            soul: soul_id,
+            soul,
             label,
             text: system_text,
             source,
@@ -192,7 +192,7 @@ impl Service {
         let strand = self
             .store
             .resolve_strand_selector(&StrandSelector::ByLabel {
-                soul_id: input.soul.to_string(),
+                soul: input.soul.to_string(),
                 label: input.label.to_string(),
             })?;
         let (outcome, _driven) = self.enqueue(
@@ -211,27 +211,27 @@ impl Service {
 
 mod dispatch;
 
-fn log_ingest_rejection(error: &Fault, strand_id: &str, audit: &Audit) {
+fn log_ingest_rejection(error: &Fault, strand: &str, audit: &Audit) {
     eprintln!(
-        "santi: ingest rejected code={} incident_id={} strand_id={} source_type={} source_ref={} content_bytes={}",
+        "santi: ingest rejected code={} incident_id={} strand={} kind={} source={} content_bytes={}",
         error.code,
         error.incident.as_deref().unwrap_or("-"),
-        strand_id,
-        audit.source_type,
-        audit.source_ref,
+        strand,
+        audit.kind,
+        audit.source,
         audit.content_bytes,
     );
 }
 
 pub(super) fn send_error(
     descriptor: santi_error::Descriptor,
-    strand_id: &str,
+    strand: &str,
     message: String,
 ) -> Fault {
     engine().transient(crate::Signal {
         descriptor,
         source: santi_error::Source::new("santi-core", "strand_send"),
-        scope: Some(santi_error::Scope::new("strand", strand_id)),
+        scope: Some(santi_error::Scope::new("strand", strand)),
         message,
         context: serde_json::Value::Null,
     })

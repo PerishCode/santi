@@ -55,7 +55,7 @@ fn parse_event(
     if response_id.is_none() {
         *response_id = Some(chunk.id.clone());
         events.push(ProviderEvent::ResponseStarted {
-            provider_response_id: response_id.clone(),
+            response: response_id.clone(),
         });
     }
     for choice in chunk.choices {
@@ -66,15 +66,15 @@ fn parse_event(
         if let Some(content) = delta.content.filter(|value| !value.is_empty()) {
             events.push(ProviderEvent::TextDelta(content));
         }
-        if let Some(tool_calls) = delta.tool_calls {
-            accumulator.push(tool_calls);
+        if let Some(calls) = delta.calls {
+            accumulator.push(calls);
         }
         let finish_reason = choice.finish_reason.as_deref();
         if finish_reason == Some("tool_calls") {
             events.extend(accumulator.finish(response_id.clone())?);
         } else if finish_reason == Some("stop") || finish_reason == Some("length") {
             events.push(ProviderEvent::Completed {
-                provider_response_id: response_id.clone(),
+                response: response_id.clone(),
             });
         }
     }
@@ -122,8 +122,8 @@ struct ToolCallAccumulator {
 }
 
 impl ToolCallAccumulator {
-    fn push(&mut self, tool_calls: Vec<ChatToolCallDelta>) {
-        for tool_call in tool_calls {
+    fn push(&mut self, calls: Vec<ChatToolCallDelta>) {
+        for tool_call in calls {
             let index = tool_call.index;
             while self.calls.len() <= index {
                 self.calls.push(AccumulatedToolCall::default());
@@ -172,7 +172,7 @@ impl AccumulatedToolCall {
             .map_err(|error| format!("invalid chat completions tool arguments: {error}"))?;
         Ok(ProviderEvent::FunctionCallRequested(ProviderFunctionCall {
             response_id: response_id.to_string(),
-            item_id: Some(self.id.clone()),
+            mark: Some(self.id.clone()),
             item: json!({
                 "type": "function_call",
                 "id": self.id,
@@ -207,8 +207,8 @@ struct ChatDelta {
     content: Option<String>,
     #[serde(default)]
     reasoning_content: Option<String>,
-    #[serde(default)]
-    tool_calls: Option<Vec<ChatToolCallDelta>>,
+    #[serde(default, rename = "tool_calls")]
+    calls: Option<Vec<ChatToolCallDelta>>,
 }
 
 #[derive(Debug, Deserialize)]

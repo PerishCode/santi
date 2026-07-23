@@ -32,10 +32,10 @@ async fn sends_with_runtime() {
 
     assert_eq!(
         response
-            .user_message
+            .message
             .as_ref()
             .expect("driven synchronously")
-            .content_text,
+            .text,
         "hello provider"
     );
     assert_eq!(
@@ -49,7 +49,7 @@ async fn sends_with_runtime() {
         runtime
             .messages
             .iter()
-            .any(|message| message.content_text == "hi from runtime")
+            .any(|message| message.text == "hi from runtime")
     );
 
     let requests = provider.requests.lock().unwrap();
@@ -72,8 +72,8 @@ async fn sends_with_runtime() {
         "santi is an agent runtime: a container that keeps souls and runs their strands."
     ));
     assert!(instructions.contains("[santi-meta]"));
-    assert!(instructions.contains("soul_id: soul_default"));
-    assert!(instructions.contains("strand_id: "));
+    assert!(instructions.contains("soul: soul_default"));
+    assert!(instructions.contains("strand: "));
     assert!(!instructions.contains("channel: santi"));
     assert!(!instructions.contains("soul_name"));
     assert!(instructions.contains("[santi-soul]"));

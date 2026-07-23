@@ -9,9 +9,9 @@ use santi_error::{Fault, Incident, Transition};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SantiStreamEvent {
-    pub event_id: String,
-    pub strand_id: String,
-    pub created_at: Timestamp,
+    pub id: String,
+    pub strand: String,
+    pub created: Timestamp,
     pub payload: SantiStreamPayload,
 }
 
@@ -27,9 +27,9 @@ pub enum TurnActivityState {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TurnActivity {
-    pub turn_id: String,
+    pub turn: String,
     pub state: TurnActivityState,
-    pub provider_response_id: Option<String>,
+    pub response: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -40,13 +40,13 @@ pub enum SantiStreamPayload {
         message: StrandMessage,
     },
     MessageDelta {
-        message_id: String,
-        turn_id: String,
+        message: String,
+        turn: String,
         role: ActorType,
         text: String,
     },
     MessageCompleted {
-        turn_id: String,
+        turn: String,
         message: StrandMessage,
     },
     ToolCallCreated {
@@ -74,14 +74,14 @@ pub enum SantiStreamPayload {
         activity: TurnActivity,
     },
     TurnCompleted {
-        turn_id: String,
+        turn: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        external_label: Option<String>,
+        label: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        final_text: Option<String>,
+        text: Option<String>,
     },
     TurnFailed {
-        turn_id: String,
+        turn: String,
         error: Box<Fault>,
     },
     Transition {
@@ -93,11 +93,11 @@ pub enum SantiStreamPayload {
 pub struct StrandRuntimeSnapshot {
     pub strand: Strand,
     pub messages: Vec<StrandMessage>,
-    pub message_events: Vec<MessageEvent>,
+    pub events: Vec<MessageEvent>,
     pub turns: Vec<Turn>,
-    pub thinking_spans: Vec<ThinkingSpan>,
-    pub tool_calls: Vec<ToolCall>,
-    pub tool_results: Vec<ToolResult>,
+    pub thinking: Vec<ThinkingSpan>,
+    pub calls: Vec<ToolCall>,
+    pub results: Vec<ToolResult>,
     pub compacts: Vec<Compact>,
     pub effects: Vec<StrandEffect>,
     pub errors: Vec<Incident>,

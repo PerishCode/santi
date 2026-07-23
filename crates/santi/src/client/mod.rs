@@ -18,10 +18,10 @@ pub use send::{Request, send};
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 struct Capsule<'a> {
-    from: Option<String>,
-    to: Option<String>,
-    start: Option<i64>,
-    end: Option<i64>,
+    first: Option<String>,
+    last: Option<String>,
+    from: Option<i64>,
+    to: Option<i64>,
     summary: Option<String>,
     file: Option<String>,
     source: String,
@@ -57,10 +57,7 @@ pub(crate) async fn run_client(
             ))
             .await
         }
-        Command::Receipt { inbox_id } => {
-            http.get(&format!("{base}/api/v1/receipts/{inbox_id}"))
-                .await
-        }
+        Command::Receipt { inbox } => http.get(&format!("{base}/api/v1/receipts/{inbox}")).await,
         Command::Effect(EffectCommand::Query { effect_id }) => {
             http.get(&format!("{base}/api/v1/effects/{effect_id}"))
                 .await
@@ -140,8 +137,8 @@ pub(crate) async fn run_client(
                 .await
         }
         Command::Compact(CompactCommand::Exec {
-            from,
-            to,
+            first,
+            last,
             summary,
             summary_file,
         }) => {
@@ -151,12 +148,12 @@ pub(crate) async fn run_client(
                 None => summary.expect("clap requires summary or summary_file"),
             };
             let mut body = serde_json::json!({
-                "from_message_id": from,
-                "to_message_id": to,
+                "first": first,
+                "last": last,
                 "summary": summary,
             });
             if let Some(soul) = defaults.soul() {
-                body["soul_id"] = serde_json::Value::from(soul);
+                body["soul"] = serde_json::Value::from(soul);
             }
             http.post(
                 &format!("{base}/api/v1/strands/{strand}/compact"),
@@ -165,30 +162,30 @@ pub(crate) async fn run_client(
             .await
         }
         Command::Compact(CompactCommand::Capsule {
+            first,
+            last,
             from,
             to,
-            from_seq,
-            to_seq,
             summary,
             summary_file,
             source,
             reason,
             risk,
             queryability,
-            dry_run,
+            dry,
         }) => {
             let body = compact_capsule_body(Capsule {
+                first,
+                last,
                 from,
                 to,
-                start: from_seq,
-                end: to_seq,
                 summary,
                 file: summary_file,
                 source,
                 reason,
                 risk,
                 queryability,
-                preview: dry_run,
+                preview: dry,
                 soul: defaults.soul(),
             })?;
             let strand = defaults.resolve_strand(None)?;
@@ -199,13 +196,13 @@ pub(crate) async fn run_client(
             .await
         }
         Command::Compact(CompactCommand::Query {
-            compact_id,
+            compact,
             keyword,
             page_index,
             page_size,
         }) => {
             let mut url = format!(
-                "{base}/api/v1/compacts/{compact_id}?page_index={page_index}&page_size={page_size}"
+                "{base}/api/v1/compacts/{compact}?page_index={page_index}&page_size={page_size}"
             );
             if let Some(keyword) = keyword.filter(|k| !k.is_empty()) {
                 url.push_str(&format!("&keyword={}", urlencoding_encode(&keyword)));

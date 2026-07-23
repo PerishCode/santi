@@ -260,7 +260,7 @@ impl RuntimePaths {
             },
             readiness: UpgradeReadiness::Ready,
             wake: false,
-            soul_id: santi_core::DEFAULT_SOUL_ID.to_string(),
+            soul: santi_core::DEFAULT_SOUL_ID.to_string(),
             configured_strand_id: None,
         };
         match finalize_at(self, finalize_request) {

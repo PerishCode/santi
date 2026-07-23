@@ -44,7 +44,7 @@ pub(crate) async fn capture_with_items(items: Vec<ProviderItem>) -> Value {
         thinking: None,
         reasoning_effort: None,
         max_tokens: None,
-        input_budget_bytes: None,
+        bytes: None,
     };
     let (tx, rx) = mpsc::channel();
     let server = response_server(
@@ -71,7 +71,7 @@ pub(crate) fn function_call_item(call_id: &str, command: &str) -> ProviderItem {
         name: "shell".to_string(),
         arguments_raw: format!(r#"{{"command":"{command}"}}"#),
         item: None,
-        item_id: None,
+        mark: None,
     }
 }
 
@@ -93,7 +93,7 @@ pub(crate) async fn capture_all_events(lines: Vec<&'static str>) -> Vec<Provider
         thinking: None,
         reasoning_effort: None,
         max_tokens: None,
-        input_budget_bytes: None,
+        bytes: None,
     };
     let (tx, rx) = mpsc::channel();
     let server = response_server(listener, tx, lines);

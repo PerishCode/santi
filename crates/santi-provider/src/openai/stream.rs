@@ -81,7 +81,7 @@ fn parse_event(
                 *current_response_id = Some(response_id);
             }
             Ok(vec![ProviderEvent::ResponseStarted {
-                provider_response_id: current_response_id.clone(),
+                response: current_response_id.clone(),
             }])
         }
         "response.in_progress" => {
@@ -89,7 +89,7 @@ fn parse_event(
                 *current_response_id = Some(response_id);
             }
             Ok(vec![ProviderEvent::ResponseInProgress {
-                provider_response_id: current_response_id.clone(),
+                response: current_response_id.clone(),
             }])
         }
         "response.output_text.delta" => Ok(value
@@ -110,7 +110,7 @@ fn parse_event(
             .unwrap_or_default()),
         "response.output_item.done" => parse_output_item_done(value.raw, current_response_id),
         "response.completed" => Ok(vec![ProviderEvent::Completed {
-            provider_response_id: value.response_id(),
+            response: value.response_id(),
         }]),
         "error" => Ok(vec![ProviderEvent::Failed(
             value
@@ -169,7 +169,7 @@ fn parse_function_call_item(
     Ok(vec![ProviderEvent::FunctionCallRequested(
         ProviderFunctionCall {
             response_id,
-            item_id: item.get("id").and_then(Value::as_str).map(str::to_string),
+            mark: item.get("id").and_then(Value::as_str).map(str::to_string),
             item: item.clone(),
             call_id,
             name,

@@ -62,13 +62,13 @@ fn run_doctor(storage_only: bool) -> Result<()> {
 fn run_inbox(command: InboxCommand, default_strand: Option<String>) -> Result<()> {
     match command {
         InboxCommand::Seed { text, file, stdin } => {
-            let strand_id = default_strand
+            let strand = default_strand
                 .map(|id| id.trim().to_string())
                 .filter(|id| !id.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("no strand id: set --strand / SANTI_STRAND_ID"))?;
             let text = read_inbox_seed_text(text, file, stdin)?;
             config::boot(None, Default::default()).map_err(|error| anyhow::anyhow!(error))?;
-            let report = santi_api::ops::inbox_seed(&strand_id, &text)
+            let report = santi_api::ops::inbox_seed(&strand, &text)
                 .map_err(|error| anyhow::anyhow!(error))?;
             println!("{}", serde_json::to_string_pretty(&report)?);
             if !report.accepted {

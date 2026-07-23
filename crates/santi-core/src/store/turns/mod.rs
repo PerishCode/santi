@@ -4,9 +4,7 @@ use super::{
     RuntimeFault, SantiStore, StartedTurn,
     db::{Database, drain_inbox_in_tx},
 };
-use crate::{
-    EffectTransitionReason, ThinkingSpan, ToolCall, ToolResult, Turn, prefixed_id, timestamp_now,
-};
+use crate::{EffectTransitionReason, ThinkingSpan, ToolCall, ToolResult, Turn, now, tag};
 
 mod completion;
 
@@ -19,28 +17,28 @@ use fail::{open_runtime_incident, provider_incident_key, runtime_incident_key};
 impl SantiStore {
     pub fn try_start_turn(
         &self,
-        strand_id: &str,
-        trigger_type: &str,
-        trigger_ref: Option<&str>,
+        strand: &str,
+        trigger: &str,
+        source: Option<&str>,
     ) -> Result<Option<StartedTurn>, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let running: Option<i64> = tx
             .query_row(
                 "SELECT 1 FROM turns WHERE strand_id = ?1 AND status = 'running' LIMIT 1",
-                params![strand_id],
+                params![strand],
                 |row| row.get(0),
             )
             .ok();
         if running.is_some() {
             return Ok(None);
         }
-        let turn_id = prefixed_id("turn");
-        let drained = drain_inbox_in_tx(&tx, strand_id, &turn_id)?;
+        let turn = tag("turn");
+        let drained = drain_inbox_in_tx(&tx, strand, &turn)?;
         if drained.messages.is_empty() {
             return Ok(None);
         }
-        let now = timestamp_now();
+        let now = now();
         tx.execute(
             r#"
             INSERT INTO turns (
@@ -51,25 +49,25 @@ impl SantiStore {
             SELECT ?1, id, ?3, ?4, next_seq - 1, NULL, 'running', NULL, ?5, ?5, NULL
             FROM strands WHERE id = ?2
             "#,
-            params![turn_id, strand_id, trigger_type, trigger_ref, now],
+            params![turn, strand, trigger, source, now],
         )
         .map_err(|error| error.to_string())?;
-        Database::new(&tx).begin_turn(strand_id, &turn_id, &drained.inbox_ids, None)?;
+        Database::new(&tx).begin_turn(strand, &turn, &drained.inbox_ids, None)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(Some(StartedTurn {
             turn: Database::new(&conn)
-                .turn_by_id(&turn_id)?
+                .turn_by_id(&turn)?
                 .ok_or_else(|| "created turn missing".to_string())?,
             drained_messages: drained.messages,
         }))
     }
 
-    pub fn latest_turn(&self, strand_id: &str) -> Result<Option<Turn>, String> {
+    pub fn latest_turn(&self, strand: &str) -> Result<Option<Turn>, String> {
         let conn = self.conn.lock().unwrap();
         let id: Option<String> = conn
             .query_row(
                 "SELECT id FROM turns WHERE strand_id = ?1 ORDER BY created_at DESC, id DESC LIMIT 1",
-                params![strand_id],
+                params![strand],
                 |row| row.get(0),
             )
             .ok();
@@ -82,7 +80,7 @@ impl SantiStore {
     pub fn reconcile_orphaned_turns(&self) -> Result<usize, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let now = timestamp_now();
+        let now = now();
         let mut stmt = tx
             .prepare("SELECT id, strand_id FROM turns WHERE status = 'running'")
             .map_err(|error| error.to_string())?;
@@ -94,9 +92,9 @@ impl SantiStore {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| error.to_string())?;
         drop(stmt);
-        for (turn_id, strand_id) in &rows {
+        for (turn, strand) in &rows {
             Database::new(&tx).reconcile_effects(
-                turn_id,
+                turn,
                 EffectTransitionReason::RestartBeforeDispatch,
                 EffectTransitionReason::RestartDuringDispatch,
                 &now,
@@ -108,19 +106,19 @@ impl SantiStore {
                     updated_at = ?2, finished_at = ?2
                 WHERE id = ?1 AND status = 'running'
                 "#,
-                params![turn_id, now],
+                params![turn, now],
             )
             .map_err(|error| error.to_string())?;
             let error = open_runtime_incident(
                 &tx,
-                strand_id,
-                turn_id,
+                strand,
+                turn,
                 RuntimeFault {
                     operation: "turn.restart_reconcile",
                     detail: "interrupted by restart",
                 },
             )?;
-            Database::new(&tx).fail_turn(turn_id, error.incident.as_deref(), &now)?;
+            Database::new(&tx).fail_turn(turn, error.incident.as_deref(), &now)?;
         }
         tx.commit().map_err(|error| error.to_string())?;
         Ok(rows.len())
@@ -152,18 +150,18 @@ impl SantiStore {
         Ok(out)
     }
 
-    pub fn tool_calls_for_turn(&self, turn_id: &str) -> Result<Vec<ToolCall>, String> {
+    pub fn tool_calls_for_turn(&self, turn: &str) -> Result<Vec<ToolCall>, String> {
         let conn = self.conn.lock().unwrap();
-        Database::new(&conn).tool_calls_for_turn(turn_id)
+        Database::new(&conn).tool_calls_for_turn(turn)
     }
 
-    pub fn thinking_spans_for_turn(&self, turn_id: &str) -> Result<Vec<ThinkingSpan>, String> {
+    pub fn thinking_spans_for_turn(&self, turn: &str) -> Result<Vec<ThinkingSpan>, String> {
         let conn = self.conn.lock().unwrap();
-        Database::new(&conn).thinking_spans_for_turn(turn_id)
+        Database::new(&conn).thinking_spans_for_turn(turn)
     }
 
-    pub fn tool_results_for_turn(&self, turn_id: &str) -> Result<Vec<ToolResult>, String> {
+    pub fn tool_results_for_turn(&self, turn: &str) -> Result<Vec<ToolResult>, String> {
         let conn = self.conn.lock().unwrap();
-        Database::new(&conn).tool_results_for_turn(turn_id)
+        Database::new(&conn).tool_results_for_turn(turn)
     }
 }

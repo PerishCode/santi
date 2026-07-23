@@ -14,9 +14,9 @@ pub(super) struct ErrorQueryParams {
 
 #[utoipa::path(
     get,
-    path = "/api/v1/strands/{strand_id}/errors",
+    path = "/api/v1/strands/{strand}/errors",
     params(
-        ("strand_id" = String, Path),
+        ("strand" = String, Path),
         ("limit" = Option<i64>, Query)
     ),
     responses(
@@ -27,11 +27,11 @@ pub(super) struct ErrorQueryParams {
 )]
 pub(super) async fn strand_errors(
     State(service): State<Service>,
-    Path(strand_id): Path<String>,
+    Path(strand): Path<String>,
     Query(params): Query<ErrorQueryParams>,
 ) -> Result<Json<Vec<Incident>>, ApiError> {
     service
-        .strand_errors(&strand_id, params.limit.unwrap_or(50))
+        .strand_errors(&strand, params.limit.unwrap_or(50))
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("strand not found"))

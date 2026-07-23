@@ -76,22 +76,22 @@ fn doctor_serializes() {
 fn seed_drains_on_boot() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
-    let strand_id = {
+    let strand = {
         let store = santi_core::SantiStore::open(&paths.database_path).expect("open");
         store.create_strand().expect("create strand").id
     };
 
-    let report = paths.inbox_seed(&strand_id, "come look").unwrap();
+    let report = paths.inbox_seed(&strand, "come look").unwrap();
     assert!(report.accepted);
     let store = santi_core::SantiStore::open(&paths.database_path).expect("reopen");
     let started = store
-        .try_start_turn(&strand_id, "strand_send", None)
+        .try_start_turn(&strand, "strand_send", None)
         .unwrap()
         .expect("turn starts");
     assert_eq!(started.drained_messages.len(), 1);
-    assert_eq!(started.drained_messages[0].content_text, "come look");
+    assert_eq!(started.drained_messages[0].text, "come look");
     assert_eq!(
-        started.drained_messages[0].message.message_kind,
+        started.drained_messages[0].message.kind,
         santi_core::MessageKind::SantiSystem
     );
 }
@@ -108,13 +108,13 @@ fn labeled_seed_drains() {
         .unwrap();
     assert!(report.accepted);
     let store = santi_core::SantiStore::open(&paths.database_path).expect("reopen");
-    let strand = store.strand(&report.strand_id).unwrap().expect("strand");
-    assert_eq!(strand.external_label.as_deref(), Some(label));
+    let strand = store.strand(&report.strand).unwrap().expect("strand");
+    assert_eq!(strand.label.as_deref(), Some(label));
     let started = store
-        .try_start_turn(&report.strand_id, "strand_send", None)
+        .try_start_turn(&report.strand, "strand_send", None)
         .unwrap()
         .expect("turn starts");
-    assert_eq!(started.drained_messages[0].content_text, "upgrade finished");
+    assert_eq!(started.drained_messages[0].text, "upgrade finished");
 }
 
 #[test]

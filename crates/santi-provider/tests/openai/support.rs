@@ -113,7 +113,7 @@ pub(crate) async fn capture_replay(item: Option<Value>) -> Value {
         reasoning_effort: None,
         reasoning_summary: None,
         max_output_tokens: None,
-        input_budget_bytes: None,
+        bytes: None,
     };
     let (tx, rx) = mpsc::channel();
     let server = thread::spawn(move || {
@@ -141,7 +141,7 @@ pub(crate) async fn capture_replay(item: Option<Value>) -> Value {
                 name: "shell".to_string(),
                 arguments_raw: "{}".to_string(),
                 item,
-                item_id: None,
+                mark: None,
             }],
             tools: None,
             previous_response_id: None,
@@ -181,7 +181,7 @@ pub(crate) async fn capture_all_events(lines: Vec<&'static str>) -> Vec<Provider
         reasoning_effort: None,
         reasoning_summary: None,
         max_output_tokens: None,
-        input_budget_bytes: None,
+        bytes: None,
     };
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept request");

@@ -29,15 +29,15 @@ async fn rejects_tool_batch() {
     let runtime = Probe::new(&service)
         .failed_turn(&strand.id, &accepted_turn(&response).id)
         .await;
-    assert!(runtime.tool_calls.is_empty());
+    assert!(runtime.calls.is_empty());
     assert!(runtime.effects.is_empty());
     let incident = runtime
         .errors
         .iter()
         .find(|incident| incident.code == "runtime.execution_budget.exceeded")
         .expect("execution budget incident");
-    assert_eq!(incident.first.context["reason"], "tool_calls");
-    assert_eq!(incident.first.context["request"]["tool_calls"], 2);
+    assert_eq!(incident.first.context["reason"], "calls");
+    assert_eq!(incident.first.context["request"]["calls"], 2);
     assert_eq!(provider.requests.lock().unwrap().len(), 1);
 }
 
@@ -76,7 +76,7 @@ async fn reserves_followup_round() {
     let runtime = Probe::new(&service)
         .failed_turn(&strand.id, &accepted_turn(&response).id)
         .await;
-    assert_eq!(runtime.tool_calls.len(), 1);
+    assert_eq!(runtime.calls.len(), 1);
     assert_eq!(runtime.effects.len(), 1);
     let incident = runtime
         .errors
@@ -124,9 +124,9 @@ async fn bounds_shell_capture() {
     let runtime = Probe::new(&service)
         .completed_turn(&strand.id, &accepted_turn(&response).id)
         .await;
-    assert_eq!(runtime.tool_results.len(), 2);
+    assert_eq!(runtime.results.len(), 2);
     let captured_bytes = runtime
-        .tool_results
+        .results
         .iter()
         .map(|result| {
             let output = result.output.as_ref().expect("captured output");
@@ -137,11 +137,11 @@ async fn bounds_shell_capture() {
         .sum::<usize>();
     assert_eq!(captured_bytes, 10);
     assert_eq!(
-        runtime.tool_results[0].output.as_ref().unwrap()["output_limit_bytes"],
+        runtime.results[0].output.as_ref().unwrap()["output_limit_bytes"],
         6
     );
     assert_eq!(
-        runtime.tool_results[1].output.as_ref().unwrap()["output_limit_bytes"],
+        runtime.results[1].output.as_ref().unwrap()["output_limit_bytes"],
         4
     );
     assert_eq!(provider.requests.lock().unwrap().len(), 3);
@@ -197,13 +197,13 @@ async fn preserves_retry_usage() {
     let runtime = Probe::new(&service)
         .failed_turn(&strand.id, &accepted_turn(&retry).id)
         .await;
-    assert_eq!(runtime.tool_calls.len(), 1);
+    assert_eq!(runtime.calls.len(), 1);
     let incident = runtime
         .errors
         .iter()
         .find(|incident| incident.code == "runtime.execution_budget.exceeded")
         .expect("execution budget incident");
-    assert_eq!(incident.first.context["reason"], "tool_calls");
-    assert_eq!(incident.first.context["usage"]["tool_calls"], 1);
+    assert_eq!(incident.first.context["reason"], "calls");
+    assert_eq!(incident.first.context["usage"]["calls"], 1);
     assert_eq!(provider.requests.lock().unwrap().len(), 3);
 }

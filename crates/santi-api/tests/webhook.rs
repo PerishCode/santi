@@ -133,7 +133,7 @@ fn feishu_normalizes_encrypted() {
     );
     assert!(event.in_scope);
     assert_eq!(event.label, "feishu:chat:chat:oc_chat1");
-    assert!(event.santi_system_text.contains("message_id: om_msg1"));
+    assert!(event.santi_system_text.contains("message: om_msg1"));
     assert!(!event.santi_system_text.contains("top secret"));
 
     let result = FeishuAdaptor::configured(None, None).normalize(

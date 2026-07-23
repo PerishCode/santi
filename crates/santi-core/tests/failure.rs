@@ -71,12 +71,12 @@ impl ProviderClient for FailureProvider {
         let mut events = Vec::new();
         if self.response_started {
             events.push(Ok(ProviderEvent::ResponseStarted {
-                provider_response_id: Some("fake-response-id".to_string()),
+                response: Some("fake-response-id".to_string()),
             }));
         }
         events.push(Ok(ProviderEvent::TextDelta("ok".to_string())));
         events.push(Ok(ProviderEvent::Completed {
-            provider_response_id: Some("fake-response-id".to_string()),
+            response: Some("fake-response-id".to_string()),
         }));
         Ok(Box::pin(stream::iter(events)))
     }
@@ -101,7 +101,7 @@ async fn aggregates_provider_failures() {
         .iter()
         .find(|candidate| candidate.id == turn(&first).id)
         .expect("failed turn");
-    assert_eq!(failed_turn.error_text.as_deref(), Some(raw_error.as_str()));
+    assert_eq!(failed_turn.error.as_deref(), Some(raw_error.as_str()));
     assert_no_failure_projection(&runtime);
 
     assert_eq!(runtime.errors.len(), 1);
@@ -113,7 +113,7 @@ async fn aggregates_provider_failures() {
     assert_eq!(incident.revision, 1);
     assert_eq!(incident.first.source.component, "santi-provider");
     assert_eq!(incident.first.source.operation, "turn.request");
-    assert_eq!(incident.first.context["turn_id"], turn(&first).id);
+    assert_eq!(incident.first.context["turn"], turn(&first).id);
     assert_eq!(incident.first.context["provider"], "fake-provider");
     assert_eq!(incident.first.context["model"], "fake-model");
     assert_eq!(incident.first.context["stage"], "request");
@@ -122,7 +122,7 @@ async fn aggregates_provider_failures() {
 
     let failed_event = std::iter::from_fn(|| events.try_recv().ok())
         .find_map(|event| match event.payload {
-            SantiStreamPayload::TurnFailed { turn_id, error } if turn_id == turn(&first).id => {
+            SantiStreamPayload::TurnFailed { turn: held, error } if held == turn(&first).id => {
                 Some(error)
             }
             _ => None,
@@ -139,7 +139,7 @@ async fn aggregates_provider_failures() {
     assert_eq!(runtime.errors[0].id, incident.id);
     assert_eq!(runtime.errors[0].occurrences, 2);
     assert_eq!(runtime.errors[0].revision, 1);
-    assert_eq!(runtime.errors[0].latest.context["turn_id"], turn(&retry).id);
+    assert_eq!(runtime.errors[0].latest.context["turn"], turn(&retry).id);
     assert_eq!(
         transition_count(&temp),
         1,
@@ -160,7 +160,7 @@ fn assert_no_failure_projection(runtime: &santi_core::StrandRuntimeSnapshot) {
         runtime
             .messages
             .iter()
-            .all(|message| message.message.message_kind != MessageKind::SantiSystem),
+            .all(|message| message.message.kind != MessageKind::SantiSystem),
         "provider failure must not append a model-visible system message"
     );
 }
@@ -194,12 +194,12 @@ fn transition_count(temp: &tempfile::TempDir) -> i64 {
 
 async fn send_text(
     service: &Service,
-    strand_id: &str,
+    strand: &str,
     text: &str,
 ) -> santi_core::SendStrandAcceptedResponse {
     service
         .send_strand(
-            strand_id,
+            strand,
             SendStrandRequest {
                 content: vec![MessagePart::Text {
                     text: text.to_string(),
@@ -212,43 +212,43 @@ async fn send_text(
 
 async fn wait_for_turn(
     service: &Service,
-    strand_id: &str,
-    turn_id: &str,
+    strand: &str,
+    turn: &str,
     status: TurnStatus,
 ) -> santi_core::StrandRuntimeSnapshot {
     for _ in 0..100 {
         let runtime = service
-            .runtime_snapshot(strand_id)
+            .runtime_snapshot(strand)
             .expect("runtime snapshot")
             .expect("strand runtime");
         if runtime
             .turns
             .iter()
-            .any(|turn| turn.id == turn_id && turn.status == status)
+            .any(|held| held.id == turn && held.status == status)
         {
             return runtime;
         }
         sleep(Duration::from_millis(20)).await;
     }
-    panic!("turn {turn_id} did not reach {status:?}");
+    panic!("turn {turn} did not reach {status:?}");
 }
 
 async fn wait_for_aborted_output(
     service: &Service,
-    strand_id: &str,
-    turn_id: &str,
+    strand: &str,
+    turn: &str,
 ) -> santi_core::StrandRuntimeSnapshot {
     for _ in 0..100 {
         let runtime = service
-            .runtime_snapshot(strand_id)
+            .runtime_snapshot(strand)
             .expect("runtime snapshot")
             .expect("strand runtime");
         let failed = runtime
             .turns
             .iter()
-            .any(|turn| turn.id == turn_id && turn.status == TurnStatus::Failed);
+            .any(|held| held.id == turn && held.status == TurnStatus::Failed);
         let partial_recorded = runtime.messages.iter().any(|message| {
-            message.message.actor_type == ActorType::Soul
+            message.message.role == ActorType::Soul
                 && message.message.state == MessageState::Aborted
         });
         if failed && partial_recorded {
@@ -256,5 +256,5 @@ async fn wait_for_aborted_output(
         }
         sleep(Duration::from_millis(20)).await;
     }
-    panic!("turn {turn_id} did not persist aborted output");
+    panic!("turn {turn} did not persist aborted output");
 }

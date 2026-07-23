@@ -16,11 +16,11 @@ async fn preserves_aborted_output() {
         .messages
         .iter()
         .find(|message| {
-            message.message.actor_type == ActorType::Soul
+            message.message.role == ActorType::Soul
                 && message.message.state == MessageState::Aborted
         })
         .expect("aborted partial assistant message");
-    assert_eq!(partial_message.content_text, "partial runtime output");
+    assert_eq!(partial_message.text, "partial runtime output");
     assert_no_failure_projection(&runtime);
     assert_eq!(runtime.errors.len(), 1);
     assert_eq!(runtime.errors[0].first.source.operation, "turn.stream");
@@ -100,7 +100,7 @@ async fn success_resolves_incident() {
         incident.resolution.as_ref().unwrap().by.as_deref(),
         Some("provider.turn_succeeded")
     );
-    assert_eq!(incident.latest.context["turn_id"], turn(&recovered).id);
+    assert_eq!(incident.latest.context["turn"], turn(&recovered).id);
     assert_eq!(incident.latest.context["provider"], "fake-provider");
     assert_eq!(incident.latest.context["model"], "fake-model");
     assert_eq!(
@@ -147,7 +147,7 @@ async fn runtime_receipt_recovers() {
             .turns
             .iter()
             .find(|candidate| candidate.id == turn(&failed).id)
-            .and_then(|turn| turn.error_text.as_deref())
+            .and_then(|turn| turn.error.as_deref())
             .is_some_and(|detail| detail.contains("forced thinking persistence failure"))
     );
     assert!(
@@ -157,7 +157,7 @@ async fn runtime_receipt_recovers() {
             .all(|error| error.code != "provider.turn.failed")
     );
     let failed_receipt = service
-        .receipt_status(&failed.receipt.inbox_id)
+        .receipt_status(&failed.receipt.inbox)
         .expect("receipt query")
         .expect("receipt");
     assert_eq!(failed_receipt.state, ReceiptState::TurnFailed);
@@ -185,7 +185,7 @@ async fn runtime_receipt_recovers() {
         Some("runtime.turn_succeeded")
     );
     let recovered_receipt = service
-        .receipt_status(&failed.receipt.inbox_id)
+        .receipt_status(&failed.receipt.inbox)
         .expect("receipt query")
         .expect("receipt");
     assert_eq!(recovered_receipt.state, ReceiptState::Completed);

@@ -10,7 +10,7 @@ async fn optional_params_sent() {
         reasoning_effort: Some("medium".to_string()),
         reasoning_summary: Some("auto".to_string()),
         max_output_tokens: Some(4096),
-        input_budget_bytes: None,
+        bytes: None,
     })
     .await;
 
@@ -34,7 +34,7 @@ async fn optional_params_omitted() {
         reasoning_effort: None,
         reasoning_summary: None,
         max_output_tokens: None,
-        input_budget_bytes: None,
+        bytes: None,
     })
     .await;
 
@@ -52,7 +52,7 @@ async fn plain_requests_unstored() {
         reasoning_effort: None,
         reasoning_summary: None,
         max_output_tokens: None,
-        input_budget_bytes: None,
+        bytes: None,
     })
     .await;
 
@@ -71,7 +71,7 @@ async fn parses_call_response_id() {
         events.as_slice(),
         [
             ProviderEvent::ResponseStarted {
-                provider_response_id: Some(response_id),
+                response: Some(response_id),
             },
             ProviderEvent::FunctionCallRequested(call),
         ]

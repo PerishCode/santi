@@ -12,7 +12,7 @@ use super::Service;
 impl Service {
     pub fn compact_exec(
         &self,
-        strand_id: &str,
+        strand: &str,
         request: CompactExecRequest,
     ) -> Result<CompactExecResponse, String> {
         let summary = request.summary.trim();
@@ -21,58 +21,53 @@ impl Service {
         }
         let strand = self
             .store
-            .strand(strand_id)?
+            .strand(strand)?
             .ok_or_else(|| "strand not found".to_string())?;
         let (from, to) = self.resolve_compact_boundaries(&strand.id, &request)?;
-        let pre_estimate = self.current_context_estimate(&strand.id)?;
-        if request.dry_run {
+        let before = self.current_context_estimate(&strand.id)?;
+        if request.dry {
             let mut response = self.store.preview_compact(&strand.id, &from, &to)?;
-            response.pre_estimate = Some(pre_estimate);
+            response.before = Some(before);
             if let Some(capsule) = request.capsule.as_ref() {
                 let metadata = compact_capsule_metadata(Capsule {
-                    compact_id: Some(&response.compact_id),
+                    compact: Some(&response.compact),
                     capsule,
                     response: Some(&response),
-                    pre_estimate: response.pre_estimate.as_ref(),
-                    post_estimate: None,
+                    before: response.before.as_ref(),
+                    after: None,
                     budget: self.context_budget().as_ref(),
-                    compression_ratio: None,
+                    ratio: None,
                 });
-                let post_estimate =
+                let after =
                     self.estimate_preview_compact(&strand.id, &response, summary, metadata)?;
-                let compression_ratio = compact_compression_ratio(
-                    response.pre_estimate.as_ref().unwrap(),
-                    &post_estimate,
-                );
+                let ratio = compact_compression_ratio(response.before.as_ref().unwrap(), &after);
                 let metadata = compact_capsule_metadata(Capsule {
-                    compact_id: Some(&response.compact_id),
+                    compact: Some(&response.compact),
                     capsule,
                     response: Some(&response),
-                    pre_estimate: response.pre_estimate.as_ref(),
-                    post_estimate: Some(&post_estimate),
+                    before: response.before.as_ref(),
+                    after: Some(&after),
                     budget: self.context_budget().as_ref(),
-                    compression_ratio,
+                    ratio,
                 });
-                let post_estimate =
+                let after =
                     self.estimate_preview_compact(&strand.id, &response, summary, metadata)?;
-                response.compression_ratio = compact_compression_ratio(
-                    response.pre_estimate.as_ref().unwrap(),
-                    &post_estimate,
-                );
-                response.post_estimate = Some(post_estimate);
+                response.ratio =
+                    compact_compression_ratio(response.before.as_ref().unwrap(), &after);
+                response.after = Some(after);
             }
             return Ok(response);
         }
 
         let initial_metadata = request.capsule.as_ref().map(|capsule| {
             compact_capsule_metadata(Capsule {
-                compact_id: None,
+                compact: None,
                 capsule,
                 response: None,
-                pre_estimate: Some(&pre_estimate),
-                post_estimate: None,
+                before: Some(&before),
+                after: None,
                 budget: self.context_budget().as_ref(),
-                compression_ratio: None,
+                ratio: None,
             })
         });
         let mut response = self
@@ -84,91 +79,88 @@ impl Service {
                 summary,
                 metadata: initial_metadata,
             })?;
-        let mut post_estimate = self.current_context_estimate(&strand.id)?;
-        let mut compression_ratio = compact_compression_ratio(&pre_estimate, &post_estimate);
+        let mut after = self.current_context_estimate(&strand.id)?;
+        let mut ratio = compact_compression_ratio(&before, &after);
         if let Some(capsule) = request.capsule.as_ref() {
             let metadata = compact_capsule_metadata(Capsule {
-                compact_id: Some(&response.compact_id),
+                compact: Some(&response.compact),
                 capsule,
                 response: Some(&response),
-                pre_estimate: Some(&pre_estimate),
-                post_estimate: Some(&post_estimate),
+                before: Some(&before),
+                after: Some(&after),
                 budget: self.context_budget().as_ref(),
-                compression_ratio,
+                ratio,
             });
             self.store
-                .update_compact_metadata(&response.compact_id, metadata)?;
-            post_estimate = self.current_context_estimate(&strand.id)?;
-            compression_ratio = compact_compression_ratio(&pre_estimate, &post_estimate);
+                .update_compact_metadata(&response.compact, metadata)?;
+            after = self.current_context_estimate(&strand.id)?;
+            ratio = compact_compression_ratio(&before, &after);
             let metadata = compact_capsule_metadata(Capsule {
-                compact_id: Some(&response.compact_id),
+                compact: Some(&response.compact),
                 capsule,
                 response: Some(&response),
-                pre_estimate: Some(&pre_estimate),
-                post_estimate: Some(&post_estimate),
+                before: Some(&before),
+                after: Some(&after),
                 budget: self.context_budget().as_ref(),
-                compression_ratio,
+                ratio,
             });
             self.store
-                .update_compact_metadata(&response.compact_id, metadata)?;
+                .update_compact_metadata(&response.compact, metadata)?;
         }
         response.active_incident_resolved =
             self.clear_context_incident(&strand.id, "compact_exec")?;
         if response.active_incident_resolved {
             self.poke_failed_receipts(&strand.id, "strand_send", None, "compact_recovery_poke");
         }
-        response.pre_estimate = Some(pre_estimate);
-        response.post_estimate = Some(post_estimate);
-        response.compression_ratio = compression_ratio;
+        response.before = Some(before);
+        response.after = Some(after);
+        response.ratio = ratio;
         Ok(response)
     }
 
     fn resolve_compact_boundaries(
         &self,
-        strand_id: &str,
+        strand: &str,
         request: &CompactExecRequest,
     ) -> Result<(String, String), String> {
         let from_id = request
-            .from_message_id
+            .first
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty());
         let to_id = request
-            .to_message_id
+            .last
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty());
-        match (from_id, to_id, request.from_seq, request.to_seq) {
+        match (from_id, to_id, request.from, request.to) {
             (Some(from), Some(to), None, None) => Ok((from.to_string(), to.to_string())),
-            (None, None, Some(from_seq), Some(to_seq)) => {
+            (None, None, Some(from), Some(to)) => {
                 let from = self
                     .store
-                    .message_id_at_seq(strand_id, from_seq)?
-                    .ok_or_else(|| format!("compact from_seq {from_seq} is not a message"))?;
+                    .message_id_at_seq(strand, from)?
+                    .ok_or_else(|| format!("compact from {from} is not a message"))?;
                 let to = self
                     .store
-                    .message_id_at_seq(strand_id, to_seq)?
-                    .ok_or_else(|| format!("compact to_seq {to_seq} is not a message"))?;
+                    .message_id_at_seq(strand, to)?
+                    .ok_or_else(|| format!("compact to {to} is not a message"))?;
                 Ok((from, to))
             }
-            _ => Err(
-                "compact requires either from_message_id/to_message_id or from_seq/to_seq"
-                    .to_string(),
-            ),
+            _ => Err("compact requires either first/last or from/to".to_string()),
         }
     }
 
     fn estimate_preview_compact(
         &self,
-        strand_id: &str,
+        strand: &str,
         response: &CompactExecResponse,
         summary: &str,
         metadata: serde_json::Value,
     ) -> Result<ContextEstimate, String> {
         let input = self
             .store
-            .assembly_input_preview(strand_id, response, summary, metadata)?;
-        let instructions = self.system_prompt_text(strand_id)?;
+            .assembly_input_preview(strand, response, summary, metadata)?;
+        let instructions = self.system_prompt_text(strand)?;
         let tools = provider_tools();
         Ok(estimate_provider_parts(
             &input,
@@ -179,24 +171,24 @@ impl Service {
 
     pub fn compact_query(
         &self,
-        compact_id: &str,
+        compact: &str,
         keyword: Option<&str>,
         page_index: i64,
         page_size: i64,
     ) -> Result<Option<CompactQueryResponse>, String> {
         self.store
-            .compact_query(compact_id, keyword, page_index, page_size)
+            .compact_query(compact, keyword, page_index, page_size)
     }
 }
 
 struct Capsule<'a> {
-    compact_id: Option<&'a str>,
+    compact: Option<&'a str>,
     capsule: &'a CompactCapsuleOptions,
     response: Option<&'a CompactExecResponse>,
-    pre_estimate: Option<&'a ContextEstimate>,
-    post_estimate: Option<&'a ContextEstimate>,
+    before: Option<&'a ContextEstimate>,
+    after: Option<&'a ContextEstimate>,
     budget: Option<&'a ContextBudget>,
-    compression_ratio: Option<f64>,
+    ratio: Option<f64>,
 }
 
 const CAPSULE_SOURCE_BYTES: usize = 128;
@@ -206,14 +198,14 @@ const CAPSULE_QUERYABILITY_BYTES: usize = 512;
 
 fn compact_capsule_metadata(input: Capsule<'_>) -> serde_json::Value {
     let originals_query = input
-        .compact_id
+        .compact
         .map(|id| format!("santi compact query --compact-id {id}"));
     let range = input.response.map(|response| {
         json!({
             "start_seq": response.start_seq,
             "end_seq": response.end_seq,
-            "start_message_id": response.start_message_id,
-            "end_message_id": response.end_message_id,
+            "first": response.first,
+            "last": response.last,
             "collapsed_count": response.collapsed_count,
             "absorbed": response.absorbed,
         })
@@ -221,7 +213,7 @@ fn compact_capsule_metadata(input: Capsule<'_>) -> serde_json::Value {
     json!({
         "schema": "santi.compact_capsule.v1",
         "operation": "manual_capsule",
-        "compact_id": input.compact_id,
+        "compact": input.compact,
         "declared_source": cap_capsule_field(&input.capsule.source, CAPSULE_SOURCE_BYTES),
         "source_trust": "caller_declared",
         "reason": cap_capsule_field(&input.capsule.reason, CAPSULE_REASON_BYTES),
@@ -231,21 +223,18 @@ fn compact_capsule_metadata(input: Capsule<'_>) -> serde_json::Value {
         }),
         "originals_query": originals_query,
         "range": range,
-        "pre_estimate": input.pre_estimate,
-        "post_estimate": input.post_estimate,
+        "before": input.before,
+        "after": input.after,
         "budget": input.budget,
-        "compression_ratio": input.compression_ratio,
+        "ratio": input.ratio,
     })
 }
 
-fn compact_compression_ratio(
-    pre_estimate: &ContextEstimate,
-    post_estimate: &ContextEstimate,
-) -> Option<f64> {
-    if pre_estimate.total_bytes <= 0 {
+fn compact_compression_ratio(before: &ContextEstimate, after: &ContextEstimate) -> Option<f64> {
+    if before.total <= 0 {
         return None;
     }
-    Some(post_estimate.total_bytes as f64 / pre_estimate.total_bytes as f64)
+    Some(after.total as f64 / before.total as f64)
 }
 
 fn cap_capsule_field(value: &str, max_bytes: usize) -> String {

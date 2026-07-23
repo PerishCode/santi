@@ -36,7 +36,7 @@ pub(crate) use tokio::{
 pub(crate) struct FakeProvider {
     pub(crate) requests: Arc<Mutex<Vec<ProviderRequest>>>,
     pub(crate) request_tool: bool,
-    pub(crate) input_budget_bytes: Option<usize>,
+    pub(crate) bytes: Option<usize>,
     pub(crate) fail_for_requests: Option<usize>,
 }
 
@@ -46,11 +46,9 @@ impl ProviderClient for FakeProvider {
         ProviderMetadata {
             provider: Arc::from("fake-provider"),
             model: "fake-model".to_string(),
-            context_budget: self.input_budget_bytes.map(|input_budget_bytes| {
-                ProviderContextBudget {
-                    input_budget_bytes,
-                    source: "test".to_string(),
-                }
+            context_budget: self.bytes.map(|bytes| ProviderContextBudget {
+                bytes,
+                source: "test".to_string(),
             }),
         }
     }
@@ -77,7 +75,7 @@ impl ProviderClient for FakeProvider {
             return Ok(Box::pin(stream::iter(vec![
                 Ok(ProviderEvent::FunctionCallRequested(ProviderFunctionCall {
                     response_id: "resp_tool".to_string(),
-                    item_id: Some("item_tool".to_string()),
+                    mark: Some("item_tool".to_string()),
                     item: json!({
                         "type": "function_call",
                         "id": "item_tool",
@@ -91,14 +89,14 @@ impl ProviderClient for FakeProvider {
                     arguments,
                 })),
                 Ok(ProviderEvent::Completed {
-                    provider_response_id: Some("resp_tool".to_string()),
+                    response: Some("resp_tool".to_string()),
                 }),
             ])));
         }
         Ok(Box::pin(stream::iter(vec![
             Ok(ProviderEvent::TextDelta("hi from runtime".to_string())),
             Ok(ProviderEvent::Completed {
-                provider_response_id: Some("fake-response-id".to_string()),
+                response: Some("fake-response-id".to_string()),
             }),
         ])))
     }
@@ -107,7 +105,7 @@ impl ProviderClient for FakeProvider {
 #[derive(Clone)]
 pub(crate) struct LargeToolCallProvider {
     pub(crate) requests: Arc<Mutex<Vec<ProviderRequest>>>,
-    pub(crate) input_budget_bytes: usize,
+    pub(crate) bytes: usize,
 }
 
 #[async_trait]
@@ -117,7 +115,7 @@ impl ProviderClient for LargeToolCallProvider {
             provider: Arc::from("large-tool-provider"),
             model: "large-tool-model".to_string(),
             context_budget: Some(ProviderContextBudget {
-                input_budget_bytes: self.input_budget_bytes,
+                bytes: self.bytes,
                 source: "test".to_string(),
             }),
         }
@@ -147,7 +145,7 @@ impl ProviderClient for LargeToolCallProvider {
                 )),
                 Ok(ProviderEvent::FunctionCallRequested(ProviderFunctionCall {
                     response_id: "resp_large_tool".to_string(),
-                    item_id: Some("item_large_tool".to_string()),
+                    mark: Some("item_large_tool".to_string()),
                     item: json!({
                         "type": "function_call",
                         "id": "item_large_tool",
@@ -161,12 +159,12 @@ impl ProviderClient for LargeToolCallProvider {
                     arguments,
                 })),
                 Ok(ProviderEvent::Completed {
-                    provider_response_id: Some("resp_large_tool".to_string()),
+                    response: Some("resp_large_tool".to_string()),
                 }),
             ])));
         }
         Ok(Box::pin(stream::iter(vec![Ok(ProviderEvent::Completed {
-            provider_response_id: Some("resp_after_large_tool".to_string()),
+            response: Some("resp_after_large_tool".to_string()),
         })])))
     }
 }
@@ -223,7 +221,7 @@ impl ProviderClient for GatedFirstProvider {
                 "provider response {index}"
             ))),
             Ok(ProviderEvent::Completed {
-                provider_response_id: Some(format!("gated-response-{index}")),
+                response: Some(format!("gated-response-{index}")),
             }),
         ])))
     }

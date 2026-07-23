@@ -94,11 +94,8 @@ async fn drive_failure_http_recovery() {
     let warning = accepted.receipt.warning.expect("canonical warning");
     assert_eq!(warning.code, "runtime.strand.drive_failed");
     assert_eq!(warning.context["accepted_before_failure"], true);
-    let receipt = receipt_status_handler(
-        State(service.clone()),
-        Path(accepted.receipt.inbox_id.clone()),
-    )
-    .await;
+    let receipt =
+        receipt_status_handler(State(service.clone()), Path(accepted.receipt.inbox.clone())).await;
     let Json(receipt) = match receipt {
         Ok(receipt) => receipt,
         Err(error) => panic!(
@@ -107,7 +104,7 @@ async fn drive_failure_http_recovery() {
             error.message()
         ),
     };
-    assert_eq!(receipt.inbox_id, accepted.receipt.inbox_id);
+    assert_eq!(receipt.inbox, accepted.receipt.inbox);
     assert_eq!(receipt.state, santi_core::ReceiptState::Accepted);
 
     let health = health_handler(State(service.clone())).await.into_response();
@@ -118,9 +115,9 @@ async fn drive_failure_http_recovery() {
     let body: serde_json::Value = serde_json::from_slice(&body).expect("health json");
     assert_eq!(body["ok"], false);
     assert_eq!(body["degraded"], true);
-    assert_eq!(body["active_drive_incidents"], 1);
-    assert!(body.get("strand_id").is_none());
-    assert!(body.get("inbox_id").is_none());
+    assert_eq!(body["incidents"], 1);
+    assert!(body.get("strand").is_none());
+    assert!(body.get("inbox").is_none());
 
     conn.execute_batch("DROP TRIGGER force_api_turn_failure;")
         .expect("remove failure trigger");

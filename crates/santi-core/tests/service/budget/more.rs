@@ -5,7 +5,7 @@ async fn resume_holds_pending() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     let provider = Arc::new(FakeProvider {
-        input_budget_bytes: Some(1),
+        bytes: Some(1),
         ..FakeProvider::default()
     });
     let service = service_with_budget(&temp, provider.clone());
@@ -50,17 +50,17 @@ async fn resume_holds_pending() {
 async fn rejected_payload_is_ephemeral() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FakeProvider {
-        input_budget_bytes: Some(1),
+        bytes: Some(1),
         ..FakeProvider::default()
     });
     let service = service_with_budget(&temp, provider);
-    let soul_id = service.list_souls().expect("souls")[0].id.clone();
+    let soul = service.list_souls().expect("souls")[0].id.clone();
     let source = InboxSource::new("test").with_metadata(json!({
         "raw": "SOURCE_SECRET_MARKER".repeat(600),
     }));
     let outcome = service
         .ingest_external_source(
-            &soul_id,
+            &soul,
             "test:no-payload-audit",
             "MESSAGE_SECRET_MARKER".repeat(500),
             Some(source),
@@ -74,7 +74,7 @@ async fn rejected_payload_is_ephemeral() {
         .list_strands()
         .expect("strands")
         .into_iter()
-        .find(|strand| strand.external_label.as_deref() == Some("test:no-payload-audit"))
+        .find(|strand| strand.label.as_deref() == Some("test:no-payload-audit"))
         .expect("labeled strand");
     let incident = service
         .strand_errors(&strand.id, 10)
@@ -93,7 +93,7 @@ async fn compact_resolves_incident() {
     let db = temp.path().join("santi.sqlite");
     let provider = Arc::new(LargeToolCallProvider {
         requests: Arc::new(Mutex::new(Vec::new())),
-        input_budget_bytes: 100_000,
+        bytes: 100_000,
     });
     let service = service_with_budget(&temp, provider.clone());
     let strand = service.create_strand().expect("create strand").strand;
@@ -123,14 +123,14 @@ async fn compact_resolves_incident() {
         runtime
             .messages
             .iter()
-            .all(|message| message.message.message_kind != MessageKind::SantiSystem),
+            .all(|message| message.message.kind != MessageKind::SantiSystem),
         "budget preflight must not project a model-visible notice"
     );
 
-    let start_message_id = runtime
+    let first = runtime
         .messages
         .iter()
-        .find(|message| message.content_text == "please run the large tool")
+        .find(|message| message.text == "please run the large tool")
         .expect("user message")
         .message
         .id
@@ -170,13 +170,13 @@ async fn compact_resolves_incident() {
         .compact_exec(
             &strand.id,
             santi_core::CompactExecRequest {
-                from_message_id: Some(start_message_id),
-                to_message_id: Some(boundary.message.id),
-                from_seq: None,
-                to_seq: None,
+                first: Some(first),
+                last: Some(boundary.message.id),
+                from: None,
+                to: None,
                 summary: "Large tool exchange collapsed after context-budget incident.".to_string(),
                 capsule: None,
-                dry_run: false,
+                dry: false,
             },
         )
         .expect("compact should resolve incident when estimate is under budget");
@@ -194,7 +194,7 @@ async fn compact_resolves_incident() {
         after
             .messages
             .iter()
-            .any(|message| message.content_text == "deliver after recovery"),
+            .any(|message| message.text == "deliver after recovery"),
         "explicit resolution should resume accepted pending input"
     );
     let conn = Connection::open(db).expect("open sqlite");
@@ -215,7 +215,7 @@ async fn budget_raise_clears_hold_on_ingest() {
     let held = service_with_budget(
         &temp,
         Arc::new(FakeProvider {
-            input_budget_bytes: Some(1),
+            bytes: Some(1),
             ..FakeProvider::default()
         }),
     );
@@ -249,7 +249,7 @@ async fn budget_raise_clears_hold_on_ingest() {
     let raised = service_with_budget(
         &temp,
         Arc::new(FakeProvider {
-            input_budget_bytes: Some(500_000),
+            bytes: Some(500_000),
             ..FakeProvider::default()
         }),
     );
@@ -264,7 +264,7 @@ async fn budget_raise_clears_hold_on_ingest() {
         panic!("under-budget hold must auto-clear on ingest remeasure");
     };
     let runtime = raised
-        .runtime_snapshot(&receipt.strand_id)
+        .runtime_snapshot(&receipt.strand)
         .expect("runtime")
         .expect("strand");
     let incident = runtime

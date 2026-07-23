@@ -79,7 +79,7 @@ fn track_frame(event: &str, data: &str, inflight: &mut HashSet<String>, seeded: 
             }
         }
         "turn_completed" | "turn_failed" => {
-            if let Some(id) = json_field(data, &["payload", "turn_id"]) {
+            if let Some(id) = json_field(data, &["payload", "turn"]) {
                 inflight.remove(&id);
             }
         }

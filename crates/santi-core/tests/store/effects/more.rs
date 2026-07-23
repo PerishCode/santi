@@ -11,7 +11,7 @@ fn restart_ambiguity() {
     let (_, prepared) = store
         .append_effect_call(
             Invocation {
-                turn: &started.turn_id,
+                turn: &started.turn,
                 call: "call_still_prepared",
                 name: "shell",
                 arguments: &json!({"command": "printf prepared"}),
@@ -55,7 +55,7 @@ fn restart_ambiguity() {
     );
     assert!(
         store
-            .tool_results_for_turn(&started.turn_id)
+            .tool_results_for_turn(&started.turn)
             .expect("tool results before resolution")
             .is_empty()
     );
@@ -84,7 +84,7 @@ fn restart_ambiguity() {
     );
     assert!(
         store
-            .tool_results_for_turn(&started.turn_id)
+            .tool_results_for_turn(&started.turn)
             .expect("tool results after resolution")
             .is_empty(),
         "resolution records evidence; it must not dispatch or fabricate a tool result"

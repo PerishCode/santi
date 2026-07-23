@@ -13,8 +13,8 @@ const COLUMNS: &str = r#"
 
 impl Database<'_> {
     pub fn open_incident(&self, draft: santi_error::Draft) -> Result<Fault, String> {
-        let existing = self.active_incident(&draft.key)?;
-        let mutation = engine().open(existing.as_ref(), draft, santi_model::timestamp_now());
+        let existing = self.incident(&draft.key)?;
+        let mutation = engine().open(existing.as_ref(), draft, santi_model::now());
         self.persist_mutation(&mutation)?;
         Ok(mutation.error)
     }
@@ -25,15 +25,15 @@ impl Database<'_> {
         by: &str,
         context: serde_json::Value,
     ) -> Result<bool, String> {
-        let Some(active) = self.active_incident(key)? else {
+        let Some(active) = self.incident(key)? else {
             return Ok(false);
         };
-        let mutation = engine().resolve(&active, by, context, santi_model::timestamp_now());
+        let mutation = engine().resolve(&active, by, context, santi_model::now());
         self.persist_mutation(&mutation)?;
         Ok(true)
     }
 
-    pub fn active_incident(&self, key: &str) -> Result<Option<Incident>, String> {
+    pub fn incident(&self, key: &str) -> Result<Option<Incident>, String> {
         self.conn
             .query_row(
                 &format!(

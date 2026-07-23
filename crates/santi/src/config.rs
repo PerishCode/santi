@@ -60,8 +60,8 @@ impl Default for Server {
 pub struct Upgrade {
     pub timeout_secs: u64,
     pub finalizer_bin: PathBuf,
-    pub soul_id: Option<String>,
-    pub strand_id: Option<String>,
+    pub soul: Option<String>,
+    pub strand: Option<String>,
 }
 
 impl Default for Upgrade {
@@ -69,8 +69,8 @@ impl Default for Upgrade {
         Upgrade {
             timeout_secs: 600,
             finalizer_bin: PathBuf::from("/usr/bin/santi"),
-            soul_id: None,
-            strand_id: None,
+            soul: None,
+            strand: None,
         }
     }
 }
@@ -147,8 +147,8 @@ fn runtime(held: SantiConfig) -> Runtime {
         shutdown_grace: Duration::from_secs(held.server.shutdown_grace_secs),
         upgrade_timeout: Duration::from_secs(held.upgrade.timeout_secs),
         finalizer_bin: held.upgrade.finalizer_bin,
-        handover_soul: held.upgrade.soul_id,
-        handover_strand: held.upgrade.strand_id,
+        handover_soul: held.upgrade.soul,
+        handover_strand: held.upgrade.strand,
         github_login: held.webhooks.github.self_login,
         github_allow: held.webhooks.github.allow,
         feishu_key: held.webhooks.feishu.encrypt_key,

@@ -6,7 +6,7 @@ use std::{
 use santi_provider::{ProviderEvent, ProviderStreamTrace};
 
 pub(in crate::service) struct Turn<'a> {
-    turn_id: &'a str,
+    turn: &'a str,
     turn_started: Instant,
     round_started: Option<Instant>,
     response_started: Option<Instant>,
@@ -18,9 +18,9 @@ pub(in crate::service) struct Turn<'a> {
 }
 
 impl<'a> Turn<'a> {
-    pub(in crate::service) fn new(turn_id: &'a str) -> Self {
+    pub(in crate::service) fn new(turn: &'a str) -> Self {
         let timing = Self {
-            turn_id,
+            turn,
             turn_started: Instant::now(),
             round_started: None,
             response_started: None,
@@ -116,7 +116,7 @@ impl<'a> Turn<'a> {
                     self.log(
                         "provider_chunk",
                         round,
-                        &format!("chunk_bytes={bytes} total_bytes={}", self.bytes),
+                        &format!("chunk_bytes={bytes} total={}", self.bytes),
                     );
                 }
             }
@@ -165,8 +165,8 @@ impl<'a> Turn<'a> {
 
     fn log(&self, event: &str, round: usize, fields: &str) {
         eprintln!(
-            "santi-timing turn_id={} event={} round={} turn_ms={} {}",
-            self.turn_id,
+            "santi-timing turn={} event={} round={} turn_ms={} {}",
+            self.turn,
             event,
             round,
             self.turn_started.elapsed().as_millis(),

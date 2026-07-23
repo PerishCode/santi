@@ -19,7 +19,7 @@ struct Driver<'a, 'turn> {
     service: &'a Service,
     address: Address<&'a str>,
     number: usize,
-    provider_family: &'a str,
+    family: &'a str,
     request_model: &'a str,
     assistant_text: &'a mut String,
     timing: &'a mut timing::Turn<'turn>,
@@ -65,7 +65,7 @@ impl Driver<'_, '_> {
             Err(error) => {
                 self.timing.failed(self.number, "sse_event", &error);
                 let result = self.service.fail_current_thinking_span(
-                    self.address.strand_id,
+                    self.address.strand,
                     &mut self.current_thinking_span,
                     error.clone(),
                 );
@@ -86,12 +86,8 @@ impl Driver<'_, '_> {
     fn handle_event(&mut self, event: ProviderEvent) -> Result<bool, Failure> {
         match event {
             ProviderEvent::StreamTrace(_) => Ok(false),
-            ProviderEvent::ResponseStarted {
-                provider_response_id,
-            }
-            | ProviderEvent::ResponseInProgress {
-                provider_response_id,
-            } => self.response_progress(provider_response_id),
+            ProviderEvent::ResponseStarted { response }
+            | ProviderEvent::ResponseInProgress { response } => self.response_progress(response),
             ProviderEvent::ReasoningSummaryDelta(delta) => {
                 self.reasoning_summary.push_str(&delta);
                 self.persist_reasoning_summary()?;
@@ -110,37 +106,35 @@ impl Driver<'_, '_> {
                 self.function_call_requested(call)?;
                 Ok(false)
             }
-            ProviderEvent::Completed {
-                provider_response_id,
-            } => self.complete(provider_response_id),
+            ProviderEvent::Completed { response } => self.complete(response),
             ProviderEvent::Failed(error) => Err(self.failed(error)),
         }
     }
 
-    fn response_progress(&mut self, provider_response_id: Option<String>) -> Result<bool, Failure> {
-        self.active_provider_response_id = provider_response_id.clone();
+    fn response_progress(&mut self, response: Option<String>) -> Result<bool, Failure> {
+        self.active_provider_response_id = response.clone();
         let result = self
             .service
             .ensure_thinking_span(crate::service::thinking::Progress {
-                strand: self.address.strand_id,
-                turn: self.address.turn_id,
+                strand: self.address.strand,
+                turn: self.address.turn,
                 current: &mut self.current_thinking_span,
                 summary: &mut self.summary_thinking_span,
-                response: provider_response_id.clone(),
+                response: response.clone(),
             });
         self.runtime(Operation::Persistence(Persistence::Thinking), result)?;
         self.service.publish_turn_activity(
-            self.address.strand_id,
-            self.address.turn_id,
+            self.address.strand,
+            self.address.turn,
             TurnActivityState::Thinking,
-            provider_response_id,
+            response,
         );
         Ok(false)
     }
 
     fn persist_reasoning_summary(&mut self) -> Result<(), Failure> {
         let result = self.service.update_thinking_span_summary(
-            self.address.strand_id,
+            self.address.strand,
             &mut self.summary_thinking_span,
             self.reasoning_summary.clone(),
         );
@@ -164,14 +158,14 @@ impl Driver<'_, '_> {
     fn function_call_requested(&mut self, call: ProviderFunctionCall) -> Result<(), Failure> {
         self.timing.function_call_requested(self.number, &call.name);
         let result = self.service.complete_current_thinking_span(
-            self.address.strand_id,
+            self.address.strand,
             &mut self.current_thinking_span,
             ThinkingCompletionReason::ToolCallRequested,
         );
         self.runtime(Operation::Persistence(Persistence::Thinking), result)?;
         self.service.publish_turn_activity(
-            self.address.strand_id,
-            self.address.turn_id,
+            self.address.strand,
+            self.address.turn,
             TurnActivityState::CallingTool,
             self.active_provider_response_id.clone(),
         );
@@ -179,23 +173,23 @@ impl Driver<'_, '_> {
         Ok(())
     }
 
-    fn complete(&mut self, provider_response_id: Option<String>) -> Result<bool, Failure> {
+    fn complete(&mut self, response: Option<String>) -> Result<bool, Failure> {
         self.timing.completed(self.number);
-        self.active_provider_response_id = provider_response_id.clone();
+        self.active_provider_response_id = response.clone();
         let result = self.service.complete_current_thinking_span(
-            self.address.strand_id,
+            self.address.strand,
             &mut self.current_thinking_span,
             ThinkingCompletionReason::ProviderCompleted,
         );
         self.runtime(Operation::Persistence(Persistence::Thinking), result)?;
-        self.completed_response_id = provider_response_id;
+        self.completed_response_id = response;
         Ok(true)
     }
 
     fn failed(&mut self, error: String) -> Failure {
         self.timing.failed(self.number, "provider_response", &error);
         let result = self.service.fail_current_thinking_span(
-            self.address.strand_id,
+            self.address.strand,
             &mut self.current_thinking_span,
             error.clone(),
         );
@@ -214,7 +208,7 @@ impl Driver<'_, '_> {
             error,
             self.assistant_text,
             Metadata {
-                provider: self.provider_family.to_string(),
+                provider: self.family.to_string(),
                 model: self.request_model.to_string(),
                 stage,
                 round: self.number,

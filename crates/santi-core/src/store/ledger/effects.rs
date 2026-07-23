@@ -10,7 +10,7 @@ use crate::store::SantiStore;
 use crate::store::db::{Database, Transition};
 use crate::{
     EffectResolutionOutcome, EffectState, EffectStatus, EffectTransitionReason, StrandEffect,
-    StrandTargetType, ToolResult, prefixed_id, timestamp_now,
+    StrandTargetType, ToolResult, now, tag,
 };
 use rusqlite::params;
 
@@ -23,7 +23,7 @@ impl SantiStore {
         };
         Ok(Some(EffectStatus {
             transitions: database.effect_transitions(effect_id)?,
-            receipt_ids: database.receipt_ids(effect_id)?,
+            receipts: database.receipts(effect_id)?,
             effect,
         }))
     }
@@ -31,7 +31,7 @@ impl SantiStore {
     pub fn begin_effect_dispatch(&self, effect_id: &str) -> Result<StrandEffect, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let now = timestamp_now();
+        let now = now();
         let changed = tx
             .execute(
                 r#"
@@ -66,9 +66,9 @@ impl SantiStore {
         settlement: Settlement<'_>,
     ) -> Result<ToolResult, String> {
         let Settlement {
-            call: tool_call_id,
+            call,
             output,
-            error: error_text,
+            error,
             state,
         } = settlement;
         let (allowed_source, reason) = match state {
@@ -91,14 +91,14 @@ impl SantiStore {
         let state_allowed = current.0 == allowed_source
             || (allowed_source == "prepared_or_dispatching"
                 && matches!(current.0.as_str(), "prepared" | "dispatching"));
-        if !state_allowed || current.1.as_deref() != Some(tool_call_id) {
+        if !state_allowed || current.1.as_deref() != Some(call) {
             return Err("effect/tool-call state mismatch".to_string());
         }
 
-        let tool_result_id = prefixed_id("tool_result");
-        let now = timestamp_now();
+        let tool_result_id = tag("tool_result");
+        let now = now();
         let database = Database::new(&tx);
-        let strand_id = database.call_soul_id(tool_call_id)?;
+        let strand = database.call_soul_id(call)?;
         let output_text = output
             .as_ref()
             .map(serde_json::to_string)
@@ -109,10 +109,10 @@ impl SantiStore {
             INSERT INTO tool_results (id, tool_call_id, output, error_text, created_at)
             VALUES (?1, ?2, ?3, ?4, ?5)
             "#,
-            params![tool_result_id, tool_call_id, output_text, error_text, now],
+            params![tool_result_id, call, output_text, error, now],
         )
         .map_err(|error| error.to_string())?;
-        database.append_entry_in_tx(&strand_id, StrandTargetType::ToolResult, &tool_result_id)?;
+        database.append_entry_in_tx(&strand, StrandTargetType::ToolResult, &tool_result_id)?;
         tx.execute(
             r#"
             UPDATE strand_effects
@@ -120,7 +120,7 @@ impl SantiStore {
                 updated_at = ?5, settled_at = ?5
             WHERE id = ?1
             "#,
-            params![effect_id, state.encode(), tool_result_id, error_text, now,],
+            params![effect_id, state.encode(), tool_result_id, error, now,],
         )
         .map_err(|error| error.to_string())?;
         database.append_effect_transition(
@@ -149,7 +149,7 @@ impl SantiStore {
         }
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let now = timestamp_now();
+        let now = now();
         let changed = tx
             .execute(
                 r#"
@@ -203,7 +203,7 @@ impl SantiStore {
             return Ok(None);
         }
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let now = timestamp_now();
+        let now = now();
         let changed = tx
             .execute(
                 r#"

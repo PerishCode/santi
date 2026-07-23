@@ -153,7 +153,7 @@ impl UpgradeHost for Host {
             .map_err(|error| format!("spawn final-version binary {}: {error}", binary.display()))?;
         let mut request = request.clone();
         let held = crate::runtime::held();
-        request.soul_id = held
+        request.soul = held
             .handover_soul
             .clone()
             .unwrap_or_else(|| santi_core::DEFAULT_SOUL_ID.to_string());

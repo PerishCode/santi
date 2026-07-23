@@ -43,14 +43,14 @@ pub(super) async fn ingest_webhook(
         .ok_or_else(|| ApiError::not_found("webhook not found"))?;
     let adaptor = adaptor_for(&subscription.adaptor)
         .ok_or_else(|| ApiError::internal(format!("unknown adaptor {}", subscription.adaptor)))?;
-    let secret = env::var(&subscription.secret_env)
+    let secret = env::var(&subscription.credential)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
             ApiError::unauthorized(format!(
                 "webhook secret env {} is not set",
-                subscription.secret_env
+                subscription.credential
             ))
         })?;
     adaptor
@@ -66,7 +66,7 @@ pub(super) async fn ingest_webhook(
     if !event.in_scope || event.self_authored {
         return Ok(StatusCode::OK.into_response());
     }
-    let label = if subscription.strand_strategy == "single" {
+    let label = if subscription.strategy == "single" {
         format!("{}:{}", subscription.adaptor, name)
     } else {
         event.label.clone()
@@ -76,14 +76,14 @@ pub(super) async fn ingest_webhook(
         .with_metadata(json!({
             "subscription": name,
             "adaptor": subscription.adaptor,
-            "strand_strategy": subscription.strand_strategy,
+            "strategy": subscription.strategy,
             "event_label": event.label,
             "materialized_label": label,
             "event": event.metadata,
         }));
     match service
         .ingest_external_source(
-            &subscription.soul_id,
+            &subscription.soul,
             &label,
             event.santi_system_text,
             Some(source),

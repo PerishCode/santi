@@ -91,8 +91,7 @@ impl WebhookAdaptor for FeishuAdaptor {
 
         let chat_id = string_at(&payload, &["event", "message", "chat_id"]).unwrap_or_default();
         let chat_type = string_at(&payload, &["event", "message", "chat_type"]).unwrap_or_default();
-        let message_id =
-            string_at(&payload, &["event", "message", "message_id"]).unwrap_or_default();
+        let message = string_at(&payload, &["event", "message", "message_id"]).unwrap_or_default();
         let event_id = string_at(&payload, &["header", "event_id"]).unwrap_or_default();
         let sender_type =
             string_at(&payload, &["event", "sender", "sender_type"]).unwrap_or_default();
@@ -104,7 +103,7 @@ impl WebhookAdaptor for FeishuAdaptor {
             || sender_allowed(&user_id, self.allow.as_deref());
         let in_scope = sender_type == "user" && allowed;
         let santi_system_text = format!(
-            "[feishu] im.message.receive_v1 in chat {chat_id} ({chat_type})\nmessage_id: {message_id}\nevent_id: {event_id}"
+            "[feishu] im.message.receive_v1 in chat {chat_id} ({chat_type})\nmessage: {message}\nevent: {event_id}"
         );
         let label = format!("feishu:{webhook_name}:chat:{chat_id}");
         let metadata = json!({
@@ -114,7 +113,7 @@ impl WebhookAdaptor for FeishuAdaptor {
             "event_id": event_id,
             "chat_id": chat_id,
             "chat_type": chat_type,
-            "message_id": message_id,
+            "message": message,
             "sender_type": sender_type,
             "label": label,
         });

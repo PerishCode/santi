@@ -16,7 +16,7 @@ fn renders_events() {
     assert_eq!(
         render_watch_event(
             "turn_started",
-            r#"{"payload":{"type":"turn_started","turn":{"id":"turn_1","trigger_type":"strand_send"}}}"#,
+            r#"{"payload":{"type":"turn_started","turn":{"id":"turn_1","trigger":"strand_send"}}}"#,
         )
         .as_deref(),
         Some("turn started turn_1 (strand_send)")
@@ -24,7 +24,7 @@ fn renders_events() {
     assert_eq!(
         render_watch_event(
             "turn_activity",
-            r#"{"payload":{"type":"turn_activity","activity":{"turn_id":"turn_1","state":"running_tool"}}}"#,
+            r#"{"payload":{"type":"turn_activity","activity":{"turn":"turn_1","state":"running_tool"}}}"#,
         )
         .as_deref(),
         Some("turn turn_1: running_tool")
@@ -32,7 +32,7 @@ fn renders_events() {
     assert_eq!(
         render_watch_event(
             "message_completed",
-            r#"{"payload":{"type":"message_completed","turn_id":"turn_1","message":{"content_text":"hello\nworld"}}}"#,
+            r#"{"payload":{"type":"message_completed","turn":"turn_1","message":{"text":"hello\nworld"}}}"#,
         )
         .as_deref(),
         Some("assistant completed turn_1: hello world")
@@ -40,7 +40,7 @@ fn renders_events() {
     assert_eq!(
         render_watch_event(
             "tool_result_created",
-            r#"{"payload":{"type":"tool_result_created","tool_result":{"tool_call_id":"call_1","error_text":null}}}"#,
+            r#"{"payload":{"type":"tool_result_created","result":{"call":"call_1","error":null}}}"#,
         )
         .as_deref(),
         Some("tool result call_1: ok")
@@ -48,7 +48,7 @@ fn renders_events() {
     assert_eq!(
         render_watch_event(
             "turn_failed",
-            r#"{"payload":{"type":"turn_failed","turn_id":"turn_1","error":{"code":"provider.turn.failed","message":"provider request failed","incident":"inc_1"}}}"#,
+            r#"{"payload":{"type":"turn_failed","turn":"turn_1","error":{"code":"provider.turn.failed","message":"provider request failed","incident":"inc_1"}}}"#,
         )
         .as_deref(),
         Some(
@@ -73,10 +73,10 @@ fn snippets_text() {
 
 #[test]
 fn parses_sse_frame() {
-    let frame = "id: e1\nevent: turn_completed\ndata: {\"payload\":{\"turn_id\":\"t1\"}}\n";
+    let frame = "id: e1\nevent: turn_completed\ndata: {\"payload\":{\"turn\":\"t1\"}}\n";
     let (event, data) = parse_sse_frame(frame).expect("frame");
     assert_eq!(event, "turn_completed");
-    assert_eq!(data, "{\"payload\":{\"turn_id\":\"t1\"}}");
+    assert_eq!(data, "{\"payload\":{\"turn\":\"t1\"}}");
     assert!(parse_sse_frame(": keep-alive\n").is_none());
 }
 

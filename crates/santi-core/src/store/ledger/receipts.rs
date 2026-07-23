@@ -5,7 +5,7 @@ use crate::store::db::{Database, receipt_state_from_db};
 use crate::{ReceiptStatus, ReceiptTransition};
 
 impl SantiStore {
-    pub fn receipt_status(&self, inbox_id: &str) -> Result<Option<ReceiptStatus>, String> {
+    pub fn receipt_status(&self, inbox: &str) -> Result<Option<ReceiptStatus>, String> {
         let conn = self.conn.lock().unwrap();
         let receipt = conn
             .query_row(
@@ -13,7 +13,7 @@ impl SantiStore {
                 SELECT id, strand_id, state, accepted_at, updated_at
                 FROM inbox_receipts WHERE id = ?1
                 "#,
-                params![inbox_id],
+                params![inbox],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
@@ -26,7 +26,7 @@ impl SantiStore {
             )
             .optional()
             .map_err(|error| error.to_string())?;
-        let Some((inbox_id, strand_id, state, accepted_at, updated_at)) = receipt else {
+        let Some((inbox, strand, state, accepted, updated)) = receipt else {
             return Ok(None);
         };
         let mut stmt = conn
@@ -41,7 +41,7 @@ impl SantiStore {
             )
             .map_err(|error| error.to_string())?;
         let raw_transitions = stmt
-            .query_map(params![&inbox_id], |row| {
+            .query_map(params![&inbox], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, i64>(1)?,
@@ -57,27 +57,25 @@ impl SantiStore {
             .map_err(|error| error.to_string())?;
         let transitions = raw_transitions
             .into_iter()
-            .map(
-                |(id, sequence, state, turn_id, incident, reconstructed_from, occurred)| {
-                    Ok(ReceiptTransition {
-                        id,
-                        sequence,
-                        state: receipt_state_from_db(&state)?,
-                        turn_id,
-                        incident,
-                        reconstructed_from,
-                        occurred,
-                    })
-                },
-            )
+            .map(|(id, sequence, state, turn, incident, rebuilt, occurred)| {
+                Ok(ReceiptTransition {
+                    id,
+                    sequence,
+                    state: receipt_state_from_db(&state)?,
+                    turn,
+                    incident,
+                    rebuilt,
+                    occurred,
+                })
+            })
             .collect::<Result<Vec<_>, String>>()?;
-        let effects = Database::new(&conn).effects_for_receipt(&inbox_id)?;
+        let effects = Database::new(&conn).effects_for_receipt(&inbox)?;
         Ok(Some(ReceiptStatus {
-            inbox_id,
-            strand_id,
+            inbox,
+            strand,
             state: receipt_state_from_db(&state)?,
-            accepted_at,
-            updated_at,
+            accepted,
+            updated,
             transitions,
             effects,
         }))

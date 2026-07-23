@@ -8,16 +8,14 @@ pub fn render_watch_event(event: &str, data: &str) -> Option<String> {
             let turn = value.get("payload")?.get("turn")?;
             let id = turn.get("id").and_then(serde_json::Value::as_str)?;
             let trigger = turn
-                .get("trigger_type")
+                .get("trigger")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("unknown");
             Some(format!("turn started {id} ({trigger})"))
         }
         "turn_activity" => {
             let activity = value.get("payload")?.get("activity")?;
-            let id = activity
-                .get("turn_id")
-                .and_then(serde_json::Value::as_str)?;
+            let id = activity.get("turn").and_then(serde_json::Value::as_str)?;
             let state = activity
                 .get("state")
                 .and_then(serde_json::Value::as_str)
@@ -32,7 +30,7 @@ pub fn render_watch_event(event: &str, data: &str) -> Option<String> {
                 message_actor_kind(message),
                 snippet(
                     message
-                        .get("content_text")
+                        .get("text")
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or_default(),
                     160,
@@ -41,42 +39,39 @@ pub fn render_watch_event(event: &str, data: &str) -> Option<String> {
         }
         "message_completed" => {
             let payload = value.get("payload")?;
-            let turn_id = payload
-                .get("turn_id")
+            let turn = payload
+                .get("turn")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("unknown");
             let text = payload
                 .get("message")
-                .and_then(|message| message.get("content_text"))
+                .and_then(|message| message.get("text"))
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or_default();
             Some(format!(
-                "assistant completed {turn_id}: {}",
+                "assistant completed {turn}: {}",
                 snippet(text, 500)
             ))
         }
         "tool_call_created" => {
-            let call = value.get("payload")?.get("tool_call")?;
+            let call = value.get("payload")?.get("call")?;
             let id = call
                 .get("id")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("unknown");
             let name = call
-                .get("tool_name")
+                .get("tool")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("tool");
             Some(format!("tool call {name} ({id})"))
         }
         "tool_result_created" => {
-            let result = value.get("payload")?.get("tool_result")?;
+            let result = value.get("payload")?.get("result")?;
             let call_id = result
-                .get("tool_call_id")
+                .get("call")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("unknown");
-            let status = if result
-                .get("error_text")
-                .is_some_and(|error| !error.is_null())
-            {
+            let status = if result.get("error").is_some_and(|error| !error.is_null()) {
                 "error"
             } else {
                 "ok"
@@ -94,7 +89,7 @@ pub fn render_watch_event(event: &str, data: &str) -> Option<String> {
             Some(format!("material updated {kind}"))
         }
         "turn_completed" => {
-            json_field(data, &["payload", "turn_id"]).map(|id| format!("turn completed {id}"))
+            json_field(data, &["payload", "turn"]).map(|id| format!("turn completed {id}"))
         }
         "turn_failed" => render_turn_failure(value.get("payload")?),
         "error_transition" => render_error_transition(value.get("payload")?),
@@ -104,7 +99,7 @@ pub fn render_watch_event(event: &str, data: &str) -> Option<String> {
 
 fn render_turn_failure(payload: &serde_json::Value) -> Option<String> {
     let id = payload
-        .get("turn_id")
+        .get("turn")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("unknown");
     let error = payload.get("error")?;
@@ -151,17 +146,17 @@ fn thinking_line(value: &serde_json::Value, label: &str) -> Option<String> {
         .get("id")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("unknown");
-    let turn_id = thinking
-        .get("turn_id")
+    let turn = thinking
+        .get("turn")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("unknown");
-    Some(format!("{label} {id} ({turn_id})"))
+    Some(format!("{label} {id} ({turn})"))
 }
 
 fn message_seq(message: &serde_json::Value) -> String {
     message
         .get("relation")
-        .and_then(|relation| relation.get("strand_seq"))
+        .and_then(|relation| relation.get("seq"))
         .and_then(serde_json::Value::as_i64)
         .map(|seq| format!("#{seq}"))
         .unwrap_or_else(|| "#?".to_string())
@@ -170,11 +165,11 @@ fn message_seq(message: &serde_json::Value) -> String {
 fn message_actor_kind(message: &serde_json::Value) -> String {
     let inner = message.get("message").unwrap_or(message);
     let actor = inner
-        .get("actor_type")
+        .get("role")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("unknown");
     let kind = inner
-        .get("message_kind")
+        .get("kind")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("text");
     format!("{actor}/{kind}")

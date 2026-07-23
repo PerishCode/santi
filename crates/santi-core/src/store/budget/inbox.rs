@@ -35,7 +35,7 @@ impl SantiStore {
             .map_err(|error| error.to_string())?;
 
         if let Some(replay) = &replay
-            && let Some((digest, strand_id, inbox_id)) =
+            && let Some((digest, strand, inbox)) =
                 Database::new(&tx).replay(replay.owner, replay.request)?
         {
             tx.commit().map_err(|error| error.to_string())?;
@@ -45,8 +45,8 @@ impl SantiStore {
             return Ok(Intake {
                 outcome: IngestOutcome::Accepted {
                     receipt: IngestReceipt {
-                        strand_id,
-                        inbox_id,
+                        strand,
+                        inbox,
                         warning: None,
                     },
                 },
@@ -72,7 +72,7 @@ impl SantiStore {
 
         if enforce_active_holds
             && Database::new(&tx)
-                .active_incident(&context_incident_key(strand))?
+                .incident(&context_incident_key(strand))?
                 .is_some()
         {
             let error = super::state::repeat_context_incident(
@@ -102,8 +102,8 @@ impl SantiStore {
                 admission.instructions.as_deref(),
                 Some(admission.tools.as_slice()),
             );
-            if estimate.total_bytes > admission.budget_bytes {
-                let reason = over_budget_reason(estimate.total_bytes, admission.budget_bytes);
+            if estimate.total > admission.budget_bytes {
+                let reason = over_budget_reason(estimate.total, admission.budget_bytes);
                 let observed_at_seq = database.current_strand_seq(strand)?;
                 let error = super::state::open_context_incident(
                     &database,
@@ -157,13 +157,11 @@ impl SantiStore {
             });
         }
 
-        let inbox_id = prefixed_id("inbox");
-        let now = timestamp_now();
+        let inbox = tag("inbox");
+        let now = now();
         let content_json = serde_json::to_string(&content).map_err(|error| error.to_string())?;
-        let source_type = source.as_ref().map(|source| source.source_type.as_str());
-        let source_ref = source
-            .as_ref()
-            .and_then(|source| source.source_ref.as_deref());
+        let origin = source.as_ref().map(|source| source.kind.as_str());
+        let trace = source.as_ref().and_then(|source| source.source.as_deref());
         let source_metadata = source
             .as_ref()
             .and_then(|source| source.metadata.as_ref())
@@ -177,25 +175,25 @@ impl SantiStore {
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             "#,
             params![
-                inbox_id,
+                inbox,
                 strand,
                 kind.encode(),
                 content_json,
-                source_type,
-                source_ref,
+                origin,
+                trace,
                 source_metadata,
                 now
             ],
         )
         .map_err(|error| error.to_string())?;
-        Database::new(&tx).insert_accepted(&inbox_id, strand, &now)?;
+        Database::new(&tx).insert_accepted(&inbox, strand, &now)?;
         if let Some(replay) = replay {
             Database::new(&tx).insert_replay(crate::store::db::ReplayInsert {
                 owner: replay.owner,
                 request: replay.request,
                 digest: replay.digest,
                 strand,
-                inbox: &inbox_id,
+                inbox: &inbox,
                 created: &now,
             })?;
         }
@@ -203,8 +201,8 @@ impl SantiStore {
         Ok(Intake {
             outcome: IngestOutcome::Accepted {
                 receipt: IngestReceipt {
-                    strand_id: strand.to_string(),
-                    inbox_id,
+                    strand: strand.to_string(),
+                    inbox,
                     warning: None,
                 },
             },

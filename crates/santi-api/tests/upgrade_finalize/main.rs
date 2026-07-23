@@ -31,7 +31,7 @@ impl ProviderClient for NoopProvider {
 
     async fn stream_response(&self, _request: ProviderRequest) -> Result<ProviderStream, String> {
         Ok(Box::pin(stream::iter(vec![Ok(ProviderEvent::Completed {
-            provider_response_id: Some("noop".to_string()),
+            response: Some("noop".to_string()),
         })])))
     }
 }
@@ -44,7 +44,7 @@ fn old_request_defaults() {
         "deb": "/tmp/santi.deb",
         "terminal": {"terminal": "upgraded"},
         "wake": true,
-        "soul_id": "soul_default",
+        "soul": "soul_default",
         "configured_strand_id": null,
     }))
     .expect("decode old runner request");
@@ -75,7 +75,7 @@ fn attempt_labels_isolate_rooms() {
             "come look again",
         )
         .expect("repeat seed via attempt label");
-    assert_eq!(retry.strand_id, outcome.strand_id);
+    assert_eq!(retry.strand, outcome.strand);
     let other = paths
         .seed_attempt_handover(
             santi_core::DEFAULT_SOUL_ID,
@@ -84,28 +84,25 @@ fn attempt_labels_isolate_rooms() {
             "other attempt",
         )
         .expect("seed other attempt");
-    assert_ne!(other.strand_id, outcome.strand_id);
+    assert_ne!(other.strand, outcome.strand);
 
     let store = SantiStore::open(&paths.database_path).expect("reopen");
-    let strand = store.strand(&outcome.strand_id).unwrap().expect("strand");
+    let strand = store.strand(&outcome.strand).unwrap().expect("strand");
     assert_eq!(
-        strand.external_label.as_deref(),
+        strand.label.as_deref(),
         Some("soul:soul_default:ops:upgrade:upgrade_one")
     );
-    let other_strand = store
-        .strand(&other.strand_id)
-        .unwrap()
-        .expect("other strand");
+    let other_strand = store.strand(&other.strand).unwrap().expect("other strand");
     assert_eq!(
-        other_strand.external_label.as_deref(),
+        other_strand.label.as_deref(),
         Some("soul:soul_default:ops:upgrade:upgrade_two")
     );
     let started = store
-        .try_start_turn(&outcome.strand_id, "strand_send", None)
+        .try_start_turn(&outcome.strand, "strand_send", None)
         .unwrap()
         .expect("turn starts");
-    assert_eq!(started.drained_messages[0].content_text, "come look");
-    assert_eq!(started.drained_messages[1].content_text, "come look again");
+    assert_eq!(started.drained_messages[0].text, "come look");
+    assert_eq!(started.drained_messages[1].text, "come look again");
 }
 
 #[test]
@@ -118,11 +115,8 @@ fn stable_helper_preserves_label() {
         .seed_come_look(santi_core::DEFAULT_SOUL_ID, None, "stable wake")
         .expect("seed stable label");
     let store = SantiStore::open(&paths.database_path).expect("reopen");
-    let strand = store.strand(&outcome.strand_id).unwrap().expect("strand");
-    assert_eq!(
-        strand.external_label.as_deref(),
-        Some("soul:soul_default:ops")
-    );
+    let strand = store.strand(&outcome.strand).unwrap().expect("strand");
+    assert_eq!(strand.label.as_deref(), Some("soul:soul_default:ops"));
 }
 
 #[test]
@@ -236,7 +230,7 @@ fn request_for(attempt_id: &str, terminal: UpgradeTerminal) -> UpgradeFinalizeRe
         terminal,
         readiness: UpgradeReadiness::Ready,
         wake: true,
-        soul_id: santi_core::DEFAULT_SOUL_ID.to_string(),
+        soul: santi_core::DEFAULT_SOUL_ID.to_string(),
         configured_strand_id: None,
     }
 }

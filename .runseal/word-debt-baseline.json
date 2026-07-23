@@ -1,19 +1,19 @@
 {
   "schema": "santi.word_debt.v1",
-  "note": "refreshed 2026-07-22 after integrated IM removal, final fanout grouping, and structural-debt cleanup: the previous wire/internal split did not reproduce because its broad crate-boundary assumption was never encoded by WIRE_PATH. This baseline records the classifier actually enforced by the gate, including the grouped durable store seats. core gate is zero, no core entry; internal no-rise; wire/test observed.",
-  "total": 2032,
+  "note": "C4 2026-07-14 (strand ss_0d11cd5a): core gate is zero, no core entry; internal no-rise; wire/test observed",
+  "total": 1572,
   "tracks": {
     "wire": {
-      "occurrences": 739,
-      "unique": 543
+      "occurrences": 462,
+      "unique": 397
     },
     "test": {
-      "occurrences": 479,
-      "unique": 389
+      "occurrences": 420,
+      "unique": 364
     },
     "internal": {
-      "occurrences": 814,
-      "unique": 657
+      "occurrences": 690,
+      "unique": 581
     }
   }
 }

@@ -69,7 +69,7 @@ pub(super) fn run_upgrade_attempt<H: UpgradeHost>(
         terminal,
         readiness,
         wake: true,
-        soul_id: santi_core::DEFAULT_SOUL_ID.to_string(),
+        soul: santi_core::DEFAULT_SOUL_ID.to_string(),
         configured_strand_id: None,
     });
 
@@ -160,7 +160,7 @@ fn record_fatal<H: UpgradeHost>(
         terminal: UpgradeTerminal::Failed { failure },
         readiness: UpgradeReadiness::Ready,
         wake: false,
-        soul_id: santi_core::DEFAULT_SOUL_ID.to_string(),
+        soul: santi_core::DEFAULT_SOUL_ID.to_string(),
         configured_strand_id: None,
     };
     match host.finalize(&request) {

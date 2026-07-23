@@ -24,9 +24,9 @@ impl SantiStore {
             )
             .optional()
             .map_err(|error| error.to_string())?;
-        if let Some(turn_id) = running_id {
+        if let Some(turn) = running_id {
             let turn = Database::new(&tx)
-                .turn_by_id(&turn_id)?
+                .turn_by_id(&turn)?
                 .ok_or_else(|| "running turn missing".to_string())?;
             return Ok(StartTurnOutcome::Running(turn));
         }
@@ -46,10 +46,7 @@ impl SantiStore {
             return Ok(StartTurnOutcome::Idle);
         }
 
-        if database
-            .active_incident(&context_incident_key(strand))?
-            .is_some()
-        {
+        if database.incident(&context_incident_key(strand))?.is_some() {
             let error =
                 super::state::repeat_context_incident(&database, strand, "pending_active_guard")?;
             tx.commit().map_err(|error| error.to_string())?;
@@ -64,8 +61,8 @@ impl SantiStore {
                 admission.instructions.as_deref(),
                 Some(admission.tools.as_slice()),
             );
-            if estimate.total_bytes > admission.budget_bytes {
-                let reason = over_budget_reason(estimate.total_bytes, admission.budget_bytes);
+            if estimate.total > admission.budget_bytes {
+                let reason = over_budget_reason(estimate.total, admission.budget_bytes);
                 let observed_at_seq = database.current_strand_seq(strand)?;
                 let error = super::state::open_context_incident(
                     &database,
@@ -89,12 +86,12 @@ impl SantiStore {
             }
         }
 
-        let turn_id = prefixed_id("turn");
-        let drained = drain_inbox_in_tx(&tx, strand, &turn_id)?;
+        let turn = tag("turn");
+        let drained = drain_inbox_in_tx(&tx, strand, &turn)?;
         if drained.messages.is_empty() && !has_failed_receipt {
             return Ok(StartTurnOutcome::Idle);
         }
-        let now = timestamp_now();
+        let now = now();
         tx.execute(
             r#"
             INSERT INTO turns (
@@ -105,42 +102,42 @@ impl SantiStore {
             SELECT ?1, id, ?3, ?4, next_seq - 1, NULL, 'running', NULL, ?5, ?5, NULL
             FROM strands WHERE id = ?2
             "#,
-            params![turn_id, strand, trigger, reference, now],
+            params![turn, strand, trigger, reference, now],
         )
         .map_err(|error| error.to_string())?;
         let recovered_incident_id = crate::store::errors::drive::resolve_in_conn(
             &tx,
             strand,
-            &turn_id,
+            &turn,
             drained.messages.len(),
         )?;
         Database::new(&tx).begin_turn(
             strand,
-            &turn_id,
+            &turn,
             &drained.inbox_ids,
             recovered_incident_id.as_deref(),
         )?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(StartTurnOutcome::Started(StartedTurn {
             turn: Database::new(&conn)
-                .turn_by_id(&turn_id)?
+                .turn_by_id(&turn)?
                 .ok_or_else(|| "created turn missing".to_string())?,
             drained_messages: drained.messages,
         }))
     }
 }
 
-pub(crate) fn execution_budget_incident_key(strand_id: &str) -> String {
+pub(crate) fn execution_budget_incident_key(strand: &str) -> String {
     format!(
-        "{}:strand:{strand_id}",
+        "{}:strand:{strand}",
         catalog::EXECUTION_BUDGET_EXCEEDED.code
     )
 }
 
 impl SantiStore {
-    pub(crate) fn strand_execution_usage(&self, strand_id: &str) -> Result<Usage, String> {
+    pub(crate) fn strand_execution_usage(&self, strand: &str) -> Result<Usage, String> {
         let conn = self.conn.lock().unwrap();
-        let tool_calls = conn
+        let calls = conn
             .query_row(
                 r#"
                 SELECT COUNT(*)
@@ -148,7 +145,7 @@ impl SantiStore {
                 JOIN turns AS turn ON turn.id = call.turn_id
                 WHERE turn.strand_id = ?1
                 "#,
-                params![strand_id],
+                params![strand],
                 |row| row.get::<_, i64>(0),
             )
             .map_err(|error| error.to_string())?;
@@ -164,24 +161,24 @@ impl SantiStore {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map(params![strand_id], |row| {
+            .query_map(params![strand], |row| {
                 Ok((
                     row.get::<_, Option<String>>(0)?,
                     row.get::<_, Option<String>>(1)?,
                 ))
             })
             .map_err(|error| error.to_string())?;
-        let mut tool_output_bytes = 0usize;
+        let mut held = 0usize;
         for row in rows {
-            let (output, error_text) = row.map_err(|error| error.to_string())?;
-            tool_output_bytes = tool_output_bytes.saturating_add(match output {
+            let (output, error) = row.map_err(|error| error.to_string())?;
+            held = held.saturating_add(match output {
                 Some(output) => captured_output_bytes(&output),
-                None => error_text.as_deref().map_or(0, str::len),
+                None => error.as_deref().map_or(0, str::len),
             });
         }
         Ok(Usage {
-            tool_calls: usize::try_from(tool_calls).unwrap_or(usize::MAX),
-            tool_output_bytes,
+            calls: usize::try_from(calls).unwrap_or(usize::MAX),
+            output: held,
         })
     }
 }

@@ -123,7 +123,7 @@ pub enum Command {
         limit: i64,
     },
     #[command(about = "Query one durable accepted-message obligation by inbox receipt id")]
-    Receipt { inbox_id: String },
+    Receipt { inbox: String },
     #[command(about = "Query or explicitly resolve one external-effect attempt")]
     #[command(subcommand)]
     Effect(EffectCommand),

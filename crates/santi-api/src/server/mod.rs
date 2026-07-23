@@ -94,7 +94,7 @@ fn shutdown_grace() -> std::time::Duration {
     std::time::Duration::from_secs(secs)
 }
 
-fn bind_addr_string(listen: &plumb_lib::config::Listen) -> String {
+fn bind_addr_string(listen: &plumb::config::Listen) -> String {
     let host = env::var("SANTI_HOST").unwrap_or_else(|_| listen.host.clone());
     let port = env::var("SANTI_PORT")
         .ok()

@@ -53,7 +53,7 @@ impl ConfigService {
         Ok(self.selected_provider(&config))
     }
 
-    pub fn listen(&self) -> Result<plumb_lib::config::Listen, String> {
+    pub fn listen(&self) -> Result<plumb::config::Listen, String> {
         let config = AppConfigFile::read(&self.config_path())?;
         Ok(config.listen)
     }

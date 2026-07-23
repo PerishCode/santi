@@ -185,6 +185,7 @@ impl PromptHarness {
                 runtime_root: runtime_root.display().to_string(),
                 execution_root: temp.path().join("execution").display().to_string(),
                 bind_addr: Some("127.0.0.1:0".to_string()),
+                constitution_path: None,
             },
             Arc::new(FakeProvider),
         )

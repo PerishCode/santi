@@ -166,10 +166,12 @@ function commandOf(row: Row): string {
 }
 
 function dbPath(repo: string): string {
-  const fromEnv = Deno.env.get("SANTI_DB");
+  const fromEnv = Deno.env.get("SANTI_PATHS_DATABASE");
   if (fromEnv) return fromEnv;
   try {
-    const match = Deno.readTextFileSync(join(repo, ".env")).match(/^\s*SANTI_DB\s*=\s*(\S+)\s*$/m);
+    const match = Deno.readTextFileSync(join(repo, ".env")).match(
+      /^\s*SANTI_PATHS_DATABASE\s*=\s*(\S+)\s*$/m,
+    );
     if (match) return match[1];
   } catch {
     // no .env; use the default

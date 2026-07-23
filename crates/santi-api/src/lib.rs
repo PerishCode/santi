@@ -1,6 +1,7 @@
 pub mod config;
 pub mod ops;
 pub mod provider;
+pub mod runtime;
 pub mod upgrade;
 
 mod bucket;

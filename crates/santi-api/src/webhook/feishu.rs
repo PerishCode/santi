@@ -1,5 +1,3 @@
-use std::env;
-
 use axum::http::HeaderMap;
 use base64::Engine as _;
 use serde_json::{Value, json};
@@ -8,9 +6,6 @@ use sha2::{Digest, Sha256};
 use super::{
     NormalizedEvent, WebhookAdaptor, WebhookError, WebhookOutcome, sender_allowed, string_at,
 };
-
-const ENCRYPT_KEY_ENV: &str = "SANTI_WEBHOOK_FEISHU_ENCRYPT_KEY";
-const ALLOW_ENV: &str = "SANTI_WEBHOOK_FEISHU_ALLOW";
 
 pub struct FeishuAdaptor {
     encrypt_key: Option<String>,
@@ -23,13 +18,6 @@ impl FeishuAdaptor {
             encrypt_key: normalized(encrypt_key),
             allow: normalized(allow),
         }
-    }
-
-    pub(crate) fn from_env() -> Self {
-        Self::configured(
-            env::var(ENCRYPT_KEY_ENV).ok().as_deref(),
-            env::var(ALLOW_ENV).ok().as_deref(),
-        )
     }
 }
 
@@ -55,9 +43,9 @@ impl WebhookAdaptor for FeishuAdaptor {
         let payload = match raw.get("encrypt").and_then(Value::as_str) {
             Some(ciphertext) => {
                 let key = self.encrypt_key.as_deref().ok_or_else(|| {
-                    WebhookError::Unauthorized(format!(
-                        "encrypted payload but {ENCRYPT_KEY_ENV} is not set"
-                    ))
+                    WebhookError::Unauthorized(
+                        "encrypted payload but webhooks.feishu.encrypt_key is not set".to_string(),
+                    )
                 })?;
                 let plaintext = decrypt(key, ciphertext)?;
                 serde_json::from_slice::<Value>(&plaintext).map_err(|error| {
@@ -153,7 +141,9 @@ fn verify_signature(
         return Ok(());
     };
     let key = encrypt_key.ok_or_else(|| {
-        WebhookError::Unauthorized(format!("signed payload but {ENCRYPT_KEY_ENV} is not set"))
+        WebhookError::Unauthorized(
+            "signed payload but webhooks.feishu.encrypt_key is not set".to_string(),
+        )
     })?;
     let timestamp = headers
         .get("X-Lark-Request-Timestamp")

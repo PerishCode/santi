@@ -21,8 +21,8 @@ The binary is installed to `/usr/bin/santi`.
 - **Enable, don't auto-start.** `postinst` installs + enables but does NOT start: starting needs
   operator secrets in `/etc/santi/santi.env`, and during a self-upgrade the `santi upgrade`
   orchestrator owns the stop/start around dpkg.
-- **`TimeoutStopSec` (620) > `SANTI_SHUTDOWN_GRACE_SECS` (600)** so systemd never SIGKILLs santi
-  mid-drain (STEP 3). `santi-upgrade.service` `TimeoutStartSec` (900) likewise exceeds
+- **`TimeoutStopSec` (620) > `SANTI_SERVER_SHUTDOWN_GRACE_SECS` (600)** so systemd never SIGKILLs
+  santi mid-drain (STEP 3). `santi-upgrade.service` `TimeoutStartSec` (900) likewise exceeds
   `SANTI_UPGRADE_TIMEOUT_SECS` (600).
 - **Runtime data is sacred.** No maintainer script ever deletes `/home/santi/.santi` — the soul's
   memory is the one thing that must survive.

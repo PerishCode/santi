@@ -59,7 +59,7 @@ EOF
 
 cat >"$FAKE_BIN/santi" <<'EOF'
 #!/usr/bin/env bash
-schema=$(cat "${SANTI_DB}.schema")
+schema=$(cat "${SANTI_PATHS_DATABASE}.schema")
 printf '{"schema_version":%s,"expected_schema_version":%s,"ok":true}\n' "$schema" "$schema"
 EOF
 

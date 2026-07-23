@@ -141,8 +141,8 @@ schema_for_runtime() {
   local runtime=$1 output
   output=$(env \
     SANTI_HOME="$(dirname "$runtime")" \
-    SANTI_DB="$runtime/db" \
-    SANTI_RUNTIME_ROOT="$runtime" \
+    SANTI_PATHS_DATABASE="$runtime/db" \
+    SANTI_PATHS_RUNTIME_ROOT="$runtime" \
     "$SANTI_RECOVERY_BIN" doctor --storage-only 2>/dev/null || true)
   json_number_field_from_text schema_version "$output"
 }

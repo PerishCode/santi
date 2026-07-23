@@ -35,7 +35,7 @@ workspace/memory. The only way into the runtime is HTTP.
 
 ```sh
 cp santi.example.toml santi.toml   # fill in a provider api_key + model
-cp .env.example .env               # SANTI_DB / SANTI_HOST / SANTI_PORT
+cp .env.example .env               # SANTI_PATHS_DATABASE / SANTI_LISTEN_HOST / SANTI_LISTEN_PORT
 
 cargo run -p santi -- service serve
 ```
@@ -155,11 +155,11 @@ its own variable (and the provider config follows `--flag` > config file > env):
 | --- | --- | --- |
 | `SANTI_HOME` | `~/.santi` | Anchor for the defaults below |
 | `SANTI_CONFIG` | `$SANTI_HOME/santi.toml` | Provider config file (`--config` overrides) |
-| `SANTI_DB` | `$SANTI_HOME/runtime/db` | SQLite store |
-| `SANTI_RUNTIME_ROOT` | `$SANTI_HOME/runtime` | Soul/session memory, objects |
-| `SANTI_EXECUTION_ROOT` | `$SANTI_HOME/execution` | Shell tool working area |
+| `SANTI_PATHS_DATABASE` | `$SANTI_HOME/runtime/db` | SQLite store |
+| `SANTI_PATHS_RUNTIME_ROOT` | `$SANTI_HOME/runtime` | Soul/session memory, objects |
+| `SANTI_PATHS_EXECUTION_ROOT` | `$SANTI_HOME/execution` | Shell tool working area |
 | `SANTI_PROVIDER` | `openai` | Selected provider profile |
-| `SANTI_HOST` / `SANTI_PORT` | `127.0.0.1` / `43307` | Bind address |
+| `SANTI_LISTEN_HOST` / `SANTI_LISTEN_PORT` | `127.0.0.1` / `43307` | Bind address |
 | `SANTI_API_KEY` | unset | Transitional static bearer sent by the CLI (`--api-key` overrides). The runtime has no global API-key gate; edge Authentik protects management paths, while downstream data paths use registered zone credentials. |
 | `SANTI_API_URL` | `http://127.0.0.1:43307` | Client target (`--base-url` overrides) |
 

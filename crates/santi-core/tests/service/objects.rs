@@ -10,6 +10,7 @@ async fn bucket_objects_are_scoped() {
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
             bind_addr: Some("127.0.0.1:0".to_string()),
+            constitution_path: None,
         },
         Arc::new(FakeProvider::default()),
     )
@@ -65,6 +66,7 @@ async fn bucket_rejects_unsafe_keys() {
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
             bind_addr: Some("127.0.0.1:0".to_string()),
+            constitution_path: None,
         },
         Arc::new(FakeProvider::default()),
     )

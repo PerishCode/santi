@@ -10,8 +10,8 @@ fn storage_doctor_is_current() {
     let output = Command::new(env!("CARGO_BIN_EXE_santi"))
         .args(["doctor", "--storage-only"])
         .current_dir(temp.path())
-        .env("SANTI_DB", &database)
-        .env("SANTI_RUNTIME_ROOT", &runtime)
+        .env("SANTI_PATHS_DATABASE", &database)
+        .env("SANTI_PATHS_RUNTIME_ROOT", &runtime)
         .output()
         .expect("run storage doctor");
 

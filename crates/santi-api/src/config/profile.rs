@@ -53,26 +53,8 @@ pub struct ChatCompletionsConfig {
 }
 
 #[derive(Debug, Deserialize)]
-pub(super) struct AppConfigFile {
-    #[serde(default)]
-    pub(super) listen: plumb::config::Listen,
-    #[serde(default)]
-    pub(super) provider: Option<String>,
-    pub(super) providers: BTreeMap<String, Profile>,
-}
-
-impl AppConfigFile {
-    pub(super) fn read(path: &str) -> Result<Self, String> {
-        let content = fs::read_to_string(path)
-            .map_err(|error| format!("failed to read app config {path}: {error}"))?;
-        toml::from_str(&content)
-            .map_err(|error| format!("failed to parse app config {path}: {error}"))
-    }
-}
-
-#[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub(super) enum Profile {
+pub enum Profile {
     OpenaiResponses {
         #[serde(default)]
         api_key: Option<String>,
@@ -107,7 +89,7 @@ pub(super) enum Profile {
     },
 }
 
-pub(super) fn resolve_provider_config(
+pub fn resolve_provider_config(
     provider: &str,
     profile: &Profile,
 ) -> Result<ProviderConfig, String> {
@@ -235,11 +217,11 @@ pub(super) fn resolve_value(
     })
 }
 
-pub(super) fn optional_env(name: &str) -> Option<String> {
+pub fn optional_env(name: &str) -> Option<String> {
     env::var(name).ok().and_then(|value| trim_string(&value))
 }
 
-pub(crate) fn santi_home() -> PathBuf {
+pub fn santi_home() -> PathBuf {
     if let Some(home) = optional_env("SANTI_HOME") {
         return expand_home(&home);
     }
@@ -254,21 +236,6 @@ pub struct RuntimePaths {
     pub database_path: PathBuf,
     pub runtime_root: PathBuf,
     pub execution_root: PathBuf,
-}
-
-pub fn resolve_runtime_paths() -> RuntimePaths {
-    let home = santi_home();
-    RuntimePaths {
-        database_path: optional_env("SANTI_DB")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join("runtime").join("db")),
-        runtime_root: optional_env("SANTI_RUNTIME_ROOT")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join("runtime")),
-        execution_root: optional_env("SANTI_EXECUTION_ROOT")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join("execution")),
-    }
 }
 
 pub(super) fn expand_home(path: &str) -> PathBuf {

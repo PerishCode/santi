@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod cli;
 pub mod client;
+pub mod config;
 mod text;
 pub mod watch;
 
@@ -13,7 +14,7 @@ use client::run_client;
 pub use text::source::read_inbox_seed_text;
 
 pub async fn run() -> Result<()> {
-    dotenvy::dotenv_override().ok();
+    dotenvy::dotenv().ok();
     let cli = Cli::parse();
     match cli.command {
         Command::Service { args } => run_service(args).await,
@@ -44,8 +45,9 @@ pub async fn run() -> Result<()> {
 }
 
 fn run_doctor(storage_only: bool) -> Result<()> {
+    config::boot(None, Default::default()).map_err(|error| anyhow::anyhow!(error))?;
     let report = if storage_only {
-        santi_api::config::resolve_runtime_paths().doctor()
+        santi_api::runtime::held().paths.doctor()
     } else {
         santi_api::ops::doctor()
     }
@@ -65,6 +67,7 @@ fn run_inbox(command: InboxCommand, default_strand: Option<String>) -> Result<()
                 .filter(|id| !id.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("no strand id: set --strand / SANTI_STRAND_ID"))?;
             let text = read_inbox_seed_text(text, file, stdin)?;
+            config::boot(None, Default::default()).map_err(|error| anyhow::anyhow!(error))?;
             let report = santi_api::ops::inbox_seed(&strand_id, &text)
                 .map_err(|error| anyhow::anyhow!(error))?;
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -88,6 +91,7 @@ fn run_upgrade(
     run: bool,
     finalize: bool,
 ) -> Result<()> {
+    config::boot(None, Default::default()).map_err(|error| anyhow::anyhow!(error))?;
     if finalize {
         let request = serde_json::from_reader(std::io::stdin().lock())?;
         let report = santi_api::upgrade::finalize(request).map_err(|error| {
@@ -132,13 +136,17 @@ fn run_upgrade(
 
 async fn run_service(args: Vec<String>) -> Result<()> {
     let argv = std::iter::once("santi".to_string()).chain(args);
-    let config = santi_api::config::ConfigService::from_args(argv)
-        .map_err(|error| anyhow::anyhow!(error))?;
-    match config.command() {
-        santi_api::config::AppCommand::Serve => santi_api::serve(config)
-            .await
-            .map_err(|error| anyhow::anyhow!(error)),
-        santi_api::config::AppCommand::ExportOpenApi => {
+    let cli = config::ServiceCli::try_parse_from(argv)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    match cli.command.unwrap_or(config::ServiceCommand::Serve) {
+        config::ServiceCommand::Serve => {
+            config::boot(cli.config.as_deref(), cli.over.partial())
+                .map_err(|error| anyhow::anyhow!(error))?;
+            santi_api::serve()
+                .await
+                .map_err(|error| anyhow::anyhow!(error))
+        }
+        config::ServiceCommand::ExportOpenApi => {
             let document =
                 santi_api::export_openapi_json().map_err(|error| anyhow::anyhow!(error))?;
             println!("{document}");

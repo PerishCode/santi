@@ -3,7 +3,7 @@ use serde_json::json;
 use super::{
     SeedOutcome, UpgradeFinalizeReport, UpgradeFinalizeRequest, UpgradeTerminal, compose_record,
 };
-use crate::config::{self, RuntimePaths};
+use crate::config::RuntimePaths;
 
 pub(super) const FINALIZE_PROTOCOL_VERSION: u32 = 1;
 const RUNTIME_SCOPE_ID: &str = "default";
@@ -43,7 +43,7 @@ fn bounded_detail(value: &str) -> String {
 pub fn finalize(
     request: UpgradeFinalizeRequest,
 ) -> Result<UpgradeFinalizeReport, Box<santi_core::SantiError>> {
-    let paths = config::resolve_runtime_paths();
+    let paths = crate::runtime::held().paths.clone();
     finalize_at(&paths, request)
 }
 

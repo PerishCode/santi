@@ -40,6 +40,7 @@ pub struct Config {
     pub runtime_root: String,
     pub execution_root: String,
     pub bind_addr: Option<String>,
+    pub constitution_path: Option<String>,
 }
 
 impl Service {

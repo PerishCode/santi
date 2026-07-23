@@ -47,8 +47,20 @@ pub trait WebhookAdaptor: Send + Sync {
 
 pub(crate) fn adaptor_for(adaptor: &str) -> Option<Box<dyn WebhookAdaptor>> {
     match adaptor {
-        "github" => Some(Box::new(GithubAdaptor::from_env())),
-        "feishu" => Some(Box::new(FeishuAdaptor::from_env())),
+        "github" => {
+            let held = crate::runtime::held();
+            Some(Box::new(GithubAdaptor::configured(
+                held.github_login.as_deref(),
+                held.github_allow.as_deref(),
+            )))
+        }
+        "feishu" => {
+            let held = crate::runtime::held();
+            Some(Box::new(FeishuAdaptor::configured(
+                held.feishu_key.as_deref(),
+                held.feishu_allow.as_deref(),
+            )))
+        }
         _ => None,
     }
 }

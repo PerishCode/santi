@@ -152,15 +152,12 @@ impl UpgradeHost for Host {
             .spawn()
             .map_err(|error| format!("spawn final-version binary {}: {error}", binary.display()))?;
         let mut request = request.clone();
-        request.soul_id = env::var("SANTI_SOUL_ID")
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
+        let held = crate::runtime::held();
+        request.soul_id = held
+            .handover_soul
+            .clone()
             .unwrap_or_else(|| santi_core::DEFAULT_SOUL_ID.to_string());
-        request.configured_strand_id = env::var("SANTI_STRAND_ID")
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
+        request.configured_strand_id = held.handover_strand.clone();
         let payload = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
         child
             .stdin

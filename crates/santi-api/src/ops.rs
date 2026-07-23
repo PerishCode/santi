@@ -2,7 +2,8 @@ use std::fs;
 
 use serde::Serialize;
 
-use crate::config::{self, RuntimePaths};
+use crate::config::RuntimePaths;
+use crate::runtime::{self, Runtime};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DoctorReport {
@@ -32,8 +33,8 @@ pub struct ProviderDoctorReport {
 }
 
 pub fn doctor() -> Result<DoctorReport, String> {
-    let service = config::ConfigService::from_args(["santi", "serve"].map(str::to_string))?;
-    config::resolve_runtime_paths().doctor_configured(&service)
+    let held = runtime::held();
+    held.paths.doctor_configured(held)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -44,7 +45,7 @@ pub struct SeedReport {
 }
 
 pub fn inbox_seed(strand_id: &str, text: &str) -> Result<SeedReport, String> {
-    config::resolve_runtime_paths().inbox_seed(strand_id, text)
+    runtime::held().paths.inbox_seed(strand_id, text)
 }
 
 fn inbox_seed_existing_strand(
@@ -77,12 +78,9 @@ impl RuntimePaths {
         self.doctor_report(None)
     }
 
-    pub fn doctor_configured(
-        &self,
-        config: &config::ConfigService,
-    ) -> Result<DoctorReport, String> {
-        let profile = config.provider_name().ok();
-        let provider = match config.provider_config() {
+    pub fn doctor_configured(&self, held: &Runtime) -> Result<DoctorReport, String> {
+        let profile = Some(held.provider.clone());
+        let provider = match held.provider_config() {
             Ok(provider) => ProviderDoctorReport {
                 profile,
                 kind: Some(provider.kind().to_string()),

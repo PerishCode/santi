@@ -11,6 +11,7 @@ fn fork_syncs_workspace() {
             runtime_root: runtime_root.display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
             bind_addr: Some("127.0.0.1:0".to_string()),
+            constitution_path: None,
         },
         Arc::new(FakeProvider::default()),
     )
@@ -51,6 +52,7 @@ fn fork_rejects_symlink() {
             runtime_root: runtime_root.display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
             bind_addr: Some("127.0.0.1:0".to_string()),
+            constitution_path: None,
         },
         Arc::new(FakeProvider::default()),
     )
@@ -155,6 +157,7 @@ fn fork_prompt_topology() {
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
             bind_addr: Some("127.0.0.1:0".to_string()),
+            constitution_path: None,
         },
         Arc::new(FakeProvider::default()),
     )

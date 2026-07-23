@@ -11,6 +11,7 @@ async fn emits_turn_completed() {
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
             bind_addr: Some("127.0.0.1:0".to_string()),
+            constitution_path: None,
         },
         provider.clone(),
     )
@@ -54,6 +55,7 @@ async fn labeled_turn_emits_envelope_and_records_outbox() {
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
             bind_addr: Some("127.0.0.1:0".to_string()),
+            constitution_path: None,
         },
         provider.clone(),
     )
@@ -106,6 +108,7 @@ async fn downstream_batch_isolates_zone_and_advances_over_other_zones() {
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
             bind_addr: Some("127.0.0.1:0".to_string()),
+            constitution_path: None,
         },
         Arc::new(FakeProvider::default()),
     )
@@ -178,6 +181,7 @@ async fn runtime_outbox_reaches_bus() {
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
             bind_addr: Some("127.0.0.1:0".to_string()),
+            constitution_path: None,
         },
         Arc::new(FakeProvider::default()),
     )
@@ -224,6 +228,7 @@ async fn global_bus_sees_strands() {
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
             bind_addr: Some("127.0.0.1:0".to_string()),
+            constitution_path: None,
         },
         Arc::new(FakeProvider::default()),
     )

@@ -14,7 +14,7 @@ use super::{
     UpgradeReadiness, UpgradeReport, UpgradeStage, UpgradeStarted, UpgradeTerminal,
     run_upgrade_attempt, upgrade_timeout,
 };
-use crate::config::{self, RuntimePaths};
+use crate::config::RuntimePaths;
 
 mod probe;
 
@@ -40,7 +40,7 @@ pub fn launch(
     deb: &str,
     previous_deb: Option<&str>,
 ) -> Result<UpgradeStarted, Box<santi_core::SantiError>> {
-    let paths = config::resolve_runtime_paths();
+    let paths = crate::runtime::held().paths.clone();
     let attempt_id = format!("upgrade_{}", Uuid::new_v4().simple());
     ensure_upgrade_idle()
         .map_err(|detail| paths.record_failure(&attempt_id, deb, UpgradeStage::Launch, detail))?;
@@ -82,7 +82,7 @@ pub fn run(
     deb: Option<String>,
     previous_deb: Option<String>,
 ) -> Result<UpgradeReport, Box<santi_core::SantiError>> {
-    let paths = config::resolve_runtime_paths();
+    let paths = crate::runtime::held().paths.clone();
     let request = match deb {
         Some(deb) => {
             let attempt_id = format!("upgrade_{}", Uuid::new_v4().simple());

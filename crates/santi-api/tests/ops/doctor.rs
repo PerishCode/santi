@@ -1,15 +1,18 @@
+use std::collections::BTreeMap;
 use std::path::Path;
+use std::time::Duration;
 
-use santi_api::config::{ConfigService, RuntimePaths};
+use santi_api::config::{Profile, RuntimePaths};
+use santi_api::runtime::Runtime;
 
 #[test]
 fn reports_budget() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
     santi_core::SantiStore::open(&paths.database_path).expect("open store");
-    let config = config_under(temp.path(), Some(120000));
+    let held = runtime_under(temp.path(), Some(120000));
 
-    let report = paths.doctor_configured(&config).expect("doctor");
+    let report = paths.doctor_configured(&held).expect("doctor");
     assert!(report.ok, "expected healthy: {report:?}");
     let provider = report.provider.expect("provider report");
     assert_eq!(provider.profile.as_deref(), Some("openai"));
@@ -24,9 +27,9 @@ fn rejects_missing_budget() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
     santi_core::SantiStore::open(&paths.database_path).expect("open store");
-    let config = config_under(temp.path(), None);
+    let held = runtime_under(temp.path(), None);
 
-    let report = paths.doctor_configured(&config).expect("doctor");
+    let report = paths.doctor_configured(&held).expect("doctor");
     assert!(!report.ok);
     let provider = report.provider.expect("provider report");
     assert!(!provider.ok);
@@ -45,31 +48,39 @@ fn paths_under(root: &Path) -> RuntimePaths {
     }
 }
 
-fn config_under(root: &Path, budget: Option<usize>) -> ConfigService {
+fn runtime_under(root: &Path, budget: Option<usize>) -> Runtime {
+    #[derive(serde::Deserialize)]
+    struct File {
+        providers: BTreeMap<String, Profile>,
+    }
     let budget = budget
         .map(|value| format!("input_budget_bytes = {value}"))
         .unwrap_or_default();
-    let config_path = root.join("santi.toml");
-    std::fs::write(
-        &config_path,
-        format!(
-            r#"
-            provider = "openai"
-
-            [providers.openai]
-            kind = "openai_responses"
-            api_key = "test-key"
-            model = "gpt-5.5"
-            {budget}
-            "#
-        ),
-    )
-    .expect("write config");
-    ConfigService::from_args([
-        "santi".to_string(),
-        "serve".to_string(),
-        "--config".to_string(),
-        config_path.display().to_string(),
-    ])
-    .expect("config service")
+    let file: File = toml::from_str(&format!(
+        r#"
+        [providers.openai]
+        kind = "openai_responses"
+        api_key = "test-key"
+        model = "gpt-5.5"
+        {budget}
+        "#
+    ))
+    .expect("parse providers");
+    Runtime {
+        bind: "127.0.0.1:0".to_string(),
+        listen_port: 0,
+        provider: "openai".to_string(),
+        providers: file.providers,
+        paths: paths_under(root),
+        shutdown_grace: Duration::from_secs(600),
+        upgrade_timeout: Duration::from_secs(600),
+        finalizer_bin: "/usr/bin/santi".into(),
+        handover_soul: None,
+        handover_strand: None,
+        github_login: None,
+        github_allow: None,
+        feishu_key: None,
+        feishu_allow: None,
+        constitution: None,
+    }
 }

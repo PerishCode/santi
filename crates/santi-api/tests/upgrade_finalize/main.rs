@@ -151,6 +151,7 @@ fn registers_attempt_rooms() {
             runtime_root: paths.runtime_root.display().to_string(),
             execution_root: paths.execution_root.display().to_string(),
             bind_addr: Some("127.0.0.1:0".to_string()),
+            constitution_path: None,
         },
         Arc::new(NoopProvider),
     )

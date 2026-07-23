@@ -5,7 +5,6 @@ mod system;
 pub use finalize::{finalize, finalize_at};
 pub use system::{launch, run};
 
-use std::env;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};

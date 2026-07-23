@@ -183,9 +183,5 @@ fn record_fatal<H: UpgradeHost>(
 }
 
 pub fn upgrade_timeout() -> Duration {
-    let secs = env::var("SANTI_UPGRADE_TIMEOUT_SECS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(600);
-    Duration::from_secs(secs)
+    crate::runtime::held().upgrade_timeout
 }

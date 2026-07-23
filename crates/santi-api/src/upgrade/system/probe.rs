@@ -1,22 +1,10 @@
-use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::super::UpgradeReadiness;
 
-const DEFAULT_FINAL_VERSION_BINARY: &str = "/usr/bin/santi";
-
 pub(super) fn final_version_binary() -> PathBuf {
-    let configured = env::var("SANTI_UPGRADE_FINALIZER_BIN").ok();
-    resolve_final_version_binary(configured.as_deref())
-}
-
-fn resolve_final_version_binary(configured: Option<&str>) -> PathBuf {
-    configured
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_FINAL_VERSION_BINARY))
+    crate::runtime::held().finalizer_bin.clone()
 }
 
 pub(super) fn probe_final_version_storage(binary: &Path) -> Result<(), String> {
@@ -38,10 +26,7 @@ pub(super) fn probe_final_version_storage(binary: &Path) -> Result<(), String> {
 }
 
 pub(super) fn probe_runtime_readiness(binary: &Path) -> Result<Option<UpgradeReadiness>, String> {
-    let port = env::var("SANTI_PORT")
-        .ok()
-        .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or(43307);
+    let port = crate::runtime::held().listen_port;
     let base_url = format!("http://127.0.0.1:{port}");
     let output = Command::new(binary)
         .args(["--base-url", &base_url, "health"])

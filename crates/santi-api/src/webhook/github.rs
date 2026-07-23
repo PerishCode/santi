@@ -1,5 +1,3 @@
-use std::env;
-
 use axum::http::HeaderMap;
 use hmac::{Hmac, Mac};
 use serde_json::{Value, json};
@@ -10,9 +8,6 @@ use super::{
 };
 
 type HmacSha256 = Hmac<Sha256>;
-
-const SELF_LOGIN_ENV: &str = "SANTI_WEBHOOK_GITHUB_LOGIN";
-const ALLOW_ENV: &str = "SANTI_WEBHOOK_GITHUB_ALLOW";
 
 pub struct GithubAdaptor {
     self_login: Option<String>,
@@ -25,13 +20,6 @@ impl GithubAdaptor {
             self_login: normalized(self_login),
             allow: normalized(allow),
         }
-    }
-
-    pub(crate) fn from_env() -> Self {
-        Self::configured(
-            env::var(SELF_LOGIN_ENV).ok().as_deref(),
-            env::var(ALLOW_ENV).ok().as_deref(),
-        )
     }
 }
 

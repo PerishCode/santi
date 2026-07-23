@@ -373,15 +373,15 @@ function repoRoot(): string {
 }
 
 function readPort(repo: string): number {
-  const fromEnv = Deno.env.get("SANTI_PORT");
+  const fromEnv = Deno.env.get("SANTI_LISTEN_PORT");
   if (fromEnv && Number.isInteger(Number(fromEnv))) return Number(fromEnv);
-  const fromFile = readEnvFile(repo, "SANTI_PORT");
+  const fromFile = readEnvFile(repo, "SANTI_LISTEN_PORT");
   if (fromFile && Number.isInteger(Number(fromFile))) return Number(fromFile);
   return 43307;
 }
 
 function readHost(repo: string): string {
-  return Deno.env.get("SANTI_HOST") ?? readEnvFile(repo, "SANTI_HOST") ?? "127.0.0.1";
+  return Deno.env.get("SANTI_LISTEN_HOST") ?? readEnvFile(repo, "SANTI_LISTEN_HOST") ?? "127.0.0.1";
 }
 
 function readEnvFile(repo: string, key: string): string | null {

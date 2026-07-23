@@ -10,6 +10,7 @@ async fn drain_preserves_provenance() {
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
             bind_addr: Some("127.0.0.1:0".to_string()),
+            constitution_path: None,
         },
         provider.clone(),
     )

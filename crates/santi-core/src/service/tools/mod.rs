@@ -238,9 +238,11 @@ impl Service {
     }
 
     pub(super) fn constitution_file(&self) -> PathBuf {
-        std::env::var("SANTI_CONSTITUTION_FILE")
+        self.config
+            .constitution_path
+            .as_ref()
             .map(PathBuf::from)
-            .unwrap_or_else(|_| self.runtime_root().join("constitution.md"))
+            .unwrap_or_else(|| self.runtime_root().join("constitution.md"))
     }
 }
 

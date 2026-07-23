@@ -17,6 +17,7 @@ async fn failed_receipt_redrives() {
             runtime_root: temp.path().join("runtime").display().to_string(),
             execution_root: temp.path().join("execution").display().to_string(),
             bind_addr: Some("127.0.0.1:0".to_string()),
+            constitution_path: None,
         },
         provider.clone(),
     )
@@ -78,6 +79,7 @@ async fn cold_start_recovers() {
         runtime_root: temp.path().join("runtime").display().to_string(),
         execution_root: temp.path().join("execution").display().to_string(),
         bind_addr: Some("127.0.0.1:0".to_string()),
+        constitution_path: None,
     };
     let service =
         Service::open(config.clone(), Arc::new(FakeProvider::default())).expect("open service");

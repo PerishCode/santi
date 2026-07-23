@@ -21,6 +21,7 @@ pub fn export_openapi_json() -> Result<String, String> {
 
 pub async fn serve(config: config::ConfigService) -> Result<(), String> {
     let provider = provider::from_config(config.provider_config()?);
+    let bind = bind_addr_string(&config.listen()?);
     let paths = config::resolve_runtime_paths();
     if let Some(parent) = paths.database_path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -32,12 +33,12 @@ pub async fn serve(config: config::ConfigService) -> Result<(), String> {
             database_path: paths.database_path.display().to_string(),
             runtime_root: paths.runtime_root.display().to_string(),
             execution_root: paths.execution_root.display().to_string(),
-            bind_addr: Some(bind_addr_string()),
+            bind_addr: Some(bind.clone()),
         },
         provider,
     )?;
     crate::upgrade::register_attempt_handover_budgets(&service)?;
-    let address: SocketAddr = bind_addr_string()
+    let address: SocketAddr = bind
         .parse()
         .map_err(|_| "SANTI_HOST/SANTI_PORT did not form a valid socket address".to_string())?;
     let listener = tokio::net::TcpListener::bind(address)
@@ -93,11 +94,11 @@ fn shutdown_grace() -> std::time::Duration {
     std::time::Duration::from_secs(secs)
 }
 
-fn bind_addr_string() -> String {
-    let host = env::var("SANTI_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+fn bind_addr_string(listen: &plumb_lib::config::Listen) -> String {
+    let host = env::var("SANTI_HOST").unwrap_or_else(|_| listen.host.clone());
     let port = env::var("SANTI_PORT")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or(43307);
+        .unwrap_or(listen.port);
     format!("{host}:{port}")
 }

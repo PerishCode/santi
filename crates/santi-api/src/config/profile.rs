@@ -55,6 +55,8 @@ pub struct ChatCompletionsConfig {
 #[derive(Debug, Deserialize)]
 pub(super) struct AppConfigFile {
     #[serde(default)]
+    pub(super) listen: plumb_lib::config::Listen,
+    #[serde(default)]
     pub(super) provider: Option<String>,
     pub(super) providers: BTreeMap<String, Profile>,
 }

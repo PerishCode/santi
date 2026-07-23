@@ -1,0 +1,2 @@
+[registries.perish]
+index = "sparse+https://git.perish.top/api/packages/PerishLab/cargo/"

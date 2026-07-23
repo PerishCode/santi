@@ -28,20 +28,21 @@ pub(crate) fn append_timeline_message(line: Line<'_>) {
     match line.intake {
         message::Intake::Request => {
             line.store
-                .enqueue_inbox(
+                .receive(
                     line.strand,
                     message::Kind::Text,
                     message::Content::text(line.text),
+                    None,
                 )
                 .expect("enqueue inbox");
         }
         message::Intake::Record => {
             let actor = match line.actor {
-                message::Role::Soul => line.store.default_soul_id(),
+                message::Role::Soul => line.store.genesis(),
                 message::Role::System => line.store.system(),
             };
             line.store
-                .append_message(Draft {
+                .pen(Draft {
                     strand: line.strand,
                     actor: line.actor,
                     id: actor,

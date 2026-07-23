@@ -10,25 +10,21 @@ use super::*;
 use crate::{message, stream, turn};
 
 impl Service {
-    pub(in crate::service::flow) async fn complete_provider_turn(
-        &self,
-        strand: String,
-        turn: String,
-    ) {
-        match self.run_provider_turn(&strand, &turn).await {
+    pub(in crate::service::flow) async fn conduct(&self, strand: String, turn: String) {
+        match self.run(&strand, &turn).await {
             Err(failure) => {
-                self.fail_background_turn(&strand, &turn, failure);
+                self.bury(&strand, &turn, failure);
             }
             Ok((last, response)) => {
-                self.finalize_turn(&strand, &turn, last, response);
+                self.land(&strand, &turn, last, response);
             }
         }
         self.noticed(&turn);
         self.poke(&strand, "strand_send", None, "turn_completion_poke");
-        self.resume_after_memory_maintenance(&strand);
+        self.relieve(&strand);
     }
 
-    fn finalize_turn(
+    fn land(
         &self,
         strand: &str,
         turn: &str,
@@ -70,7 +66,7 @@ impl Service {
                     },
                 );
             }
-            Err(error) => self.fail_background_turn(
+            Err(error) => self.bury(
                 strand,
                 turn,
                 Failure::runtime(Operation::Persistence(Persistence::Completion), error, ""),
@@ -78,7 +74,7 @@ impl Service {
         }
     }
 
-    async fn run_provider_turn(
+    async fn run(
         &self,
         strand: &str,
         turn: &str,
@@ -102,9 +98,9 @@ impl Service {
             let next = round + 1;
             if let Some(error) = provider_try!(
                 Operation::Admission(Admission::Execution),
-                self.admit_execution_round(strand, turn, next)
+                self.readmit(strand, turn, next)
             ) {
-                return Err(Failure::execution_budget(error, &prose));
+                return Err(Failure::execution(error, &prose));
             }
             round = next;
             let input = provider_try!(Operation::Assembly, input(&self.store, strand));
@@ -112,10 +108,7 @@ impl Service {
             let family = metadata.provider.to_string();
             let request = Request {
                 model: metadata.model,
-                instructions: Some(provider_try!(
-                    Operation::Prompt,
-                    self.system_prompt_text(strand)
-                )),
+                instructions: Some(provider_try!(Operation::Prompt, self.wording(strand))),
                 input,
                 tools: Some(tools()),
                 previous: None,
@@ -123,10 +116,10 @@ impl Service {
             let estimate = gauged(&request);
             if let Some(error) = provider_try!(
                 Operation::Admission(Admission::Context),
-                self.open_over_budget_incident(strand, turn, &request, &estimate)
+                self.overdrawn(strand, turn, &request, &estimate)
             ) {
                 timing.failed(round, "context_budget", &error.to_string());
-                return Err(Failure::context_budget(error));
+                return Err(Failure::context(error));
             }
             timing.built(
                 round,
@@ -190,7 +183,7 @@ impl Service {
             if !speech.is_empty() {
                 last = Some(provider_try!(
                     Operation::Persistence(Persistence::Assistant),
-                    self.store.append_soul_assistant_text(strand, &speech)
+                    self.store.voice(strand, &speech)
                 ));
             }
 
@@ -200,12 +193,12 @@ impl Service {
 
             let limits = match provider_try!(
                 Operation::Admission(Admission::Execution),
-                self.admit_tool_batch(strand, turn, round, calls.len())
+                self.judge(strand, turn, round, calls.len())
             ) {
                 Verdict::Unbounded => vec![None; calls.len()],
                 Verdict::Bounded(limits) => limits.into_iter().map(Some).collect::<Vec<_>>(),
                 Verdict::Rejected(error) => {
-                    return Err(Failure::execution_budget(*error, &prose));
+                    return Err(Failure::execution(*error, &prose));
                 }
             };
             timing.outputting(round, calls.len());

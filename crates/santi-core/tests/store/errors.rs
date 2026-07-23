@@ -15,8 +15,8 @@ fn generic_ports_are_transactional() {
         context: serde_json::json!({"attempt_id": "upgrade_1"}),
     };
 
-    let opened = store.open_error_incident(draft()).expect("open incident");
-    let repeated = store.open_error_incident(draft()).expect("repeat incident");
+    let opened = store.raise(draft()).expect("open incident");
+    let repeated = store.raise(draft()).expect("repeat incident");
     assert_eq!(opened.incident, repeated.incident);
 
     let incidents = store.incidents(&scope, 10).expect("list incidents");
@@ -26,7 +26,7 @@ fn generic_ports_are_transactional() {
 
     assert!(
         store
-            .resolve_error_incident(
+            .resolve(
                 key,
                 "upgrade.succeeded",
                 serde_json::json!({"attempt_id": "upgrade_2"}),

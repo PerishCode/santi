@@ -70,10 +70,11 @@ fn drain_commits_pending() {
 
     for text in ["first", "second", "third"] {
         store
-            .enqueue_inbox(
+            .receive(
                 &strand.id,
                 message::Kind::Text,
                 message::Content::text(text),
+                None,
             )
             .expect("enqueue");
     }
@@ -105,7 +106,7 @@ fn drain_records_provenance() {
     let strand = store.weave().expect("create strand");
 
     store
-        .enqueue_inbox_with_source(
+        .receive(
             &strand.id,
             message::Kind::Text,
             message::Content::text("needs provenance"),
@@ -213,7 +214,12 @@ fn inbox_gate_rejects() {
     drop(conn);
 
     let outcome = store
-        .enqueue_inbox(&strand.id, message::Kind::Text, message::Content::text("x"))
+        .receive(
+            &strand.id,
+            message::Kind::Text,
+            message::Content::text("x"),
+            None,
+        )
         .expect("enqueue at gate");
     let ingest::Outcome::Rejected { error } = outcome else {
         panic!("gate accepted an enqueue after 500 pending rows");

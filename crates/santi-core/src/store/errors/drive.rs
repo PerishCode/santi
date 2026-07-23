@@ -13,22 +13,21 @@ pub(crate) struct Input<'a> {
     pub detail: &'a str,
 }
 
-pub(crate) fn drive_incident_key(strand: &str) -> String {
-    format!("{}:strand:{strand}", catalog::STRAND_DRIVE_FAILED.code)
-}
-
-pub(in crate::store) fn repeat_active_in_conn(
+pub(in crate::store) fn stalled(
     conn: &Connection,
     strand: &str,
     operation: &str,
 ) -> Result<Option<Fault>, String> {
     let database = Database::new(conn);
-    if database.incident(&drive_incident_key(strand))?.is_none() {
+    if database
+        .incident(&catalog::STRAND_DRIVE_FAILED.key("strand", strand))?
+        .is_none()
+    {
         return Ok(None);
     }
     let pending = pending(conn, strand)?;
     database
-        .open(drive_draft(
+        .open(draft(
             strand,
             Input {
                 operation,
@@ -41,7 +40,7 @@ pub(in crate::store) fn repeat_active_in_conn(
         .map(Some)
 }
 
-pub(in crate::store) fn resolve_in_conn(
+pub(in crate::store) fn revive(
     conn: &Connection,
     strand: &str,
     turn: &str,
@@ -49,10 +48,10 @@ pub(in crate::store) fn resolve_in_conn(
 ) -> Result<Option<String>, String> {
     let database = Database::new(conn);
     let incident = database
-        .incident(&drive_incident_key(strand))?
+        .incident(&catalog::STRAND_DRIVE_FAILED.key("strand", strand))?
         .map(|incident| incident.id);
     database.resolve(
-        &drive_incident_key(strand),
+        &catalog::STRAND_DRIVE_FAILED.key("strand", strand),
         "strand.drive_started",
         json!({
             "schema": "santi.error.strand_drive.resolution.v1",
@@ -69,7 +68,7 @@ impl Store {
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
-        let error = repeat_active_in_conn(&tx, strand, "ingest_active_guard")?;
+        let error = stalled(&tx, strand, "ingest_active_guard")?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(error)
     }
@@ -78,7 +77,7 @@ impl Store {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let pending = pending(&tx, strand)?;
-        let error = Database::new(&tx).open(drive_draft(strand, input, pending))?;
+        let error = Database::new(&tx).open(draft(strand, input, pending))?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(error)
     }
@@ -94,9 +93,9 @@ impl Store {
     }
 }
 
-fn drive_draft(strand: &str, input: Input<'_>, pending: i64) -> santi_error::Draft {
+fn draft(strand: &str, input: Input<'_>, pending: i64) -> santi_error::Draft {
     santi_error::Draft {
-        key: drive_incident_key(strand),
+        key: catalog::STRAND_DRIVE_FAILED.key("strand", strand),
         descriptor: catalog::STRAND_DRIVE_FAILED,
         scope: santi_error::Scope::new("strand", strand),
         source: santi_error::Source::new("santi-core", input.operation),

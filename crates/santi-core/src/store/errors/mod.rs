@@ -7,7 +7,7 @@ use crate::now;
 pub(crate) mod drive;
 
 impl Store {
-    pub fn open_error_incident(&self, draft: santi_error::Draft) -> Result<Fault, String> {
+    pub fn raise(&self, draft: santi_error::Draft) -> Result<Fault, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let error = Database::new(&tx).open(draft)?;
@@ -15,7 +15,7 @@ impl Store {
         Ok(error)
     }
 
-    pub fn resolve_error_incident(
+    pub fn resolve(
         &self,
         key: &str,
         resolved_by: &str,
@@ -37,7 +37,7 @@ impl Store {
         Database::new(&conn).incidents(&scope.kind, &scope.id, limit)
     }
 
-    pub(crate) fn active_error_incident(&self, key: &str) -> Result<Option<Incident>, String> {
+    pub(crate) fn incident(&self, key: &str) -> Result<Option<Incident>, String> {
         let conn = self.conn.lock().unwrap();
         Database::new(&conn).incident(key)
     }

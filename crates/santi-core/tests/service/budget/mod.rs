@@ -148,14 +148,14 @@ async fn remeasures_hot_memory() {
     assert_eq!(provider.requests.lock().unwrap().len(), 1);
     assert!(
         service
-            .strand_budget(&strand.id)
+            .audit(&strand.id)
             .expect("strand budget")
             .expect("strand")
             .incident
             .is_none()
     );
     let incidents = service
-        .strand_errors(&strand.id, 10)
+        .stranded(&strand.id, 10)
         .expect("strand errors")
         .expect("strand");
     assert_eq!(incidents.len(), 1);
@@ -264,10 +264,11 @@ async fn store_cannot_bypass() {
 
     let store = Store::open(&db).expect("open store directly");
     let outcome = store
-        .enqueue_inbox(
+        .receive(
             &strand.id,
             message::Kind::Text,
             message::Content::text("direct bypass attempt"),
+            None,
         )
         .expect("direct enqueue");
     let santi_core::ingest::Outcome::Rejected { error } = outcome else {

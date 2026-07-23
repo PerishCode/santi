@@ -38,12 +38,12 @@ pub async fn send(
         (status = 503, body = Fault)
     )
 )]
-pub async fn drive_strand(
+pub async fn drive(
     State(service): State<Service>,
     Path(strand): Path<String>,
 ) -> Result<Json<drive::Response>, ApiError> {
     service
-        .drive_strand(&strand)
+        .drive(&strand)
         .map(Json)
         .map_err(|error| ApiError::from_santi(*error))
 }
@@ -161,12 +161,12 @@ pub(super) async fn snapshot(
         (status = 500, body = Fault)
     )
 )]
-pub(super) async fn strand_budget(
+pub(super) async fn audit(
     State(service): State<Service>,
     Path(strand): Path<String>,
 ) -> Result<Json<budget::Snapshot>, ApiError> {
     service
-        .strand_budget(&strand)
+        .audit(&strand)
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("strand not found"))

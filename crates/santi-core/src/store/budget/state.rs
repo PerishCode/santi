@@ -2,8 +2,9 @@ use crate::store::db::Database;
 use santi_provider::Item;
 
 use crate::Fault;
+use crate::catalog;
 
-use super::{Pressure, context_incident_key};
+use super::Pressure;
 use crate::message;
 
 pub(super) fn queued(db: &Database<'_>, strand: &str) -> Result<Vec<Item>, String> {
@@ -23,12 +24,8 @@ pub(super) fn press(db: &Database<'_>, strand: &str, input: Pressure<'_>) -> Res
     db.open(input.drafted(strand))
 }
 
-pub(super) fn repeat_context_incident(
-    db: &Database<'_>,
-    strand: &str,
-    operation: &str,
-) -> Result<Fault, String> {
-    let key = context_incident_key(strand);
+pub(super) fn repress(db: &Database<'_>, strand: &str, operation: &str) -> Result<Fault, String> {
+    let key = catalog::CONTEXT_BUDGET_EXCEEDED.key("strand", strand);
     let existing = db
         .incident(&key)?
         .ok_or_else(|| "active context-budget incident missing".to_string())?;

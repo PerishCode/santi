@@ -69,7 +69,7 @@ fn soul_label_anchoring() {
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
 
     let soul = store.awaken().expect("create soul");
-    assert_ne!(soul.id, store.default_soul_id());
+    assert_ne!(soul.id, store.genesis());
     assert!(store.souls().expect("list").len() >= 2);
     assert!(store.soul(&soul.id).expect("soul").is_some());
 
@@ -88,7 +88,7 @@ fn soul_label_anchoring() {
     assert_eq!(store.keeper(&s1.id).expect("soul id"), soul.id);
 
     let default_strand = store
-        .labeled(store.default_soul_id(), "github:issue:49")
+        .labeled(store.genesis(), "github:issue:49")
         .expect("same label, default soul");
     assert_ne!(default_strand.id, s1.id);
 

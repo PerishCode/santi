@@ -84,7 +84,7 @@ async fn drive_failure_recovers() {
 
     conn.execute_batch("DROP TRIGGER force_turn_insert_failure;")
         .expect("remove failure trigger");
-    let driven = service.drive_strand(&strand.id).expect("operator redrive");
+    let driven = service.drive(&strand.id).expect("operator redrive");
     assert_eq!(driven.state, santi_core::drive::State::Started);
     let turn = driven.turn.expect("redrive turn");
     let runtime = Probe::new(&service)

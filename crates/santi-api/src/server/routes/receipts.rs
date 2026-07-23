@@ -167,13 +167,13 @@ pub(super) async fn list_messages(
         (status = 500, body = Fault)
     )
 )]
-pub(super) async fn strand_material(
+pub(super) async fn material(
     State(service): State<Service>,
     Path(strand): Path<String>,
     Json(request): Json<material::Request>,
 ) -> Result<Json<material::Material>, ApiError> {
     service
-        .strand_material(&strand, request)
+        .material(&strand, request)
         .map(Json)
         .map_err(ApiError::from_service)
 }

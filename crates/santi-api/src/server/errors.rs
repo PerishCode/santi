@@ -25,13 +25,13 @@ pub(super) struct ErrorQueryParams {
         (status = 500, body = Fault)
     )
 )]
-pub(super) async fn strand_errors(
+pub(super) async fn stranded(
     State(service): State<Service>,
     Path(strand): Path<String>,
     Query(params): Query<ErrorQueryParams>,
 ) -> Result<Json<Vec<Incident>>, ApiError> {
     service
-        .strand_errors(&strand, params.limit.unwrap_or(50))
+        .stranded(&strand, params.limit.unwrap_or(50))
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("strand not found"))

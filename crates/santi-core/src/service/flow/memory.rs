@@ -30,7 +30,7 @@ struct Snapshot {
 }
 
 impl Service {
-    pub(in crate::service) fn soul_memory_policy(&self) -> Policy {
+    pub(in crate::service) fn regimen(&self) -> Policy {
         let bytes = self
             .provider
             .metadata()
@@ -44,17 +44,17 @@ impl Service {
         }
     }
 
-    pub(super) fn memory_drive_gate(&self, strand: &Strand) -> Result<Gate, String> {
-        let _guard = self.memory_pressure_lock.lock().unwrap();
-        let policy = self.soul_memory_policy();
-        let snapshot = self.soul_memory_snapshot(&strand.soul)?;
-        self.reconcile_memory_intervention(&strand.soul, &snapshot, policy)?;
+    pub(super) fn gate(&self, strand: &Strand) -> Result<Gate, String> {
+        let _guard = self.pressure.lock().unwrap();
+        let policy = self.regimen();
+        let snapshot = self.measure(&strand.soul)?;
+        self.reconcile(&strand.soul, &snapshot, policy)?;
         if snapshot.weight <= policy.allowance {
             return Ok(Gate::Allow);
         }
 
         let maintenance = self.store.labeled(&strand.soul, MAINTENANCE)?;
-        self.ensure_memory_maintenance_prompt(&maintenance, &snapshot, policy)?;
+        self.brief(&maintenance, &snapshot, policy)?;
         if strand.id == maintenance.id {
             Ok(Gate::Allow)
         } else {
@@ -64,22 +64,22 @@ impl Service {
         }
     }
 
-    pub(super) fn resume_after_memory_maintenance(&self, strand: &str) {
-        if let Err(error) = self.resume_memory_soul(strand) {
+    pub(super) fn relieve(&self, strand: &str) {
+        if let Err(error) = self.remeasure(strand) {
             eprintln!("santi: soul memory relief scan failed strand={strand}: {error}");
         }
     }
 
-    fn resume_memory_soul(&self, strand: &str) -> Result<(), String> {
+    fn remeasure(&self, strand: &str) -> Result<(), String> {
         let Some(maintenance) = self.store.strand(strand)? else {
             return Ok(());
         };
         if maintenance.label.as_deref() != Some(MAINTENANCE) {
             return Ok(());
         }
-        let policy = self.soul_memory_policy();
-        let snapshot = self.soul_memory_snapshot(&maintenance.soul)?;
-        self.reconcile_memory_intervention(&maintenance.soul, &snapshot, policy)?;
+        let policy = self.regimen();
+        let snapshot = self.measure(&maintenance.soul)?;
+        self.reconcile(&maintenance.soul, &snapshot, policy)?;
         if snapshot.weight > policy.allowance {
             return Ok(());
         }
@@ -103,7 +103,7 @@ impl Service {
         Ok(())
     }
 
-    fn soul_memory_snapshot(&self, soul: &str) -> Result<Snapshot, String> {
+    fn measure(&self, soul: &str) -> Result<Snapshot, String> {
         let path = self.memoir(soul);
         let bytes = match fs::read(path) {
             Ok(bytes) => bytes,
@@ -116,7 +116,7 @@ impl Service {
         })
     }
 
-    fn ensure_memory_maintenance_prompt(
+    fn brief(
         &self,
         maintenance: &Strand,
         snapshot: &Snapshot,
@@ -137,10 +137,10 @@ impl Service {
             return Ok(());
         }
 
-        let outcome = self.store.enqueue_inbox_while_suspended(Ingress {
+        let outcome = self.store.harbor(Ingress {
             strand: &maintenance.id,
             kind: message::Kind::SantiSystem,
-            content: memory_maintenance_metaprompt(snapshot, policy),
+            content: metaprompt(snapshot, policy),
             source: Some(
                 ingest::Source::new("runtime_memory_pressure").with_ref(maintenance.soul.clone()),
             ),
@@ -156,19 +156,14 @@ impl Service {
         }
     }
 
-    fn reconcile_memory_intervention(
-        &self,
-        soul: &str,
-        snapshot: &Snapshot,
-        policy: Policy,
-    ) -> Result<(), String> {
-        let key = memory_intervention_incident_key(soul);
-        let active = self.store.active_error_incident(&key)?;
+    fn reconcile(&self, soul: &str, snapshot: &Snapshot, policy: Policy) -> Result<(), String> {
+        let key = catalog::SOUL_MEMORY_INTERVENTION_REQUIRED.key("soul", soul);
+        let active = self.store.incident(&key)?;
         let mutated = if snapshot.weight > policy.threshold {
             if active.is_some() {
                 false
             } else {
-                self.store.open_error_incident(santi_error::Draft {
+                self.store.raise(santi_error::Draft {
                     key,
                     descriptor: catalog::SOUL_MEMORY_INTERVENTION_REQUIRED,
                     scope: santi_error::Scope::new("soul", soul),
@@ -187,7 +182,7 @@ impl Service {
                 true
             }
         } else if active.is_some() {
-            self.store.resolve_error_incident(
+            self.store.resolve(
                 &key,
                 "soul_memory_remeasured",
                 json!({
@@ -207,7 +202,7 @@ impl Service {
     }
 }
 
-fn memory_maintenance_metaprompt(snapshot: &Snapshot, policy: Policy) -> message::Content {
+fn metaprompt(snapshot: &Snapshot, policy: Policy) -> message::Content {
     message::Content::text(
         [
             "<system_message>".to_string(),
@@ -240,14 +235,7 @@ fn contains(item: &Item, needle: &str) -> bool {
     matches!(item, Item::Message { content, .. } if content.contains(needle))
 }
 
-fn memory_intervention_incident_key(soul: &str) -> String {
-    format!(
-        "{}:soul:{soul}",
-        catalog::SOUL_MEMORY_INTERVENTION_REQUIRED.code
-    )
-}
-
-pub(super) fn drive_maintenance(service: &Service, maintenance_strand_id: &str) {
+pub(super) fn maintain(service: &Service, maintenance_strand_id: &str) {
     if let drive::Outcome::Held(error) | drive::Outcome::Failed(error) = service.poke(
         maintenance_strand_id,
         "system",

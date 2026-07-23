@@ -19,7 +19,7 @@ impl Service {
     ) -> Result<(), String> {
         if update.prose.is_empty() {
             update.timing.uttered(update.round);
-            self.complete_current_thinking_span(
+            self.conclude(
                 update.address.strand,
                 update.span,
                 thinking::Reason::FirstTextDelta,

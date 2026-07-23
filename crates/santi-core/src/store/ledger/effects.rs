@@ -58,7 +58,7 @@ impl Store {
             .ok_or_else(|| "dispatching effect missing".to_string())
     }
 
-    pub(crate) fn append_effect_tool_result(
+    pub(crate) fn redeem(
         &self,
         effect: &str,
         settlement: Settlement<'_>,

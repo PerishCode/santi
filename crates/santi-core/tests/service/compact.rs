@@ -20,7 +20,7 @@ fn capsule_dry_run_header() {
     let strand = service.weave().expect("create strand").strand;
     let store = Store::open(&db).expect("open store directly");
     store
-        .append_message(Draft {
+        .pen(Draft {
             strand: &strand.id,
             actor: message::Role::System,
             id: store.system(),
@@ -30,10 +30,10 @@ fn capsule_dry_run_header() {
         })
         .expect("append user");
     store
-        .append_message(Draft {
+        .pen(Draft {
             strand: &strand.id,
             actor: message::Role::Soul,
-            id: store.default_soul_id(),
+            id: store.genesis(),
             content: message::Content::text("old assistant detail"),
             state: message::State::Fixed,
             intake: message::Intake::Record,
@@ -137,17 +137,17 @@ fn system_boundary_compacts() {
     let strand = service.weave().expect("create strand").strand;
     let store = Store::open(&db).expect("open store directly");
     store
-        .append_santi_system_message(
+        .inscribe(
             &strand.id,
             message::Content::text("upgrade handover"),
             message::Intake::Record,
         )
         .expect("append system record");
     store
-        .append_message(Draft {
+        .pen(Draft {
             strand: &strand.id,
             actor: message::Role::Soul,
-            id: store.default_soul_id(),
+            id: store.genesis(),
             content: message::Content::text("upgrade checked"),
             state: message::State::Fixed,
             intake: message::Intake::Record,
@@ -191,7 +191,7 @@ fn capsule_seq_boundary() {
     let strand = service.weave().expect("create strand").strand;
     let store = Store::open(&db).expect("open store directly");
     let user = store
-        .append_message(Draft {
+        .pen(Draft {
             strand: &strand.id,
             actor: message::Role::System,
             id: store.system(),
@@ -200,13 +200,13 @@ fn capsule_seq_boundary() {
             intake: message::Intake::Request,
         })
         .expect("append user")
-        .strand_message;
+        .message;
     let turn = store
         .start(&strand.id, &user.message.id)
         .expect("start turn")
         .turn;
     store
-        .append_tool_call(Invocation {
+        .call(Invocation {
             turn: &turn.id,
             call: "call_seq_boundary",
             name: "shell",

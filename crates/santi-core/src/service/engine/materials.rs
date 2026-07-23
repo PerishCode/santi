@@ -9,7 +9,7 @@ pub(in crate::service) type Key = (String, material::Kind);
 const PLAIN: &str = "text/plain; charset=utf-8";
 
 impl Service {
-    pub fn strand_material(
+    pub fn material(
         &self,
         strand: &str,
         request: material::Request,
@@ -20,29 +20,29 @@ impl Service {
                     .store
                     .strand(strand)?
                     .ok_or_else(|| "strand not found".to_string())?;
-                self.system_prompt_material(&strand)
+                self.prompt(&strand)
             }
         }
     }
 
-    pub(in crate::service) fn system_prompt_text(&self, strand: &str) -> Result<String, String> {
+    pub(in crate::service) fn wording(&self, strand: &str) -> Result<String, String> {
         let strand = self
             .store
             .strand(strand)?
             .ok_or_else(|| "strand not found".to_string())?;
-        Ok(self.system_prompt_material(&strand)?.text)
+        Ok(self.prompt(&strand)?.text)
     }
 
-    fn system_prompt_material(&self, strand: &Strand) -> Result<material::Material, String> {
+    fn prompt(&self, strand: &Strand) -> Result<material::Material, String> {
         let id = strand.id.as_str();
         let text = prompted(Prompting {
             id,
             strand,
-            constitution: self.constitution_file(),
-            soul_memory_path: self.memoir(&strand.soul),
-            strand_memory_path: self.strand_memory_file(id),
-            allowance: self.soul_memory_policy().allowance,
-            genesis: strand.soul == self.store.default_soul_id(),
+            constitution: self.charter(),
+            memoir: self.memoir(&strand.soul),
+            journal: self.journal(id),
+            allowance: self.regimen().allowance,
+            genesis: strand.soul == self.store.genesis(),
         })?;
         let key: Key = (id.to_string(), material::Kind::SystemPrompt);
         let mut cache = self.materials.lock().unwrap();

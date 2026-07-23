@@ -40,7 +40,7 @@ async fn failed_receipt_redrives() {
         .await;
 
     let driven = service
-        .drive_strand(&strand.id)
+        .drive(&strand.id)
         .expect("explicit failed-receipt redrive");
     assert_eq!(driven.state, santi_core::drive::State::Started);
     let recovered_turn = driven.turn.expect("recovery turn");
@@ -152,9 +152,7 @@ async fn cold_start_recovers() {
 
     conn.execute_batch("DROP TRIGGER force_cold_start_turn_failure;")
         .expect("remove failure trigger");
-    let driven = restarted
-        .drive_strand(&strand.id)
-        .expect("operator redrive");
+    let driven = restarted.drive(&strand.id).expect("operator redrive");
     let turn = driven.turn.expect("redrive turn");
     let runtime = Probe::new(&restarted)
         .completed_turn(&strand.id, &turn.id)

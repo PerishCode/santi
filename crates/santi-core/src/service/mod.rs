@@ -29,9 +29,9 @@ pub struct Service {
     streams: broadcast::Sender<stream::Event>,
     errors: broadcast::Sender<Transition>,
     notices: notice::Bus,
-    execution_budgets: Arc<Mutex<HashMap<String, budget::Execution>>>,
-    memory_pressure_lock: Arc<Mutex<()>>,
-    shutting_down: Arc<AtomicBool>,
+    budgets: Arc<Mutex<HashMap<String, budget::Execution>>>,
+    pressure: Arc<Mutex<()>>,
+    closing: Arc<AtomicBool>,
     degraded: Arc<AtomicBool>,
 }
 
@@ -57,42 +57,35 @@ impl Service {
             streams: broadcast::channel(1024).0,
             errors: broadcast::channel(1024).0,
             notices: notice::Bus::new(),
-            execution_budgets: Arc::new(Mutex::new(HashMap::new())),
-            memory_pressure_lock: Arc::new(Mutex::new(())),
-            shutting_down: Arc::new(AtomicBool::new(false)),
+            budgets: Arc::new(Mutex::new(HashMap::new())),
+            pressure: Arc::new(Mutex::new(())),
+            closing: Arc::new(AtomicBool::new(false)),
             degraded: Arc::new(AtomicBool::new(degraded)),
         })
     }
 
-    pub fn set_strand_execution_budget(
-        &self,
-        strand: &str,
-        budget: budget::Execution,
-    ) -> Result<(), String> {
+    pub fn ration(&self, strand: &str, budget: budget::Execution) -> Result<(), String> {
         budget.validate()?;
         if self.store.strand(strand)?.is_none() {
             return Err("strand not found".to_string());
         }
-        self.execution_budgets
+        self.budgets
             .lock()
             .unwrap()
             .insert(strand.to_string(), budget);
         Ok(())
     }
 
-    pub(in crate::service) fn strand_execution_budget(
-        &self,
-        strand: &str,
-    ) -> Option<budget::Execution> {
-        self.execution_budgets.lock().unwrap().get(strand).cloned()
+    pub(in crate::service) fn rationed(&self, strand: &str) -> Option<budget::Execution> {
+        self.budgets.lock().unwrap().get(strand).cloned()
     }
 
     pub fn close(&self) {
-        self.shutting_down.store(true, Ordering::SeqCst);
+        self.closing.store(true, Ordering::SeqCst);
     }
 
     pub fn closing(&self) -> bool {
-        self.shutting_down.load(Ordering::SeqCst)
+        self.closing.load(Ordering::SeqCst)
     }
 
     pub async fn drain(&self, cap: Duration) {

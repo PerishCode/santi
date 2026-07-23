@@ -2,7 +2,7 @@ use crate::store::Ingress;
 use crate::{Fault, engine, strand::Strand};
 
 use super::super::{Service, drive};
-use super::memory::{Gate, drive_maintenance};
+use super::memory::{Gate, maintain};
 use crate::{ingest, message, strand};
 
 pub(in crate::service) struct Ingest<'a> {
@@ -89,12 +89,12 @@ impl Service {
         input: Ingest<'_>,
     ) -> Result<(ingest::Outcome, drive::Outcome), String> {
         let audit = Audit::new(&input.content, &input.source);
-        match self.memory_drive_gate(strand)? {
+        match self.gate(strand)? {
             Gate::Allow => {}
             Gate::Pause {
                 maintenance_strand_id,
             } => {
-                let intake = self.store.enqueue_inbox_while_suspended(Ingress {
+                let intake = self.store.harbor(Ingress {
                     strand: &strand.id,
                     kind: input.kind,
                     content: input.content,
@@ -108,12 +108,12 @@ impl Service {
                     logged(error, &strand.id, &audit);
                 }
                 if intake.inserted {
-                    drive_maintenance(self, &maintenance_strand_id);
+                    maintain(self, &maintenance_strand_id);
                 }
                 return Ok((outcome, drive::Outcome::Paused));
             }
         }
-        self.clear_context_incident(&strand.id, "ingest_remeasurement")?;
+        self.absolve(&strand.id, "ingest_remeasurement")?;
         if let Some(error) = self.store.gated(&strand.id)? {
             self.dispatched();
             logged(&error, &strand.id, &audit);
@@ -124,8 +124,8 @@ impl Service {
                 drive::Outcome::Idle,
             ));
         }
-        let admission = self.context_admission(&strand.id)?;
-        let intake = self.store.enqueue_inbox_with_context(Ingress {
+        let admission = self.admission(&strand.id)?;
+        let intake = self.store.ingest(Ingress {
             strand: &strand.id,
             kind: input.kind,
             content: input.content,

@@ -108,7 +108,7 @@ fn resolve_upgrade(
     readiness: super::UpgradeReadiness,
 ) -> Result<(), Box<santi_core::Fault>> {
     store
-        .resolve_error_incident(
+        .resolve(
             UPGRADE_INCIDENT_KEY,
             "upgrade.succeeded",
             json!({
@@ -140,7 +140,7 @@ fn open_execution_failure(
     terminal: &str,
 ) -> Result<santi_core::Fault, Box<santi_core::Fault>> {
     store
-        .open_error_incident(santi_core::error::Draft {
+        .raise(santi_core::error::Draft {
             key: UPGRADE_INCIDENT_KEY.to_string(),
             descriptor: santi_core::catalog::UPGRADE_FAILED,
             scope: santi_core::Scope::new("runtime", RUNTIME_SCOPE_ID),

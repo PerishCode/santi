@@ -13,7 +13,7 @@ use crate::provider;
 
 pub use effects::{ResolveEffectRequest, effect, settle};
 pub use error::ApiError;
-pub use routes::{drive_strand, health, receipt, send};
+pub use routes::{drive, health, receipt, send};
 
 pub fn export_openapi_json() -> Result<String, String> {
     serde_json::to_string_pretty(&openapi::document()).map_err(|error| error.to_string())

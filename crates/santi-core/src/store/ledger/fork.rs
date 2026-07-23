@@ -115,7 +115,7 @@ impl Store {
             .ok_or_else(|| "forked strand missing".to_string())
     }
 
-    pub(crate) fn delete_fork_child_strand(&self, child_strand_id: &str) -> Result<(), String> {
+    pub(crate) fn disown(&self, child_strand_id: &str) -> Result<(), String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let child = Database::new(&tx)

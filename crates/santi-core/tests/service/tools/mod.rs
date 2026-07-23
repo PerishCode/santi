@@ -187,11 +187,11 @@ async fn dispatches_tools() {
         .get("stdout")
         .and_then(|value| value.as_str())
         .expect("shell stdout");
-    let strand_memory_dir = Path::new("runtime")
+    let strandhome = Path::new("runtime")
         .join("strands")
         .join(&strand.id)
         .join("memory");
-    assert!(stdout.contains(&strand_memory_dir.display().to_string()));
+    assert!(stdout.contains(&strandhome.display().to_string()));
     assert!(
         stdout.contains("soul_default"),
         "SANTI_SOUL_ID in shell env: {stdout}"
@@ -208,7 +208,7 @@ async fn dispatches_tools() {
         .get("cwd")
         .and_then(|value| value.as_str())
         .expect("shell cwd");
-    assert!(Path::new(cwd).ends_with(&strand_memory_dir));
+    assert!(Path::new(cwd).ends_with(&strandhome));
 
     assert_eq!(runtime.effects.len(), 1);
     let effect = &runtime.effects[0];

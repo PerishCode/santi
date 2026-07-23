@@ -7,7 +7,7 @@ fn appends_relations_in_order() {
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let strand = store.weave().expect("create strand");
     let user = store
-        .append_message(Draft {
+        .pen(Draft {
             strand: &strand.id,
             actor: message::Role::System,
             id: store.system(),
@@ -16,7 +16,7 @@ fn appends_relations_in_order() {
             intake: message::Intake::Request,
         })
         .expect("append user")
-        .strand_message;
+        .message;
 
     assert_eq!(user.relation.seq, 1);
     let input = store.assembly(&strand.id).expect("assembly input");
@@ -30,13 +30,13 @@ fn maps_santi_system_input() {
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let strand = store.weave().expect("create strand");
     let message = store
-        .append_santi_system_message(
+        .inscribe(
             &strand.id,
             message::Content::text("<system_message>\nkind: note\n</system_message>"),
             message::Intake::Request,
         )
         .expect("append santi system")
-        .strand_message;
+        .message;
 
     assert_eq!(message.message.role, message::Role::System);
     assert_eq!(message.message.kind, message::Kind::SantiSystem);
@@ -55,7 +55,7 @@ fn thinking_becomes_reasoning() {
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let strand = store.weave().expect("create strand");
     let user = store
-        .append_message(Draft {
+        .pen(Draft {
             strand: &strand.id,
             actor: message::Role::System,
             id: store.system(),
@@ -64,20 +64,20 @@ fn thinking_becomes_reasoning() {
             intake: message::Intake::Request,
         })
         .expect("append user")
-        .strand_message;
+        .message;
     let turn = store
         .start(&strand.id, &user.message.id)
         .expect("start turn")
         .turn;
     let thinking = store
-        .append_thinking_span(&turn.id, Some("resp_test".to_string()))
+        .muse(&turn.id, Some("resp_test".to_string()))
         .expect("append thinking");
     let thinking = store
         .summarize(&thinking.id, "Looked at the prompt.".to_string())
         .expect("update thinking summary")
         .expect("thinking exists");
     let thinking = store
-        .complete_thinking_span(&thinking.id, thinking::Reason::FirstTextDelta)
+        .conclude(&thinking.id, thinking::Reason::FirstTextDelta)
         .expect("complete thinking")
         .expect("thinking exists");
 
@@ -116,7 +116,7 @@ fn timeline_interleaves() {
     let strand = store.weave().expect("create strand");
 
     let user = store
-        .append_message(Draft {
+        .pen(Draft {
             strand: &strand.id,
             actor: message::Role::System,
             id: store.system(),
@@ -125,13 +125,13 @@ fn timeline_interleaves() {
             intake: message::Intake::Request,
         })
         .expect("append user")
-        .strand_message;
+        .message;
     let turn = store
         .start(&strand.id, &user.message.id)
         .expect("start turn")
         .turn;
     store
-        .append_tool_call(Invocation {
+        .call(Invocation {
             turn: &turn.id,
             call: "call_1",
             name: "shell",
@@ -145,14 +145,14 @@ fn timeline_interleaves() {
         })
         .expect("append tool call");
     store
-        .append_tool_result(
+        .reply(
             "call_1",
             Some(serde_json::json!({ "stdout": "hi\n" })),
             None,
         )
         .expect("append tool result");
     store
-        .append_soul_assistant_text(&strand.id, "done")
+        .voice(&strand.id, "done")
         .expect("append soul assistant text");
 
     let input = store.assembly(&strand.id).expect("assembly input");

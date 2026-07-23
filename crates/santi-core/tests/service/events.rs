@@ -178,7 +178,7 @@ async fn runtime_outbox_reaches_bus() {
     .expect("open service");
     let store = Store::open(&database).expect("open store");
     store
-        .open_error_incident(santi_core::error::Draft {
+        .raise(santi_core::error::Draft {
             key: "runtime.upgrade.failed:runtime:default".to_string(),
             descriptor: santi_core::catalog::UPGRADE_FAILED,
             scope: santi_core::Scope::new("runtime", "default"),
@@ -226,7 +226,7 @@ async fn global_bus_sees_strands() {
     let strand = service.weave().expect("create strand").strand;
     let store = Store::open(&database).expect("open store");
     store
-        .open_error_incident(santi_core::error::Draft {
+        .raise(santi_core::error::Draft {
             key: format!("test.failed:strand:{}", strand.id),
             descriptor: santi_core::catalog::INTERNAL,
             scope: santi_core::Scope::new("strand", &strand.id),

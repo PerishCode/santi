@@ -48,23 +48,14 @@ impl Store {
         }
     }
 
-    pub fn enqueue_inbox(
-        &self,
-        strand: &str,
-        kind: message::Kind,
-        content: message::Content,
-    ) -> Result<ingest::Outcome, String> {
-        self.enqueue_inbox_with_source(strand, kind, content, None)
-    }
-
-    pub fn enqueue_inbox_with_source(
+    pub fn receive(
         &self,
         strand: &str,
         kind: message::Kind,
         content: message::Content,
         source: Option<ingest::Source>,
     ) -> Result<ingest::Outcome, String> {
-        self.enqueue_inbox_with_context(Ingress {
+        self.ingest(Ingress {
             strand,
             kind,
             content,

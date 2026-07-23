@@ -21,15 +21,12 @@ impl Service {
     pub(in crate::service) fn estimate(&self, strand: &str) -> Result<budget::Estimate, String> {
         let mut input = self.store.assembly(strand)?;
         input.extend(self.store.pending(strand)?);
-        let instructions = self.system_prompt_text(strand)?;
+        let instructions = self.wording(strand)?;
         let tools = tools();
         Ok(estimated(&input, Some(&instructions), Some(&tools)))
     }
 
-    pub(in crate::service) fn context_admission(
-        &self,
-        strand: &str,
-    ) -> Result<Option<Admission>, String> {
+    pub(in crate::service) fn admission(&self, strand: &str) -> Result<Option<Admission>, String> {
         let Some(budget) = self.budget() else {
             return Ok(None);
         };
@@ -39,12 +36,12 @@ impl Service {
             model: metadata.model,
             source: budget.source,
             bytes: budget.bytes,
-            instructions: Some(self.system_prompt_text(strand)?),
+            instructions: Some(self.wording(strand)?),
             tools: tools(),
         }))
     }
 
-    pub(in crate::service) fn open_over_budget_incident(
+    pub(in crate::service) fn overdrawn(
         &self,
         strand: &str,
         turn: &str,
@@ -86,12 +83,12 @@ impl Service {
         Ok(Some(error))
     }
 
-    pub(in crate::service) fn clear_context_incident(
+    pub(in crate::service) fn absolve(
         &self,
         strand: &str,
         cleared_by: &str,
     ) -> Result<bool, String> {
-        if self.store.active_context_incident(strand)?.is_none() {
+        if self.store.pressure(strand)?.is_none() {
             return Ok(false);
         }
         let Some(budget) = self.budget() else {
@@ -101,9 +98,7 @@ impl Service {
         if estimate.total > budget.bytes {
             return Ok(false);
         }
-        let resolved = self
-            .store
-            .resolve_context_incident(strand, cleared_by, &estimate)?;
+        let resolved = self.store.vent(strand, cleared_by, &estimate)?;
         self.dispatched();
         Ok(resolved)
     }
@@ -120,20 +115,20 @@ pub(super) enum Verdict {
 }
 
 impl Service {
-    pub(super) fn admit_execution_round(
+    pub(super) fn readmit(
         &self,
         strand: &str,
         turn: &str,
         next: usize,
     ) -> Result<Option<Fault>, String> {
-        let Some(budget) = self.strand_execution_budget(strand) else {
+        let Some(budget) = self.rationed(strand) else {
             return Ok(None);
         };
         if next <= budget.rounds {
             return Ok(None);
         }
-        let usage = self.store.strand_execution_usage(strand)?;
-        self.open_execution_budget_incident(Breach {
+        let usage = self.store.spent(strand)?;
+        self.breached(Breach {
             strand,
             turn,
             budget: &budget,
@@ -144,24 +139,24 @@ impl Service {
         .map(Some)
     }
 
-    pub(super) fn admit_tool_batch(
+    pub(super) fn judge(
         &self,
         strand: &str,
         turn: &str,
         round: usize,
         calls: usize,
     ) -> Result<Verdict, String> {
-        let Some(budget) = self.strand_execution_budget(strand) else {
+        let Some(budget) = self.rationed(strand) else {
             return Ok(Verdict::Unbounded);
         };
-        let usage = self.store.strand_execution_usage(strand)?;
+        let usage = self.store.spent(strand)?;
         let request = json!({
             "provider_round": round,
             "calls": calls,
         });
         if round >= budget.rounds {
             return self
-                .open_execution_budget_incident(Breach {
+                .breached(Breach {
                     strand,
                     turn,
                     budget: &budget,
@@ -174,7 +169,7 @@ impl Service {
         }
         if usage.calls.saturating_add(calls) > budget.calls {
             return self
-                .open_execution_budget_incident(Breach {
+                .breached(Breach {
                     strand,
                     turn,
                     budget: &budget,
@@ -188,7 +183,7 @@ impl Service {
         let room = budget.output.saturating_sub(usage.output);
         if room < calls {
             return self
-                .open_execution_budget_incident(Breach {
+                .breached(Breach {
                     strand,
                     turn,
                     budget: &budget,
@@ -202,7 +197,7 @@ impl Service {
         Ok(Verdict::Bounded(allotted(room, budget.shell, calls)))
     }
 
-    fn open_execution_budget_incident(&self, breach: Breach<'_>) -> Result<Fault, String> {
+    fn breached(&self, breach: Breach<'_>) -> Result<Fault, String> {
         let Breach {
             strand,
             turn,
@@ -211,8 +206,8 @@ impl Service {
             reason,
             request,
         } = breach;
-        let error = self.store.open_error_incident(santi_error::Draft {
-            key: crate::store::execution_budget_incident_key(strand),
+        let error = self.store.raise(santi_error::Draft {
+            key: catalog::EXECUTION_BUDGET_EXCEEDED.key("strand", strand),
             descriptor: catalog::EXECUTION_BUDGET_EXCEEDED,
             scope: santi_error::Scope::new("strand", strand),
             source: santi_error::Source::new("santi-core", "turn.execution_budget"),

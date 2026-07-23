@@ -13,7 +13,7 @@ pub use completion::Completion;
 const BREADTH: usize = 4096;
 mod fail;
 use crate::{effect, thinking, tool};
-use fail::{open_runtime_incident, provider_incident_key, runtime_incident_key};
+use fail::indict;
 
 impl Store {
     pub fn tried(
@@ -110,7 +110,7 @@ impl Store {
                 params![turn, now],
             )
             .map_err(|error| error.to_string())?;
-            let error = open_runtime_incident(
+            let error = indict(
                 &tx,
                 strand,
                 turn,

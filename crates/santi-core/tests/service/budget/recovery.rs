@@ -42,16 +42,16 @@ async fn compact_redrives_receipt() {
         .clone();
     let store = Store::open(&db).expect("open store directly");
     let boundary = store
-        .append_message(Draft {
+        .pen(Draft {
             strand: &strand.id,
             actor: message::Role::Soul,
-            id: store.default_soul_id(),
+            id: store.genesis(),
             content: message::Content::text("manual compact boundary"),
             state: message::State::Fixed,
             intake: message::Intake::Record,
         })
         .expect("append manual boundary")
-        .strand_message;
+        .message;
 
     let compact = service
         .exec(

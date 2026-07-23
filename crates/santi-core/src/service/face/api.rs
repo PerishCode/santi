@@ -100,7 +100,7 @@ impl Service {
         self.store.snapshot(strand)
     }
 
-    pub fn strand_budget(&self, strand: &str) -> Result<Option<budget::Snapshot>, String> {
+    pub fn audit(&self, strand: &str) -> Result<Option<budget::Snapshot>, String> {
         let Some(strand) = self.store.strand(strand)? else {
             return Ok(None);
         };
@@ -108,11 +108,11 @@ impl Service {
             strand: strand.id.clone(),
             estimate: self.estimate(&strand.id)?,
             budget: self.budget(),
-            incident: self.store.active_context_incident(&strand.id)?,
+            incident: self.store.pressure(&strand.id)?,
         }))
     }
 
-    pub fn strand_errors(&self, strand: &str, limit: i64) -> Result<Option<Vec<Incident>>, String> {
+    pub fn stranded(&self, strand: &str, limit: i64) -> Result<Option<Vec<Incident>>, String> {
         let Some(strand) = self.store.strand(strand)? else {
             return Ok(None);
         };

@@ -44,9 +44,11 @@ impl Store {
             return Ok(Opened::Idle);
         }
 
-        if database.incident(&context_incident_key(strand))?.is_some() {
-            let error =
-                super::state::repeat_context_incident(&database, strand, "pending_active_guard")?;
+        if database
+            .incident(&catalog::CONTEXT_BUDGET_EXCEEDED.key("strand", strand))?
+            .is_some()
+        {
+            let error = super::state::repress(&database, strand, "pending_active_guard")?;
             tx.commit().map_err(|error| error.to_string())?;
             return Ok(Opened::Held(error));
         }
@@ -103,12 +105,8 @@ impl Store {
             params![turn, strand, trigger, reference, now],
         )
         .map_err(|error| error.to_string())?;
-        let recovered = crate::store::errors::drive::resolve_in_conn(
-            &tx,
-            strand,
-            &turn,
-            drained.messages.len(),
-        )?;
+        let recovered =
+            crate::store::errors::drive::revive(&tx, strand, &turn, drained.messages.len())?;
         Database::new(&tx).begin(strand, &turn, &drained.inboxes, recovered.as_deref())?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(Opened::Started(Begun {
@@ -120,15 +118,8 @@ impl Store {
     }
 }
 
-pub(crate) fn execution_budget_incident_key(strand: &str) -> String {
-    format!(
-        "{}:strand:{strand}",
-        catalog::EXECUTION_BUDGET_EXCEEDED.code
-    )
-}
-
 impl Store {
-    pub(crate) fn strand_execution_usage(&self, strand: &str) -> Result<budget::Usage, String> {
+    pub(crate) fn spent(&self, strand: &str) -> Result<budget::Usage, String> {
         let conn = self.conn.lock().unwrap();
         let calls = conn
             .query_row(

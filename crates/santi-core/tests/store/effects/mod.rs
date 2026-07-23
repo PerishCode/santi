@@ -12,10 +12,11 @@ struct StartedEffect {
 fn start_effect(store: &Store) -> StartedEffect {
     let strand = store.weave().expect("create strand");
     let inbox = match store
-        .enqueue_inbox(
+        .receive(
             &strand.id,
             message::Kind::Text,
             message::Content::text("run an external effect"),
+            None,
         )
         .expect("enqueue")
     {
@@ -29,7 +30,7 @@ fn start_effect(store: &Store) -> StartedEffect {
         .turn;
     let call = "call_effect".to_string();
     let (_, effect) = store
-        .append_effect_call(
+        .charge(
             Invocation {
                 turn: &turn.id,
                 call: &call,
@@ -89,10 +90,11 @@ fn intent_atomicity() {
     let store = Store::open(&db).expect("open store");
     let strand = store.weave().expect("create strand");
     store
-        .enqueue_inbox(
+        .receive(
             &strand.id,
             message::Kind::Text,
             message::Content::text("run an external effect"),
+            None,
         )
         .expect("enqueue");
     let turn = store
@@ -114,7 +116,7 @@ fn intent_atomicity() {
 
     assert!(
         store
-            .append_effect_call(
+            .charge(
                 Invocation {
                     turn: &turn.id,
                     call: "call_atomic",

@@ -17,11 +17,7 @@ pub struct Invocation<'a> {
 }
 
 impl Store {
-    pub fn append_thinking_span(
-        &self,
-        turn: &str,
-        response: Option<String>,
-    ) -> Result<thinking::Span, String> {
+    pub fn muse(&self, turn: &str, response: Option<String>) -> Result<thinking::Span, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let thinking = tag("thinking");
@@ -86,12 +82,12 @@ impl Store {
         Database::new(&conn).span(thinking_span_id)
     }
 
-    pub fn complete_thinking_span(
+    pub fn conclude(
         &self,
         thinking_span_id: &str,
         completion_reason: thinking::Reason,
     ) -> Result<Option<thinking::Span>, String> {
-        self.finish_thinking_span(
+        self.wrap(
             thinking_span_id,
             thinking::State::Completed,
             Some(completion_reason),
@@ -99,20 +95,19 @@ impl Store {
         )
     }
 
-    pub fn fail_thinking_span(
+    pub fn abandon(
         &self,
         thinking_span_id: &str,
         error: String,
     ) -> Result<Option<thinking::Span>, String> {
-        self.finish_thinking_span(thinking_span_id, thinking::State::Failed, None, Some(error))
+        self.wrap(thinking_span_id, thinking::State::Failed, None, Some(error))
     }
 
-    pub fn append_tool_call(&self, invocation: Invocation<'_>) -> Result<tool::Call, String> {
-        self.append_effect_call(invocation, None)
-            .map(|(call, _)| call)
+    pub fn call(&self, invocation: Invocation<'_>) -> Result<tool::Call, String> {
+        self.charge(invocation, None).map(|(call, _)| call)
     }
 
-    pub fn append_effect_call(
+    pub fn charge(
         &self,
         invocation: Invocation<'_>,
         effect: Option<&str>,
@@ -189,7 +184,7 @@ impl Store {
         Ok((call, effect))
     }
 
-    pub fn append_tool_result(
+    pub fn reply(
         &self,
         call: &str,
         output: Option<Value>,
@@ -221,11 +216,7 @@ impl Store {
             .ok_or_else(|| "created tool_result missing".to_string())
     }
 
-    pub fn append_soul_assistant_text(
-        &self,
-        strand: &str,
-        text: &str,
-    ) -> Result<crate::message::Placed, String> {
+    pub fn voice(&self, strand: &str, text: &str) -> Result<crate::message::Placed, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let soul: String = tx
@@ -257,7 +248,7 @@ impl Store {
             .ok_or_else(|| "created message missing".to_string())
     }
 
-    fn finish_thinking_span(
+    fn wrap(
         &self,
         thinking_span_id: &str,
         state: thinking::State,

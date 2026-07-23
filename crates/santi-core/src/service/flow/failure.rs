@@ -72,7 +72,7 @@ impl Operation {
         match self {
             Self::Assembly => "turn.assembly_input",
             Self::Prompt => "turn.system_prompt",
-            Self::Admission(Admission::Context) => "turn.context_admission",
+            Self::Admission(Admission::Context) => "turn.admission",
             Self::Admission(Admission::Execution) => "turn.execution_budget_admission",
             Self::Persistence(Persistence::Thinking) => "turn.thinking_persistence",
             Self::Persistence(Persistence::Text) => "turn.text_persistence",
@@ -107,7 +107,7 @@ impl Failure {
         }
     }
 
-    pub(super) fn context_budget(error: Fault) -> Self {
+    pub(super) fn context(error: Fault) -> Self {
         Self {
             error: error.to_string(),
             partial: String::new(),
@@ -115,7 +115,7 @@ impl Failure {
         }
     }
 
-    pub(super) fn execution_budget(error: Fault, partial: &str) -> Self {
+    pub(super) fn execution(error: Fault, partial: &str) -> Self {
         Self {
             error: error.to_string(),
             partial: partial.to_string(),
@@ -125,40 +125,34 @@ impl Failure {
 }
 
 impl Service {
-    pub(super) fn fail_background_turn(&self, strand: &str, turn: &str, failure: Failure) {
+    pub(super) fn bury(&self, strand: &str, turn: &str, failure: Failure) {
         let Failure {
             error,
             partial,
             cause,
         } = failure;
-        let persist_budget = |canonical_error: Fault, budget: &str| match self
-            .store
-            .fail_turn_with_incident(turn, &error, canonical_error.incident.as_deref())
-        {
+        let condemned = |canonical_error: Fault, budget: &str| match self.store.condemn(
+            turn,
+            &error,
+            canonical_error.incident.as_deref(),
+        ) {
             Ok(turn) => (Some(turn), canonical_error),
             Err(persistence_error) => {
                 eprintln!(
                     "santi: {budget}-budget turn persistence failed for {turn}: {persistence_error}"
                 );
-                (
-                    None,
-                    terminal_runtime_error(strand, turn, persistence_error),
-                )
+                (None, unwritten(strand, turn, persistence_error))
             }
         };
         let (finished, canonical_error) = match cause {
-            Cause::Provider(metadata) => {
-                self.persist_provider_failure(strand, turn, &error, metadata)
-            }
-            Cause::Budget(Admission::Context, error) => persist_budget(*error, "context"),
-            Cause::Budget(Admission::Execution, error) => persist_budget(*error, "execution"),
-            Cause::Runtime(operation) => {
-                self.persist_runtime_failure(strand, turn, &error, operation)
-            }
+            Cause::Provider(metadata) => self.misfired(strand, turn, &error, metadata),
+            Cause::Budget(Admission::Context, error) => condemned(*error, "context"),
+            Cause::Budget(Admission::Execution, error) => condemned(*error, "execution"),
+            Cause::Runtime(operation) => self.tripped(strand, turn, &error, operation),
         };
 
         if let Some(held) = finished {
-            self.persist_partial_output(strand, &held.id, &held, partial);
+            self.salvage(strand, &held.id, &held, partial);
         }
         self.dispatched();
         self.publish(
@@ -170,14 +164,14 @@ impl Service {
         );
     }
 
-    fn persist_provider_failure(
+    fn misfired(
         &self,
         strand: &str,
         turn: &str,
         error: &str,
         metadata: Metadata,
     ) -> (Option<Turn>, Fault) {
-        match self.store.fail_provider_turn(
+        match self.store.misfire(
             turn,
             error,
             Misfire {
@@ -195,22 +189,19 @@ impl Service {
                     "santi: provider failure incident persistence failed for {turn}: {persistence_error}"
                 );
                 let held = self.store.fail(turn, error).ok();
-                (
-                    held,
-                    terminal_persistence_error(strand, turn, persistence_error),
-                )
+                (held, unrecorded(strand, turn, persistence_error))
             }
         }
     }
 
-    fn persist_runtime_failure(
+    fn tripped(
         &self,
         strand: &str,
         turn: &str,
         error: &str,
         operation: Operation,
     ) -> (Option<Turn>, Fault) {
-        match self.store.fail_runtime_turn(
+        match self.store.stumble(
             turn,
             error,
             Stumble {
@@ -223,35 +214,32 @@ impl Service {
                 eprintln!(
                     "santi: runtime turn failure persistence failed for {turn}: {persistence_error}"
                 );
-                (
-                    None,
-                    terminal_runtime_error(strand, turn, persistence_error),
-                )
+                (None, unwritten(strand, turn, persistence_error))
             }
         }
     }
 
-    fn persist_partial_output(&self, strand: &str, turn: &str, held: &Turn, partial: String) {
+    fn salvage(&self, strand: &str, turn: &str, held: &Turn, partial: String) {
         if partial.trim().is_empty() {
             return;
         }
-        match self.store.append_message(crate::Draft {
+        match self.store.pen(crate::Draft {
             strand: &held.strand,
             actor: message::Role::Soul,
-            id: self.store.default_soul_id(),
+            id: self.store.genesis(),
             content: message::Content::text(partial),
             state: message::State::Aborted,
             intake: message::Intake::Record,
         }) {
             Ok(message) => {
-                let seq = message.strand_message.relation.seq;
+                let seq = message.message.relation.seq;
                 self.publish(
                     strand,
                     stream::Payload::MessageCreated {
-                        message: message.strand_message,
+                        message: message.message,
                     },
                 );
-                if let Err(error) = self.store.finish_failed_turn_context(turn, seq) {
+                if let Err(error) = self.store.seal(turn, seq) {
                     eprintln!("santi: failed to finalize partial output for {turn}: {error}");
                 }
             }
@@ -262,7 +250,7 @@ impl Service {
     }
 }
 
-fn terminal_persistence_error(strand: &str, turn: &str, detail: String) -> Fault {
+fn unrecorded(strand: &str, turn: &str, detail: String) -> Fault {
     engine().transient(crate::Signal {
         descriptor: catalog::ERROR_ENGINE_PERSISTENCE_FAILED,
         source: santi_error::Source::new("santi-core", "provider_turn_failure"),
@@ -272,7 +260,7 @@ fn terminal_persistence_error(strand: &str, turn: &str, detail: String) -> Fault
     })
 }
 
-fn terminal_runtime_error(strand: &str, turn: &str, detail: String) -> Fault {
+fn unwritten(strand: &str, turn: &str, detail: String) -> Fault {
     engine().transient(crate::Signal {
         descriptor: catalog::INTERNAL,
         source: santi_error::Source::new("santi-core", "turn_failure_persistence"),

@@ -10,7 +10,7 @@ fn restart_ambiguity() {
         .dispatch(&started.effect)
         .expect("open dispatch window");
     let (_, prepared) = store
-        .append_effect_call(
+        .charge(
             Invocation {
                 turn: &started.turn,
                 call: "call_still_prepared",

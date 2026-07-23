@@ -62,7 +62,7 @@ fn fork_rejects_symlink() {
     {
         let store = Store::open(&db).expect("open store directly");
         let first = store
-            .append_message(Draft {
+            .pen(Draft {
                 strand: &parent.id,
                 actor: message::Role::System,
                 id: store.system(),
@@ -71,9 +71,9 @@ fn fork_rejects_symlink() {
                 intake: message::Intake::Record,
             })
             .expect("append first")
-            .strand_message;
+            .message;
         let second = store
-            .append_message(Draft {
+            .pen(Draft {
                 strand: &parent.id,
                 actor: message::Role::System,
                 id: store.system(),
@@ -82,7 +82,7 @@ fn fork_rejects_symlink() {
                 intake: message::Intake::Record,
             })
             .expect("append second")
-            .strand_message;
+            .message;
         store
             .compact(
                 &parent.id,
@@ -166,7 +166,7 @@ fn fork_prompt_topology() {
     let parent = service.weave().expect("create parent").strand;
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store directly");
     store
-        .append_santi_system_message(
+        .inscribe(
             &parent.id,
             message::Content::text("<system_message>\nkind: seed\n</system_message>"),
             message::Intake::Record,
@@ -176,7 +176,7 @@ fn fork_prompt_topology() {
     let child = service.fork(&parent.id).expect("fork").strand;
 
     let text = service
-        .strand_material(
+        .material(
             &child.id,
             material::Request {
                 kind: material::Kind::SystemPrompt,

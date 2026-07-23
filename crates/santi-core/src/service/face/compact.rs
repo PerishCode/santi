@@ -93,8 +93,7 @@ impl Service {
             });
             self.store.annotate(&response.compact, metadata)?;
         }
-        response.active_incident_resolved =
-            self.clear_context_incident(&strand.id, "compact_exec")?;
+        response.active_incident_resolved = self.absolve(&strand.id, "compact_exec")?;
         if response.active_incident_resolved {
             self.poked(&strand.id, "strand_send", None, "compact_recovery_poke");
         }
@@ -140,7 +139,7 @@ impl Service {
         metadata: serde_json::Value,
     ) -> Result<budget::Estimate, String> {
         let input = self.store.preview(strand, response, summary, metadata)?;
-        let instructions = self.system_prompt_text(strand)?;
+        let instructions = self.wording(strand)?;
         let tools = tools();
         Ok(estimated(&input, Some(&instructions), Some(&tools)))
     }

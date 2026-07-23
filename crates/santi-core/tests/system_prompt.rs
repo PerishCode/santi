@@ -217,7 +217,7 @@ impl PromptHarness {
 
     fn system_prompt_for(&self, strand: &str) -> material::Material {
         self.service
-            .strand_material(
+            .material(
                 strand,
                 material::Request {
                     kind: material::Kind::SystemPrompt,

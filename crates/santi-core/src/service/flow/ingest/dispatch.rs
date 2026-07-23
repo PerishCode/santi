@@ -1,4 +1,4 @@
-use crate::service::flow::memory::{Gate, drive_maintenance};
+use crate::service::flow::memory::{Gate, maintain};
 use crate::service::{Service, drive};
 use crate::store::{Launch, Opened, errors::drive::Input};
 use crate::{Fault, catalog, engine};
@@ -57,7 +57,7 @@ impl Service {
         })
     }
 
-    pub fn drive_strand(&self, strand: &str) -> Result<crate::drive::Response, Box<Fault>> {
+    pub fn drive(&self, strand: &str) -> Result<crate::drive::Response, Box<Fault>> {
         self.store
             .strand(strand)
             .map_err(|message| Box::new(erred(catalog::INTERNAL, strand, message)))?
@@ -146,22 +146,22 @@ impl Service {
                 return drive::Outcome::Failed(self.stumbled(strand, drive, error));
             }
         };
-        match self.memory_drive_gate(&strand) {
+        match self.gate(&strand) {
             Ok(Gate::Allow) => {}
             Ok(Gate::Pause {
                 maintenance_strand_id,
             }) => {
-                drive_maintenance(self, &maintenance_strand_id);
+                maintain(self, &maintenance_strand_id);
                 return drive::Outcome::Paused;
             }
             Err(error) => {
                 return drive::Outcome::Failed(self.stumbled(&strand.id, drive, error));
             }
         }
-        if let Err(error) = self.clear_context_incident(&strand.id, "driver_remeasurement") {
+        if let Err(error) = self.absolve(&strand.id, "driver_remeasurement") {
             return drive::Outcome::Failed(self.stumbled(&strand.id, drive, error));
         }
-        let admission = match self.context_admission(&strand.id) {
+        let admission = match self.admission(&strand.id) {
             Ok(admission) => admission,
             Err(error) => {
                 return drive::Outcome::Failed(self.stumbled(&strand.id, drive, error));
@@ -191,7 +191,7 @@ impl Service {
                 let strand = strand.id.clone();
                 let turn = started.turn.id.clone();
                 tokio::spawn(async move {
-                    background.complete_provider_turn(strand, turn).await;
+                    background.conduct(strand, turn).await;
                 });
                 drive::Outcome::Started(started.turn, started.drained)
             }

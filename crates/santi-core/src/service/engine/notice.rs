@@ -175,15 +175,13 @@ impl Service {
             return Ok(());
         }
         let content = reminded(&event);
-        let message = self.store.append_santi_system_message(
-            &event.address.strand,
-            content,
-            message::Intake::Record,
-        )?;
+        let message =
+            self.store
+                .inscribe(&event.address.strand, content, message::Intake::Record)?;
         self.publish(
             &event.address.strand,
             stream::Payload::MessageCreated {
-                message: message.strand_message,
+                message: message.message,
             },
         );
         Ok(())

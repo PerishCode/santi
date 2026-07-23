@@ -69,6 +69,12 @@ pub struct Descriptor {
     pub exposure: Exposure,
 }
 
+impl Descriptor {
+    pub fn key(&self, kind: &str, id: &str) -> String {
+        format!("{}:{kind}:{id}", self.code)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[schema(as = error::Scope)]
 pub struct Scope {

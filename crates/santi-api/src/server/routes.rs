@@ -17,7 +17,7 @@ use tower_http::{
 
 use super::{
     ApiError,
-    errors::{errors, strand_errors},
+    errors::{errors, stranded},
     ingress::ingest_webhook,
     sse::{strand_events, transitions, turn_event_stream},
 };
@@ -31,14 +31,14 @@ pub(super) fn router(service: Service) -> Router {
         .route("/api/v1/webhooks", post(subscribe).get(webhooks))
         .route("/api/v1/strands/{strand}", get(get_strand))
         .route("/api/v1/strands/{strand}/messages", get(list_messages))
-        .route("/api/v1/strands/{strand}/materials", post(strand_material))
+        .route("/api/v1/strands/{strand}/materials", post(material))
         .route("/api/v1/strands/{strand}/events", get(strand_events))
         .route("/api/v1/strands/{strand}/send", post(send))
-        .route("/api/v1/strands/{strand}/drive", post(drive_strand))
+        .route("/api/v1/strands/{strand}/drive", post(drive))
         .route("/api/v1/strands/{strand}/fork", post(fork))
         .route("/api/v1/strands/{strand}/compact", post(exec))
-        .route("/api/v1/strands/{strand}/budget", get(strand_budget))
-        .route("/api/v1/strands/{strand}/errors", get(strand_errors))
+        .route("/api/v1/strands/{strand}/budget", get(audit))
+        .route("/api/v1/strands/{strand}/errors", get(stranded))
         .route("/api/v1/errors/events", get(transitions))
         .route("/api/v1/errors/{scope_kind}/{scope_id}", get(errors))
         .route("/api/v1/receipts/{inbox}", get(receipt))

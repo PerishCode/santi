@@ -93,10 +93,11 @@ async fn boot_drains_inbox() {
 
     let store = Store::open(&config.database).expect("open store directly");
     store
-        .enqueue_inbox(
+        .receive(
             &strand,
             message::Kind::Text,
             message::Content::text("stranded before the crash"),
+            None,
         )
         .expect("enqueue inbox");
     drop(store);

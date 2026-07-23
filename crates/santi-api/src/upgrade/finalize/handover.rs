@@ -20,7 +20,7 @@ pub(super) fn finalize_handover(
     };
     if let Some(detail) = handover_failure {
         let error = store
-            .open_error_incident(santi_core::error::Draft {
+            .raise(santi_core::error::Draft {
                 key: HANDOVER_INCIDENT_KEY.to_string(),
                 descriptor: santi_core::catalog::UPGRADE_HANDOVER_FAILED,
                 scope: santi_core::Scope::new("runtime", RUNTIME_SCOPE_ID),
@@ -46,7 +46,7 @@ pub(super) fn finalize_handover(
         errors.push(error);
     } else {
         store
-            .resolve_error_incident(
+            .resolve(
                 HANDOVER_INCIDENT_KEY,
                 "upgrade.handover_succeeded",
                 json!({

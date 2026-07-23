@@ -10,10 +10,7 @@ pub(in crate::service) struct Progress<'a> {
 }
 
 impl Service {
-    pub(in crate::service) fn ensure_thinking_span(
-        &self,
-        progress: Progress<'_>,
-    ) -> Result<(), String> {
+    pub(in crate::service) fn tend(&self, progress: Progress<'_>) -> Result<(), String> {
         if let Some(thinking) = progress.current {
             if progress.response.is_some()
                 && thinking.response != progress.response
@@ -29,9 +26,7 @@ impl Service {
             return Ok(());
         }
 
-        let thinking = self
-            .store
-            .append_thinking_span(progress.turn, progress.response)?;
+        let thinking = self.store.muse(progress.turn, progress.response)?;
         self.publish(
             progress.strand,
             stream::Payload::ThinkingCreated {
@@ -65,7 +60,7 @@ impl Service {
         Ok(())
     }
 
-    pub(in crate::service) fn complete_current_thinking_span(
+    pub(in crate::service) fn conclude(
         &self,
         strand: &str,
         current: &mut Option<thinking::Span>,
@@ -74,10 +69,7 @@ impl Service {
         let Some(thinking) = current.take() else {
             return Ok(());
         };
-        if let Some(completed) = self
-            .store
-            .complete_thinking_span(&thinking.id, completion_reason)?
-        {
+        if let Some(completed) = self.store.conclude(&thinking.id, completion_reason)? {
             self.publish(
                 strand,
                 stream::Payload::ThinkingCompleted {
@@ -88,7 +80,7 @@ impl Service {
         Ok(())
     }
 
-    pub(in crate::service) fn fail_current_thinking_span(
+    pub(in crate::service) fn abandon(
         &self,
         strand: &str,
         current: &mut Option<thinking::Span>,
@@ -97,7 +89,7 @@ impl Service {
         let Some(thinking) = current.take() else {
             return Ok(());
         };
-        if let Some(failed) = self.store.fail_thinking_span(&thinking.id, error)? {
+        if let Some(failed) = self.store.abandon(&thinking.id, error)? {
             self.publish(
                 strand,
                 stream::Payload::ThinkingCompleted { thinking: failed },

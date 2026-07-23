@@ -13,10 +13,11 @@ async fn resume_holds_pending() {
     let strand = service.weave().expect("create strand").strand;
     let store = Store::open(&db).expect("open store directly");
     let santi_core::ingest::Outcome::Accepted { .. } = store
-        .enqueue_inbox(
+        .receive(
             &strand.id,
             message::Kind::Text,
             message::Content::text("stranded pending that exceeds budget"),
+            None,
         )
         .expect("offline enqueue")
     else {
@@ -78,7 +79,7 @@ async fn rejected_payload_is_ephemeral() {
         .find(|strand| strand.label.as_deref() == Some("test:no-payload-audit"))
         .expect("labeled strand");
     let incident = service
-        .strand_errors(&strand.id, 10)
+        .stranded(&strand.id, 10)
         .expect("errors")
         .expect("strand")
         .pop()
@@ -156,16 +157,16 @@ async fn compact_resolves_incident() {
     drop(conn);
     let store = Store::open(&db).expect("open store directly");
     let boundary = store
-        .append_message(Draft {
+        .pen(Draft {
             strand: &strand.id,
             actor: message::Role::Soul,
-            id: store.default_soul_id(),
+            id: store.genesis(),
             content: message::Content::text("manual compact boundary"),
             state: message::State::Fixed,
             intake: message::Intake::Record,
         })
         .expect("append manual boundary")
-        .strand_message;
+        .message;
 
     let compact = service
         .exec(

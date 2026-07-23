@@ -1,9 +1,9 @@
 use rusqlite::params;
 use serde_json::json;
 
-use super::{provider_incident_key, runtime_incident_key};
+use crate::catalog;
 use crate::message;
-use crate::store::{Store, db::Database, execution_budget_incident_key};
+use crate::store::{Store, db::Database};
 use crate::{now, tag, turn::Turn};
 
 pub struct Completion<'a> {
@@ -78,7 +78,7 @@ impl Store {
         .map_err(|error| error.to_string())?;
         Database::new(&tx).complete(completion.turn, &now)?;
         Database::new(&tx).resolve(
-            &provider_incident_key(&strand),
+            &catalog::PROVIDER_TURN_FAILED.key("strand", &strand),
             "provider.turn_succeeded",
             json!({
                 "turn": completion.turn,
@@ -88,7 +88,7 @@ impl Store {
             }),
         )?;
         Database::new(&tx).resolve(
-            &runtime_incident_key(&strand),
+            &catalog::RUNTIME_TURN_FAILED.key("strand", &strand),
             "runtime.turn_succeeded",
             json!({
                 "turn": completion.turn,
@@ -97,7 +97,7 @@ impl Store {
             }),
         )?;
         Database::new(&tx).resolve(
-            &execution_budget_incident_key(&strand),
+            &catalog::EXECUTION_BUDGET_EXCEEDED.key("strand", &strand),
             "execution_budget.turn_succeeded",
             json!({
                 "turn": completion.turn,

@@ -11,22 +11,22 @@ impl Service {
             .ok_or_else(|| "parent strand not found".to_string())?;
         let fork = parent.next - 1;
         let child = self.store.fork(&parent.id, fork)?;
-        if let Err(error) = self.sync_fork_workspace(&parent.id, &child.id) {
-            let nursery = self.strand_memory_dir(&child.id);
+        if let Err(error) = self.bequeath(&parent.id, &child.id) {
+            let nursery = self.strandhome(&child.id);
             if let Some(child_root) = nursery.parent() {
                 let _ = fs::remove_dir_all(child_root);
             } else {
                 let _ = fs::remove_dir_all(&nursery);
             }
-            let _ = self.store.delete_fork_child_strand(&child.id);
+            let _ = self.store.disown(&child.id);
             return Err(format!("fork workspace sync failed: {error}"));
         }
         Ok(strand::Forked { strand: child })
     }
 
-    fn sync_fork_workspace(&self, parent: &str, child_strand_id: &str) -> Result<(), String> {
-        let parent = self.strand_memory_dir(parent);
-        let dir = self.strand_memory_dir(child_strand_id);
+    fn bequeath(&self, parent: &str, child_strand_id: &str) -> Result<(), String> {
+        let parent = self.strandhome(parent);
+        let dir = self.strandhome(child_strand_id);
         if dir.exists() {
             return Err(format!(
                 "child strand workspace already exists: {}",

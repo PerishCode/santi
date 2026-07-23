@@ -7,7 +7,7 @@ fn fork_copies_prefix() {
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let parent = store.weave().expect("create parent");
     let first = store
-        .append_message(Draft {
+        .pen(Draft {
             strand: &parent.id,
             actor: message::Role::System,
             id: store.system(),
@@ -16,9 +16,9 @@ fn fork_copies_prefix() {
             intake: message::Intake::Record,
         })
         .expect("append first")
-        .strand_message;
+        .message;
     let second = store
-        .append_message(Draft {
+        .pen(Draft {
             strand: &parent.id,
             actor: message::Role::System,
             id: store.system(),
@@ -27,9 +27,9 @@ fn fork_copies_prefix() {
             intake: message::Intake::Record,
         })
         .expect("append second")
-        .strand_message;
+        .message;
     let third = store
-        .append_message(Draft {
+        .pen(Draft {
             strand: &parent.id,
             actor: message::Role::System,
             id: store.system(),
@@ -38,7 +38,7 @@ fn fork_copies_prefix() {
             intake: message::Intake::Record,
         })
         .expect("append third")
-        .strand_message;
+        .message;
 
     let child = store.fork(&parent.id, 2).expect("fork");
     assert_eq!(child.parent.as_deref(), Some(parent.id.as_str()));
@@ -71,7 +71,7 @@ fn fork_copies_inner_compacts() {
     for text in ["one", "two", "three", "four"] {
         messages.push(
             store
-                .append_message(Draft {
+                .pen(Draft {
                     strand: &parent.id,
                     actor: message::Role::System,
                     id: store.system(),
@@ -80,7 +80,7 @@ fn fork_copies_inner_compacts() {
                     intake: message::Intake::Record,
                 })
                 .expect("append")
-                .strand_message,
+                .message,
         );
     }
     let inside = store
@@ -136,7 +136,7 @@ fn fork_reuses_tools() {
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let parent = store.weave().expect("create parent");
     let user = store
-        .append_message(Draft {
+        .pen(Draft {
             strand: &parent.id,
             actor: message::Role::System,
             id: store.system(),
@@ -145,13 +145,13 @@ fn fork_reuses_tools() {
             intake: message::Intake::Request,
         })
         .expect("append user")
-        .strand_message;
+        .message;
     let turn = store
         .start(&parent.id, &user.message.id)
         .expect("start turn")
         .turn;
     store
-        .append_tool_call(Invocation {
+        .call(Invocation {
             turn: &turn.id,
             call: "call_fork",
             name: "shell",
@@ -165,7 +165,7 @@ fn fork_reuses_tools() {
         })
         .expect("append tool call");
     store
-        .append_tool_result(
+        .reply(
             "call_fork",
             Some(serde_json::json!({ "stdout": "fork\n" })),
             None,
@@ -208,7 +208,7 @@ fn fork_drops_external_state() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let parent = store
-        .labeled(store.default_soul_id(), "github:issue:fork")
+        .labeled(store.genesis(), "github:issue:fork")
         .expect("label strand");
     assert_eq!(parent.label.as_deref(), Some("github:issue:fork"));
     let turn = store.start(&parent.id, "manual").expect("start turn").turn;

@@ -81,7 +81,7 @@ pub struct Paths {
     pub database: Option<PathBuf>,
     pub runtime: Option<PathBuf>,
     pub execution: Option<PathBuf>,
-    pub constitution_file: Option<PathBuf>,
+    pub charter: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, Cascade)]
@@ -150,7 +150,7 @@ fn runtime(held: SantiConfig) -> Runtime {
         github_allow: held.webhooks.github.allow,
         feishu_key: held.webhooks.feishu.encrypt_key,
         feishu_allow: held.webhooks.feishu.allow,
-        constitution: held.paths.constitution_file,
+        constitution: held.paths.charter,
     }
 }
 

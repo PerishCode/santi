@@ -32,7 +32,7 @@ pub fn register_attempt_handover_budgets(
         if !is_attempt_handover {
             continue;
         }
-        service.set_strand_execution_budget(
+        service.ration(
             &strand.id,
             santi_core::budget::Execution {
                 profile: HANDOVER_BUDGET_PROFILE.to_string(),

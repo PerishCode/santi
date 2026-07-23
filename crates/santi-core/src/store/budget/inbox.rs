@@ -2,26 +2,16 @@ use super::*;
 use crate::ingest;
 
 impl Store {
-    pub(crate) fn enqueue_inbox_with_context(
-        &self,
-        ingress: Ingress<'_>,
-    ) -> Result<Intake, String> {
-        self.enqueue_inbox_with_policy(ingress, true)
+    pub(crate) fn ingest(&self, ingress: Ingress<'_>) -> Result<Intake, String> {
+        self.intake(ingress, true)
     }
 
-    pub(crate) fn enqueue_inbox_while_suspended(
-        &self,
-        mut ingress: Ingress<'_>,
-    ) -> Result<Intake, String> {
+    pub(crate) fn harbor(&self, mut ingress: Ingress<'_>) -> Result<Intake, String> {
         ingress.admission = None;
-        self.enqueue_inbox_with_policy(ingress, false)
+        self.intake(ingress, false)
     }
 
-    fn enqueue_inbox_with_policy(
-        &self,
-        ingress: Ingress<'_>,
-        enforce_active_holds: bool,
-    ) -> Result<Intake, String> {
+    fn intake(&self, ingress: Ingress<'_>, enforce_active_holds: bool) -> Result<Intake, String> {
         let Ingress {
             strand,
             kind,
@@ -56,11 +46,8 @@ impl Store {
         }
 
         if enforce_active_holds
-            && let Some(error) = crate::store::errors::drive::repeat_active_in_conn(
-                &tx,
-                strand,
-                "ingest_active_guard",
-            )?
+            && let Some(error) =
+                crate::store::errors::drive::stalled(&tx, strand, "ingest_active_guard")?
         {
             tx.commit().map_err(|error| error.to_string())?;
             return Ok(Intake {
@@ -73,14 +60,10 @@ impl Store {
 
         if enforce_active_holds
             && Database::new(&tx)
-                .incident(&context_incident_key(strand))?
+                .incident(&catalog::CONTEXT_BUDGET_EXCEEDED.key("strand", strand))?
                 .is_some()
         {
-            let error = super::state::repeat_context_incident(
-                &Database::new(&tx),
-                strand,
-                "ingest_active_guard",
-            )?;
+            let error = super::state::repress(&Database::new(&tx), strand, "ingest_active_guard")?;
             tx.commit().map_err(|error| error.to_string())?;
             return Ok(Intake {
                 outcome: ingest::Outcome::Rejected {

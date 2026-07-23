@@ -7,7 +7,7 @@ use super::*;
 use crate::effect;
 
 impl Store {
-    pub(crate) fn fail_provider_turn(
+    pub(crate) fn misfire(
         &self,
         turn: &str,
         error: &str,
@@ -33,7 +33,7 @@ impl Store {
         )
         .map_err(|error| error.to_string())?;
         let error = Database::new(&tx).open(santi_error::Draft {
-            key: provider_incident_key(&strand),
+            key: catalog::PROVIDER_TURN_FAILED.key("strand", &strand),
             descriptor: catalog::PROVIDER_TURN_FAILED,
             scope: santi_error::Scope::new("strand", &strand),
             source: santi_error::Source::new("santi-provider", failure.operation),
@@ -62,7 +62,7 @@ impl Store {
         Ok((turn, error))
     }
 
-    pub(crate) fn fail_runtime_turn(
+    pub(crate) fn stumble(
         &self,
         turn: &str,
         error: &str,
@@ -87,7 +87,7 @@ impl Store {
             params![turn, error, now],
         )
         .map_err(|error| error.to_string())?;
-        let error = open_runtime_incident(&tx, &strand, turn, failure)?;
+        let error = indict(&tx, &strand, turn, failure)?;
         Database::new(&tx).reconcile(
             turn,
             effect::Reason::TurnFailedBeforeDispatch,
@@ -103,10 +103,10 @@ impl Store {
     }
 
     pub fn fail(&self, turn: &str, error: &str) -> Result<Turn, String> {
-        self.fail_turn_with_incident(turn, error, None)
+        self.condemn(turn, error, None)
     }
 
-    pub(crate) fn fail_turn_with_incident(
+    pub(crate) fn condemn(
         &self,
         turn: &str,
         error: &str,
@@ -137,7 +137,7 @@ impl Store {
             .ok_or_else(|| "failed turn missing".to_string())
     }
 
-    pub fn finish_failed_turn_context(&self, turn: &str, seen: i64) -> Result<Turn, String> {
+    pub fn seal(&self, turn: &str, seen: i64) -> Result<Turn, String> {
         let conn = self.conn.lock().unwrap();
         let now = now();
         conn.execute(
@@ -171,22 +171,14 @@ impl Store {
     }
 }
 
-pub(super) fn provider_incident_key(strand: &str) -> String {
-    format!("{}:strand:{strand}", catalog::PROVIDER_TURN_FAILED.code)
-}
-
-pub(super) fn runtime_incident_key(strand: &str) -> String {
-    format!("{}:strand:{strand}", catalog::RUNTIME_TURN_FAILED.code)
-}
-
-pub(super) fn open_runtime_incident(
+pub(super) fn indict(
     conn: &rusqlite::Connection,
     strand: &str,
     turn: &str,
     failure: Stumble<'_>,
 ) -> Result<Fault, String> {
     Database::new(conn).open(santi_error::Draft {
-        key: runtime_incident_key(strand),
+        key: catalog::RUNTIME_TURN_FAILED.key("strand", strand),
         descriptor: catalog::RUNTIME_TURN_FAILED,
         scope: santi_error::Scope::new("strand", strand),
         source: santi_error::Source::new("santi-core", failure.operation),

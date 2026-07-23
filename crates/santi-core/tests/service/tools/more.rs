@@ -13,7 +13,7 @@ async fn rejects_tool_batch() {
     );
     let strand = service.weave().expect("create strand").strand;
     service
-        .set_strand_execution_budget(&strand.id, execution_budget(4, 1, 100, 50))
+        .ration(&strand.id, execution_budget(4, 1, 100, 50))
         .expect("set budget");
     let response = service
         .send(
@@ -60,7 +60,7 @@ async fn reserves_followup_round() {
     );
     let strand = service.weave().expect("create strand").strand;
     service
-        .set_strand_execution_budget(&strand.id, execution_budget(2, 4, 100, 50))
+        .ration(&strand.id, execution_budget(2, 4, 100, 50))
         .expect("set budget");
     let response = service
         .send(
@@ -108,7 +108,7 @@ async fn bounds_shell_capture() {
     );
     let strand = service.weave().expect("create strand").strand;
     service
-        .set_strand_execution_budget(&strand.id, execution_budget(3, 2, 10, 6))
+        .ration(&strand.id, execution_budget(3, 2, 10, 6))
         .expect("set budget");
     let response = service
         .send(
@@ -167,7 +167,7 @@ async fn preserves_retry_usage() {
     );
     let strand = service.weave().expect("create strand").strand;
     service
-        .set_strand_execution_budget(&strand.id, execution_budget(4, 1, 100, 50))
+        .ration(&strand.id, execution_budget(4, 1, 100, 50))
         .expect("set budget");
     let first = service
         .send(

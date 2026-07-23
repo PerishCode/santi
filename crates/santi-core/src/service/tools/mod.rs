@@ -61,7 +61,7 @@ impl Service {
             mark: call.mark.clone(),
             response: Some(call.response.clone()),
         };
-        let (held, effect) = self.store.append_effect_call(
+        let (held, effect) = self.store.charge(
             crate::Invocation {
                 turn,
                 call: &call.call,
@@ -84,7 +84,7 @@ impl Service {
                 limit: output_limit,
             })?
         } else {
-            self.store.append_tool_result(
+            self.store.reply(
                 &call.call,
                 None,
                 Some(curbed(
@@ -111,7 +111,7 @@ impl Service {
         {
             Ok(prepared) => prepared,
             Err(error) => {
-                return self.store.append_effect_tool_result(
+                return self.store.redeem(
                     effect,
                     crate::store::Settlement {
                         call: &call.call,
@@ -124,7 +124,7 @@ impl Service {
         };
         self.store.dispatch(effect)?;
         match shell::ran(prepared, output_limit) {
-            shell::Outcome::Captured(output) => self.store.append_effect_tool_result(
+            shell::Outcome::Captured(output) => self.store.redeem(
                 effect,
                 crate::store::Settlement {
                     call: &call.call,
@@ -133,7 +133,7 @@ impl Service {
                     state: effect::State::Confirmed,
                 },
             ),
-            shell::Outcome::Failed(error) => self.store.append_effect_tool_result(
+            shell::Outcome::Failed(error) => self.store.redeem(
                 effect,
                 crate::store::Settlement {
                     call: &call.call,
@@ -159,16 +159,15 @@ impl Service {
         soul: &str,
         args: shell::Args,
     ) -> Result<shell::Prepared, String> {
-        std::fs::create_dir_all(self.soul_memory_dir(soul)).map_err(|error| error.to_string())?;
-        std::fs::create_dir_all(self.strand_memory_dir(strand))
-            .map_err(|error| error.to_string())?;
+        std::fs::create_dir_all(self.soulhome(soul)).map_err(|error| error.to_string())?;
+        std::fs::create_dir_all(self.strandhome(strand)).map_err(|error| error.to_string())?;
         let cwd = self.situated(strand, soul, args.cwd.as_deref())?;
         std::fs::create_dir_all(&cwd).map_err(|error| error.to_string())?;
         let mut command = shell::shell(&args.command);
         command
             .current_dir(&cwd)
-            .env("SANTI_SOUL_MEMORY_DIR", self.soul_memory_dir(soul))
-            .env("SANTI_STRAND_MEMORY_DIR", self.strand_memory_dir(strand))
+            .env("SANTI_SOUL_MEMORY_DIR", self.soulhome(soul))
+            .env("SANTI_STRAND_MEMORY_DIR", self.strandhome(strand))
             .env("SANTI_SOUL_ID", soul)
             .env("SANTI_STRAND_ID", strand)
             .env("SANTI_TURN_ID", turn)
@@ -183,8 +182,8 @@ impl Service {
         };
         let uri = parsed(cwd)?;
         let root = match uri.root {
-            workspace::Root::Soul => self.soul_memory_dir(soul),
-            workspace::Root::Strand => self.strand_memory_dir(strand),
+            workspace::Root::Soul => self.soulhome(soul),
+            workspace::Root::Strand => self.strandhome(strand),
         };
         Ok(root.join(uri.path))
     }
@@ -197,7 +196,7 @@ impl Service {
         PathBuf::from(&self.config.execution)
     }
 
-    pub(super) fn soul_memory_dir(&self, soul: &str) -> PathBuf {
+    pub(super) fn soulhome(&self, soul: &str) -> PathBuf {
         self.runtime().join("souls").join(soul).join("memory")
     }
 
@@ -205,15 +204,15 @@ impl Service {
         crate::store::memoir(self.runtime(), soul)
     }
 
-    pub(super) fn strand_memory_dir(&self, strand: &str) -> PathBuf {
+    pub(super) fn strandhome(&self, strand: &str) -> PathBuf {
         self.runtime().join("strands").join(strand).join("memory")
     }
 
-    pub(super) fn strand_memory_file(&self, strand: &str) -> PathBuf {
-        self.strand_memory_dir(strand).join("MEMORY.md")
+    pub(super) fn journal(&self, strand: &str) -> PathBuf {
+        self.strandhome(strand).join("MEMORY.md")
     }
 
-    pub(super) fn constitution_file(&self) -> PathBuf {
+    pub(super) fn charter(&self) -> PathBuf {
         self.config
             .constitution
             .as_ref()

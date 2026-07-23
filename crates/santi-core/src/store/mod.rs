@@ -14,7 +14,7 @@ mod lifecycle;
 mod runtime;
 mod turns;
 
-pub(crate) use budget::{Ingress, Launch, Replay, execution_budget_incident_key};
+pub(crate) use budget::{Ingress, Launch, Replay};
 pub(crate) use compact::Collapse;
 pub use db::version;
 use db::*;
@@ -45,7 +45,7 @@ pub struct Store {
 
 #[derive(Debug, Clone)]
 pub struct Penned {
-    pub strand_message: message::Placed,
+    pub message: message::Placed,
 }
 
 pub struct Draft<'a> {
@@ -85,7 +85,7 @@ pub(crate) struct Stumble<'a> {
 }
 
 impl Store {
-    pub fn default_soul_id(&self) -> &'static str {
+    pub fn genesis(&self) -> &'static str {
         GENESIS
     }
 
@@ -156,17 +156,17 @@ impl Store {
         }))
     }
 
-    pub fn append_message(&self, draft: Draft<'_>) -> Result<Penned, String> {
-        self.append_message_with_kind(draft, message::Kind::Text)
+    pub fn pen(&self, draft: Draft<'_>) -> Result<Penned, String> {
+        self.compose(draft, message::Kind::Text)
     }
 
-    pub fn append_santi_system_message(
+    pub fn inscribe(
         &self,
         strand: &str,
         content: message::Content,
         intake: message::Intake,
     ) -> Result<Penned, String> {
-        self.append_message_with_kind(
+        self.compose(
             Draft {
                 strand,
                 actor: message::Role::System,
@@ -179,11 +179,7 @@ impl Store {
         )
     }
 
-    fn append_message_with_kind(
-        &self,
-        draft: Draft<'_>,
-        kind: message::Kind,
-    ) -> Result<Penned, String> {
+    fn compose(&self, draft: Draft<'_>, kind: message::Kind) -> Result<Penned, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let message = tag("msg");
@@ -212,7 +208,7 @@ impl Store {
         Database::new(&tx).entered(draft.strand, strand::Target::Message, &message)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(Penned {
-            strand_message: Database::new(&conn)
+            message: Database::new(&conn)
                 .message(&message)?
                 .ok_or_else(|| "created message missing".to_string())?,
         })

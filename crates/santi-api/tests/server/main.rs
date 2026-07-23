@@ -126,10 +126,11 @@ async fn effect_http_roundtrip() {
     let store = Store::open(&database).expect("open store");
     let strand = store.weave().expect("create strand");
     let inbox = match store
-        .enqueue_inbox(
+        .receive(
             &strand.id,
             message::Kind::Text,
             message::Content::text("run effect"),
+            None,
         )
         .expect("enqueue")
     {
@@ -142,7 +143,7 @@ async fn effect_http_roundtrip() {
         .expect("started turn")
         .turn;
     let (_, effect) = store
-        .append_effect_call(
+        .charge(
             Invocation {
                 turn: &turn.id,
                 call: "call_api_effect",

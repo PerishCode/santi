@@ -12,7 +12,7 @@ pub struct DoctorReport {
     pub schema_version: Option<u32>,
     pub expected_schema_version: u32,
     pub schema_ok: bool,
-    pub default_soul_id: String,
+    pub genesis: String,
     pub memory_path: String,
     pub memory_present: bool,
     pub memory_readable: bool,
@@ -53,7 +53,7 @@ fn inbox_seed_existing_strand(
     strand: &str,
     text: &str,
 ) -> Result<SeedReport, String> {
-    let outcome = store.enqueue_inbox_with_source(
+    let outcome = store.receive(
         strand,
         santi_core::message::Kind::SantiSystem,
         santi_core::message::Content::text(text),
@@ -125,7 +125,7 @@ impl RuntimePaths {
             schema_version,
             expected_schema_version: santi_core::VERSION,
             schema_ok,
-            default_soul_id: santi_core::GENESIS.to_string(),
+            genesis: santi_core::GENESIS.to_string(),
             memory_path: memory_path.display().to_string(),
             memory_present,
             memory_readable,

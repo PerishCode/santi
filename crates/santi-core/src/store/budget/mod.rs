@@ -2,8 +2,6 @@ mod inbox;
 mod state;
 mod turn;
 
-pub(crate) use turn::execution_budget_incident_key;
-
 use rusqlite::{OptionalExtension, params};
 use santi_error::{Fault, Incident, catalog, engine};
 use santi_provider::{Item, Tool};
@@ -18,10 +16,6 @@ use crate::{budget, ingest, message};
 use crate::{now, tag};
 
 const PENDING: &str = "pending_drain_would_exceed_budget";
-
-pub(crate) fn context_incident_key(strand: &str) -> String {
-    format!("{}:strand:{strand}", catalog::CONTEXT_BUDGET_EXCEEDED.code)
-}
 
 pub(crate) struct Pressure<'a> {
     pub code: &'a str,
@@ -40,7 +34,7 @@ pub(crate) struct Pressure<'a> {
 impl Pressure<'_> {
     fn drafted(self, strand: &str) -> santi_error::Draft {
         santi_error::Draft {
-            key: context_incident_key(strand),
+            key: catalog::CONTEXT_BUDGET_EXCEEDED.key("strand", strand),
             descriptor: catalog::CONTEXT_BUDGET_EXCEEDED,
             scope: santi_error::Scope::new("strand", strand),
             source: santi_error::Source::new("santi-core", self.operation),
@@ -116,11 +110,11 @@ impl Store {
         Ok(error)
     }
 
-    pub(crate) fn active_context_incident(&self, strand: &str) -> Result<Option<Incident>, String> {
-        self.active_error_incident(&context_incident_key(strand))
+    pub(crate) fn pressure(&self, strand: &str) -> Result<Option<Incident>, String> {
+        self.incident(&catalog::CONTEXT_BUDGET_EXCEEDED.key("strand", strand))
     }
 
-    pub(crate) fn resolve_context_incident(
+    pub(crate) fn vent(
         &self,
         strand: &str,
         resolved_by: &str,
@@ -131,7 +125,7 @@ impl Store {
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
         let resolved = Database::new(&tx).resolve(
-            &context_incident_key(strand),
+            &catalog::CONTEXT_BUDGET_EXCEEDED.key("strand", strand),
             resolved_by,
             json!({
                 "schema": "santi.error.context_budget.resolution.v1",

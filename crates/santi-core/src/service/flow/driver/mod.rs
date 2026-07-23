@@ -60,13 +60,11 @@ impl Driver<'_, '_> {
             Ok(event) => Ok(Some(event)),
             Err(error) => {
                 self.timing.failed(self.number, "sse_event", &error);
-                let result = self.service.fail_current_thinking_span(
-                    self.address.strand,
-                    &mut self.span,
-                    error.clone(),
-                );
+                let result =
+                    self.service
+                        .abandon(self.address.strand, &mut self.span, error.clone());
                 self.runtime(Operation::Persistence(Persistence::Thinking), result)?;
-                Err(self.provider_failure(error, Stage::Stream))
+                Err(self.faulted(error, Stage::Stream))
             }
         }
     }
@@ -84,12 +82,12 @@ impl Driver<'_, '_> {
             Event::Started { response } | Event::Working { response } => self.progressed(response),
             Event::Thinking(delta) => {
                 self.summary.push_str(&delta);
-                self.persist_reasoning_summary()?;
+                self.sketched()?;
                 Ok(false)
             }
             Event::Thought(summary) => {
                 self.summary = summary;
-                self.persist_reasoning_summary()?;
+                self.sketched()?;
                 Ok(false)
             }
             Event::Text(delta) => {
@@ -107,15 +105,13 @@ impl Driver<'_, '_> {
 
     fn progressed(&mut self, response: Option<String>) -> Result<bool, Failure> {
         self.active = response.clone();
-        let result = self
-            .service
-            .ensure_thinking_span(crate::service::thinking::Progress {
-                strand: self.address.strand,
-                turn: self.address.turn,
-                current: &mut self.span,
-                summary: &mut self.sketch,
-                response: response.clone(),
-            });
+        let result = self.service.tend(crate::service::thinking::Progress {
+            strand: self.address.strand,
+            turn: self.address.turn,
+            current: &mut self.span,
+            summary: &mut self.sketch,
+            response: response.clone(),
+        });
         self.runtime(Operation::Persistence(Persistence::Thinking), result)?;
         self.service.stirred(
             self.address.strand,
@@ -126,7 +122,7 @@ impl Driver<'_, '_> {
         Ok(false)
     }
 
-    fn persist_reasoning_summary(&mut self) -> Result<(), Failure> {
+    fn sketched(&mut self) -> Result<(), Failure> {
         let result =
             self.service
                 .summarize(self.address.strand, &mut self.sketch, self.summary.clone());
@@ -149,7 +145,7 @@ impl Driver<'_, '_> {
 
     fn called(&mut self, call: Call) -> Result<(), Failure> {
         self.timing.called(self.number, &call.name);
-        let result = self.service.complete_current_thinking_span(
+        let result = self.service.conclude(
             self.address.strand,
             &mut self.span,
             thinking::Reason::ToolCallRequested,
@@ -168,7 +164,7 @@ impl Driver<'_, '_> {
     fn complete(&mut self, response: Option<String>) -> Result<bool, Failure> {
         self.timing.completed(self.number);
         self.active = response.clone();
-        let result = self.service.complete_current_thinking_span(
+        let result = self.service.conclude(
             self.address.strand,
             &mut self.span,
             thinking::Reason::ProviderCompleted,
@@ -180,13 +176,11 @@ impl Driver<'_, '_> {
 
     fn failed(&mut self, error: String) -> Failure {
         self.timing.failed(self.number, "provider_response", &error);
-        let result = self.service.fail_current_thinking_span(
-            self.address.strand,
-            &mut self.span,
-            error.clone(),
-        );
+        let result = self
+            .service
+            .abandon(self.address.strand, &mut self.span, error.clone());
         match self.runtime(Operation::Persistence(Persistence::Thinking), result) {
-            Ok(()) => self.provider_failure(error, Stage::Response),
+            Ok(()) => self.faulted(error, Stage::Response),
             Err(failure) => failure,
         }
     }
@@ -195,7 +189,7 @@ impl Driver<'_, '_> {
         result.map_err(|error| Failure::runtime(operation, error, self.prose.as_str()))
     }
 
-    fn provider_failure(&self, error: String, stage: Stage) -> Failure {
+    fn faulted(&self, error: String, stage: Stage) -> Failure {
         Failure::provider(
             error,
             self.prose,

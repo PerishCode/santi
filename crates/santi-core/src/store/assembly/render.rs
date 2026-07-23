@@ -75,21 +75,21 @@ pub(super) fn previewed(
         })
         .map_err(|error| error.to_string())?;
     let mut input = Vec::new();
-    let mut overlay_index = 0usize;
-    let mut overlay_emitted = false;
+    let mut cursor = 0usize;
+    let mut overlaid = false;
     for row in rows {
         let (seq, kind, target) = row.map_err(|error| error.to_string())?;
-        while overlay_index < overlay.len() && overlay[overlay_index].span.to < seq {
-            overlay_index += 1;
-            overlay_emitted = false;
+        while cursor < overlay.len() && overlay[cursor].span.to < seq {
+            cursor += 1;
+            overlaid = false;
         }
-        if overlay_index < overlay.len() && overlay[overlay_index].span.from <= seq {
-            if !overlay_emitted {
+        if cursor < overlay.len() && overlay[cursor].span.from <= seq {
+            if !overlaid {
                 input.push(Item::Message {
                     role: "system".to_string(),
-                    content: overlay[overlay_index].content.clone(),
+                    content: overlay[cursor].content.clone(),
                 });
-                overlay_emitted = true;
+                overlaid = true;
             }
             continue;
         }
@@ -106,7 +106,7 @@ impl Items<'_> {
             "message" => self.message(target),
             "thinking" => self.thinking(target),
             "tool_call" => self.call(target),
-            "tool_result" => self.tool_result(target),
+            "tool_result" => self.replied(target),
             _ => Ok(None),
         }
     }
@@ -146,7 +146,7 @@ impl Items<'_> {
         }))
     }
 
-    fn tool_result(&self, target: &str) -> Result<Option<Item>, String> {
+    fn replied(&self, target: &str) -> Result<Option<Item>, String> {
         let Some(tool_result) = self.db.reply(target)? else {
             return Ok(None);
         };

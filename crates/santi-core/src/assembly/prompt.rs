@@ -22,26 +22,27 @@ pub(crate) struct Prompting<'a> {
     pub id: &'a str,
     pub strand: &'a Strand,
     pub constitution: PathBuf,
-    pub soul_memory_path: PathBuf,
-    pub strand_memory_path: PathBuf,
+    pub memoir: PathBuf,
+    pub journal: PathBuf,
     pub allowance: usize,
     pub genesis: bool,
 }
 
 pub(crate) fn prompted(request: Prompting<'_>) -> Result<String, String> {
     let constitution = chartered(&request.constitution)?;
-    let soul_memory = project_soul_memory(
-        read_soul_memory(&request.soul_memory_path, request.genesis)?,
+    let memoir = projected(
+        retrieved(&request.memoir, request.genesis)?,
         request.allowance,
     );
-    let memory = read_memory_material(&request.strand_memory_path)?;
-    let soul_source = soulward();
-    let strand_source = strandward();
+    let journal = recalled(&request.journal)?;
 
     let mut sections = vec![
         constitution,
-        format!("{soul_source} will always be displayed in [santi-soul]."),
-        format!("{strand_source} will always be displayed in [santi-strand]."),
+        format!("{} will always be displayed in [santi-soul].", soulward()),
+        format!(
+            "{} will always be displayed in [santi-strand].",
+            strandward()
+        ),
         format!(
             "These files have no internal version history; save backups into {SOULSPACE} or {STRANDSPACE} if needed."
         ),
@@ -51,8 +52,8 @@ pub(crate) fn prompted(request: Prompting<'_>) -> Result<String, String> {
     if let Some(fork_topology) = forked(&request) {
         sections.push(fork_topology);
     }
-    sections.push(remembered("santi-soul", &soul_source, &soul_memory));
-    sections.push(remembered("santi-strand", &strand_source, &memory));
+    sections.push(remembered("santi-soul", &soulward(), &memoir));
+    sections.push(remembered("santi-strand", &strandward(), &journal));
     Ok(sections.join("\n\n"))
 }
 
@@ -108,15 +109,15 @@ fn remembered(name: &str, source: &str, memory: &Material) -> String {
     .join("\n")
 }
 
-fn read_soul_memory(path: &Path, genesis: bool) -> Result<Material, String> {
-    let mut material = read_memory_material(path)?;
+fn retrieved(path: &Path, genesis: bool) -> Result<Material, String> {
+    let mut material = recalled(path)?;
     if genesis && material.content.trim().is_empty() {
         material.content = TABULA.to_string();
     }
     Ok(material)
 }
 
-fn project_soul_memory(mut material: Material, allowance: usize) -> Material {
+fn projected(mut material: Material, allowance: usize) -> Material {
     let weight = material.content.len();
     if weight <= allowance {
         return material;
@@ -145,7 +146,7 @@ fn project_soul_memory(mut material: Material, allowance: usize) -> Material {
     material
 }
 
-fn read_memory_material(path: &Path) -> Result<Material, String> {
+fn recalled(path: &Path) -> Result<Material, String> {
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),

@@ -91,7 +91,7 @@ impl Service {
             return Ok(None);
         };
         Ok(Some(strand::Detail {
-            messages: self.store.strand_messages(&strand.id)?,
+            messages: self.store.messages(&strand.id)?,
             strand,
         }))
     }
@@ -129,17 +129,17 @@ impl Service {
         self.store.receipt_status(inbox)
     }
 
-    pub fn effect_status(&self, effect_id: &str) -> Result<Option<effect::Status>, String> {
-        self.store.effect_status(effect_id)
+    pub fn effect_status(&self, effect: &str) -> Result<Option<effect::Status>, String> {
+        self.store.effect_status(effect)
     }
 
     pub fn resolve_effect(
         &self,
-        effect_id: &str,
+        effect: &str,
         outcome: effect::Outcome,
         evidence: &str,
     ) -> Result<Option<effect::Status>, String> {
-        self.store.resolve_effect(effect_id, outcome, evidence)
+        self.store.resolve_effect(effect, outcome, evidence)
     }
 
     pub(crate) fn publish_stream(&self, strand: &str, payload: stream::Payload) {
@@ -162,13 +162,13 @@ impl Service {
             .map_err(|_| ())
     }
 
-    pub fn turn_events_since(
+    pub fn since(
         &self,
         after_seq: i64,
         prefix: &str,
         limit: usize,
     ) -> Result<crate::event::Batch, String> {
-        self.store.turn_events_since(after_seq, prefix, limit)
+        self.store.since(after_seq, prefix, limit)
     }
 
     pub(in crate::service) fn dispatch_error_events(&self) {

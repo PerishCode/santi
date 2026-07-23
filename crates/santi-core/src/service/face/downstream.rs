@@ -10,7 +10,7 @@ impl Service {
             return Ok(None);
         }
         let digest = hex::encode(Sha256::digest(bearer.as_bytes()));
-        self.store.list_downstreams().map(|downstreams| {
+        self.store.downstreams().map(|downstreams| {
             downstreams
                 .into_iter()
                 .find(|downstream| same_digest(&downstream.digest, &digest))
@@ -39,8 +39,8 @@ impl Service {
         self.store.create_downstream(id, prefix, &digest)
     }
 
-    pub fn list_downstreams(&self) -> Result<Vec<downstream::Credential>, String> {
-        self.store.list_downstreams()
+    pub fn downstreams(&self) -> Result<Vec<downstream::Credential>, String> {
+        self.store.downstreams()
     }
 
     pub fn ingest_downstream(

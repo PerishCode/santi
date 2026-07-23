@@ -112,7 +112,7 @@ impl Service {
             strand,
             turn,
             call,
-            effect: effect_id,
+            effect,
             limit: output_limit,
         } = shell;
         let soul = self.store.soul_id_for_strand(strand)?;
@@ -122,7 +122,7 @@ impl Service {
             Ok(prepared) => prepared,
             Err(error) => {
                 return self.store.append_effect_tool_result(
-                    effect_id,
+                    effect,
                     crate::store::Settlement {
                         call: &call.call_id,
                         output: None,
@@ -132,10 +132,10 @@ impl Service {
                 );
             }
         };
-        self.store.begin_effect_dispatch(effect_id)?;
+        self.store.begin_effect_dispatch(effect)?;
         match shell::run_prepared_shell(prepared, output_limit) {
             shell::Outcome::Captured(output) => self.store.append_effect_tool_result(
-                effect_id,
+                effect,
                 crate::store::Settlement {
                     call: &call.call_id,
                     output: Some(output),
@@ -144,7 +144,7 @@ impl Service {
                 },
             ),
             shell::Outcome::Failed(error) => self.store.append_effect_tool_result(
-                effect_id,
+                effect,
                 crate::store::Settlement {
                     call: &call.call_id,
                     output: None,
@@ -154,12 +154,12 @@ impl Service {
             ),
             shell::Outcome::Unknown(error) => {
                 self.store.mark_effect_unknown(
-                    effect_id,
+                    effect,
                     effect::Reason::ResultCaptureFailed,
                     &error,
                 )?;
                 Err(format!(
-                    "shell effect {effect_id} outcome is unknown; automatic replay is forbidden: {error}"
+                    "shell effect {effect} outcome is unknown; automatic replay is forbidden: {error}"
                 ))
             }
         }

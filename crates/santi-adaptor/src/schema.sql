@@ -244,7 +244,7 @@ CREATE TABLE IF NOT EXISTS inbox_receipts (
     id TEXT PRIMARY KEY,
     strand_id TEXT NOT NULL,
     state TEXT NOT NULL CHECK (state IN (
-        'accepted', 'mechanically_recovered', 'driving', 'turn_failed', 'completed'
+        'accepted', 'recovered', 'driving', 'failed', 'completed'
     )),
     accepted_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -259,7 +259,7 @@ CREATE TABLE IF NOT EXISTS receipt_transitions (
     inbox_id TEXT NOT NULL,
     sequence INTEGER NOT NULL CHECK (sequence > 0),
     state TEXT NOT NULL CHECK (state IN (
-        'accepted', 'mechanically_recovered', 'driving', 'turn_failed', 'completed'
+        'accepted', 'recovered', 'driving', 'failed', 'completed'
     )),
     turn_id TEXT,
     incident_id TEXT,

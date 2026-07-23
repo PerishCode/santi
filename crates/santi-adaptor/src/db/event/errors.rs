@@ -12,24 +12,19 @@ const COLUMNS: &str = r#"
 "#;
 
 impl Database<'_> {
-    pub fn open_incident(&self, draft: santi_error::Draft) -> Result<Fault, String> {
+    pub fn open(&self, draft: santi_error::Draft) -> Result<Fault, String> {
         let existing = self.incident(&draft.key)?;
         let mutation = engine().open(existing.as_ref(), draft, santi_model::now());
-        self.persist_mutation(&mutation)?;
+        self.persist(&mutation)?;
         Ok(mutation.error)
     }
 
-    pub fn resolve_incident(
-        &self,
-        key: &str,
-        by: &str,
-        context: serde_json::Value,
-    ) -> Result<bool, String> {
+    pub fn resolve(&self, key: &str, by: &str, context: serde_json::Value) -> Result<bool, String> {
         let Some(active) = self.incident(key)? else {
             return Ok(false);
         };
         let mutation = engine().resolve(&active, by, context, santi_model::now());
-        self.persist_mutation(&mutation)?;
+        self.persist(&mutation)?;
         Ok(true)
     }
 
@@ -46,12 +41,7 @@ impl Database<'_> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn list_incidents(
-        &self,
-        kind: &str,
-        id: &str,
-        limit: i64,
-    ) -> Result<Vec<Incident>, String> {
+    pub fn incidents(&self, kind: &str, id: &str, limit: i64) -> Result<Vec<Incident>, String> {
         let mut stmt = self
             .conn
             .prepare(&format!(
@@ -67,7 +57,7 @@ impl Database<'_> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn persist_mutation(&self, mutation: &Mutation) -> Result<(), String> {
+    pub fn persist(&self, mutation: &Mutation) -> Result<(), String> {
         let held = &mutation.incident;
         self.conn
             .execute(

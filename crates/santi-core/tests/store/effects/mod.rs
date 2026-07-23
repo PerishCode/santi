@@ -5,7 +5,7 @@ mod more;
 
 struct StartedEffect {
     turn: String,
-    effect_id: String,
+    effect: String,
     inbox: String,
 }
 
@@ -42,7 +42,7 @@ fn start_effect(store: &SantiStore) -> StartedEffect {
         .expect("append effect intent");
     StartedEffect {
         turn: turn.id,
-        effect_id: effect.expect("effect").id,
+        effect: effect.expect("effect").id,
         inbox,
     }
 }
@@ -54,11 +54,11 @@ fn prepared_failure() {
     let started = start_effect(&store);
 
     store
-        .fail_turn(&started.turn, "failure before dispatch")
+        .fail(&started.turn, "failure before dispatch")
         .expect("fail turn");
 
     let status = store
-        .effect_status(&started.effect_id)
+        .effect_status(&started.effect)
         .expect("query effect")
         .expect("effect");
     assert_eq!(status.effect.state, effect::State::NotDispatched);
@@ -127,10 +127,7 @@ fn intent_atomicity() {
             .is_err()
     );
     assert!(
-        store
-            .tool_calls_for_turn(&turn.id)
-            .expect("tool calls")
-            .is_empty(),
+        store.called(&turn.id).expect("tool calls").is_empty(),
         "the tool call must roll back when its effect intent cannot persist"
     );
 }

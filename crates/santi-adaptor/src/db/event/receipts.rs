@@ -14,7 +14,7 @@ struct Transition<'a> {
 }
 
 impl Database<'_> {
-    pub fn insert_accepted(&self, inbox: &str, strand: &str, accepted: &str) -> Result<(), String> {
+    pub fn accept(&self, inbox: &str, strand: &str, accepted: &str) -> Result<(), String> {
         self.conn
             .execute(
                 r#"
@@ -24,7 +24,7 @@ impl Database<'_> {
                 params![inbox, strand, accepted],
             )
             .map_err(|error| error.to_string())?;
-        self.append_transition(
+        self.noted(
             inbox,
             Transition {
                 state: receipt::State::Accepted,
@@ -35,7 +35,7 @@ impl Database<'_> {
         )
     }
 
-    pub fn begin_turn(
+    pub fn begin(
         &self,
         strand: &str,
         turn: &str,
@@ -45,7 +45,7 @@ impl Database<'_> {
         let mut receipts = drained_inbox_ids.iter().cloned().collect::<BTreeSet<_>>();
         let mut stmt = self
             .conn
-            .prepare("SELECT id FROM inbox_receipts WHERE strand_id = ?1 AND state = 'turn_failed'")
+            .prepare("SELECT id FROM inbox_receipts WHERE strand_id = ?1 AND state = 'failed'")
             .map_err(|error| error.to_string())?;
         let failed = stmt
             .query_map(params![strand], |row| row.get::<_, String>(0))
@@ -58,8 +58,8 @@ impl Database<'_> {
         let now = now();
         if let Some(incident) = recovered_incident_id {
             for inbox in drained_inbox_ids {
-                self.set_state(inbox, receipt::State::Recovered, &now)?;
-                self.append_transition(
+                self.shift(inbox, receipt::State::Recovered, &now)?;
+                self.noted(
                     inbox,
                     Transition {
                         state: receipt::State::Recovered,
@@ -71,8 +71,8 @@ impl Database<'_> {
             }
         }
         for inbox in receipts {
-            self.set_state(&inbox, receipt::State::Driving, &now)?;
-            self.append_transition(
+            self.shift(&inbox, receipt::State::Driving, &now)?;
+            self.noted(
                 &inbox,
                 Transition {
                     state: receipt::State::Driving,
@@ -85,20 +85,15 @@ impl Database<'_> {
         Ok(())
     }
 
-    pub fn fail_turn(
-        &self,
-        turn: &str,
-        incident: Option<&str>,
-        occurred: &str,
-    ) -> Result<(), String> {
-        self.transition_turn_receipts(turn, receipt::State::Failed, incident, occurred)
+    pub fn fail(&self, turn: &str, incident: Option<&str>, occurred: &str) -> Result<(), String> {
+        self.close(turn, receipt::State::Failed, incident, occurred)
     }
 
-    pub fn complete_turn(&self, turn: &str, occurred_at: &str) -> Result<(), String> {
-        self.transition_turn_receipts(turn, receipt::State::Completed, None, occurred_at)
+    pub fn complete(&self, turn: &str, occurred_at: &str) -> Result<(), String> {
+        self.close(turn, receipt::State::Completed, None, occurred_at)
     }
 
-    fn transition_turn_receipts(
+    fn close(
         &self,
         turn: &str,
         state: receipt::State,
@@ -114,7 +109,7 @@ impl Database<'_> {
             JOIN inbox_receipts AS receipt ON receipt.id = transition.inbox_id
             WHERE transition.turn_id = ?1
               AND transition.state = 'driving'
-              AND receipt.state IN ('driving', 'mechanically_recovered')
+              AND receipt.state IN ('driving', 'recovered')
             "#,
             )
             .map_err(|error| error.to_string())?;
@@ -127,8 +122,8 @@ impl Database<'_> {
         }
         drop(stmt);
         for inbox in receipts {
-            self.set_state(&inbox, state.clone(), occurred)?;
-            self.append_transition(
+            self.shift(&inbox, state.clone(), occurred)?;
+            self.noted(
                 &inbox,
                 Transition {
                     state: state.clone(),
@@ -141,17 +136,17 @@ impl Database<'_> {
         Ok(())
     }
 
-    fn set_state(&self, inbox: &str, state: receipt::State, updated: &str) -> Result<(), String> {
+    fn shift(&self, inbox: &str, state: receipt::State, updated: &str) -> Result<(), String> {
         self.conn
             .execute(
                 "UPDATE inbox_receipts SET state = ?2, updated_at = ?3 WHERE id = ?1",
-                params![inbox, receipt_state_db(&state), updated],
+                params![inbox, state.encode(), updated],
             )
             .map_err(|error| error.to_string())?;
         Ok(())
     }
 
-    fn append_transition(&self, inbox: &str, transition: Transition<'_>) -> Result<(), String> {
+    fn noted(&self, inbox: &str, transition: Transition<'_>) -> Result<(), String> {
         self.conn
             .execute(
                 r#"
@@ -164,7 +159,7 @@ impl Database<'_> {
                 params![
                     tag("rct"),
                     inbox,
-                    receipt_state_db(&transition.state),
+                    transition.state.encode(),
                     transition.turn,
                     transition.incident,
                     transition.time,
@@ -172,26 +167,5 @@ impl Database<'_> {
             )
             .map_err(|error| error.to_string())?;
         Ok(())
-    }
-}
-
-pub fn receipt_state_db(state: &receipt::State) -> &'static str {
-    match state {
-        receipt::State::Accepted => "accepted",
-        receipt::State::Recovered => "mechanically_recovered",
-        receipt::State::Driving => "driving",
-        receipt::State::Failed => "turn_failed",
-        receipt::State::Completed => "completed",
-    }
-}
-
-pub fn receipt_state_from_db(state: &str) -> Result<receipt::State, String> {
-    match state {
-        "accepted" => Ok(receipt::State::Accepted),
-        "mechanically_recovered" => Ok(receipt::State::Recovered),
-        "driving" => Ok(receipt::State::Driving),
-        "turn_failed" => Ok(receipt::State::Failed),
-        "completed" => Ok(receipt::State::Completed),
-        _ => Err(format!("unknown receipt state: {state}")),
     }
 }

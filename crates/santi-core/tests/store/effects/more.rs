@@ -7,7 +7,7 @@ fn restart_ambiguity() {
     let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
     let started = start_effect(&store);
     store
-        .begin_effect_dispatch(&started.effect_id)
+        .begin_effect_dispatch(&started.effect)
         .expect("open dispatch window");
     let (_, prepared) = store
         .append_effect_call(
@@ -25,7 +25,7 @@ fn restart_ambiguity() {
 
     assert_eq!(store.reconcile_orphaned_turns().expect("reconcile"), 1);
     let status = store
-        .effect_status(&started.effect_id)
+        .effect_status(&started.effect)
         .expect("query effect")
         .expect("effect");
     assert_eq!(status.effect.state, effect::State::Unknown);
@@ -56,14 +56,14 @@ fn restart_ambiguity() {
     );
     assert!(
         store
-            .tool_results_for_turn(&started.turn)
+            .replied(&started.turn)
             .expect("tool results before resolution")
             .is_empty()
     );
 
     let resolved = store
         .resolve_effect(
-            &started.effect_id,
+            &started.effect,
             effect::Outcome::NotApplied,
             "operator checked the target system",
         )
@@ -85,14 +85,14 @@ fn restart_ambiguity() {
     );
     assert!(
         store
-            .tool_results_for_turn(&started.turn)
+            .replied(&started.turn)
             .expect("tool results after resolution")
             .is_empty(),
         "resolution records evidence; it must not dispatch or fabricate a tool result"
     );
     assert!(
         store
-            .resolve_effect(&started.effect_id, effect::Outcome::Applied, "second guess",)
+            .resolve_effect(&started.effect, effect::Outcome::Applied, "second guess",)
             .is_err(),
         "a settled operator resolution is immutable"
     );

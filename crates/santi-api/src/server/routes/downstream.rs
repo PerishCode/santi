@@ -32,11 +32,11 @@ pub(super) async fn create_downstream(
         (status = 500, body = Fault)
     )
 )]
-pub(super) async fn list_downstreams(
+pub(super) async fn downstreams(
     State(service): State<Service>,
 ) -> Result<Json<Vec<downstream::Credential>>, ApiError> {
     service
-        .list_downstreams()
+        .downstreams()
         .map(Json)
         .map_err(ApiError::from_service)
 }

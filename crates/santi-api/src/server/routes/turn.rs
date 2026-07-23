@@ -27,7 +27,7 @@ pub(super) async fn turn_events(
     let since = params.since.unwrap_or(0).max(0);
     let limit = params.limit.unwrap_or(256).clamp(1, 1000);
     service
-        .turn_events_since(since, &principal.prefix, limit)
+        .since(since, &principal.prefix, limit)
         .map(Json)
         .map_err(ApiError::from_service)
 }

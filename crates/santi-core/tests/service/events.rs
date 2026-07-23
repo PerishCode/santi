@@ -86,9 +86,7 @@ async fn labeled_turn_emits_envelope_and_records_outbox() {
     assert_eq!(label_seen.as_deref(), Some(label));
     assert!(text_seen.is_some_and(|text| !text.is_empty()));
 
-    let recorded = service
-        .turn_events_since(0, "github:", 10)
-        .expect("turn events");
+    let recorded = service.since(0, "github:", 10).expect("turn events");
     let event = recorded
         .events
         .iter()
@@ -130,9 +128,7 @@ async fn downstream_batch_isolates_zone_and_advances_over_other_zones() {
     .await
     .expect("github turn completes");
 
-    let empty = service
-        .turn_events_since(0, "stim:", 10)
-        .expect("empty stim batch");
+    let empty = service.since(0, "stim:", 10).expect("empty stim batch");
     assert!(empty.events.is_empty());
     assert!(empty.cursor > 0);
 
@@ -154,14 +150,12 @@ async fn downstream_batch_isolates_zone_and_advances_over_other_zones() {
     .expect("stim turn completes");
 
     let stim = service
-        .turn_events_since(empty.cursor, "stim:", 10)
+        .since(empty.cursor, "stim:", 10)
         .expect("stim batch");
     assert_eq!(stim.events.len(), 1);
     assert_eq!(stim.events[0].label, "stim:alice");
     assert!(stim.cursor > empty.cursor);
-    let github = service
-        .turn_events_since(0, "github:", 10)
-        .expect("github batch");
+    let github = service.since(0, "github:", 10).expect("github batch");
     assert_eq!(github.events.len(), 1);
     assert_eq!(github.events[0].label, "github:issue:1");
     assert_eq!(github.cursor, stim.cursor);

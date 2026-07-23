@@ -1,5 +1,5 @@
 use crate::store::{
-    db::{Database, message_to_provider_item},
+    db::{Database, item},
     span::Span,
 };
 use rusqlite::params;
@@ -21,7 +21,7 @@ pub(super) fn assembly_input_with_preview(
     let items = Items {
         db: Database::new(conn),
     };
-    for compact in items.db.compacts_for_strand(strand)? {
+    for compact in items.db.compacts(strand)? {
         if preview
             .as_ref()
             .is_some_and(|preview| preview.absorbed.iter().any(|id| id == &compact.id))
@@ -29,8 +29,8 @@ pub(super) fn assembly_input_with_preview(
             continue;
         }
         if let (Some(from), Some(to)) = (
-            items.db.message_seq_in_strand(strand, &compact.first)?,
-            items.db.message_seq_in_strand(strand, &compact.last)?,
+            items.db.seat(strand, &compact.first)?,
+            items.db.seat(strand, &compact.last)?,
         ) {
             overlay.push(Overlay {
                 span: Span {
@@ -118,14 +118,14 @@ impl Items<'_> {
     }
 
     fn message(&self, target: &str) -> Result<Option<ProviderItem>, String> {
-        let Some(message) = self.db.message_record_by_id(target)? else {
+        let Some(message) = self.db.record(target)? else {
             return Ok(None);
         };
-        Ok(message_to_provider_item(&message))
+        Ok(item(&message))
     }
 
     fn thinking(&self, target: &str) -> Result<Option<ProviderItem>, String> {
-        let Some(thinking) = self.db.thinking_span_by_id(target)? else {
+        let Some(thinking) = self.db.span(target)? else {
             return Ok(None);
         };
         let Some(content) = thinking.summary.filter(|text| !text.trim().is_empty()) else {
@@ -138,10 +138,10 @@ impl Items<'_> {
     }
 
     fn tool_call(&self, target: &str) -> Result<Option<ProviderItem>, String> {
-        let Some(tool_call) = self.db.tool_call_by_id(target)? else {
+        let Some(tool_call) = self.db.call(target)? else {
             return Ok(None);
         };
-        let (item, mark) = self.db.regenerable_replay_material(&tool_call.id)?;
+        let (item, mark) = self.db.material(&tool_call.id)?;
         let arguments_raw =
             serde_json::to_string(&tool_call.arguments).map_err(|error| error.to_string())?;
         Ok(Some(ProviderItem::FunctionCall {
@@ -154,7 +154,7 @@ impl Items<'_> {
     }
 
     fn tool_result(&self, target: &str) -> Result<Option<ProviderItem>, String> {
-        let Some(tool_result) = self.db.tool_result_by_id(target)? else {
+        let Some(tool_result) = self.db.reply(target)? else {
             return Ok(None);
         };
         let output = serde_json::to_string(&json!({

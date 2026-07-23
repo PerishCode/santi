@@ -47,7 +47,7 @@ fn fork_copies_prefix() {
     assert!(child.label.is_none());
     assert!(child.state.is_none());
 
-    let child_messages = store.strand_messages(&child.id).expect("child messages");
+    let child_messages = store.messages(&child.id).expect("child messages");
     assert_eq!(child_messages.len(), 2);
     assert_eq!(child_messages[0].relation.seq, 1);
     assert_eq!(child_messages[1].relation.seq, 2);
@@ -219,7 +219,7 @@ fn fork_drops_external_state() {
         .expect("start turn")
         .turn;
     store
-        .complete_turn(Completion {
+        .complete(Completion {
             turn: &turn.id,
             sequence: None,
             provider: "fake-provider",

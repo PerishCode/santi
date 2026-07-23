@@ -58,17 +58,16 @@ pub(crate) async fn run_client(
             .await
         }
         Command::Receipt { inbox } => http.get(&format!("{base}/api/v1/receipts/{inbox}")).await,
-        Command::Effect(EffectCommand::Query { effect_id }) => {
-            http.get(&format!("{base}/api/v1/effects/{effect_id}"))
-                .await
+        Command::Effect(EffectCommand::Query { effect }) => {
+            http.get(&format!("{base}/api/v1/effects/{effect}")).await
         }
         Command::Effect(EffectCommand::Resolve {
-            effect_id,
+            effect,
             outcome,
             evidence,
         }) => {
             http.post(
-                &format!("{base}/api/v1/effects/{effect_id}/resolve"),
+                &format!("{base}/api/v1/effects/{effect}/resolve"),
                 Some(serde_json::json!({
                     "outcome": outcome.as_api_str(),
                     "evidence": evidence,

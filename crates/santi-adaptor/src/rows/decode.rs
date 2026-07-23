@@ -62,8 +62,8 @@ impl Decode for Strand {
 
 impl Decode for message::Message {
     fn decode(row: &Row<'_>) -> rusqlite::Result<Self> {
-        let content_json: String = row.get(4)?;
-        let content = serde_json::from_str::<message::Content>(&content_json).map_err(|error| {
+        let blob: String = row.get(4)?;
+        let content = serde_json::from_str::<message::Content>(&blob).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
                 4,
                 rusqlite::types::Type::Text,
@@ -87,8 +87,8 @@ impl Decode for message::Message {
 
 impl Decode for message::Event {
     fn decode(row: &Row<'_>) -> rusqlite::Result<Self> {
-        let payload_json: String = row.get(6)?;
-        let payload = serde_json::from_str::<Value>(&payload_json).map_err(|error| {
+        let blob: String = row.get(6)?;
+        let payload = serde_json::from_str::<Value>(&blob).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
                 6,
                 rusqlite::types::Type::Text,
@@ -110,8 +110,8 @@ impl Decode for message::Event {
 
 impl Decode for message::Placed {
     fn decode(row: &Row<'_>) -> rusqlite::Result<Self> {
-        let content_json: String = row.get(8)?;
-        let content = serde_json::from_str::<message::Content>(&content_json).map_err(|error| {
+        let blob: String = row.get(8)?;
+        let content = serde_json::from_str::<message::Content>(&blob).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
                 8,
                 rusqlite::types::Type::Text,
@@ -167,8 +167,8 @@ impl Decode for Turn {
 
 impl Decode for tool::Call {
     fn decode(row: &Row<'_>) -> rusqlite::Result<Self> {
-        let arguments_text: String = row.get(3)?;
-        let arguments = serde_json::from_str::<Value>(&arguments_text).map_err(|error| {
+        let raw: String = row.get(3)?;
+        let arguments = serde_json::from_str::<Value>(&raw).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
                 3,
                 rusqlite::types::Type::Text,
@@ -187,11 +187,11 @@ impl Decode for tool::Call {
 
 impl Decode for tool::Reply {
     fn decode(row: &Row<'_>) -> rusqlite::Result<Self> {
-        let output_text: Option<String> = row.get(2)?;
+        let output: Option<String> = row.get(2)?;
         Ok(Self {
             id: row.get(0)?,
             call: row.get(1)?,
-            output: output_text.and_then(|value| serde_json::from_str(&value).ok()),
+            output: output.and_then(|value| serde_json::from_str(&value).ok()),
             error: row.get(3)?,
             created: row.get(4)?,
         })
@@ -220,7 +220,7 @@ impl Decode for thinking::Span {
 
 impl Decode for Compact {
     fn decode(row: &Row<'_>) -> rusqlite::Result<Self> {
-        let metadata_json: Option<String> = row.get(6)?;
+        let blob: Option<String> = row.get(6)?;
         Ok(Self {
             id: row.get(0)?,
             strand: row.get(1)?,
@@ -228,7 +228,7 @@ impl Decode for Compact {
             first: row.get(3)?,
             last: row.get(4)?,
             created: row.get(5)?,
-            metadata: metadata_json.and_then(|value| serde_json::from_str(&value).ok()),
+            metadata: blob.and_then(|value| serde_json::from_str(&value).ok()),
         })
     }
 }

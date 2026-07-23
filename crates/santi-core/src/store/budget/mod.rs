@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use super::{
     STRAND_INBOX_GATE, SantiStore, StartTurnOutcome, StartedTurn,
     assembly::assembly_input_in_conn,
-    db::{Database, drain_inbox_in_tx},
+    db::{Database, drain},
 };
 use crate::{budget, ingest, message};
 use crate::{now, tag};
@@ -134,7 +134,7 @@ impl SantiStore {
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
-        let resolved = Database::new(&tx).resolve_incident(
+        let resolved = Database::new(&tx).resolve(
             &context_incident_key(strand),
             resolved_by,
             json!({

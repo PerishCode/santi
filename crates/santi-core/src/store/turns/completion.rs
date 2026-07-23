@@ -15,11 +15,11 @@ pub struct Completion<'a> {
 }
 
 impl SantiStore {
-    pub fn complete_turn(&self, completion: Completion<'_>) -> Result<Turn, String> {
-        self.complete(completion, None).map(|(turn, _)| turn)
+    pub fn complete(&self, completion: Completion<'_>) -> Result<Turn, String> {
+        self.finish(completion, None).map(|(turn, _)| turn)
     }
 
-    pub(crate) fn complete(
+    pub(crate) fn finish(
         &self,
         completion: Completion<'_>,
         message: Option<&message::Placed>,
@@ -76,8 +76,8 @@ impl SantiStore {
             params![completion.turn, completion.sequence, state, now],
         )
         .map_err(|error| error.to_string())?;
-        Database::new(&tx).complete_turn(completion.turn, &now)?;
-        Database::new(&tx).resolve_incident(
+        Database::new(&tx).complete(completion.turn, &now)?;
+        Database::new(&tx).resolve(
             &provider_incident_key(&strand),
             "provider.turn_succeeded",
             json!({
@@ -87,7 +87,7 @@ impl SantiStore {
                 "response": completion.response,
             }),
         )?;
-        Database::new(&tx).resolve_incident(
+        Database::new(&tx).resolve(
             &runtime_incident_key(&strand),
             "runtime.turn_succeeded",
             json!({
@@ -96,7 +96,7 @@ impl SantiStore {
                 "model": completion.model,
             }),
         )?;
-        Database::new(&tx).resolve_incident(
+        Database::new(&tx).resolve(
             &execution_budget_incident_key(&strand),
             "execution_budget.turn_succeeded",
             json!({
@@ -118,7 +118,7 @@ impl SantiStore {
                 completed: now.clone(),
             };
             let payload = serde_json::to_string(&event).map_err(|error| error.to_string())?;
-            Database::new(&tx).insert_turn_outbox(crate::store::db::TurnOutboxInsert {
+            Database::new(&tx).queue(crate::store::db::Queued {
                 id: &event.id,
                 turn: &event.turn,
                 label: &event.label,
@@ -131,7 +131,7 @@ impl SantiStore {
         };
         tx.commit().map_err(|error| error.to_string())?;
         let turn = Database::new(&conn)
-            .turn_by_id(completion.turn)?
+            .turn(completion.turn)?
             .ok_or_else(|| "completed turn missing".to_string())?;
         Ok((turn, turn_event))
     }

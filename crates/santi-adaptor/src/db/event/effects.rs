@@ -1,11 +1,11 @@
 use rusqlite::{OptionalExtension, params};
 
 use super::Database;
-use crate::rows::{Decode, collect_rows};
+use crate::rows::{Decode, collected};
 use santi_model::effect;
 use santi_model::tag;
 
-const EFFECT_COLUMNS: &str = r#"
+const COLUMNS: &str = r#"
     id, strand_id, turn_id, tool_call_id, effect_type, state,
     result_ref, error_text, created_at, updated_at, dispatched_at, settled_at
 "#;
@@ -26,8 +26,8 @@ pub struct Transition<'a> {
 }
 
 impl Database<'_> {
-    pub fn insert_prepared(&self, prepared: Prepared<'_>) -> Result<String, String> {
-        let effect_id = tag("effect");
+    pub fn prepare(&self, prepared: Prepared<'_>) -> Result<String, String> {
+        let effect = tag("effect");
         self.conn
             .execute(
                 r#"
@@ -39,7 +39,7 @@ impl Database<'_> {
         VALUES (?1, ?2, ?3, ?4, ?5, 'prepared', NULL, NULL, NULL, ?6, ?6, NULL, NULL)
         "#,
                 params![
-                    effect_id,
+                    effect,
                     prepared.strand,
                     prepared.turn,
                     prepared.call,
@@ -48,8 +48,8 @@ impl Database<'_> {
                 ],
             )
             .map_err(|error| error.to_string())?;
-        self.append_effect_transition(
-            &effect_id,
+        self.shifted(
+            &effect,
             Transition {
                 state: effect::State::Prepared,
                 reason: effect::Reason::IntentPersisted,
@@ -57,14 +57,10 @@ impl Database<'_> {
                 time: prepared.time,
             },
         )?;
-        Ok(effect_id)
+        Ok(effect)
     }
 
-    pub fn append_effect_transition(
-        &self,
-        effect_id: &str,
-        transition: Transition<'_>,
-    ) -> Result<(), String> {
+    pub fn shifted(&self, effect: &str, transition: Transition<'_>) -> Result<(), String> {
         self.conn
             .execute(
                 r#"
@@ -76,7 +72,7 @@ impl Database<'_> {
         "#,
                 params![
                     tag("efx"),
-                    effect_id,
+                    effect,
                     transition.state.encode(),
                     transition.reason.encode(),
                     transition.evidence,
@@ -87,18 +83,18 @@ impl Database<'_> {
         Ok(())
     }
 
-    pub fn find_effect(&self, effect_id: &str) -> Result<Option<effect::Effect>, String> {
+    pub fn effect(&self, effect: &str) -> Result<Option<effect::Effect>, String> {
         self.conn
             .query_row(
-                &format!("SELECT {EFFECT_COLUMNS} FROM strand_effects WHERE id = ?1 LIMIT 1"),
-                params![effect_id],
+                &format!("SELECT {COLUMNS} FROM strand_effects WHERE id = ?1 LIMIT 1"),
+                params![effect],
                 effect::Effect::decode,
             )
             .optional()
             .map_err(|error| error.to_string())
     }
 
-    pub fn effects_for_receipt(&self, inbox: &str) -> Result<Vec<effect::Effect>, String> {
+    pub fn effected(&self, inbox: &str) -> Result<Vec<effect::Effect>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -117,10 +113,10 @@ impl Database<'_> {
         let rows = stmt
             .query_map(params![inbox], effect::Effect::decode)
             .map_err(|error| error.to_string())?;
-        collect_rows(rows)
+        collected(rows)
     }
 
-    pub fn effect_transitions(&self, effect_id: &str) -> Result<Vec<effect::Transition>, String> {
+    pub fn shifts(&self, effect: &str) -> Result<Vec<effect::Transition>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -133,7 +129,7 @@ impl Database<'_> {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map(params![effect_id], |row| {
+            .query_map(params![effect], |row| {
                 Ok(effect::Transition {
                     id: row.get(0)?,
                     sequence: row.get(1)?,
@@ -144,10 +140,10 @@ impl Database<'_> {
                 })
             })
             .map_err(|error| error.to_string())?;
-        collect_rows(rows)
+        collected(rows)
     }
 
-    pub fn receipts(&self, effect_id: &str) -> Result<Vec<String>, String> {
+    pub fn receipts(&self, effect: &str) -> Result<Vec<String>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -161,13 +157,13 @@ impl Database<'_> {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map(params![effect_id], |row| row.get(0))
+            .query_map(params![effect], |row| row.get(0))
             .map_err(|error| error.to_string())?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|error| error.to_string())
     }
 
-    pub fn reconcile_effects(
+    pub fn reconcile(
         &self,
         turn: &str,
         prepared_reason: effect::Reason,
@@ -193,7 +189,7 @@ impl Database<'_> {
             .map_err(|error| error.to_string())?;
         drop(stmt);
 
-        for (effect_id, state) in rows {
+        for (effect, state) in rows {
             let (next, reason, settled) = if state == "prepared" {
                 (effect::State::NotDispatched, prepared_reason.clone(), true)
             } else {
@@ -207,11 +203,11 @@ impl Database<'_> {
                 settled_at = CASE WHEN ?4 THEN ?3 ELSE settled_at END
             WHERE id = ?1
             "#,
-                    params![effect_id, next.encode(), occurred, settled],
+                    params![effect, next.encode(), occurred, settled],
                 )
                 .map_err(|error| error.to_string())?;
-            self.append_effect_transition(
-                &effect_id,
+            self.shifted(
+                &effect,
                 Transition {
                     state: next,
                     reason,

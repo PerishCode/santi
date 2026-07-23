@@ -32,7 +32,7 @@ impl SantiStore {
             params![turn, error, now],
         )
         .map_err(|error| error.to_string())?;
-        let error = Database::new(&tx).open_incident(santi_error::Draft {
+        let error = Database::new(&tx).open(santi_error::Draft {
             key: provider_incident_key(&strand),
             descriptor: catalog::PROVIDER_TURN_FAILED,
             scope: santi_error::Scope::new("strand", &strand),
@@ -48,16 +48,16 @@ impl SantiStore {
                 "trace": format!("log://turn/{turn}"),
             }),
         })?;
-        Database::new(&tx).reconcile_effects(
+        Database::new(&tx).reconcile(
             turn,
             effect::Reason::TurnFailedBeforeDispatch,
             effect::Reason::TurnFailedDuringDispatch,
             &now,
         )?;
-        Database::new(&tx).fail_turn(turn, error.incident.as_deref(), &now)?;
+        Database::new(&tx).fail(turn, error.incident.as_deref(), &now)?;
         tx.commit().map_err(|error| error.to_string())?;
         let turn = Database::new(&conn)
-            .turn_by_id(turn)?
+            .turn(turn)?
             .ok_or_else(|| "failed turn missing".to_string())?;
         Ok((turn, error))
     }
@@ -88,21 +88,21 @@ impl SantiStore {
         )
         .map_err(|error| error.to_string())?;
         let error = open_runtime_incident(&tx, &strand, turn, failure)?;
-        Database::new(&tx).reconcile_effects(
+        Database::new(&tx).reconcile(
             turn,
             effect::Reason::TurnFailedBeforeDispatch,
             effect::Reason::TurnFailedDuringDispatch,
             &now,
         )?;
-        Database::new(&tx).fail_turn(turn, error.incident.as_deref(), &now)?;
+        Database::new(&tx).fail(turn, error.incident.as_deref(), &now)?;
         tx.commit().map_err(|error| error.to_string())?;
         let turn = Database::new(&conn)
-            .turn_by_id(turn)?
+            .turn(turn)?
             .ok_or_else(|| "failed turn missing".to_string())?;
         Ok((turn, error))
     }
 
-    pub fn fail_turn(&self, turn: &str, error: &str) -> Result<Turn, String> {
+    pub fn fail(&self, turn: &str, error: &str) -> Result<Turn, String> {
         self.fail_turn_with_incident(turn, error, None)
     }
 
@@ -124,16 +124,16 @@ impl SantiStore {
             params![turn, error, now],
         )
         .map_err(|error| error.to_string())?;
-        Database::new(&tx).reconcile_effects(
+        Database::new(&tx).reconcile(
             turn,
             effect::Reason::TurnFailedBeforeDispatch,
             effect::Reason::TurnFailedDuringDispatch,
             &now,
         )?;
-        Database::new(&tx).fail_turn(turn, incident, &now)?;
+        Database::new(&tx).fail(turn, incident, &now)?;
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .turn_by_id(turn)?
+            .turn(turn)?
             .ok_or_else(|| "failed turn missing".to_string())
     }
 
@@ -166,7 +166,7 @@ impl SantiStore {
         )
         .map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .turn_by_id(turn)?
+            .turn(turn)?
             .ok_or_else(|| "failed turn missing".to_string())
     }
 }
@@ -185,7 +185,7 @@ pub(super) fn open_runtime_incident(
     turn: &str,
     failure: RuntimeFault<'_>,
 ) -> Result<Fault, String> {
-    Database::new(conn).open_incident(santi_error::Draft {
+    Database::new(conn).open(santi_error::Draft {
         key: runtime_incident_key(strand),
         descriptor: catalog::RUNTIME_TURN_FAILED,
         scope: santi_error::Scope::new("strand", strand),

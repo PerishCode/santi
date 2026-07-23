@@ -108,8 +108,8 @@ impl RuntimePaths {
         provider: Option<ProviderDoctorReport>,
     ) -> Result<DoctorReport, String> {
         let database_exists = self.database_path.exists();
-        let schema_version = santi_core::read_schema_version(&self.database_path)?;
-        let schema_ok = schema_version == Some(santi_core::SCHEMA_VERSION);
+        let schema_version = santi_core::version(&self.database_path)?;
+        let schema_ok = schema_version == Some(santi_core::VERSION);
         let memory_path =
             santi_core::soul_memory_file(&self.runtime_root, santi_core::DEFAULT_SOUL_ID);
         let memory_present = memory_path.exists();
@@ -124,7 +124,7 @@ impl RuntimePaths {
             database_path: self.database_path.display().to_string(),
             database_exists,
             schema_version,
-            expected_schema_version: santi_core::SCHEMA_VERSION,
+            expected_schema_version: santi_core::VERSION,
             schema_ok,
             default_soul_id: santi_core::DEFAULT_SOUL_ID.to_string(),
             memory_path: memory_path.display().to_string(),

@@ -2,7 +2,7 @@ use rusqlite::params;
 
 use super::Database;
 
-pub struct TurnOutboxInsert<'a> {
+pub struct Queued<'a> {
     pub id: &'a str,
     pub turn: &'a str,
     pub label: &'a str,
@@ -11,7 +11,7 @@ pub struct TurnOutboxInsert<'a> {
 }
 
 impl Database<'_> {
-    pub fn insert_turn_outbox(&self, input: TurnOutboxInsert<'_>) -> Result<(), String> {
+    pub fn queue(&self, input: Queued<'_>) -> Result<(), String> {
         self.conn
             .execute(
                 r#"
@@ -31,13 +31,13 @@ impl Database<'_> {
         Ok(())
     }
 
-    pub fn turn_events_since(
+    pub fn since(
         &self,
         after_seq: i64,
         prefix: &str,
         limit: usize,
     ) -> Result<(i64, Vec<(i64, String)>), String> {
-        let high_water = self
+        let crest = self
             .conn
             .query_row("SELECT MAX(seq) FROM turn_outbox", [], |row| {
                 row.get::<_, Option<i64>>(0)
@@ -60,10 +60,9 @@ impl Database<'_> {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map(
-                params![after_seq, high_water, prefix, limit as i64 + 1],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
-            )
+            .query_map(params![after_seq, crest, prefix, limit as i64 + 1], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
             .map_err(|error| error.to_string())?;
         let mut events = rows
             .map(|row| row.map_err(|error| error.to_string()))
@@ -72,7 +71,7 @@ impl Database<'_> {
             events.truncate(limit);
             events.last().map(|(seq, _)| *seq).unwrap_or(after_seq)
         } else {
-            high_water
+            crest
         };
         Ok((cursor, events))
     }

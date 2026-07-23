@@ -27,7 +27,7 @@ impl SantiStore {
         let thinking_id = tag("thinking");
         let now = now();
         let database = Database::new(&tx);
-        let strand = database.turn_strand_id(turn)?;
+        let strand = database.holder(turn)?;
         tx.execute(
             r#"
             INSERT INTO thinking_spans (
@@ -39,10 +39,10 @@ impl SantiStore {
             params![thinking_id, turn, response, now],
         )
         .map_err(|error| error.to_string())?;
-        database.append_entry_in_tx(&strand, strand::Target::Thinking, &thinking_id)?;
+        database.entered(&strand, strand::Target::Thinking, &thinking_id)?;
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .thinking_span_by_id(&thinking_id)?
+            .span(&thinking_id)?
             .ok_or_else(|| "created thinking_span missing".to_string())
     }
 
@@ -63,7 +63,7 @@ impl SantiStore {
             params![thinking_span_id, response, now],
         )
         .map_err(|error| error.to_string())?;
-        Database::new(&conn).thinking_span_by_id(thinking_span_id)
+        Database::new(&conn).span(thinking_span_id)
     }
 
     pub fn update_thinking_span_summary(
@@ -83,7 +83,7 @@ impl SantiStore {
             params![thinking_span_id, summary, now],
         )
         .map_err(|error| error.to_string())?;
-        Database::new(&conn).thinking_span_by_id(thinking_span_id)
+        Database::new(&conn).span(thinking_span_id)
     }
 
     pub fn complete_thinking_span(
@@ -121,7 +121,7 @@ impl SantiStore {
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let now = now();
         let database = Database::new(&tx);
-        let strand = database.turn_strand_id(invocation.turn)?;
+        let strand = database.holder(invocation.turn)?;
         tx.execute(
             r#"
             INSERT INTO tool_calls (id, turn_id, tool_name, arguments, created_at)
@@ -159,16 +159,16 @@ impl SantiStore {
                     provider_item_text,
                     invocation.provenance.mark,
                     invocation.provenance.response_id,
-                    crate::SCHEMA_VERSION,
+                    crate::VERSION,
                     now
                 ],
             )
             .map_err(|error| error.to_string())?;
         }
-        database.append_entry_in_tx(&strand, strand::Target::ToolCall, invocation.call)?;
-        let effect_id = effect
+        database.entered(&strand, strand::Target::ToolCall, invocation.call)?;
+        let effect = effect
             .map(|kind| {
-                Database::new(&tx).insert_prepared(Prepared {
+                Database::new(&tx).prepare(Prepared {
                     strand: &strand,
                     turn: invocation.turn,
                     call: invocation.call,
@@ -179,11 +179,11 @@ impl SantiStore {
             .transpose()?;
         tx.commit().map_err(|error| error.to_string())?;
         let tool_call = Database::new(&conn)
-            .tool_call_by_id(invocation.call)?
+            .call(invocation.call)?
             .ok_or_else(|| "created tool_call missing".to_string())?;
-        let effect = effect_id
+        let effect = effect
             .as_deref()
-            .map(|effect_id| Database::new(&conn).find_effect(effect_id))
+            .map(|effect| Database::new(&conn).effect(effect))
             .transpose()?
             .flatten();
         Ok((tool_call, effect))
@@ -200,8 +200,8 @@ impl SantiStore {
         let tool_result_id = tag("tool_result");
         let now = now();
         let database = Database::new(&tx);
-        let strand = database.call_soul_id(call)?;
-        let output_text = output
+        let strand = database.caller(call)?;
+        let output = output
             .as_ref()
             .map(serde_json::to_string)
             .transpose()
@@ -211,13 +211,13 @@ impl SantiStore {
             INSERT INTO tool_results (id, tool_call_id, output, error_text, created_at)
             VALUES (?1, ?2, ?3, ?4, ?5)
             "#,
-            params![tool_result_id, call, output_text, error, now],
+            params![tool_result_id, call, output, error, now],
         )
         .map_err(|error| error.to_string())?;
-        database.append_entry_in_tx(&strand, strand::Target::ToolResult, &tool_result_id)?;
+        database.entered(&strand, strand::Target::ToolResult, &tool_result_id)?;
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .tool_result_by_id(&tool_result_id)?
+            .reply(&tool_result_id)?
             .ok_or_else(|| "created tool_result missing".to_string())
     }
 
@@ -237,7 +237,7 @@ impl SantiStore {
             .map_err(|error| error.to_string())?;
         let message = tag("msg");
         let now = now();
-        let content_json = serde_json::to_string(&crate::message::Content::text(text))
+        let blob = serde_json::to_string(&crate::message::Content::text(text))
             .map_err(|error| error.to_string())?;
         tx.execute(
             r#"
@@ -247,13 +247,13 @@ impl SantiStore {
             )
             VALUES (?1, 'soul', ?2, 'text', ?3, 'fixed', 1, 0, NULL, ?4, ?4)
             "#,
-            params![message, soul, content_json, now],
+            params![message, soul, blob, now],
         )
         .map_err(|error| error.to_string())?;
-        Database::new(&tx).append_entry_in_tx(strand, strand::Target::Message, &message)?;
+        Database::new(&tx).entered(strand, strand::Target::Message, &message)?;
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .message_by_id(&message)?
+            .message(&message)?
             .ok_or_else(|| "created message missing".to_string())
     }
 
@@ -285,6 +285,6 @@ impl SantiStore {
             ],
         )
         .map_err(|error| error.to_string())?;
-        Database::new(&conn).thinking_span_by_id(thinking_span_id)
+        Database::new(&conn).span(thinking_span_id)
     }
 }

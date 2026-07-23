@@ -105,7 +105,7 @@ impl SantiStore {
             );
             if estimate.total > admission.budget_bytes {
                 let reason = over_budget_reason(estimate.total, admission.budget_bytes);
-                let observed_at_seq = database.current_strand_seq(strand)?;
+                let observed_at_seq = database.cursor(strand)?;
                 let error = super::state::open_context_incident(
                     &database,
                     strand,
@@ -160,10 +160,10 @@ impl SantiStore {
 
         let inbox = tag("inbox");
         let now = now();
-        let content_json = serde_json::to_string(&content).map_err(|error| error.to_string())?;
+        let blob = serde_json::to_string(&content).map_err(|error| error.to_string())?;
         let origin = source.as_ref().map(|source| source.kind.as_str());
         let trace = source.as_ref().and_then(|source| source.source.as_deref());
-        let source_metadata = source
+        let metadata = source
             .as_ref()
             .and_then(|source| source.metadata.as_ref())
             .map(serde_json::to_string)
@@ -179,17 +179,17 @@ impl SantiStore {
                 inbox,
                 strand,
                 kind.encode(),
-                content_json,
+                blob,
                 origin,
                 trace,
-                source_metadata,
+                metadata,
                 now
             ],
         )
         .map_err(|error| error.to_string())?;
-        Database::new(&tx).insert_accepted(&inbox, strand, &now)?;
+        Database::new(&tx).accept(&inbox, strand, &now)?;
         if let Some(replay) = replay {
-            Database::new(&tx).insert_replay(crate::store::db::ReplayInsert {
+            Database::new(&tx).stow(crate::store::db::Stowed {
                 owner: replay.owner,
                 request: replay.request,
                 digest: replay.digest,

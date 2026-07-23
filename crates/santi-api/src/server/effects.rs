@@ -16,7 +16,7 @@ pub struct ResolveEffectRequest {
 
 #[utoipa::path(
     get,
-    path = "/api/v1/effects/{effect_id}",
+    path = "/api/v1/effects/{effect}",
     params(("effect_id" = String, Path)),
     responses(
         (status = 200, body = effect::Status),
@@ -26,10 +26,10 @@ pub struct ResolveEffectRequest {
 )]
 pub async fn effect_status(
     State(service): State<Service>,
-    Path(effect_id): Path<String>,
+    Path(effect): Path<String>,
 ) -> Result<Json<effect::Status>, ApiError> {
     service
-        .effect_status(&effect_id)
+        .effect_status(&effect)
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("effect not found"))
@@ -37,7 +37,7 @@ pub async fn effect_status(
 
 #[utoipa::path(
     post,
-    path = "/api/v1/effects/{effect_id}/resolve",
+    path = "/api/v1/effects/{effect}/resolve",
     params(("effect_id" = String, Path)),
     request_body = ResolveEffectRequest,
     responses(
@@ -49,11 +49,11 @@ pub async fn effect_status(
 )]
 pub async fn resolve_effect(
     State(service): State<Service>,
-    Path(effect_id): Path<String>,
+    Path(effect): Path<String>,
     Json(request): Json<ResolveEffectRequest>,
 ) -> Result<Json<effect::Status>, ApiError> {
     service
-        .resolve_effect(&effect_id, request.outcome, &request.evidence)
+        .resolve_effect(&effect, request.outcome, &request.evidence)
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("effect not found"))

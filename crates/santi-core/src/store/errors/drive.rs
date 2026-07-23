@@ -28,7 +28,7 @@ pub(in crate::store) fn repeat_active_in_conn(
     }
     let pending = pending_count(conn, strand)?;
     database
-        .open_incident(drive_draft(
+        .open(drive_draft(
             strand,
             Input {
                 operation,
@@ -51,7 +51,7 @@ pub(in crate::store) fn resolve_in_conn(
     let incident_id = database
         .incident(&drive_incident_key(strand))?
         .map(|incident| incident.id);
-    database.resolve_incident(
+    database.resolve(
         &drive_incident_key(strand),
         "strand.drive_started",
         json!({
@@ -82,7 +82,7 @@ impl SantiStore {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let pending = pending_count(&tx, strand)?;
-        let error = Database::new(&tx).open_incident(drive_draft(strand, input, pending))?;
+        let error = Database::new(&tx).open(drive_draft(strand, input, pending))?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(error)
     }

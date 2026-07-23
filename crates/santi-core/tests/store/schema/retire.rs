@@ -39,8 +39,8 @@ fn schema_retires_integrated_im_without_touching_sidecar() {
 
     drop(SantiStore::open(&db).expect("migrate v32 to v33"));
     assert_eq!(
-        santi_core::read_schema_version(&db).expect("schema version"),
-        Some(santi_core::SCHEMA_VERSION)
+        santi_core::version(&db).expect("schema version"),
+        Some(santi_core::VERSION)
     );
     let conn = Connection::open(db).expect("reopen sqlite");
     let retired: i64 = conn

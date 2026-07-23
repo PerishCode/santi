@@ -3,14 +3,14 @@ use super::db::Database;
 use crate::event;
 
 impl SantiStore {
-    pub fn turn_events_since(
+    pub fn since(
         &self,
         after_seq: i64,
         prefix: &str,
         limit: usize,
     ) -> Result<event::Batch, String> {
         let conn = self.conn.lock().unwrap();
-        let (cursor, rows) = Database::new(&conn).turn_events_since(after_seq, prefix, limit)?;
+        let (cursor, rows) = Database::new(&conn).since(after_seq, prefix, limit)?;
         let events = rows
             .into_iter()
             .map(|(_, payload)| {

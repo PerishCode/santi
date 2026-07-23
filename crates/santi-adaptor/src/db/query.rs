@@ -6,7 +6,7 @@ use super::*;
 use santi_model::{effect, thinking, tool};
 
 impl<'a> Database<'a> {
-    pub fn turn_by_id(&self, turn: &str) -> Result<Option<Turn>, String> {
+    pub fn turn(&self, turn: &str) -> Result<Option<Turn>, String> {
         self.conn
             .query_row(
                 r#"
@@ -24,7 +24,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn compact_by_id(&self, compact: &str) -> Result<Option<Compact>, String> {
+    pub fn held(&self, compact: &str) -> Result<Option<Compact>, String> {
         self.conn
             .query_row(
                 r#"
@@ -38,7 +38,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn turn_strand_id(&self, turn: &str) -> Result<String, String> {
+    pub fn holder(&self, turn: &str) -> Result<String, String> {
         self.conn
             .query_row(
                 "SELECT strand_id FROM turns WHERE id = ?1 LIMIT 1",
@@ -48,7 +48,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn call_soul_id(&self, call: &str) -> Result<String, String> {
+    pub fn caller(&self, call: &str) -> Result<String, String> {
         self.conn
             .query_row(
                 r#"
@@ -64,7 +64,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn tool_call_by_id(&self, call: &str) -> Result<Option<tool::Call>, String> {
+    pub fn call(&self, call: &str) -> Result<Option<tool::Call>, String> {
         self.conn
             .query_row(
                 "SELECT id, turn_id, tool_name, arguments, created_at FROM tool_calls WHERE id = ?1 LIMIT 1",
@@ -75,7 +75,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn regenerable_replay_material(
+    pub fn material(
         &self,
         call: &str,
     ) -> Result<(Option<serde_json::Value>, Option<String>), String> {
@@ -98,7 +98,7 @@ impl<'a> Database<'a> {
             })
     }
 
-    pub fn tool_result_by_id(&self, tool_result_id: &str) -> Result<Option<tool::Reply>, String> {
+    pub fn reply(&self, tool_result_id: &str) -> Result<Option<tool::Reply>, String> {
         self.conn
             .query_row(
                 "SELECT id, tool_call_id, output, error_text, created_at FROM tool_results WHERE id = ?1 LIMIT 1",
@@ -109,10 +109,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn thinking_span_by_id(
-        &self,
-        thinking_span_id: &str,
-    ) -> Result<Option<thinking::Span>, String> {
+    pub fn span(&self, thinking_span_id: &str) -> Result<Option<thinking::Span>, String> {
         self.conn
             .query_row(
                 r#"
@@ -129,11 +126,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn message_seq_in_strand(
-        &self,
-        strand: &str,
-        message: &str,
-    ) -> Result<Option<i64>, String> {
+    pub fn seat(&self, strand: &str, message: &str) -> Result<Option<i64>, String> {
         self.conn
             .query_row(
                 r#"
@@ -148,7 +141,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn compacts_for_strand(&self, strand: &str) -> Result<Vec<Compact>, String> {
+    pub fn compacts(&self, strand: &str) -> Result<Vec<Compact>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -162,10 +155,10 @@ impl<'a> Database<'a> {
         let rows = stmt
             .query_map(params![strand], Compact::decode)
             .map_err(|error| error.to_string())?;
-        collect_rows(rows)
+        collected(rows)
     }
 
-    pub fn strand_effects(&self, strand: &str) -> Result<Vec<effect::Effect>, String> {
+    pub fn effects(&self, strand: &str) -> Result<Vec<effect::Effect>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -181,6 +174,6 @@ impl<'a> Database<'a> {
         let rows = stmt
             .query_map(params![strand], effect::Effect::decode)
             .map_err(|error| error.to_string())?;
-        collect_rows(rows)
+        collected(rows)
     }
 }

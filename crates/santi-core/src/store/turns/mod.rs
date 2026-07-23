@@ -2,7 +2,7 @@ use rusqlite::params;
 
 use super::{
     RuntimeFault, SantiStore, StartedTurn,
-    db::{Database, drain_inbox_in_tx},
+    db::{Database, drain},
 };
 use crate::{now, tag, turn::Turn};
 
@@ -35,7 +35,7 @@ impl SantiStore {
             return Ok(None);
         }
         let turn = tag("turn");
-        let drained = drain_inbox_in_tx(&tx, strand, &turn)?;
+        let drained = drain(&tx, strand, &turn)?;
         if drained.messages.is_empty() {
             return Ok(None);
         }
@@ -53,11 +53,11 @@ impl SantiStore {
             params![turn, strand, trigger, source, now],
         )
         .map_err(|error| error.to_string())?;
-        Database::new(&tx).begin_turn(strand, &turn, &drained.inbox_ids, None)?;
+        Database::new(&tx).begin(strand, &turn, &drained.inboxes, None)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(Some(StartedTurn {
             turn: Database::new(&conn)
-                .turn_by_id(&turn)?
+                .turn(&turn)?
                 .ok_or_else(|| "created turn missing".to_string())?,
             drained_messages: drained.messages,
         }))
@@ -73,7 +73,7 @@ impl SantiStore {
             )
             .ok();
         match id {
-            Some(id) => Database::new(&conn).turn_by_id(&id),
+            Some(id) => Database::new(&conn).turn(&id),
             None => Ok(None),
         }
     }
@@ -94,7 +94,7 @@ impl SantiStore {
             .map_err(|error| error.to_string())?;
         drop(stmt);
         for (turn, strand) in &rows {
-            Database::new(&tx).reconcile_effects(
+            Database::new(&tx).reconcile(
                 turn,
                 effect::Reason::RestartBeforeDispatch,
                 effect::Reason::RestartDuringDispatch,
@@ -119,7 +119,7 @@ impl SantiStore {
                     detail: "interrupted by restart",
                 },
             )?;
-            Database::new(&tx).fail_turn(turn, error.incident.as_deref(), &now)?;
+            Database::new(&tx).fail(turn, error.incident.as_deref(), &now)?;
         }
         tx.commit().map_err(|error| error.to_string())?;
         Ok(rows.len())
@@ -151,18 +151,18 @@ impl SantiStore {
         Ok(out)
     }
 
-    pub fn tool_calls_for_turn(&self, turn: &str) -> Result<Vec<tool::Call>, String> {
+    pub fn called(&self, turn: &str) -> Result<Vec<tool::Call>, String> {
         let conn = self.conn.lock().unwrap();
-        Database::new(&conn).tool_calls_for_turn(turn)
+        Database::new(&conn).called(turn)
     }
 
-    pub fn thinking_spans_for_turn(&self, turn: &str) -> Result<Vec<thinking::Span>, String> {
+    pub fn thought(&self, turn: &str) -> Result<Vec<thinking::Span>, String> {
         let conn = self.conn.lock().unwrap();
-        Database::new(&conn).thinking_spans_for_turn(turn)
+        Database::new(&conn).thought(turn)
     }
 
-    pub fn tool_results_for_turn(&self, turn: &str) -> Result<Vec<tool::Reply>, String> {
+    pub fn replied(&self, turn: &str) -> Result<Vec<tool::Reply>, String> {
         let conn = self.conn.lock().unwrap();
-        Database::new(&conn).tool_results_for_turn(turn)
+        Database::new(&conn).replied(turn)
     }
 }

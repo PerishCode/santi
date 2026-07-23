@@ -22,11 +22,8 @@ fn storage_doctor_is_current() {
         String::from_utf8_lossy(&output.stderr)
     );
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).expect("doctor JSON");
-    assert_eq!(report["schema_version"], santi_core::SCHEMA_VERSION);
-    assert_eq!(
-        report["expected_schema_version"],
-        santi_core::SCHEMA_VERSION
-    );
+    assert_eq!(report["schema_version"], santi_core::VERSION);
+    assert_eq!(report["expected_schema_version"], santi_core::VERSION);
     assert_eq!(report["provider"], serde_json::Value::Null);
     assert_eq!(report["ok"], true);
 }

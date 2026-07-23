@@ -182,3 +182,26 @@ impl crate::strand::Target {
         }
     }
 }
+
+impl crate::receipt::State {
+    pub fn encode(&self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Recovered => "recovered",
+            Self::Driving => "driving",
+            Self::Failed => "failed",
+            Self::Completed => "completed",
+        }
+    }
+
+    pub fn decode(value: &str) -> Result<Self, String> {
+        match value {
+            "accepted" => Ok(Self::Accepted),
+            "recovered" => Ok(Self::Recovered),
+            "driving" => Ok(Self::Driving),
+            "failed" => Ok(Self::Failed),
+            "completed" => Ok(Self::Completed),
+            other => Err(format!("unknown receipt state {other}")),
+        }
+    }
+}

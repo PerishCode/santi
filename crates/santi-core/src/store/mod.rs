@@ -16,16 +16,16 @@ mod turns;
 
 pub(crate) use budget::{Ingress, Launch, Replay, execution_budget_incident_key};
 pub(crate) use compact::Collapse;
-pub use db::read_schema_version;
+pub use db::version;
 use db::*;
 pub(crate) use effects::Settlement;
-use rows::{Decode, collect_rows};
+use rows::{Decode, collected};
 pub use runtime::Invocation;
 pub use turns::Completion;
 
 use crate::{message, strand};
-use santi_adaptor::SANTI_SYSTEM_ACTOR_ID;
-pub use santi_adaptor::SCHEMA_VERSION;
+use santi_adaptor::SYSTEM;
+pub use santi_adaptor::VERSION;
 pub const DEFAULT_SOUL_ID: &str = "soul_default";
 const STRAND_INBOX_GATE: i64 = 500;
 
@@ -93,7 +93,7 @@ impl SantiStore {
     }
 
     pub fn system_actor_id(&self) -> &'static str {
-        SANTI_SYSTEM_ACTOR_ID
+        SYSTEM
     }
 
     pub fn list_strands(&self) -> Result<Vec<Strand>, String> {
@@ -111,7 +111,7 @@ impl SantiStore {
         let rows = stmt
             .query_map([], Strand::decode)
             .map_err(|error| error.to_string())?;
-        collect_rows(rows)
+        collected(rows)
     }
 
     pub fn create_strand(&self) -> Result<Strand, String> {
@@ -130,13 +130,13 @@ impl SantiStore {
         )
         .map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .strand_by_id(&strand)?
+            .strand(&strand)?
             .ok_or_else(|| "created strand missing".to_string())
     }
 
-    pub fn strand_messages(&self, strand: &str) -> Result<Vec<message::Placed>, String> {
+    pub fn messages(&self, strand: &str) -> Result<Vec<message::Placed>, String> {
         let conn = self.conn.lock().unwrap();
-        Database::new(&conn).strand_messages(strand)
+        Database::new(&conn).messages(strand)
     }
 
     pub fn runtime_snapshot(
@@ -145,19 +145,19 @@ impl SantiStore {
     ) -> Result<Option<crate::stream::Snapshot>, String> {
         let conn = self.conn.lock().unwrap();
         let database = Database::new(&conn);
-        let Some(strand) = database.strand_by_id(strand)? else {
+        let Some(strand) = database.strand(strand)? else {
             return Ok(None);
         };
         Ok(Some(crate::stream::Snapshot {
-            messages: database.strand_messages(&strand.id)?,
-            events: database.message_events_for_strand(&strand.id)?,
-            turns: database.turns_for_strand(&strand.id)?,
-            thinking: database.soul_thinking_spans(&strand.id)?,
-            calls: database.soul_tool_calls(&strand.id)?,
-            results: database.soul_tool_results(&strand.id)?,
-            compacts: database.compacts_for_strand(&strand.id)?,
-            effects: database.strand_effects(&strand.id)?,
-            errors: database.list_incidents("strand", &strand.id, 100)?,
+            messages: database.messages(&strand.id)?,
+            events: database.events(&strand.id)?,
+            turns: database.turns(&strand.id)?,
+            thinking: database.thinking(&strand.id)?,
+            calls: database.calls(&strand.id)?,
+            results: database.results(&strand.id)?,
+            compacts: database.compacts(&strand.id)?,
+            effects: database.effects(&strand.id)?,
+            errors: database.incidents("strand", &strand.id, 100)?,
             strand,
         }))
     }
@@ -176,7 +176,7 @@ impl SantiStore {
             Draft {
                 strand,
                 actor: message::Role::System,
-                id: SANTI_SYSTEM_ACTOR_ID,
+                id: SYSTEM,
                 content,
                 state: message::State::Fixed,
                 intake,
@@ -194,8 +194,7 @@ impl SantiStore {
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let message = tag("msg");
         let now = now();
-        let content_json =
-            serde_json::to_string(&draft.content).map_err(|error| error.to_string())?;
+        let blob = serde_json::to_string(&draft.content).map_err(|error| error.to_string())?;
         tx.execute(
             r#"
             INSERT INTO messages (
@@ -209,18 +208,18 @@ impl SantiStore {
                 draft.actor.encode(),
                 draft.id,
                 kind.encode(),
-                content_json,
+                blob,
                 draft.state.encode(),
                 draft.intake.is_request() as i64,
                 now
             ],
         )
         .map_err(|error| error.to_string())?;
-        Database::new(&tx).append_entry_in_tx(draft.strand, strand::Target::Message, &message)?;
+        Database::new(&tx).entered(draft.strand, strand::Target::Message, &message)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(AppendedMessage {
             strand_message: Database::new(&conn)
-                .message_by_id(&message)?
+                .message(&message)?
                 .ok_or_else(|| "created message missing".to_string())?,
         })
     }

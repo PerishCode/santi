@@ -13,20 +13,20 @@ use crate::{now, tag};
 use rusqlite::params;
 
 impl SantiStore {
-    pub fn effect_status(&self, effect_id: &str) -> Result<Option<effect::Status>, String> {
+    pub fn effect_status(&self, effect: &str) -> Result<Option<effect::Status>, String> {
         let conn = self.conn.lock().unwrap();
         let database = Database::new(&conn);
-        let Some(effect) = database.find_effect(effect_id)? else {
+        let Some(held) = database.effect(effect)? else {
             return Ok(None);
         };
         Ok(Some(effect::Status {
-            transitions: database.effect_transitions(effect_id)?,
-            receipts: database.receipts(effect_id)?,
-            effect,
+            transitions: database.shifts(effect)?,
+            receipts: database.receipts(effect)?,
+            effect: held,
         }))
     }
 
-    pub fn begin_effect_dispatch(&self, effect_id: &str) -> Result<effect::Effect, String> {
+    pub fn begin_effect_dispatch(&self, effect: &str) -> Result<effect::Effect, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let now = now();
@@ -37,14 +37,14 @@ impl SantiStore {
                 SET state = 'dispatching', updated_at = ?2, dispatched_at = ?2
                 WHERE id = ?1 AND state = 'prepared'
                 "#,
-                params![effect_id, now],
+                params![effect, now],
             )
             .map_err(|error| error.to_string())?;
         if changed != 1 {
             return Err("effect is not prepared for dispatch".to_string());
         }
-        Database::new(&tx).append_effect_transition(
-            effect_id,
+        Database::new(&tx).shifted(
+            effect,
             Transition {
                 state: effect::State::Dispatching,
                 reason: effect::Reason::DispatchWindowOpened,
@@ -54,13 +54,13 @@ impl SantiStore {
         )?;
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .find_effect(effect_id)?
+            .effect(effect)?
             .ok_or_else(|| "dispatching effect missing".to_string())
     }
 
     pub(crate) fn append_effect_tool_result(
         &self,
-        effect_id: &str,
+        effect: &str,
         settlement: Settlement<'_>,
     ) -> Result<tool::Reply, String> {
         let Settlement {
@@ -81,7 +81,7 @@ impl SantiStore {
         let current: (String, Option<String>) = tx
             .query_row(
                 "SELECT state, tool_call_id FROM strand_effects WHERE id = ?1",
-                params![effect_id],
+                params![effect],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .map_err(|error| error.to_string())?;
@@ -95,8 +95,8 @@ impl SantiStore {
         let tool_result_id = tag("tool_result");
         let now = now();
         let database = Database::new(&tx);
-        let strand = database.call_soul_id(call)?;
-        let output_text = output
+        let strand = database.caller(call)?;
+        let output = output
             .as_ref()
             .map(serde_json::to_string)
             .transpose()
@@ -106,10 +106,10 @@ impl SantiStore {
             INSERT INTO tool_results (id, tool_call_id, output, error_text, created_at)
             VALUES (?1, ?2, ?3, ?4, ?5)
             "#,
-            params![tool_result_id, call, output_text, error, now],
+            params![tool_result_id, call, output, error, now],
         )
         .map_err(|error| error.to_string())?;
-        database.append_entry_in_tx(&strand, strand::Target::ToolResult, &tool_result_id)?;
+        database.entered(&strand, strand::Target::ToolResult, &tool_result_id)?;
         tx.execute(
             r#"
             UPDATE strand_effects
@@ -117,11 +117,11 @@ impl SantiStore {
                 updated_at = ?5, settled_at = ?5
             WHERE id = ?1
             "#,
-            params![effect_id, state.encode(), tool_result_id, error, now,],
+            params![effect, state.encode(), tool_result_id, error, now,],
         )
         .map_err(|error| error.to_string())?;
-        database.append_effect_transition(
-            effect_id,
+        database.shifted(
+            effect,
             Transition {
                 state,
                 reason,
@@ -131,13 +131,13 @@ impl SantiStore {
         )?;
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .tool_result_by_id(&tool_result_id)?
+            .reply(&tool_result_id)?
             .ok_or_else(|| "created effect tool_result missing".to_string())
     }
 
     pub fn mark_effect_unknown(
         &self,
-        effect_id: &str,
+        effect: &str,
         reason: effect::Reason,
         evidence: &str,
     ) -> Result<effect::Effect, String> {
@@ -154,14 +154,14 @@ impl SantiStore {
                 SET state = 'unknown', error_text = ?2, updated_at = ?3
                 WHERE id = ?1 AND state = 'dispatching'
                 "#,
-                params![effect_id, evidence, now],
+                params![effect, evidence, now],
             )
             .map_err(|error| error.to_string())?;
         if changed != 1 {
             return Err("effect is not dispatching".to_string());
         }
-        Database::new(&tx).append_effect_transition(
-            effect_id,
+        Database::new(&tx).shifted(
+            effect,
             Transition {
                 state: effect::State::Unknown,
                 reason,
@@ -171,13 +171,13 @@ impl SantiStore {
         )?;
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .find_effect(effect_id)?
+            .effect(effect)?
             .ok_or_else(|| "unknown effect missing".to_string())
     }
 
     pub fn resolve_effect(
         &self,
-        effect_id: &str,
+        effect: &str,
         outcome: effect::Outcome,
         evidence: &str,
     ) -> Result<Option<effect::Status>, String> {
@@ -196,7 +196,7 @@ impl SantiStore {
             ),
         };
         let mut conn = self.conn.lock().unwrap();
-        if Database::new(&conn).find_effect(effect_id)?.is_none() {
+        if Database::new(&conn).effect(effect)?.is_none() {
             return Ok(None);
         }
         let tx = conn.transaction().map_err(|error| error.to_string())?;
@@ -208,14 +208,14 @@ impl SantiStore {
                 SET state = ?2, updated_at = ?3, settled_at = ?3
                 WHERE id = ?1 AND state = 'unknown'
                 "#,
-                params![effect_id, state.encode(), now],
+                params![effect, state.encode(), now],
             )
             .map_err(|error| error.to_string())?;
         if changed != 1 {
             return Err("only an unknown effect can be resolved".to_string());
         }
-        Database::new(&tx).append_effect_transition(
-            effect_id,
+        Database::new(&tx).shifted(
+            effect,
             Transition {
                 state,
                 reason,
@@ -225,6 +225,6 @@ impl SantiStore {
         )?;
         tx.commit().map_err(|error| error.to_string())?;
         drop(conn);
-        self.effect_status(effect_id)
+        self.effect_status(effect)
     }
 }

@@ -45,7 +45,7 @@ impl Service {
             );
         }
         let metadata = self.provider.metadata();
-        match self.store.complete(
+        match self.store.finish(
             crate::Completion {
                 turn,
                 sequence: last_soul_message

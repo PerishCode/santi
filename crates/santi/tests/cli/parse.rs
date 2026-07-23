@@ -50,10 +50,10 @@ fn parses_receipt_query() {
 #[test]
 fn parses_effect_commands() {
     let parsed = Cli::try_parse_from(["santi", "effect", "query", "effect_123"]).unwrap();
-    let Command::Effect(EffectCommand::Query { effect_id }) = parsed.command else {
+    let Command::Effect(EffectCommand::Query { effect }) = parsed.command else {
         panic!("expected effect query");
     };
-    assert_eq!(effect_id, "effect_123");
+    assert_eq!(effect, "effect_123");
 
     let parsed = Cli::try_parse_from([
         "santi",
@@ -67,14 +67,14 @@ fn parses_effect_commands() {
     ])
     .unwrap();
     let Command::Effect(EffectCommand::Resolve {
-        effect_id,
+        effect,
         outcome,
         evidence,
     }) = parsed.command
     else {
         panic!("expected effect resolution");
     };
-    assert_eq!(effect_id, "effect_123");
+    assert_eq!(effect, "effect_123");
     assert_eq!(outcome, EffectOutcomeArg::NotApplied);
     assert_eq!(evidence, "marker absent");
 }

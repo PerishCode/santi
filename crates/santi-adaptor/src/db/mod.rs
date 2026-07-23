@@ -1,22 +1,21 @@
 mod budget;
 mod downstream;
-pub use downstream::ReplayInsert;
+pub use downstream::Stowed;
 mod event;
 pub use event::{Prepared, Transition};
 mod inbox;
 mod lifecycle;
 mod query;
 mod turn;
-pub use turn::TurnOutboxInsert;
+pub use turn::Queued;
 
 use rusqlite::{Connection, OptionalExtension, params};
 
 use santi_model::{now, soul::Soul, strand::Strand};
 
 use super::rows::*;
-pub use event::receipt_state_from_db;
-pub use inbox::drain_inbox_in_tx;
-pub use lifecycle::{migrate, read_schema_version};
+pub use inbox::drain;
+pub use lifecycle::{migrate, version};
 use santi_model::{message, strand, webhook};
 
 pub struct Database<'a> {
@@ -28,14 +27,14 @@ impl<'a> Database<'a> {
         Self { conn }
     }
 
-    pub fn append_entry_in_tx(
+    pub fn entered(
         &self,
         strand: &str,
         kind: strand::Target,
         target: &str,
     ) -> Result<strand::Entry, String> {
         let now = now();
-        let allocated_seq = self
+        let seated = self
             .conn
             .query_row(
                 r#"
@@ -56,19 +55,19 @@ impl<'a> Database<'a> {
         )
         VALUES (?1, ?2, ?3, ?4, ?5)
         "#,
-                params![strand, kind.encode(), target, allocated_seq, now],
+                params![strand, kind.encode(), target, seated, now],
             )
             .map_err(|error| error.to_string())?;
         Ok(strand::Entry {
             strand: strand.to_string(),
             kind,
             target: target.to_string(),
-            seq: allocated_seq,
+            seq: seated,
             created: now,
         })
     }
 
-    pub fn message_events_for_strand(&self, strand: &str) -> Result<Vec<message::Event>, String> {
+    pub fn events(&self, strand: &str) -> Result<Vec<message::Event>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -85,10 +84,10 @@ impl<'a> Database<'a> {
         let rows = stmt
             .query_map(params![strand], message::Event::decode)
             .map_err(|error| error.to_string())?;
-        collect_rows(rows)
+        collected(rows)
     }
 
-    pub fn soul_by_id(&self, soul: &str) -> Result<Option<Soul>, String> {
+    pub fn soul(&self, soul: &str) -> Result<Option<Soul>, String> {
         self.conn
             .query_row(
                 r#"
@@ -104,7 +103,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn webhook_by_name(&self, name: &str) -> Result<Option<webhook::Subscription>, String> {
+    pub fn webhook(&self, name: &str) -> Result<Option<webhook::Subscription>, String> {
         self.conn
             .query_row(
                 r#"
@@ -120,7 +119,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn strand_by_id(&self, strand: &str) -> Result<Option<Strand>, String> {
+    pub fn strand(&self, strand: &str) -> Result<Option<Strand>, String> {
         self.conn
             .query_row(
                 r#"
@@ -137,7 +136,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn strand_by_label(&self, soul: &str, label: &str) -> Result<Option<Strand>, String> {
+    pub fn labeled(&self, soul: &str, label: &str) -> Result<Option<Strand>, String> {
         self.conn
             .query_row(
                 r#"
@@ -154,7 +153,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn message_by_id(&self, message: &str) -> Result<Option<message::Placed>, String> {
+    pub fn message(&self, message: &str) -> Result<Option<message::Placed>, String> {
         self.conn
             .query_row(
                 r#"
@@ -173,10 +172,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn message_record_by_id(
-        &self,
-        message: &str,
-    ) -> Result<Option<santi_model::message::Message>, String> {
+    pub fn record(&self, message: &str) -> Result<Option<santi_model::message::Message>, String> {
         self.conn
             .query_row(
                 r#"
@@ -193,7 +189,7 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn strand_messages(&self, strand: &str) -> Result<Vec<message::Placed>, String> {
+    pub fn messages(&self, strand: &str) -> Result<Vec<message::Placed>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -211,13 +207,11 @@ impl<'a> Database<'a> {
         let rows = stmt
             .query_map(params![strand], message::Placed::decode)
             .map_err(|error| error.to_string())?;
-        collect_rows(rows)
+        collected(rows)
     }
 }
 
-pub fn message_to_provider_item(
-    message: &santi_model::message::Message,
-) -> Option<santi_provider::ProviderItem> {
+pub fn item(message: &santi_model::message::Message) -> Option<santi_provider::ProviderItem> {
     let role = match (&message.role, &message.kind) {
         (message::Role::Soul, _) => "assistant",
         (message::Role::System, message::Kind::Text) => "user",

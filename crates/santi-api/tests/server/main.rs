@@ -111,8 +111,8 @@ fn openapi_lists_error_surfaces() {
     assert!(document.contains("/api/v1/errors/events"));
     assert!(document.contains("/api/v1/strands/{strand}/drive"));
     assert!(document.contains("/api/v1/receipts/{inbox}"));
-    assert!(document.contains("/api/v1/effects/{effect_id}"));
-    assert!(document.contains("/api/v1/effects/{effect_id}/resolve"));
+    assert!(document.contains("/api/v1/effects/{effect}"));
+    assert!(document.contains("/api/v1/effects/{effect}/resolve"));
     assert!(document.contains("effect.Reason"));
     assert!(document.contains("ingest.Receipt"));
     assert!(document.contains("/api/v1/turn-events/stream"));
@@ -156,9 +156,9 @@ async fn effect_http_roundtrip() {
             Some("shell"),
         )
         .expect("append effect");
-    let effect_id = effect.expect("effect").id;
+    let effect = effect.expect("effect").id;
     store
-        .begin_effect_dispatch(&effect_id)
+        .begin_effect_dispatch(&effect)
         .expect("open dispatch window");
     drop(store);
 
@@ -174,7 +174,7 @@ async fn effect_http_roundtrip() {
     )
     .expect("restart service");
 
-    let queried = effect_status_handler(State(service.clone()), Path(effect_id.clone())).await;
+    let queried = effect_status_handler(State(service.clone()), Path(effect.clone())).await;
     let Json(queried) = match queried {
         Ok(queried) => queried,
         Err(error) => panic!(
@@ -188,7 +188,7 @@ async fn effect_http_roundtrip() {
 
     let error = resolve_effect_handler(
         State(service.clone()),
-        Path(effect_id.clone()),
+        Path(effect.clone()),
         Json(ResolveEffectRequest {
             outcome: effect::Outcome::Applied,
             evidence: "   ".to_string(),
@@ -200,7 +200,7 @@ async fn effect_http_roundtrip() {
 
     let resolved = resolve_effect_handler(
         State(service),
-        Path(effect_id),
+        Path(effect),
         Json(ResolveEffectRequest {
             outcome: effect::Outcome::Applied,
             evidence: "operator found the target marker".to_string(),

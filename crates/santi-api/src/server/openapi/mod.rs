@@ -107,7 +107,7 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 12] = [
         super::routes::runtime_snapshot,
         super::routes::turn_events,
         super::routes::create_downstream,
-        super::routes::list_downstreams,
+        super::routes::downstreams,
         super::routes::ingest,
         crate::bucket::get_bucket_object
     ),

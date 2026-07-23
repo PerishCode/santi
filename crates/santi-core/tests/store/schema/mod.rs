@@ -103,10 +103,7 @@ fn soul_label_anchoring() {
 fn absent_schema_is_none() {
     let temp = tempfile::tempdir().expect("temp dir");
     let missing = temp.path().join("nope.sqlite");
-    assert_eq!(
-        santi_core::read_schema_version(&missing).expect("read"),
-        None
-    );
+    assert_eq!(santi_core::version(&missing).expect("read"), None);
 }
 
 #[test]
@@ -120,12 +117,12 @@ fn schema_read_matches_open() {
             .expect("stamp version");
     }
     assert_eq!(
-        santi_core::read_schema_version(&db).expect("read"),
+        santi_core::version(&db).expect("read"),
         Some(5),
         "probe must report the stored version, not migrate it"
     );
     assert_eq!(
-        santi_core::read_schema_version(&db).expect("read again"),
+        santi_core::version(&db).expect("read again"),
         Some(5),
         "a second probe still sees the stale version — the first was read-only"
     );
@@ -133,8 +130,8 @@ fn schema_read_matches_open() {
     let store = SantiStore::open(&db).expect("open store");
     drop(store);
     assert_eq!(
-        santi_core::read_schema_version(&db).expect("read post-open"),
-        Some(santi_core::SCHEMA_VERSION)
+        santi_core::version(&db).expect("read post-open"),
+        Some(santi_core::VERSION)
     );
 }
 

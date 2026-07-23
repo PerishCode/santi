@@ -61,7 +61,7 @@ impl SantiStore {
         }
         let compact = tag("cmp");
         let now = now();
-        let metadata_json = metadata
+        let blob = metadata
             .as_ref()
             .map(serde_json::to_string)
             .transpose()
@@ -73,7 +73,7 @@ impl SantiStore {
             )
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
             "#,
-            params![compact, strand, summary, from, to, now, metadata_json],
+            params![compact, strand, summary, from, to, now, blob],
         )
         .map_err(|error| error.to_string())?;
         tx.commit().map_err(|error| error.to_string())?;
@@ -133,10 +133,10 @@ impl SantiStore {
         metadata: Value,
     ) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
-        let metadata_json = serde_json::to_string(&metadata).map_err(|error| error.to_string())?;
+        let blob = serde_json::to_string(&metadata).map_err(|error| error.to_string())?;
         conn.execute(
             "UPDATE compacts SET metadata = ?2 WHERE id = ?1",
-            params![compact, metadata_json],
+            params![compact, blob],
         )
         .map_err(|error| error.to_string())?;
         Ok(())
@@ -151,13 +151,13 @@ impl SantiStore {
     ) -> Result<Option<compact::Page>, String> {
         let conn = self.conn.lock().unwrap();
         let database = Database::new(&conn);
-        let Some(compact) = database.compact_by_id(compact)? else {
+        let Some(compact) = database.held(compact)? else {
             return Ok(None);
         };
         let mut entries = Vec::new();
         if let (Some(from), Some(to)) = (
-            database.message_seq_in_strand(&compact.strand, &compact.first)?,
-            database.message_seq_in_strand(&compact.strand, &compact.last)?,
+            database.seat(&compact.strand, &compact.first)?,
+            database.seat(&compact.strand, &compact.last)?,
         ) {
             let needle = keyword
                 .map(str::trim)

@@ -1,10 +1,10 @@
 use rusqlite::{OptionalExtension, params};
 
 use super::Database;
-use crate::rows::{Decode, collect_rows};
+use crate::rows::{Decode, collected};
 use santi_model::downstream;
 
-pub struct ReplayInsert<'a> {
+pub struct Stowed<'a> {
     pub owner: &'a str,
     pub request: &'a str,
     pub digest: &'a str,
@@ -14,7 +14,7 @@ pub struct ReplayInsert<'a> {
 }
 
 impl Database<'_> {
-    pub fn insert_downstream(
+    pub fn enroll(
         &self,
         id: &str,
         prefix: &str,
@@ -35,7 +35,7 @@ impl Database<'_> {
         Ok(())
     }
 
-    pub fn downstream_by_id(&self, id: &str) -> Result<Option<downstream::Credential>, String> {
+    pub fn downstream(&self, id: &str) -> Result<Option<downstream::Credential>, String> {
         self.conn
             .query_row(
                 r#"
@@ -49,7 +49,7 @@ impl Database<'_> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn list_downstreams(&self) -> Result<Vec<downstream::Credential>, String> {
+    pub fn downstreams(&self) -> Result<Vec<downstream::Credential>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -62,7 +62,7 @@ impl Database<'_> {
         let rows = stmt
             .query_map([], downstream::Credential::decode)
             .map_err(|error| error.to_string())?;
-        collect_rows(rows)
+        collected(rows)
     }
 
     pub fn replay(
@@ -84,7 +84,7 @@ impl Database<'_> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn insert_replay(&self, input: ReplayInsert<'_>) -> Result<(), String> {
+    pub fn stow(&self, input: Stowed<'_>) -> Result<(), String> {
         self.conn
             .execute(
                 r#"

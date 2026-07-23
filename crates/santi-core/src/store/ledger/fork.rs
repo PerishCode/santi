@@ -12,7 +12,7 @@ impl SantiStore {
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let database = Database::new(&tx);
         let parent = database
-            .strand_by_id(parent)?
+            .strand(parent)?
             .ok_or_else(|| "parent strand not found".to_string())?;
         let parent_last_seq = parent.next - 1;
         if fork > parent_last_seq {
@@ -80,12 +80,11 @@ impl SantiStore {
             .map_err(|error| error.to_string())?;
         }
 
-        for compact in database.compacts_for_strand(&parent.id)? {
-            let Some(start_seq) = database.message_seq_in_strand(&parent.id, &compact.first)?
-            else {
+        for compact in database.compacts(&parent.id)? {
+            let Some(start_seq) = database.seat(&parent.id, &compact.first)? else {
                 continue;
             };
-            let Some(end_seq) = database.message_seq_in_strand(&parent.id, &compact.last)? else {
+            let Some(end_seq) = database.seat(&parent.id, &compact.last)? else {
                 continue;
             };
             if start_seq <= fork && end_seq <= fork {
@@ -112,7 +111,7 @@ impl SantiStore {
 
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .strand_by_id(&child_id)?
+            .strand(&child_id)?
             .ok_or_else(|| "forked strand missing".to_string())
     }
 
@@ -120,7 +119,7 @@ impl SantiStore {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let child = Database::new(&tx)
-            .strand_by_id(child_strand_id)?
+            .strand(child_strand_id)?
             .ok_or_else(|| "fork child not found".to_string())?;
         if child.parent.is_none() {
             return Err("refusing to delete a non-fork strand".to_string());

@@ -1,6 +1,6 @@
 use crate::{now, strand::Strand, tag};
 pub(crate) use budget::Ingress;
-use rows::{Decode, collect_rows};
+use rows::{Decode, collected};
 use rusqlite::params;
 
 use super::{SantiStore, db::Database};
@@ -12,10 +12,10 @@ impl SantiStore {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let database = Database::new(&tx);
-        if database.soul_by_id(soul)?.is_none() {
+        if database.soul(soul)?.is_none() {
             return Err("soul not found".to_string());
         }
-        let strand = if let Some(existing) = database.strand_by_label(soul, label)? {
+        let strand = if let Some(existing) = database.labeled(soul, label)? {
             existing.id
         } else {
             let strand = tag("ss");
@@ -35,7 +35,7 @@ impl SantiStore {
         };
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .strand_by_id(&strand)?
+            .strand(&strand)?
             .ok_or_else(|| "labeled strand missing".to_string())
     }
 
@@ -100,7 +100,7 @@ impl SantiStore {
         )
         .map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .webhook_by_name(&request.name)?
+            .webhook(&request.name)?
             .ok_or_else(|| "created webhook missing".to_string())
     }
 
@@ -117,12 +117,12 @@ impl SantiStore {
         let rows = stmt
             .query_map([], crate::webhook::Subscription::decode)
             .map_err(|error| error.to_string())?;
-        collect_rows(rows)
+        collected(rows)
     }
 
     pub fn webhook(&self, name: &str) -> Result<Option<crate::webhook::Subscription>, String> {
         let conn = self.conn.lock().unwrap();
-        Database::new(&conn).webhook_by_name(name)
+        Database::new(&conn).webhook(name)
     }
 
     pub fn create_soul(&self) -> Result<crate::soul::Soul, String> {
@@ -135,7 +135,7 @@ impl SantiStore {
         )
         .map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .soul_by_id(&soul)?
+            .soul(&soul)?
             .ok_or_else(|| "created soul missing".to_string())
     }
 
@@ -152,17 +152,17 @@ impl SantiStore {
         let rows = stmt
             .query_map([], crate::soul::Soul::decode)
             .map_err(|error| error.to_string())?;
-        collect_rows(rows)
+        collected(rows)
     }
 
     pub fn soul(&self, soul: &str) -> Result<Option<crate::soul::Soul>, String> {
         let conn = self.conn.lock().unwrap();
-        Database::new(&conn).soul_by_id(soul)
+        Database::new(&conn).soul(soul)
     }
 
     pub fn strand(&self, strand: &str) -> Result<Option<Strand>, String> {
         let conn = self.conn.lock().unwrap();
-        Database::new(&conn).strand_by_id(strand)
+        Database::new(&conn).strand(strand)
     }
 
     pub fn soul_id_for_strand(&self, strand: &str) -> Result<String, String> {
@@ -192,7 +192,7 @@ impl SantiStore {
         .map_err(|error| error.to_string())?;
         Ok(StartedTurn {
             turn: Database::new(&conn)
-                .turn_by_id(&turn)?
+                .turn(&turn)?
                 .ok_or_else(|| "created turn missing".to_string())?,
             drained_messages: Vec::new(),
         })

@@ -3,6 +3,5 @@ mod errors;
 mod receipts;
 mod timeline;
 
-use super::{Database, Decode, collect_rows};
+use super::{Database, Decode, collected};
 pub use effects::{Prepared, Transition};
-pub use receipts::receipt_state_from_db;

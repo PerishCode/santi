@@ -22,7 +22,7 @@ fn doctor_reads_runtime() {
     let report = paths.doctor().expect("doctor");
     assert!(report.ok, "expected healthy: {report:?}");
     assert!(report.schema_ok);
-    assert_eq!(report.schema_version, Some(santi_core::SCHEMA_VERSION));
+    assert_eq!(report.schema_version, Some(santi_core::VERSION));
     assert!(report.memory_present && report.memory_readable);
     assert!(report.memory_bytes > 0);
 }

@@ -202,7 +202,7 @@ impl Service {
                 eprintln!(
                     "santi: provider failure incident persistence failed for {turn}: {persistence_error}"
                 );
-                let held = self.store.fail_turn(turn, error).ok();
+                let held = self.store.fail(turn, error).ok();
                 (
                     held,
                     terminal_persistence_error(strand, turn, persistence_error),

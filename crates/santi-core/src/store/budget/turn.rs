@@ -27,7 +27,7 @@ impl SantiStore {
             .map_err(|error| error.to_string())?;
         if let Some(turn) = running_id {
             let turn = Database::new(&tx)
-                .turn_by_id(&turn)?
+                .turn(&turn)?
                 .ok_or_else(|| "running turn missing".to_string())?;
             return Ok(StartTurnOutcome::Running(turn));
         }
@@ -37,7 +37,7 @@ impl SantiStore {
         let has_failed_receipt = recover
             && tx
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM inbox_receipts WHERE strand_id = ?1 AND state = 'turn_failed')",
+                    "SELECT EXISTS(SELECT 1 FROM inbox_receipts WHERE strand_id = ?1 AND state = 'failed')",
                     params![strand],
                     |row| row.get::<_, i64>(0),
                 )
@@ -64,7 +64,7 @@ impl SantiStore {
             );
             if estimate.total > admission.budget_bytes {
                 let reason = over_budget_reason(estimate.total, admission.budget_bytes);
-                let observed_at_seq = database.current_strand_seq(strand)?;
+                let observed_at_seq = database.cursor(strand)?;
                 let error = super::state::open_context_incident(
                     &database,
                     strand,
@@ -88,7 +88,7 @@ impl SantiStore {
         }
 
         let turn = tag("turn");
-        let drained = drain_inbox_in_tx(&tx, strand, &turn)?;
+        let drained = drain(&tx, strand, &turn)?;
         if drained.messages.is_empty() && !has_failed_receipt {
             return Ok(StartTurnOutcome::Idle);
         }
@@ -112,16 +112,16 @@ impl SantiStore {
             &turn,
             drained.messages.len(),
         )?;
-        Database::new(&tx).begin_turn(
+        Database::new(&tx).begin(
             strand,
             &turn,
-            &drained.inbox_ids,
+            &drained.inboxes,
             recovered_incident_id.as_deref(),
         )?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(StartTurnOutcome::Started(StartedTurn {
             turn: Database::new(&conn)
-                .turn_by_id(&turn)?
+                .turn(&turn)?
                 .ok_or_else(|| "created turn missing".to_string())?,
             drained_messages: drained.messages,
         }))

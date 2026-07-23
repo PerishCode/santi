@@ -89,11 +89,11 @@ async fn drain_preserves_provenance() {
         "the drain event should name the turn that committed the pending request"
     );
 
-    let enqueued_at = second_event.payload["enqueued_at"]
+    let queued = second_event.payload["queued"]
         .as_str()
-        .expect("enqueued_at string");
+        .expect("queued string");
     assert!(
-        enqueued_at <= second_message.message.created.as_str(),
+        queued <= second_message.message.created.as_str(),
         "enqueue time should not be later than drain/message time"
     );
 

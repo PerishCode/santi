@@ -128,7 +128,7 @@ impl Service {
         let fingerprint = format!("source_sha256: {}", snapshot.sha256);
         let recorded = self
             .store
-            .strand_messages(&maintenance.id)?
+            .messages(&maintenance.id)?
             .iter()
             .any(|message| message.text.contains(&fingerprint));
         let pending = self

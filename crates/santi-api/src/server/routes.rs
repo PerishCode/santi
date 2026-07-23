@@ -43,11 +43,11 @@ pub(super) fn router(service: Service) -> Router {
         .route("/api/v1/errors/{scope_kind}/{scope_id}", get(errors))
         .route("/api/v1/receipts/{inbox}", get(receipt_status))
         .route(
-            "/api/v1/effects/{effect_id}",
+            "/api/v1/effects/{effect}",
             get(super::effects::effect_status),
         )
         .route(
-            "/api/v1/effects/{effect_id}/resolve",
+            "/api/v1/effects/{effect}/resolve",
             post(super::effects::resolve_effect),
         )
         .route("/api/v1/compacts/{compact}", get(compact_query))
@@ -56,7 +56,7 @@ pub(super) fn router(service: Service) -> Router {
         .route("/api/v1/turn-events/stream", get(turn_event_stream))
         .route(
             "/api/v1/downstreams",
-            post(create_downstream).get(list_downstreams),
+            post(create_downstream).get(downstreams),
         )
         .route("/api/v1/ingest", post(ingest))
         .route(

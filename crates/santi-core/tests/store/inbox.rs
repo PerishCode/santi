@@ -45,7 +45,7 @@ fn drive_coalesces_redrives() {
     );
 
     store
-        .complete_turn(Completion {
+        .complete(Completion {
             turn: &turn.id,
             sequence: None,
             provider: "fake",
@@ -118,7 +118,7 @@ fn drain_records_provenance() {
         .expect("enqueue with source");
 
     let conn = Connection::open(&db).expect("open sqlite");
-    let (inbox, enqueued_at): (String, String) = conn
+    let (inbox, queued): (String, String) = conn
         .query_row(
             "SELECT id, created_at FROM strand_inbox WHERE strand_id = ?1",
             [&strand.id],
@@ -147,7 +147,7 @@ fn drain_records_provenance() {
     let payload = &event.payload;
     assert_eq!(payload["kind"], "inbox_drain");
     assert_eq!(payload["inbox"], inbox);
-    assert_eq!(payload["enqueued_at"], enqueued_at);
+    assert_eq!(payload["queued"], queued);
     assert_eq!(payload["drained_at"], drained.message.created);
     assert_eq!(payload["committing_turn_id"], started.turn.id);
     assert_eq!(payload["message"], drained.message.id);

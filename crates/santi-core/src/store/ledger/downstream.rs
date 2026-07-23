@@ -14,7 +14,7 @@ impl SantiStore {
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
-        let downstreams = Database::new(&tx).list_downstreams()?;
+        let downstreams = Database::new(&tx).downstreams()?;
         if let Some(existing) = downstreams.iter().find(|downstream| downstream.id == id) {
             if existing.prefix == prefix && existing.digest == digest {
                 tx.commit().map_err(|error| error.to_string())?;
@@ -34,17 +34,17 @@ impl SantiStore {
             return Err("downstream digest is already registered".to_string());
         }
         let now = now();
-        Database::new(&tx).insert_downstream(id, prefix, digest, &now)?;
+        Database::new(&tx).enroll(id, prefix, digest, &now)?;
         let downstream = Database::new(&tx)
-            .downstream_by_id(id)?
+            .downstream(id)?
             .ok_or_else(|| "created downstream missing".to_string())?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(downstream)
     }
 
-    pub fn list_downstreams(&self) -> Result<Vec<downstream::Credential>, String> {
+    pub fn downstreams(&self) -> Result<Vec<downstream::Credential>, String> {
         let conn = self.conn.lock().unwrap();
-        Database::new(&conn).list_downstreams()
+        Database::new(&conn).downstreams()
     }
 
     pub(crate) fn replay_downstream(

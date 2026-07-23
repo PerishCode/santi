@@ -13,7 +13,7 @@ pub(super) fn plan_compact_in_tx(
 ) -> Result<Plan, String> {
     for (label, id) in [("from", first), ("to", last)] {
         let message = Database::new(conn)
-            .message_record_by_id(id)?
+            .record(id)?
             .ok_or_else(|| format!("compact {label} message not found"))?;
         let is_projected = message.role == message::Role::Soul
             || (message.role == message::Role::System
@@ -30,20 +30,20 @@ pub(super) fn plan_compact_in_tx(
 
     let database = Database::new(conn);
     let start_seq = database
-        .message_seq_in_strand(strand, first)?
+        .seat(strand, first)?
         .ok_or_else(|| "compact from message not in this strand".to_string())?;
     let end_seq = database
-        .message_seq_in_strand(strand, last)?
+        .seat(strand, last)?
         .ok_or_else(|| "compact to message not in this strand".to_string())?;
     if start_seq > end_seq {
         return Err("compact from must not be after to".to_string());
     }
 
     let mut absorbed = Vec::new();
-    for existing in database.compacts_for_strand(strand)? {
+    for existing in database.compacts(strand)? {
         let (Some(es), Some(ee)) = (
-            database.message_seq_in_strand(strand, &existing.first)?,
-            database.message_seq_in_strand(strand, &existing.last)?,
+            database.seat(strand, &existing.first)?,
+            database.seat(strand, &existing.last)?,
         ) else {
             continue;
         };
@@ -97,15 +97,15 @@ pub(super) fn message_id_at_seq(
 pub(super) fn entry_text(conn: &Connection, kind: &str, target: &str) -> Result<String, String> {
     Ok(match kind {
         "message" => Database::new(conn)
-            .message_record_by_id(target)?
+            .record(target)?
             .map(|message| message.content.rendered())
             .unwrap_or_default(),
         "tool_call" => Database::new(conn)
-            .tool_call_by_id(target)?
+            .call(target)?
             .map(|call| format!("[tool_call {}] {}", call.tool, value_text(&call.arguments)))
             .unwrap_or_default(),
         "tool_result" => Database::new(conn)
-            .tool_result_by_id(target)?
+            .reply(target)?
             .map(|result| match (result.output, result.error) {
                 (Some(output), _) => format!("[tool_result] {}", value_text(&output)),
                 (None, Some(error)) => format!("[tool_result error] {error}"),
@@ -113,7 +113,7 @@ pub(super) fn entry_text(conn: &Connection, kind: &str, target: &str) -> Result<
             })
             .unwrap_or_default(),
         "thinking" => Database::new(conn)
-            .thinking_span_by_id(target)?
+            .span(target)?
             .and_then(|thinking| thinking.summary)
             .map(|summary| format!("[thinking] {summary}"))
             .unwrap_or_default(),

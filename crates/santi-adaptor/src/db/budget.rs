@@ -3,7 +3,7 @@ use rusqlite::{OptionalExtension, params};
 use super::Database;
 
 impl Database<'_> {
-    pub fn pending_inbox_rows(&self, strand: &str) -> Result<Vec<(String, String)>, String> {
+    pub fn pending(&self, strand: &str) -> Result<Vec<(String, String)>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -24,7 +24,7 @@ impl Database<'_> {
             .collect()
     }
 
-    pub fn current_strand_seq(&self, strand: &str) -> Result<Option<i64>, String> {
+    pub fn cursor(&self, strand: &str) -> Result<Option<i64>, String> {
         self.conn
             .query_row(
                 "SELECT next_seq - 1 FROM strands WHERE id = ?1 LIMIT 1",

@@ -138,12 +138,12 @@ pub enum Command {
 #[derive(Subcommand)]
 pub enum EffectCommand {
     #[command(about = "GET /api/v1/effects/{id}")]
-    Query { effect_id: String },
+    Query { effect: String },
     #[command(
         about = "Resolve an unknown effect from operator-supplied evidence. This never retries a command or changes its receipt/turn state"
     )]
     Resolve {
-        effect_id: String,
+        effect: String,
         #[arg(long, value_enum)]
         outcome: EffectOutcomeArg,
         #[arg(long)]

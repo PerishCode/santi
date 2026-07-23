@@ -2,9 +2,9 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
-use crate::{SCHEMA_VERSION, schema::SCHEMA};
+use crate::{VERSION, schema::SCHEMA};
 
-pub fn read_schema_version(path: impl AsRef<Path>) -> Result<Option<u32>, String> {
+pub fn version(path: impl AsRef<Path>) -> Result<Option<u32>, String> {
     if !path.as_ref().exists() {
         return Ok(None);
     }
@@ -22,7 +22,7 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
     let version = conn
         .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
         .map_err(|error| error.to_string())?;
-    if version != SCHEMA_VERSION {
+    if version != VERSION {
         conn.execute_batch(
             r#"
                 DROP TABLE IF EXISTS provider_replay_material;
@@ -71,7 +71,7 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
     }
     conn.execute_batch(SCHEMA)
         .map_err(|error| error.to_string())?;
-    conn.pragma_update(None, "user_version", SCHEMA_VERSION)
+    conn.pragma_update(None, "user_version", VERSION)
         .map_err(|error| error.to_string())?;
     Ok(())
 }

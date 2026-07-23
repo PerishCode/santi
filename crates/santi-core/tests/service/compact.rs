@@ -100,7 +100,7 @@ fn capsule_dry_run_header() {
 
     let input = store.assembly_input(&strand.id).expect("assembly input");
     assert_eq!(input.len(), 1);
-    let ProviderItem::Message { role, content } = &input[0] else {
+    let Item::Message { role, content } = &input[0] else {
         panic!("expected compact provider message");
     };
     assert_eq!(role, "system");
@@ -215,7 +215,7 @@ fn capsule_seq_boundary() {
                 family: "fake-provider".to_string(),
                 item: None,
                 mark: None,
-                response_id: None,
+                response: None,
             },
         })
         .expect("append tool call");

@@ -1,13 +1,13 @@
 use serde_json::{Map, Value, json};
 
-use crate::{ProviderItem, ProviderRequest, ProviderTool};
+use crate::{Item, Request, Tool};
 
 use super::*;
 
-pub(super) fn response_body(config: &OpenAIProviderConfig, request: ProviderRequest) -> Value {
+pub(super) fn body(config: &Config, request: Request) -> Value {
     let mut body = Map::from_iter([
         ("model".to_string(), json!(request.model)),
-        ("input".to_string(), response_input(&request)),
+        ("input".to_string(), input(&request)),
         ("stream".to_string(), json!(true)),
         ("store".to_string(), json!(false)),
         (
@@ -25,35 +25,32 @@ pub(super) fn response_body(config: &OpenAIProviderConfig, request: ProviderRequ
         body.insert("instructions".to_string(), json!(instructions));
     }
     if let Some(tools) = request.tools {
-        body.insert("tools".to_string(), json!(map_tools(tools)));
+        body.insert("tools".to_string(), json!(tooled(tools)));
     }
-    if let Some(previous_response_id) = request.previous_response_id {
-        body.insert(
-            "previous_response_id".to_string(),
-            json!(previous_response_id),
-        );
+    if let Some(previous) = request.previous {
+        body.insert("previous_response_id".to_string(), json!(previous));
     }
-    if let Some(reasoning) = reasoning_options(config) {
+    if let Some(reasoning) = options(config) {
         body.insert("reasoning".to_string(), reasoning);
     }
-    if let Some(max_output_tokens) = config.max_output_tokens {
-        body.insert("max_output_tokens".to_string(), json!(max_output_tokens));
+    if let Some(ceiling) = config.ceiling {
+        body.insert("max_output_tokens".to_string(), json!(ceiling));
     }
 
     Value::Object(body)
 }
 
-fn reasoning_options(config: &OpenAIProviderConfig) -> Option<Value> {
+fn options(config: &Config) -> Option<Value> {
     let mut reasoning = Map::new();
     if let Some(effort) = config
-        .reasoning_effort
+        .effort
         .as_ref()
         .filter(|value| !value.trim().is_empty())
     {
         reasoning.insert("effort".to_string(), json!(effort));
     }
     if let Some(summary) = config
-        .reasoning_summary
+        .summary
         .as_ref()
         .filter(|value| !value.trim().is_empty())
     {
@@ -66,46 +63,40 @@ fn reasoning_options(config: &OpenAIProviderConfig) -> Option<Value> {
     }
 }
 
-fn response_input(request: &ProviderRequest) -> Value {
-    let items = request
-        .input
-        .iter()
-        .filter_map(response_item)
-        .collect::<Vec<_>>();
+fn input(request: &Request) -> Value {
+    let items = request.input.iter().filter_map(item).collect::<Vec<_>>();
     json!(items)
 }
 
-fn response_item(item: &ProviderItem) -> Option<Value> {
+fn item(item: &Item) -> Option<Value> {
     match item {
-        ProviderItem::Message { role, content } => Some(response_message(role, content)),
-        ProviderItem::Reasoning { .. } => None,
-        ProviderItem::FunctionCall {
-            call_id,
+        Item::Message { role, content } => Some(message(role, content)),
+        Item::Reasoning { .. } => None,
+        Item::Call {
+            call,
             name,
-            arguments_raw,
+            raw,
             item,
             ..
-        } => Some(response_call(call_id, name, arguments_raw, item)),
-        ProviderItem::FunctionCallOutput { call_id, output } => {
-            Some(response_output(call_id, output))
-        }
+        } => Some(called(call, name, raw, item)),
+        Item::Output { call, output } => Some(outputted(call, output)),
     }
 }
 
-fn response_message(role: &str, content: &str) -> Value {
-    let content_type = if role == "assistant" {
+fn message(role: &str, content: &str) -> Value {
+    let mime = if role == "assistant" {
         "output_text"
     } else {
         "input_text"
     };
     json!({
         "role": role,
-        "content": [{ "type": content_type, "text": content }],
+        "content": [{ "type": mime, "text": content }],
     })
 }
 
-fn response_call(call: &str, name: &str, arguments: &str, item: &Option<Value>) -> Value {
-    validated_function_call_replay(item).unwrap_or_else(|| {
+fn called(call: &str, name: &str, arguments: &str, item: &Option<Value>) -> Value {
+    validated(item).unwrap_or_else(|| {
         eprintln!(
             "santi-provider: ignored invalid openai replay cache for call {call}; regenerated from canonical event"
         );
@@ -118,11 +109,11 @@ fn response_call(call: &str, name: &str, arguments: &str, item: &Option<Value>) 
     })
 }
 
-fn response_output(call: &str, output: &str) -> Value {
+fn outputted(call: &str, output: &str) -> Value {
     json!({ "type": "function_call_output", "call_id": call, "output": output })
 }
 
-fn validated_function_call_replay(item: &Option<Value>) -> Option<Value> {
+fn validated(item: &Option<Value>) -> Option<Value> {
     let item = item.as_ref()?;
     if item.get("type").and_then(Value::as_str) != Some("function_call") {
         return None;
@@ -135,11 +126,11 @@ fn validated_function_call_replay(item: &Option<Value>) -> Option<Value> {
     Some(item.clone())
 }
 
-fn map_tools(tools: Vec<ProviderTool>) -> Vec<Value> {
+fn tooled(tools: Vec<Tool>) -> Vec<Value> {
     tools
         .into_iter()
         .map(|tool| match tool {
-            ProviderTool::Function(tool) => json!({
+            Tool::Function(tool) => json!({
                 "type": "function",
                 "name": tool.name,
                 "description": tool.description,

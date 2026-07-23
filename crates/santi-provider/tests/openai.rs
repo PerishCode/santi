@@ -1,15 +1,16 @@
-use santi_provider::{OpenAIProviderConfig, ProviderEvent, ProviderStreamTrace};
+use santi_provider::openai::Config;
+use santi_provider::{Event, Trace};
 use serde_json::Value;
 
 #[tokio::test]
-async fn optional_params_sent() {
-    let body = capture_body(OpenAIProviderConfig {
-        api_key: "test-key".to_string(),
+async fn sent() {
+    let body = posted(Config {
+        key: "test-key".to_string(),
         model: "gpt-5.5".to_string(),
-        base_url: String::new(),
-        reasoning_effort: Some("medium".to_string()),
-        reasoning_summary: Some("auto".to_string()),
-        max_output_tokens: Some(4096),
+        url: String::new(),
+        effort: Some("medium".to_string()),
+        summary: Some("auto".to_string()),
+        ceiling: Some(4096),
         bytes: None,
     })
     .await;
@@ -26,14 +27,14 @@ async fn optional_params_sent() {
 }
 
 #[tokio::test]
-async fn optional_params_omitted() {
-    let body = capture_body(OpenAIProviderConfig {
-        api_key: "test-key".to_string(),
+async fn omitted() {
+    let body = posted(Config {
+        key: "test-key".to_string(),
         model: "gpt-4.1".to_string(),
-        base_url: String::new(),
-        reasoning_effort: None,
-        reasoning_summary: None,
-        max_output_tokens: None,
+        url: String::new(),
+        effort: None,
+        summary: None,
+        ceiling: None,
         bytes: None,
     })
     .await;
@@ -44,14 +45,14 @@ async fn optional_params_omitted() {
 }
 
 #[tokio::test]
-async fn plain_requests_unstored() {
-    let body = capture_body_without_tools(OpenAIProviderConfig {
-        api_key: "test-key".to_string(),
+async fn unstored() {
+    let body = bare(Config {
+        key: "test-key".to_string(),
         model: "gpt-4.1".to_string(),
-        base_url: String::new(),
-        reasoning_effort: None,
-        reasoning_summary: None,
-        max_output_tokens: None,
+        url: String::new(),
+        effort: None,
+        summary: None,
+        ceiling: None,
         bytes: None,
     })
     .await;
@@ -60,8 +61,8 @@ async fn plain_requests_unstored() {
 }
 
 #[tokio::test]
-async fn parses_call_response_id() {
-    let events = capture_events(vec![
+async fn identified() {
+    let events = events(vec![
         r#"data: {"type":"response.created","response":{"id":"resp_tool"}}"#,
         r#"data: {"type":"response.output_item.done","item":{"type":"function_call","id":"item_shell","call_id":"call_shell","name":"shell","arguments":"{\"cmd\":\"pwd\"}"}}"#,
     ])
@@ -70,21 +71,21 @@ async fn parses_call_response_id() {
     assert!(matches!(
         events.as_slice(),
         [
-            ProviderEvent::ResponseStarted {
-                response: Some(response_id),
+            Event::Started {
+                response: Some(response),
             },
-            ProviderEvent::FunctionCallRequested(call),
+            Event::Called(call),
         ]
-            if response_id == "resp_tool"
-                && call.response_id == "resp_tool"
-                && call.call_id == "call_shell"
+            if response == "resp_tool"
+                && call.response == "resp_tool"
+                && call.call == "call_shell"
                 && call.name == "shell"
     ));
 }
 
 #[tokio::test]
-async fn parses_summary_stream() {
-    let events = capture_events(vec![
+async fn summaries() {
+    let events = events(vec![
         r#"data: {"type":"response.created","response":{"id":"resp_reasoning"}}"#,
         r#"data: {"type":"response.reasoning_summary_text.delta","delta":"looking "}"#,
         r#"data: {"type":"response.reasoning_summary_text.delta","delta":"closely"}"#,
@@ -95,55 +96,54 @@ async fn parses_summary_stream() {
     assert!(matches!(
         events.as_slice(),
         [
-            ProviderEvent::ResponseStarted { .. },
-            ProviderEvent::ReasoningSummaryDelta(first),
-            ProviderEvent::ReasoningSummaryDelta(second),
-            ProviderEvent::ReasoningSummaryDone(done),
+            Event::Started { .. },
+            Event::Thinking(first),
+            Event::Thinking(second),
+            Event::Thought(done),
         ] if first == "looking " && second == "closely" && done == "looking closely"
     ));
 }
 
 #[tokio::test]
-async fn parses_summary_item_done() {
-    let events = capture_events(vec![
+async fn summarized() {
+    let events = events(vec![
         r#"data: {"type":"response.output_item.done","item":{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"First. "},{"type":"summary_text","text":"Second."}]}}"#,
     ])
     .await;
 
     assert!(matches!(
         events.as_slice(),
-        [ProviderEvent::ReasoningSummaryDone(summary)] if summary == "First. Second."
+        [Event::Thought(summary)] if summary == "First. Second."
     ));
 }
 
 #[tokio::test]
-async fn emits_stream_trace_events() {
-    let events = capture_all_events(vec![
+async fn traced() {
+    let events = captured(vec![
         r#"data: {"type":"response.created","response":{"id":"resp_trace"}}"#,
         r#"data: {"type":"response.output_text.delta","delta":"ok"}"#,
     ])
     .await;
 
+    assert!(
+        events
+            .iter()
+            .any(|event| { matches!(event, Event::Traced(Trace::Chunk { .. })) })
+    );
     assert!(events.iter().any(|event| {
         matches!(
             event,
-            ProviderEvent::StreamTrace(ProviderStreamTrace::Chunk { .. })
-        )
-    }));
-    assert!(events.iter().any(|event| {
-        matches!(
-            event,
-            ProviderEvent::StreamTrace(ProviderStreamTrace::RawEvent {
-                raw_type,
-                mapped_events,
-            }) if raw_type == "response.created"
-                && mapped_events == &vec!["response_started".to_string()]
+            Event::Traced(Trace::Raw {
+                kind,
+                mapped,
+            }) if kind == "response.created"
+                && mapped == &vec!["response_started".to_string()]
         )
     }));
 }
 
 #[tokio::test]
-async fn poisoned_replay_regenerates() {
+async fn regenerated() {
     let item = serde_json::json!({
         "type": "function_call",
         "call_id": "call_1",
@@ -151,17 +151,17 @@ async fn poisoned_replay_regenerates() {
         "arguments": "{}",
         "id": "item_deadbeef"
     });
-    let function_call = capture_replay(Some(item)).await;
-    match function_call.get("id").and_then(Value::as_str) {
+    let called = replayed(Some(item)).await;
+    match called.get("id").and_then(Value::as_str) {
         None => {}
         Some(id) => assert!(id.starts_with("fc"), "must not forward invalid id: {id}"),
     }
-    assert_eq!(function_call["call_id"], "call_1");
-    assert_eq!(function_call["name"], "shell");
+    assert_eq!(called["call_id"], "call_1");
+    assert_eq!(called["name"], "shell");
 }
 
 #[tokio::test]
-async fn valid_replay_survives() {
+async fn survived() {
     let item = serde_json::json!({
         "type": "function_call",
         "call_id": "call_1",
@@ -169,15 +169,15 @@ async fn valid_replay_survives() {
         "arguments": "{}",
         "id": "fc_ok"
     });
-    let function_call = capture_replay(Some(item)).await;
-    assert_eq!(function_call["id"], "fc_ok");
+    let called = replayed(Some(item)).await;
+    assert_eq!(called["id"], "fc_ok");
 }
 
 #[tokio::test]
-async fn absent_replay_synthesizes() {
-    let function_call = capture_replay(None).await;
-    assert!(function_call.get("id").is_none());
-    assert_eq!(function_call["call_id"], "call_1");
+async fn synthesized() {
+    let called = replayed(None).await;
+    assert!(called.get("id").is_none());
+    assert_eq!(called["call_id"], "call_1");
 }
 
 #[path = "openai/support.rs"]

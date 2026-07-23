@@ -1,12 +1,12 @@
 use crate::store::db::Database;
-use santi_provider::ProviderItem;
+use santi_provider::Item;
 
 use crate::Fault;
 
 use super::{Pressure, context_incident_key};
 use crate::message;
 
-pub(super) fn pending_items(db: &Database<'_>, strand: &str) -> Result<Vec<ProviderItem>, String> {
+pub(super) fn pending_items(db: &Database<'_>, strand: &str) -> Result<Vec<Item>, String> {
     let mut items = Vec::new();
     for (kind, blob) in db.pending(strand)? {
         let content =

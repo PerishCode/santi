@@ -1,11 +1,11 @@
 pub(crate) use rusqlite::Connection;
 use santi_core::message;
-pub(crate) use santi_core::{Completion, Draft, Invocation, ProviderItem, SantiStore};
+pub(crate) use santi_core::{Completion, Draft, Invocation, Item, SantiStore};
 pub(crate) use serde_json::json;
 
-pub(crate) fn assert_text(item: &ProviderItem, role: &str, content: &str) {
+pub(crate) fn assert_text(item: &Item, role: &str, content: &str) {
     match item {
-        ProviderItem::Message {
+        Item::Message {
             role: actual_role,
             content: actual_content,
         } => {

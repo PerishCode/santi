@@ -145,7 +145,7 @@ impl SantiStore {
             .map_err(|error| error.to_string())?;
         if provider_item_text.is_some()
             || invocation.provenance.mark.is_some()
-            || invocation.provenance.response_id.is_some()
+            || invocation.provenance.response.is_some()
         {
             tx.execute(
                 r#"
@@ -158,7 +158,7 @@ impl SantiStore {
                     invocation.provenance.family,
                     provider_item_text,
                     invocation.provenance.mark,
-                    invocation.provenance.response_id,
+                    invocation.provenance.response,
                     crate::VERSION,
                     now
                 ],

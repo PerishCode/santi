@@ -12,7 +12,7 @@ pub use santi_model::{
     message, now, receipt, soul, stamped, strand, stream, tag, thinking, tool, turn, webhook,
 };
 pub use santi_object as object;
-pub use santi_provider::ProviderItem;
+pub use santi_provider::Item;
 pub use store::{
     Completion, DEFAULT_SOUL_ID, Draft, Invocation, SantiStore, VERSION, soul_memory_file, version,
 };

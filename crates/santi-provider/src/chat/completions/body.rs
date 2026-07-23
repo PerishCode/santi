@@ -1,10 +1,10 @@
 use serde_json::{Map, Value, json};
 
-use crate::{ProviderItem, ProviderRequest, ProviderTool};
+use crate::{Item, Request, Tool};
 
 use super::*;
 
-pub(super) fn chat_body(config: &ChatCompletionsProviderConfig, request: ProviderRequest) -> Value {
+pub(super) fn body(config: &Config, request: Request) -> Value {
     let mut body = Map::from_iter([
         ("model".to_string(), json!(request.model)),
         ("messages".to_string(), messages(&request)),
@@ -12,7 +12,7 @@ pub(super) fn chat_body(config: &ChatCompletionsProviderConfig, request: Provide
     ]);
 
     if let Some(tools) = request.tools {
-        body.insert("tools".to_string(), json!(map_tools(tools)));
+        body.insert("tools".to_string(), json!(tooled(tools)));
     }
     if let Some(thinking) = config
         .thinking
@@ -21,21 +21,21 @@ pub(super) fn chat_body(config: &ChatCompletionsProviderConfig, request: Provide
     {
         body.insert("thinking".to_string(), json!({ "type": thinking }));
     }
-    if let Some(reasoning_effort) = config
-        .reasoning_effort
+    if let Some(effort) = config
+        .effort
         .as_ref()
         .filter(|value| !value.trim().is_empty())
     {
-        body.insert("reasoning_effort".to_string(), json!(reasoning_effort));
+        body.insert("reasoning_effort".to_string(), json!(effort));
     }
-    if let Some(max_tokens) = config.max_tokens {
-        body.insert("max_tokens".to_string(), json!(max_tokens));
+    if let Some(ceiling) = config.ceiling {
+        body.insert("max_tokens".to_string(), json!(ceiling));
     }
 
     Value::Object(body)
 }
 
-fn messages(request: &ProviderRequest) -> Value {
+fn messages(request: &Request) -> Value {
     let mut messages = Vec::new();
     if let Some(instructions) = request
         .instructions
@@ -55,27 +55,22 @@ fn messages(request: &ProviderRequest) -> Value {
     json!(messages)
 }
 
-fn message(item: &ProviderItem) -> Option<Value> {
+fn message(item: &Item) -> Option<Value> {
     match item {
-        ProviderItem::Message { role, content } => Some(text_message(role, content)),
-        ProviderItem::Reasoning { .. } => None,
-        ProviderItem::FunctionCall {
-            call_id,
-            name,
-            arguments_raw,
-            ..
-        } => Some(call_message(call_id, name, arguments_raw)),
-        ProviderItem::FunctionCallOutput { call_id, output } => {
-            Some(output_message(call_id, output))
-        }
+        Item::Message { role, content } => Some(texted(role, content)),
+        Item::Reasoning { .. } => None,
+        Item::Call {
+            call, name, raw, ..
+        } => Some(calling(call, name, raw)),
+        Item::Output { call, output } => Some(outputted(call, output)),
     }
 }
 
-fn text_message(role: &str, content: &str) -> Value {
+fn texted(role: &str, content: &str) -> Value {
     json!({ "role": role, "content": content })
 }
 
-fn call_message(call: &str, name: &str, arguments: &str) -> Value {
+fn calling(call: &str, name: &str, arguments: &str) -> Value {
     json!({
         "role": "assistant",
         "content": Value::Null,
@@ -90,15 +85,15 @@ fn call_message(call: &str, name: &str, arguments: &str) -> Value {
     })
 }
 
-fn output_message(call: &str, output: &str) -> Value {
+fn outputted(call: &str, output: &str) -> Value {
     json!({ "role": "tool", "tool_call_id": call, "content": output })
 }
 
-fn map_tools(tools: Vec<ProviderTool>) -> Vec<Value> {
+fn tooled(tools: Vec<Tool>) -> Vec<Value> {
     tools
         .into_iter()
         .map(|tool| match tool {
-            ProviderTool::Function(tool) => json!({
+            Tool::Function(tool) => json!({
                 "type": "function",
                 "function": {
                     "name": tool.name,

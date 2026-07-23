@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::{pin::Pin, sync::Arc};
 
 #[derive(Debug, Clone)]
-pub enum ProviderItem {
+pub enum Item {
     Message {
         role: String,
         content: String,
@@ -14,94 +14,88 @@ pub enum ProviderItem {
         id: Option<String>,
         content: String,
     },
-    FunctionCall {
-        call_id: String,
+    Call {
+        call: String,
         name: String,
-        arguments_raw: String,
+        raw: String,
         item: Option<Value>,
         mark: Option<String>,
     },
-    FunctionCallOutput {
-        call_id: String,
+    Output {
+        call: String,
         output: String,
     },
 }
 
 #[derive(Debug, Clone)]
-pub struct ProviderRequest {
+pub struct Request {
     pub model: String,
     pub instructions: Option<String>,
-    pub input: Vec<ProviderItem>,
-    pub tools: Option<Vec<ProviderTool>>,
-    pub previous_response_id: Option<String>,
+    pub input: Vec<Item>,
+    pub tools: Option<Vec<Tool>>,
+    pub previous: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ProviderTool {
-    Function(ProviderFunctionTool),
+pub enum Tool {
+    Function(Function),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProviderFunctionTool {
+pub struct Function {
     pub name: String,
     pub description: String,
     pub parameters: Value,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ProviderFunctionCall {
-    pub response_id: String,
+pub struct Call {
+    pub response: String,
     pub mark: Option<String>,
     pub item: Value,
-    pub call_id: String,
+    pub call: String,
     pub name: String,
-    pub arguments_raw: String,
+    pub raw: String,
     pub arguments: Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProviderStreamTrace {
-    Chunk {
-        bytes: usize,
-    },
-    RawEvent {
-        raw_type: String,
-        mapped_events: Vec<String>,
-    },
+pub enum Trace {
+    Chunk { bytes: usize },
+    Raw { kind: String, mapped: Vec<String> },
 }
 
 #[derive(Debug, Clone)]
-pub struct ProviderMetadata {
+pub struct Metadata {
     pub provider: Arc<str>,
     pub model: String,
-    pub context_budget: Option<ProviderContextBudget>,
+    pub budget: Option<Cap>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderContextBudget {
+pub struct Cap {
     pub bytes: usize,
     pub source: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ProviderEvent {
-    StreamTrace(ProviderStreamTrace),
-    ResponseStarted { response: Option<String> },
-    ResponseInProgress { response: Option<String> },
-    ReasoningSummaryDelta(String),
-    ReasoningSummaryDone(String),
-    TextDelta(String),
-    FunctionCallRequested(ProviderFunctionCall),
+pub enum Event {
+    Traced(Trace),
+    Started { response: Option<String> },
+    Working { response: Option<String> },
+    Thinking(String),
+    Thought(String),
+    Text(String),
+    Called(Call),
     Completed { response: Option<String> },
     Failed(String),
 }
 
-pub type ProviderStream =
-    Pin<Box<dyn Stream<Item = Result<ProviderEvent, String>> + Send + 'static>>;
+pub type Streaming = Pin<Box<dyn Stream<Item = Result<Event, String>> + Send + 'static>>;
 
 #[async_trait]
-pub trait ProviderClient: Send + Sync {
-    fn metadata(&self) -> ProviderMetadata;
+pub trait Provider: Send + Sync {
+    fn metadata(&self) -> Metadata;
 
-    async fn stream_response(&self, request: ProviderRequest) -> Result<ProviderStream, String>;
+    async fn stream(&self, request: Request) -> Result<Streaming, String>;
 }

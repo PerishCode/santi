@@ -1,11 +1,11 @@
-use santi_provider::{ProviderItem, ProviderRequest, ProviderTool};
+use santi_provider::{Item, Request, Tool};
 use serde_json::{Value, json};
 
 use crate::budget;
 
 const ESTIMATOR: &str = "provider_json_bytes_v1";
 
-pub(crate) fn estimate_provider_request(request: &ProviderRequest) -> budget::Estimate {
+pub(crate) fn estimate_provider_request(request: &Request) -> budget::Estimate {
     estimate_provider_parts(
         &request.input,
         request.instructions.as_deref(),
@@ -14,9 +14,9 @@ pub(crate) fn estimate_provider_request(request: &ProviderRequest) -> budget::Es
 }
 
 pub(crate) fn estimate_provider_parts(
-    input: &[ProviderItem],
+    input: &[Item],
     instructions: Option<&str>,
-    tools: Option<&[ProviderTool]>,
+    tools: Option<&[Tool]>,
 ) -> budget::Estimate {
     let held = input
         .iter()
@@ -44,7 +44,7 @@ pub(crate) fn estimate_provider_parts(
 pub(crate) fn inbound_provider_item(
     kind: &crate::message::Kind,
     content: &crate::message::Content,
-) -> Option<ProviderItem> {
+) -> Option<Item> {
     let text = content.rendered();
     if text.trim().is_empty() {
         return None;
@@ -53,41 +53,41 @@ pub(crate) fn inbound_provider_item(
         crate::message::Kind::Text => "user",
         crate::message::Kind::SantiSystem => "system",
     };
-    Some(ProviderItem::Message {
+    Some(Item::Message {
         role: role.to_string(),
         content: text,
     })
 }
 
-fn provider_item_value(item: &ProviderItem) -> Value {
+fn provider_item_value(item: &Item) -> Value {
     match item {
-        ProviderItem::Message { role, content } => json!({
+        Item::Message { role, content } => json!({
             "type": "message",
             "role": role,
             "content": content,
         }),
-        ProviderItem::Reasoning { id, content } => json!({
+        Item::Reasoning { id, content } => json!({
             "type": "reasoning",
             "id": id,
             "content": content,
         }),
-        ProviderItem::FunctionCall {
-            call_id,
+        Item::Call {
+            call,
             name,
-            arguments_raw,
+            raw,
             item,
             mark,
         } => json!({
             "type": "function_call",
-            "call_id": call_id,
+            "call": call,
             "name": name,
-            "arguments_raw": arguments_raw,
+            "raw": raw,
             "item": item,
             "mark": mark,
         }),
-        ProviderItem::FunctionCallOutput { call_id, output } => json!({
+        Item::Output { call, output } => json!({
             "type": "function_call_output",
-            "call_id": call_id,
+            "call": call,
             "output": output,
         }),
     }

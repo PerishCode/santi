@@ -107,7 +107,7 @@ impl Service {
         Ok(Some(budget::Snapshot {
             strand: strand.id.clone(),
             estimate: self.current_context_estimate(&strand.id)?,
-            budget: self.context_budget(),
+            budget: self.budget(),
             incident: self.store.active_context_incident(&strand.id)?,
         }))
     }

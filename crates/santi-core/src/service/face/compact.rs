@@ -32,7 +32,7 @@ impl Service {
                     response: Some(&response),
                     before: response.before.as_ref(),
                     after: None,
-                    budget: self.context_budget().as_ref(),
+                    budget: self.budget().as_ref(),
                     ratio: None,
                 });
                 let after =
@@ -44,7 +44,7 @@ impl Service {
                     response: Some(&response),
                     before: response.before.as_ref(),
                     after: Some(&after),
-                    budget: self.context_budget().as_ref(),
+                    budget: self.budget().as_ref(),
                     ratio,
                 });
                 let after =
@@ -63,7 +63,7 @@ impl Service {
                 response: None,
                 before: Some(&before),
                 after: None,
-                budget: self.context_budget().as_ref(),
+                budget: self.budget().as_ref(),
                 ratio: None,
             })
         });
@@ -85,7 +85,7 @@ impl Service {
                 response: Some(&response),
                 before: Some(&before),
                 after: Some(&after),
-                budget: self.context_budget().as_ref(),
+                budget: self.budget().as_ref(),
                 ratio,
             });
             self.store
@@ -98,7 +98,7 @@ impl Service {
                 response: Some(&response),
                 before: Some(&before),
                 after: Some(&after),
-                budget: self.context_budget().as_ref(),
+                budget: self.budget().as_ref(),
                 ratio,
             });
             self.store

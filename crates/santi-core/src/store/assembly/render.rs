@@ -3,7 +3,7 @@ use crate::store::{
     span::Span,
 };
 use rusqlite::params;
-use santi_provider::ProviderItem;
+use santi_provider::Item;
 use serde_json::json;
 
 use super::*;
@@ -16,7 +16,7 @@ pub(super) fn assembly_input_with_preview(
     conn: &rusqlite::Connection,
     strand: &str,
     preview: Option<Preview<'_>>,
-) -> Result<Vec<ProviderItem>, String> {
+) -> Result<Vec<Item>, String> {
     let mut overlay: Vec<Overlay> = Vec::new();
     let items = Items {
         db: Database::new(conn),
@@ -91,7 +91,7 @@ pub(super) fn assembly_input_with_preview(
         }
         if overlay_index < overlay.len() && overlay[overlay_index].span.start_seq <= seq {
             if !overlay_emitted {
-                input.push(ProviderItem::Message {
+                input.push(Item::Message {
                     role: "system".to_string(),
                     content: overlay[overlay_index].content.clone(),
                 });
@@ -107,7 +107,7 @@ pub(super) fn assembly_input_with_preview(
 }
 
 impl Items<'_> {
-    fn provider(&self, kind: &str, target: &str) -> Result<Option<ProviderItem>, String> {
+    fn provider(&self, kind: &str, target: &str) -> Result<Option<Item>, String> {
         match kind {
             "message" => self.message(target),
             "thinking" => self.thinking(target),
@@ -117,43 +117,42 @@ impl Items<'_> {
         }
     }
 
-    fn message(&self, target: &str) -> Result<Option<ProviderItem>, String> {
+    fn message(&self, target: &str) -> Result<Option<Item>, String> {
         let Some(message) = self.db.record(target)? else {
             return Ok(None);
         };
         Ok(item(&message))
     }
 
-    fn thinking(&self, target: &str) -> Result<Option<ProviderItem>, String> {
+    fn thinking(&self, target: &str) -> Result<Option<Item>, String> {
         let Some(thinking) = self.db.span(target)? else {
             return Ok(None);
         };
         let Some(content) = thinking.summary.filter(|text| !text.trim().is_empty()) else {
             return Ok(None);
         };
-        Ok(Some(ProviderItem::Reasoning {
+        Ok(Some(Item::Reasoning {
             id: thinking.response,
             content,
         }))
     }
 
-    fn tool_call(&self, target: &str) -> Result<Option<ProviderItem>, String> {
+    fn tool_call(&self, target: &str) -> Result<Option<Item>, String> {
         let Some(tool_call) = self.db.call(target)? else {
             return Ok(None);
         };
         let (item, mark) = self.db.material(&tool_call.id)?;
-        let arguments_raw =
-            serde_json::to_string(&tool_call.arguments).map_err(|error| error.to_string())?;
-        Ok(Some(ProviderItem::FunctionCall {
-            call_id: tool_call.id,
+        let raw = serde_json::to_string(&tool_call.arguments).map_err(|error| error.to_string())?;
+        Ok(Some(Item::Call {
+            call: tool_call.id,
             name: tool_call.tool,
-            arguments_raw,
+            raw,
             item,
             mark,
         }))
     }
 
-    fn tool_result(&self, target: &str) -> Result<Option<ProviderItem>, String> {
+    fn tool_result(&self, target: &str) -> Result<Option<Item>, String> {
         let Some(tool_result) = self.db.reply(target)? else {
             return Ok(None);
         };
@@ -163,8 +162,8 @@ impl Items<'_> {
             "error": tool_result.error,
         }))
         .map_err(|error| error.to_string())?;
-        Ok(Some(ProviderItem::FunctionCallOutput {
-            call_id: tool_result.call,
+        Ok(Some(Item::Output {
+            call: tool_result.call,
             output,
         }))
     }

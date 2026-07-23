@@ -11,14 +11,11 @@ use crate::budget;
 const REASON_PROVIDER: &str = "provider_request_exceeds_budget";
 
 impl Service {
-    pub(in crate::service) fn context_budget(&self) -> Option<budget::Cap> {
-        self.provider
-            .metadata()
-            .context_budget
-            .map(|budget| budget::Cap {
-                bytes: budget.bytes as i64,
-                source: budget.source,
-            })
+    pub(in crate::service) fn budget(&self) -> Option<budget::Cap> {
+        self.provider.metadata().budget.map(|budget| budget::Cap {
+            bytes: budget.bytes as i64,
+            source: budget.source,
+        })
     }
 
     pub(in crate::service) fn current_context_estimate(
@@ -40,7 +37,7 @@ impl Service {
         &self,
         strand: &str,
     ) -> Result<Option<Admission>, String> {
-        let Some(budget) = self.context_budget() else {
+        let Some(budget) = self.budget() else {
             return Ok(None);
         };
         let metadata = self.provider.metadata();
@@ -58,10 +55,10 @@ impl Service {
         &self,
         strand: &str,
         turn: &str,
-        request: &santi_provider::ProviderRequest,
+        request: &santi_provider::Request,
         estimate: &budget::Estimate,
     ) -> Result<Option<Fault>, String> {
-        let Some(budget) = self.context_budget() else {
+        let Some(budget) = self.budget() else {
             return Ok(None);
         };
         if estimate.total <= budget.bytes {
@@ -104,7 +101,7 @@ impl Service {
         if self.store.active_context_incident(strand)?.is_none() {
             return Ok(false);
         }
-        let Some(budget) = self.context_budget() else {
+        let Some(budget) = self.budget() else {
             return Ok(false);
         };
         let estimate = self.current_context_estimate(strand)?;

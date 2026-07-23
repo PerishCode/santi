@@ -1,17 +1,16 @@
-use santi_provider::{
-    ChatCompletionsProviderConfig, ProviderEvent, ProviderItem, ProviderStreamTrace,
-};
+use santi_provider::chat::completions::Config;
+use santi_provider::{Event, Item, Trace};
 
 #[tokio::test]
-async fn maps_chat_body() {
-    let body = capture_body(ChatCompletionsProviderConfig {
+async fn mapped() {
+    let body = posted(Config {
         provider: "deepseek".to_string(),
-        api_key: "test-key".to_string(),
+        key: "test-key".to_string(),
         model: "deepseek-v4-pro".to_string(),
-        base_url: String::new(),
+        url: String::new(),
         thinking: Some("disabled".to_string()),
-        reasoning_effort: Some("high".to_string()),
-        max_tokens: Some(512),
+        effort: Some("high".to_string()),
+        ceiling: Some(512),
         bytes: None,
     })
     .await;
@@ -28,17 +27,17 @@ async fn maps_chat_body() {
 }
 
 #[tokio::test]
-async fn flattens_tool_items() {
-    let body = capture_with_items(vec![
-        ProviderItem::FunctionCall {
-            call_id: "call_shell".to_string(),
+async fn flattened() {
+    let body = itemized(vec![
+        Item::Call {
+            call: "call_shell".to_string(),
             name: "shell".to_string(),
-            arguments_raw: "{\"command\":\"pwd\"}".to_string(),
+            raw: "{\"command\":\"pwd\"}".to_string(),
             item: None,
             mark: None,
         },
-        ProviderItem::FunctionCallOutput {
-            call_id: "call_shell".to_string(),
+        Item::Output {
+            call: "call_shell".to_string(),
             output: "/tmp".to_string(),
         },
     ])
@@ -57,16 +56,16 @@ async fn flattens_tool_items() {
 }
 
 #[tokio::test]
-async fn flattens_interleaved_rounds() {
-    let body = capture_with_items(vec![
-        function_call_item("call_one", "pwd"),
-        ProviderItem::FunctionCallOutput {
-            call_id: "call_one".to_string(),
+async fn interleaved() {
+    let body = itemized(vec![
+        fixture("call_one", "pwd"),
+        Item::Output {
+            call: "call_one".to_string(),
             output: "one".to_string(),
         },
-        function_call_item("call_two", "ls"),
-        ProviderItem::FunctionCallOutput {
-            call_id: "call_two".to_string(),
+        fixture("call_two", "ls"),
+        Item::Output {
+            call: "call_two".to_string(),
             output: "two".to_string(),
         },
     ])
@@ -84,8 +83,8 @@ async fn flattens_interleaved_rounds() {
 }
 
 #[tokio::test]
-async fn parses_reasoning_text() {
-    let events = capture_events(vec![
+async fn reasoned() {
+    let events = events(vec![
         r#"data: {"id":"chatcmpl_1","choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}"#,
         r#"data: {"id":"chatcmpl_1","choices":[{"delta":{"reasoning_content":"thinking"},"finish_reason":null}]}"#,
         r#"data: {"id":"chatcmpl_1","choices":[{"delta":{"content":"ok"},"finish_reason":null}]}"#,
@@ -97,24 +96,24 @@ async fn parses_reasoning_text() {
     assert!(matches!(
         events.as_slice(),
         [
-            ProviderEvent::ResponseStarted {
-                response: Some(response_id),
+            Event::Started {
+                response: Some(response),
             },
-            ProviderEvent::ReasoningSummaryDelta(reasoning),
-            ProviderEvent::TextDelta(text),
-            ProviderEvent::Completed {
+            Event::Thinking(reasoning),
+            Event::Text(text),
+            Event::Completed {
                 response: Some(completed_id),
             },
         ] if reasoning == "thinking"
             && text == "ok"
-            && response_id == "chatcmpl_1"
+            && response == "chatcmpl_1"
             && completed_id == "chatcmpl_1"
     ));
 }
 
 #[tokio::test]
-async fn parses_streamed_tool_call() {
-    let events = capture_events(vec![
+async fn streamed() {
+    let events = events(vec![
         r#"data: {"id":"chatcmpl_tool","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_shell","type":"function","function":{"name":"shell","arguments":"{\"command\""}}]},"finish_reason":null}]}"#,
         r#"data: {"id":"chatcmpl_tool","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"pwd\"}"}}]},"finish_reason":null}]}"#,
         r#"data: {"id":"chatcmpl_tool","choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
@@ -124,18 +123,18 @@ async fn parses_streamed_tool_call() {
     assert!(matches!(
         events.as_slice(),
         [
-            ProviderEvent::ResponseStarted { .. },
-            ProviderEvent::FunctionCallRequested(call),
-        ] if call.response_id == "chatcmpl_tool"
-                && call.call_id == "call_shell"
+            Event::Started { .. },
+            Event::Called(call),
+        ] if call.response == "chatcmpl_tool"
+                && call.call == "call_shell"
                 && call.name == "shell"
                 && call.arguments["command"] == "pwd"
     ));
 }
 
 #[tokio::test]
-async fn keeps_tool_name() {
-    let events = capture_events(vec![
+async fn named() {
+    let events = events(vec![
         r#"data: {"id":"chatcmpl_tool","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_shell","type":"function","function":{"name":"shell","arguments":""}}]},"finish_reason":null}]}"#,
         r#"data: {"id":"chatcmpl_tool","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"","arguments":"{\"command\""}}]},"finish_reason":null}]}"#,
         r#"data: {"id":"chatcmpl_tool","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"","arguments":":\"pwd\"}"}}]},"finish_reason":null}]}"#,
@@ -146,34 +145,33 @@ async fn keeps_tool_name() {
     assert!(matches!(
         events.as_slice(),
         [
-            ProviderEvent::ResponseStarted { .. },
-            ProviderEvent::FunctionCallRequested(call),
+            Event::Started { .. },
+            Event::Called(call),
         ] if call.name == "shell"
                 && call.arguments["command"] == "pwd"
     ));
 }
 
 #[tokio::test]
-async fn emits_stream_trace_events() {
-    let events = capture_all_events(vec![
+async fn traced() {
+    let events = captured(vec![
         r#"data: {"id":"chatcmpl_1","choices":[{"delta":{"content":"ok"},"finish_reason":null}]}"#,
     ])
     .await;
 
+    assert!(
+        events
+            .iter()
+            .any(|event| { matches!(event, Event::Traced(Trace::Chunk { .. })) })
+    );
     assert!(events.iter().any(|event| {
         matches!(
             event,
-            ProviderEvent::StreamTrace(ProviderStreamTrace::Chunk { .. })
-        )
-    }));
-    assert!(events.iter().any(|event| {
-        matches!(
-            event,
-            ProviderEvent::StreamTrace(ProviderStreamTrace::RawEvent {
-                raw_type,
-                mapped_events,
-            }) if raw_type == "chat.completion.chunk"
-                && mapped_events == &vec![
+            Event::Traced(Trace::Raw {
+                kind,
+                mapped,
+            }) if kind == "chat.completion.chunk"
+                && mapped == &vec![
                     "response_started".to_string(),
                     "text_delta".to_string(),
                 ]
@@ -181,6 +179,6 @@ async fn emits_stream_trace_events() {
     }));
 }
 
-#[path = "chat_completions/support.rs"]
+#[path = "chat/support.rs"]
 mod support;
 use support::*;

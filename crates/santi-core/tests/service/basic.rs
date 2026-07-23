@@ -58,7 +58,7 @@ async fn sends_with_runtime() {
     assert_eq!(requests[0].model, "fake-model");
     assert_eq!(requests[0].input.len(), 1);
     match &requests[0].input[0] {
-        ProviderItem::Message { role, content } => {
+        Item::Message { role, content } => {
             assert_eq!(role, "user");
             assert_eq!(content, "hello provider");
         }
@@ -112,14 +112,14 @@ async fn sends_with_runtime() {
     let tool_names = tools
         .iter()
         .map(|tool| match tool {
-            santi_provider::ProviderTool::Function(tool) => tool.name.as_str(),
+            santi_provider::Tool::Function(tool) => tool.name.as_str(),
         })
         .collect::<Vec<_>>();
     assert_eq!(tool_names, vec!["shell"]);
     let tool_descriptions = tools
         .iter()
         .map(|tool| match tool {
-            santi_provider::ProviderTool::Function(tool) => {
+            santi_provider::Tool::Function(tool) => {
                 format!("{} {}", tool.description, tool.parameters)
             }
         })

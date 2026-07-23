@@ -10,7 +10,7 @@ const MAINTENANCE_LABEL: &str = "santi:memory:maintenance";
 
 #[derive(Clone)]
 struct MemoryOrganizingProvider {
-    requests: Arc<Mutex<Vec<ProviderRequest>>>,
+    requests: Arc<Mutex<Vec<Request>>>,
     memory_path: std::path::PathBuf,
     first_request_seen: Arc<Notify>,
     release_first_request: Arc<Notify>,
@@ -38,19 +38,19 @@ impl MemoryOrganizingProvider {
 }
 
 #[async_trait]
-impl ProviderClient for MemoryOrganizingProvider {
-    fn metadata(&self) -> ProviderMetadata {
-        ProviderMetadata {
+impl Provider for MemoryOrganizingProvider {
+    fn metadata(&self) -> Metadata {
+        Metadata {
             provider: Arc::from("memory-organizing-provider"),
             model: "memory-organizing-model".to_string(),
-            context_budget: Some(ProviderContextBudget {
+            budget: Some(Cap {
                 bytes: INPUT_BUDGET_BYTES,
                 source: "test".to_string(),
             }),
         }
     }
 
-    async fn stream_response(&self, request: ProviderRequest) -> Result<ProviderStream, String> {
+    async fn stream(&self, request: Request) -> Result<Streaming, String> {
         let request_index = {
             let mut requests = self.requests.lock().unwrap();
             requests.push(request);
@@ -66,10 +66,8 @@ impl ProviderClient for MemoryOrganizingProvider {
             .map_err(|error| error.to_string())?;
         }
         Ok(Box::pin(stream::iter(vec![
-            Ok(ProviderEvent::TextDelta(format!(
-                "provider response {request_index}"
-            ))),
-            Ok(ProviderEvent::Completed {
+            Ok(Event::Text(format!("provider response {request_index}"))),
+            Ok(Event::Completed {
                 response: Some(format!("memory-response-{request_index}")),
             }),
         ])))

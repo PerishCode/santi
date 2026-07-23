@@ -6,7 +6,7 @@ mod flow;
 mod text;
 mod tools;
 
-use santi_provider::ProviderClient;
+use santi_provider::Provider;
 use std::{
     collections::HashMap,
     sync::{
@@ -23,7 +23,7 @@ use crate::{budget, material, stream};
 #[derive(Clone)]
 pub struct Service {
     pub(crate) store: SantiStore,
-    provider: Arc<dyn ProviderClient>,
+    provider: Arc<dyn Provider>,
     pub(crate) config: Config,
     material_cache: Arc<Mutex<HashMap<materials::Key, material::Material>>>,
     stream_events: broadcast::Sender<stream::Event>,
@@ -45,7 +45,7 @@ pub struct Config {
 }
 
 impl Service {
-    pub fn open(config: Config, provider: Arc<dyn ProviderClient>) -> Result<Self, String> {
+    pub fn open(config: Config, provider: Arc<dyn Provider>) -> Result<Self, String> {
         let store = SantiStore::open(&config.database_path)?;
         store.reconcile_orphaned_turns()?;
         let drive_degraded = store.active_drive_incident_count()? > 0;

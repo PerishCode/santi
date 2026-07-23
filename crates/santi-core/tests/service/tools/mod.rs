@@ -13,21 +13,21 @@ enum BudgetProviderStep {
 
 #[derive(Clone)]
 struct BudgetProvider {
-    requests: Arc<Mutex<Vec<ProviderRequest>>>,
+    requests: Arc<Mutex<Vec<Request>>>,
     steps: Arc<Vec<BudgetProviderStep>>,
 }
 
 #[async_trait]
-impl ProviderClient for BudgetProvider {
-    fn metadata(&self) -> ProviderMetadata {
-        ProviderMetadata {
+impl Provider for BudgetProvider {
+    fn metadata(&self) -> Metadata {
+        Metadata {
             provider: Arc::from("budget-provider"),
             model: "budget-model".to_string(),
-            context_budget: None,
+            budget: None,
         }
     }
 
-    async fn stream_response(&self, request: ProviderRequest) -> Result<ProviderStream, String> {
+    async fn stream(&self, request: Request) -> Result<Streaming, String> {
         let index = {
             let mut requests = self.requests.lock().unwrap();
             requests.push(request);
@@ -41,7 +41,7 @@ impl ProviderClient for BudgetProvider {
         match step {
             BudgetProviderStep::Fail(error) => Err(error),
             BudgetProviderStep::Complete => {
-                Ok(Box::pin(stream::iter(vec![Ok(ProviderEvent::Completed {
+                Ok(Box::pin(stream::iter(vec![Ok(Event::Completed {
                     response: Some(format!("resp_{index}")),
                 })])))
             }
@@ -57,37 +57,31 @@ impl ProviderClient for BudgetProvider {
     }
 }
 
-fn tool_events(
-    index: usize,
-    count: usize,
-    output_bytes: usize,
-) -> Vec<Result<ProviderEvent, String>> {
+fn tool_events(index: usize, count: usize, output_bytes: usize) -> Vec<Result<Event, String>> {
     let mut events = Vec::new();
     for call_index in 0..count {
-        let call_id = format!("call_{index}_{call_index}");
-        let response_id = format!("resp_{index}");
+        let call = format!("call_{index}_{call_index}");
+        let response = format!("resp_{index}");
         let command = output_command(output_bytes);
         let arguments = json!({"command": command});
-        let arguments_raw = arguments.to_string();
-        events.push(Ok(ProviderEvent::FunctionCallRequested(
-            ProviderFunctionCall {
-                response_id: response_id.clone(),
-                mark: Some(format!("item_{call_id}")),
-                item: json!({
-                    "type": "function_call",
-                    "id": format!("item_{call_id}"),
-                    "call_id": call_id,
-                    "name": "shell",
-                    "arguments": arguments_raw,
-                }),
-                call_id,
-                name: "shell".to_string(),
-                arguments_raw,
-                arguments,
-            },
-        )));
+        let raw = arguments.to_string();
+        events.push(Ok(Event::Called(Call {
+            response: response.clone(),
+            mark: Some(format!("item_{call}")),
+            item: json!({
+                "type": "function_call",
+                "id": format!("item_{call}"),
+                "call_id": call,
+                "name": "shell",
+                "arguments": raw,
+            }),
+            call,
+            name: "shell".to_string(),
+            raw,
+            arguments,
+        })));
     }
-    events.push(Ok(ProviderEvent::Completed {
+    events.push(Ok(Event::Completed {
         response: Some(format!("resp_{index}")),
     }));
     events
@@ -255,17 +249,17 @@ async fn dispatches_tools() {
 
     let requests = provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
-    assert!(requests[1].previous_response_id.is_none());
+    assert!(requests[1].previous.is_none());
     assert!(
         requests[1]
             .input
             .iter()
-            .any(|item| matches!(item, ProviderItem::FunctionCall { .. }))
+            .any(|item| matches!(item, Item::Call { .. }))
     );
     assert!(
         requests[1]
             .input
             .iter()
-            .any(|item| matches!(item, ProviderItem::FunctionCallOutput { .. }))
+            .any(|item| matches!(item, Item::Output { .. }))
     );
 }

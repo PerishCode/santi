@@ -1,6 +1,6 @@
 use std::{path::PathBuf, process::Stdio};
 
-use santi_provider::{ProviderFunctionCall, ProviderFunctionTool, ProviderTool};
+use santi_provider::{Call, Function, Tool};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -15,10 +15,10 @@ use crate::{effect, stream};
 
 mod shell;
 
-pub(crate) fn provider_tools() -> Vec<ProviderTool> {
+pub(crate) fn provider_tools() -> Vec<Tool> {
     let soul_memory_uri = soul_memory_uri();
     let strand_memory_uri = strand_memory_uri();
-    vec![ProviderTool::Function(ProviderFunctionTool {
+    vec![Tool::Function(Function {
         name: "shell".to_string(),
         description: format!(
             "Run a shell command. By default commands run in the current execution workspace. Use cwd \"{SOUL_WORKSPACE_URI}\" to work in the current soul workspace, where {soul_memory_uri} is always rendered live in [santi-soul]. Use cwd \"{STRAND_WORKSPACE_URI}\" to work in the current strand workspace, where {strand_memory_uri} is always rendered live in [santi-strand]. Unix-like systems use bash by default; Windows uses pwsh by default."
@@ -44,7 +44,7 @@ pub(crate) fn provider_tools() -> Vec<ProviderTool> {
 struct Shell<'a> {
     strand: &'a str,
     turn: &'a str,
-    call: &'a ProviderFunctionCall,
+    call: &'a Call,
     effect: &'a str,
     limit: Option<usize>,
 }
@@ -54,7 +54,7 @@ impl Service {
         &self,
         strand: &str,
         turn: &str,
-        call: ProviderFunctionCall,
+        call: Call,
         output_limit: Option<usize>,
     ) -> Result<(), String> {
         let kind = (call.name == "shell").then_some("shell");
@@ -62,12 +62,12 @@ impl Service {
             family: self.provider.metadata().provider.to_string(),
             item: Some(call.item.clone()),
             mark: call.mark.clone(),
-            response_id: Some(call.response_id.clone()),
+            response: Some(call.response.clone()),
         };
         let (tool_call, effect) = self.store.append_effect_call(
             crate::Invocation {
                 turn,
-                call: &call.call_id,
+                call: &call.call,
                 name: &call.name,
                 arguments: &call.arguments,
                 provenance: &provenance,
@@ -90,7 +90,7 @@ impl Service {
             })?
         } else {
             self.store.append_tool_result(
-                &call.call_id,
+                &call.call,
                 None,
                 Some(bounded_tool_error(
                     format!("unsupported tool: {}", call.name),
@@ -124,7 +124,7 @@ impl Service {
                 return self.store.append_effect_tool_result(
                     effect,
                     crate::store::Settlement {
-                        call: &call.call_id,
+                        call: &call.call,
                         output: None,
                         error: Some(bounded_tool_error(error, output_limit)),
                         state: effect::State::NotDispatched,
@@ -137,7 +137,7 @@ impl Service {
             shell::Outcome::Captured(output) => self.store.append_effect_tool_result(
                 effect,
                 crate::store::Settlement {
-                    call: &call.call_id,
+                    call: &call.call,
                     output: Some(output),
                     error: None,
                     state: effect::State::Confirmed,
@@ -146,7 +146,7 @@ impl Service {
             shell::Outcome::Failed(error) => self.store.append_effect_tool_result(
                 effect,
                 crate::store::Settlement {
-                    call: &call.call_id,
+                    call: &call.call,
                     output: None,
                     error: Some(bounded_tool_error(error, output_limit)),
                     state: effect::State::NotDispatched,

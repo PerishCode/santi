@@ -101,7 +101,7 @@ fn thinking_becomes_reasoning() {
     assert_eq!(input.len(), 2);
     assert_text(&input[0], "user", "hello thinking");
     match &input[1] {
-        ProviderItem::Reasoning { id, content } => {
+        Item::Reasoning { id, content } => {
             assert_eq!(id.as_deref(), Some("resp_test"));
             assert_eq!(content, "Looked at the prompt.");
         }
@@ -140,7 +140,7 @@ fn timeline_interleaves() {
                 family: "openai".to_string(),
                 item: Some(serde_json::json!({ "type": "function_call", "id": "fc_1" })),
                 mark: Some("fc_1".to_string()),
-                response_id: Some("resp_1".to_string()),
+                response: Some("resp_1".to_string()),
             },
         })
         .expect("append tool call");
@@ -159,24 +159,24 @@ fn timeline_interleaves() {
     assert_eq!(input.len(), 4);
     assert_text(&input[0], "user", "run a command");
     match &input[1] {
-        ProviderItem::FunctionCall {
-            call_id,
+        Item::Call {
+            call,
             name,
-            arguments_raw,
+            raw,
             item,
             mark,
         } => {
-            assert_eq!(call_id, "call_1");
+            assert_eq!(call, "call_1");
             assert_eq!(name, "shell");
-            assert!(arguments_raw.contains("echo hi"));
+            assert!(raw.contains("echo hi"));
             assert_eq!(mark.as_deref(), Some("fc_1"));
             assert_eq!(item.as_ref().expect("raw item")["id"], "fc_1");
         }
         other => panic!("expected function call, got {other:?}"),
     }
     match &input[2] {
-        ProviderItem::FunctionCallOutput { call_id, output } => {
-            assert_eq!(call_id, "call_1");
+        Item::Output { call, output } => {
+            assert_eq!(call, "call_1");
             assert!(output.contains("\"ok\":true"));
             assert!(output.contains("hi"));
         }

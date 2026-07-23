@@ -6,7 +6,7 @@ pub(crate) use turn::execution_budget_incident_key;
 
 use rusqlite::{OptionalExtension, params};
 use santi_error::{Fault, Incident, catalog, engine};
-use santi_provider::{ProviderItem, ProviderTool};
+use santi_provider::{Item, Tool};
 use serde_json::{Value, json};
 
 use super::{
@@ -69,7 +69,7 @@ pub(crate) struct Admission {
     pub budget_source: String,
     pub budget_bytes: i64,
     pub instructions: Option<String>,
-    pub tools: Vec<ProviderTool>,
+    pub tools: Vec<Tool>,
 }
 
 pub(crate) struct Ingress<'a> {
@@ -101,7 +101,7 @@ pub(crate) struct Launch<'a> {
 }
 
 impl SantiStore {
-    pub(crate) fn pending_provider_items(&self, strand: &str) -> Result<Vec<ProviderItem>, String> {
+    pub(crate) fn pending_provider_items(&self, strand: &str) -> Result<Vec<Item>, String> {
         let conn = self.conn.lock().unwrap();
         state::pending_items(&Database::new(&conn), strand)
     }

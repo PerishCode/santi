@@ -4,7 +4,7 @@ use crate::service::flow::budget::Verdict;
 use crate::service::flow::failure::{Admission, Failure, Metadata, Operation, Persistence, Stage};
 use crate::service::tools::provider_tools;
 use crate::service::{Service, address::Address, notice::Observation, timing};
-use santi_provider::ProviderRequest;
+use santi_provider::Request;
 
 use super::*;
 use crate::{message, stream, turn};
@@ -112,7 +112,7 @@ impl Service {
             let input = provider_try!(Operation::Assembly, provider_input(&self.store, strand));
             let metadata = self.provider.metadata();
             let family = metadata.provider.to_string();
-            let request = ProviderRequest {
+            let request = Request {
                 model: metadata.model,
                 instructions: Some(provider_try!(
                     Operation::Prompt,
@@ -120,7 +120,7 @@ impl Service {
                 )),
                 input,
                 tools: Some(provider_tools()),
-                previous_response_id: None,
+                previous: None,
             };
             let estimate = estimate_provider_request(&request);
             if let Some(error) = provider_try!(
@@ -145,7 +145,7 @@ impl Service {
             });
             self.publish_turn_activity(strand, turn, turn::Motion::Requesting, None);
             let request_model = request.model.clone();
-            let stream = match self.provider.stream_response(request).await {
+            let stream = match self.provider.stream(request).await {
                 Ok(stream) => {
                     timing.http_response_started(round);
                     stream

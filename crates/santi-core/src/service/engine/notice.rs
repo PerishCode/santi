@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use santi_provider::ProviderItem;
+use santi_provider::Item;
 
 use super::{Service, address::Address};
 use crate::{message, stream};
@@ -13,7 +13,7 @@ pub(in crate::service) struct Observation<'a> {
     pub(in crate::service) round: usize,
     pub(in crate::service) provider: &'a str,
     pub(in crate::service) model: &'a str,
-    pub(in crate::service) input: &'a [ProviderItem],
+    pub(in crate::service) input: &'a [Item],
     pub(in crate::service) instructions: Option<&'a str>,
 }
 
@@ -217,31 +217,29 @@ fn compact_reminder_message(event: &Observed) -> message::Content {
     )
 }
 
-fn provider_input_bytes(input: &[ProviderItem]) -> usize {
+fn provider_input_bytes(input: &[Item]) -> usize {
     input.iter().map(provider_item_bytes).sum()
 }
 
-fn provider_item_bytes(item: &ProviderItem) -> usize {
+fn provider_item_bytes(item: &Item) -> usize {
     match item {
-        ProviderItem::Message { role, content } => role.len().saturating_add(content.len()),
-        ProviderItem::Reasoning { id, content } => id
+        Item::Message { role, content } => role.len().saturating_add(content.len()),
+        Item::Reasoning { id, content } => id
             .as_ref()
             .map_or(0, String::len)
             .saturating_add(content.len()),
-        ProviderItem::FunctionCall {
-            call_id,
+        Item::Call {
+            call,
             name,
-            arguments_raw,
+            raw,
             item,
             mark,
-        } => call_id
+        } => call
             .len()
             .saturating_add(name.len())
-            .saturating_add(arguments_raw.len())
+            .saturating_add(raw.len())
             .saturating_add(mark.as_ref().map_or(0, String::len))
             .saturating_add(item.as_ref().map_or(0, |value| value.to_string().len())),
-        ProviderItem::FunctionCallOutput { call_id, output } => {
-            call_id.len().saturating_add(output.len())
-        }
+        Item::Output { call, output } => call.len().saturating_add(output.len()),
     }
 }

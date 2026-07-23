@@ -1,6 +1,6 @@
 use std::fs;
 
-use santi_provider::ProviderItem;
+use santi_provider::Item;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
@@ -34,7 +34,7 @@ impl Service {
         let bytes = self
             .provider
             .metadata()
-            .context_budget
+            .budget
             .map_or(FALLBACK_INPUT_BUDGET_BYTES, |budget| budget.bytes);
         let allowance_bytes = (bytes / 2).max(1);
         let operator_threshold_bytes =
@@ -239,8 +239,8 @@ fn memory_maintenance_metaprompt(snapshot: &Snapshot, policy: Policy) -> message
     )
 }
 
-fn provider_item_contains(item: &ProviderItem, needle: &str) -> bool {
-    matches!(item, ProviderItem::Message { content, .. } if content.contains(needle))
+fn provider_item_contains(item: &Item, needle: &str) -> bool {
+    matches!(item, Item::Message { content, .. } if content.contains(needle))
 }
 
 fn memory_intervention_incident_key(soul: &str) -> String {

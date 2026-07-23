@@ -17,47 +17,44 @@ use santi_api::{
 use santi_core::service::{self, Service};
 use santi_core::{Invocation, SantiStore, catalog, engine};
 use santi_core::{effect, ingest, message, tool};
-use santi_provider::{
-    ProviderClient, ProviderContextBudget, ProviderEvent, ProviderMetadata, ProviderRequest,
-    ProviderStream,
-};
+use santi_provider::{Cap, Event, Metadata, Provider, Request, Streaming};
 
 struct BudgetedProvider;
 
 struct DriverProvider;
 
 #[async_trait]
-impl ProviderClient for BudgetedProvider {
-    fn metadata(&self) -> ProviderMetadata {
-        ProviderMetadata {
+impl Provider for BudgetedProvider {
+    fn metadata(&self) -> Metadata {
+        Metadata {
             provider: Arc::from("budgeted-provider"),
             model: "budgeted-model".to_string(),
-            context_budget: Some(ProviderContextBudget {
+            budget: Some(Cap {
                 bytes: 1,
                 source: "test".to_string(),
             }),
         }
     }
 
-    async fn stream_response(&self, _request: ProviderRequest) -> Result<ProviderStream, String> {
-        Ok(Box::pin(stream::iter(vec![Ok(ProviderEvent::Completed {
+    async fn stream(&self, _request: Request) -> Result<Streaming, String> {
+        Ok(Box::pin(stream::iter(vec![Ok(Event::Completed {
             response: None,
         })])))
     }
 }
 
 #[async_trait]
-impl ProviderClient for DriverProvider {
-    fn metadata(&self) -> ProviderMetadata {
-        ProviderMetadata {
+impl Provider for DriverProvider {
+    fn metadata(&self) -> Metadata {
+        Metadata {
             provider: Arc::from("driver-provider"),
             model: "driver-model".to_string(),
-            context_budget: None,
+            budget: None,
         }
     }
 
-    async fn stream_response(&self, _request: ProviderRequest) -> Result<ProviderStream, String> {
-        Ok(Box::pin(stream::iter(vec![Ok(ProviderEvent::Completed {
+    async fn stream(&self, _request: Request) -> Result<Streaming, String> {
+        Ok(Box::pin(stream::iter(vec![Ok(Event::Completed {
             response: None,
         })])))
     }

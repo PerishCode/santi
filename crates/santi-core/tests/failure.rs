@@ -4,25 +4,23 @@ use rusqlite::Connection;
 use santi_core::Category;
 use santi_core::service::{self, Service};
 use santi_core::{message, strand, turn};
-use santi_provider::{
-    ProviderClient, ProviderEvent, ProviderItem, ProviderMetadata, ProviderRequest, ProviderStream,
-};
+use santi_provider::{Event, Item, Metadata, Provider, Request, Streaming};
 use std::sync::{Arc, Mutex};
 use tokio::time::{Duration, sleep};
 
 #[path = "failure/more.rs"]
 mod more;
 
-fn as_text(item: &ProviderItem) -> Option<(&str, &str)> {
+fn as_text(item: &Item) -> Option<(&str, &str)> {
     match item {
-        ProviderItem::Message { role, content } => Some((role.as_str(), content.as_str())),
+        Item::Message { role, content } => Some((role.as_str(), content.as_str())),
         _ => None,
     }
 }
 
 #[derive(Clone, Default)]
 struct FailureProvider {
-    requests: Arc<Mutex<Vec<ProviderRequest>>>,
+    requests: Arc<Mutex<Vec<Request>>>,
     fail_with: Option<String>,
     fail_for_requests: Option<usize>,
     stream_error_after_text: Option<String>,
@@ -31,16 +29,16 @@ struct FailureProvider {
 }
 
 #[async_trait]
-impl ProviderClient for FailureProvider {
-    fn metadata(&self) -> ProviderMetadata {
-        ProviderMetadata {
+impl Provider for FailureProvider {
+    fn metadata(&self) -> Metadata {
+        Metadata {
             provider: Arc::from("fake-provider"),
             model: "fake-model".to_string(),
-            context_budget: None,
+            budget: None,
         }
     }
 
-    async fn stream_response(&self, request: ProviderRequest) -> Result<ProviderStream, String> {
+    async fn stream(&self, request: Request) -> Result<Streaming, String> {
         let attempt = {
             let mut requests = self.requests.lock().unwrap();
             requests.push(request);
@@ -55,25 +53,23 @@ impl ProviderClient for FailureProvider {
         }
         if let Some(error) = &self.stream_error_after_text {
             return Ok(Box::pin(stream::iter(vec![
-                Ok(ProviderEvent::TextDelta(
-                    "partial runtime output".to_string(),
-                )),
+                Ok(Event::Text("partial runtime output".to_string())),
                 Err(error.clone()),
             ])));
         }
         if let Some(error) = &self.response_failure {
-            return Ok(Box::pin(stream::iter(vec![Ok(ProviderEvent::Failed(
+            return Ok(Box::pin(stream::iter(vec![Ok(Event::Failed(
                 error.clone(),
             ))])));
         }
         let mut events = Vec::new();
         if self.response_started {
-            events.push(Ok(ProviderEvent::ResponseStarted {
+            events.push(Ok(Event::Started {
                 response: Some("fake-response-id".to_string()),
             }));
         }
-        events.push(Ok(ProviderEvent::TextDelta("ok".to_string())));
-        events.push(Ok(ProviderEvent::Completed {
+        events.push(Ok(Event::Text("ok".to_string())));
+        events.push(Ok(Event::Completed {
             response: Some("fake-response-id".to_string()),
         }));
         Ok(Box::pin(stream::iter(events)))

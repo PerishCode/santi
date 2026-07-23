@@ -1,5 +1,5 @@
 use futures_util::StreamExt;
-use santi_provider::{ProviderEvent, ProviderFunctionCall, ProviderStream};
+use santi_provider::{Call, Event, Streaming};
 
 use super::super::{Service, address::Address, text::delta, timing, timing::provider_event_name};
 use super::failure::{Failure, Metadata, Operation, Persistence, Stage};
@@ -8,7 +8,7 @@ use crate::{thinking, turn};
 mod run;
 
 struct Output {
-    calls: Vec<ProviderFunctionCall>,
+    calls: Vec<Call>,
     completed_response_id: Option<String>,
     active_provider_response_id: Option<String>,
     assistant_text: String,
@@ -22,7 +22,7 @@ struct Driver<'a, 'turn> {
     request_model: &'a str,
     assistant_text: &'a mut String,
     timing: &'a mut timing::Turn<'turn>,
-    calls: Vec<ProviderFunctionCall>,
+    calls: Vec<Call>,
     completed_response_id: Option<String>,
     active_provider_response_id: Option<String>,
     current_thinking_span: Option<thinking::Span>,
@@ -33,7 +33,7 @@ struct Driver<'a, 'turn> {
 }
 
 impl Driver<'_, '_> {
-    async fn consume(mut self, mut stream: ProviderStream) -> Result<Output, Failure> {
+    async fn consume(mut self, mut stream: Streaming) -> Result<Output, Failure> {
         while let Some(event) = stream.next().await {
             let Some(event) = self.receive_event(event)? else {
                 continue;
@@ -51,12 +51,9 @@ impl Driver<'_, '_> {
         })
     }
 
-    fn receive_event(
-        &mut self,
-        event: Result<ProviderEvent, String>,
-    ) -> Result<Option<ProviderEvent>, Failure> {
+    fn receive_event(&mut self, event: Result<Event, String>) -> Result<Option<Event>, Failure> {
         match event {
-            Ok(ProviderEvent::StreamTrace(trace)) => {
+            Ok(Event::Traced(trace)) => {
                 self.timing.provider_trace(self.number, trace);
                 Ok(None)
             }
@@ -74,7 +71,7 @@ impl Driver<'_, '_> {
         }
     }
 
-    fn record_first_event(&mut self, event: &ProviderEvent) {
+    fn record_first_event(&mut self, event: &Event) {
         if !self.saw_sse_event {
             self.saw_sse_event = true;
             self.timing
@@ -82,31 +79,32 @@ impl Driver<'_, '_> {
         }
     }
 
-    fn handle_event(&mut self, event: ProviderEvent) -> Result<bool, Failure> {
+    fn handle_event(&mut self, event: Event) -> Result<bool, Failure> {
         match event {
-            ProviderEvent::StreamTrace(_) => Ok(false),
-            ProviderEvent::ResponseStarted { response }
-            | ProviderEvent::ResponseInProgress { response } => self.response_progress(response),
-            ProviderEvent::ReasoningSummaryDelta(delta) => {
+            Event::Traced(_) => Ok(false),
+            Event::Started { response } | Event::Working { response } => {
+                self.response_progress(response)
+            }
+            Event::Thinking(delta) => {
                 self.reasoning_summary.push_str(&delta);
                 self.persist_reasoning_summary()?;
                 Ok(false)
             }
-            ProviderEvent::ReasoningSummaryDone(summary) => {
+            Event::Thought(summary) => {
                 self.reasoning_summary = summary;
                 self.persist_reasoning_summary()?;
                 Ok(false)
             }
-            ProviderEvent::TextDelta(delta) => {
+            Event::Text(delta) => {
                 self.text_delta(delta)?;
                 Ok(false)
             }
-            ProviderEvent::FunctionCallRequested(call) => {
+            Event::Called(call) => {
                 self.function_call_requested(call)?;
                 Ok(false)
             }
-            ProviderEvent::Completed { response } => self.complete(response),
-            ProviderEvent::Failed(error) => Err(self.failed(error)),
+            Event::Completed { response } => self.complete(response),
+            Event::Failed(error) => Err(self.failed(error)),
         }
     }
 
@@ -154,7 +152,7 @@ impl Driver<'_, '_> {
         self.runtime(Operation::Persistence(Persistence::Text), result)
     }
 
-    fn function_call_requested(&mut self, call: ProviderFunctionCall) -> Result<(), Failure> {
+    fn function_call_requested(&mut self, call: Call) -> Result<(), Failure> {
         self.timing.function_call_requested(self.number, &call.name);
         let result = self.service.complete_current_thinking_span(
             self.address.strand,

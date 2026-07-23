@@ -67,7 +67,7 @@ async fn external_ingest_turn() {
         request.input.iter().any(|item| {
             matches!(
                 item,
-                ProviderItem::Message { role, content }
+                Item::Message { role, content }
                     if role == "system" && content == "an external request arrived"
             )
         })

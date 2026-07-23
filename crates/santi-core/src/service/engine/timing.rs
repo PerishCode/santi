@@ -3,7 +3,7 @@ use std::{
     time::Instant,
 };
 
-use santi_provider::{ProviderEvent, ProviderStreamTrace};
+use santi_provider::{Event, Trace};
 
 pub(in crate::service) struct Turn<'a> {
     turn: &'a str,
@@ -107,9 +107,9 @@ impl<'a> Turn<'a> {
         );
     }
 
-    pub(in crate::service) fn provider_trace(&mut self, round: usize, trace: ProviderStreamTrace) {
+    pub(in crate::service) fn provider_trace(&mut self, round: usize, trace: Trace) {
         match trace {
-            ProviderStreamTrace::Chunk { bytes } => {
+            Trace::Chunk { bytes } => {
                 self.chunks += 1;
                 self.bytes += bytes;
                 if self.chunks == 1 {
@@ -120,20 +120,17 @@ impl<'a> Turn<'a> {
                     );
                 }
             }
-            ProviderStreamTrace::RawEvent {
-                raw_type,
-                mapped_events,
-            } => {
+            Trace::Raw { kind, mapped } => {
                 self.raw_events += 1;
-                let (count, is_first) = self.record_raw_event(&raw_type);
-                if should_log_raw_event(is_first, &mapped_events) {
+                let (count, is_first) = self.record_raw_event(&kind);
+                if should_log_raw_event(is_first, &mapped) {
                     self.log(
                         "provider_raw_event",
                         round,
                         &format!(
-                            "raw_type={raw_type} raw_count={count} mapped={mapped} raw_events={}",
+                            "raw_type={kind} raw_count={count} mapped={mapped} raw_events={}",
                             self.raw_events,
-                            mapped = mapped_event_list(&mapped_events)
+                            mapped = mapped_event_list(&mapped)
                         ),
                     );
                 }
@@ -141,13 +138,13 @@ impl<'a> Turn<'a> {
         }
     }
 
-    fn record_raw_event(&mut self, raw_type: &str) -> (usize, bool) {
+    fn record_raw_event(&mut self, kind: &str) -> (usize, bool) {
         let count = {
-            let count = self.raw_counts.entry(raw_type.to_string()).or_insert(0);
+            let count = self.raw_counts.entry(kind.to_string()).or_insert(0);
             *count += 1;
             *count
         };
-        let is_first = self.seen_raw_types.insert(raw_type.to_string());
+        let is_first = self.seen_raw_types.insert(kind.to_string());
         (count, is_first)
     }
 
@@ -175,31 +172,31 @@ impl<'a> Turn<'a> {
     }
 }
 
-fn should_log_raw_event(is_first: bool, mapped_events: &[String]) -> bool {
+fn should_log_raw_event(is_first: bool, mapped: &[String]) -> bool {
     is_first
-        || mapped_events
+        || mapped
             .iter()
             .any(|event| !matches!(event.as_str(), "reasoning_summary_delta" | "text_delta"))
 }
 
-fn mapped_event_list(mapped_events: &[String]) -> String {
-    if mapped_events.is_empty() {
+fn mapped_event_list(mapped: &[String]) -> String {
+    if mapped.is_empty() {
         "none".to_string()
     } else {
-        mapped_events.join(",")
+        mapped.join(",")
     }
 }
 
-pub(in crate::service) fn provider_event_name(event: &ProviderEvent) -> &'static str {
+pub(in crate::service) fn provider_event_name(event: &Event) -> &'static str {
     match event {
-        ProviderEvent::ResponseStarted { .. } => "response_started",
-        ProviderEvent::ResponseInProgress { .. } => "response_in_progress",
-        ProviderEvent::ReasoningSummaryDelta(_) => "reasoning_summary_delta",
-        ProviderEvent::ReasoningSummaryDone(_) => "reasoning_summary_done",
-        ProviderEvent::TextDelta(_) => "text_delta",
-        ProviderEvent::FunctionCallRequested(_) => "function_call_requested",
-        ProviderEvent::Completed { .. } => "completed",
-        ProviderEvent::Failed(_) => "failed",
-        ProviderEvent::StreamTrace(_) => "stream_trace",
+        Event::Started { .. } => "response_started",
+        Event::Working { .. } => "response_in_progress",
+        Event::Thinking(_) => "reasoning_summary_delta",
+        Event::Thought(_) => "reasoning_summary_done",
+        Event::Text(_) => "text_delta",
+        Event::Called(_) => "function_call_requested",
+        Event::Completed { .. } => "completed",
+        Event::Failed(_) => "failed",
+        Event::Traced(_) => "stream_trace",
     }
 }

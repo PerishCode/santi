@@ -118,12 +118,12 @@ pub(crate) fn count_messages(runtime: &santi_core::stream::Snapshot, text: &str)
         .count()
 }
 
-pub(crate) fn provider_messages(request: &ProviderRequest) -> Vec<(&str, &str)> {
+pub(crate) fn provider_messages(request: &Request) -> Vec<(&str, &str)> {
     request
         .input
         .iter()
         .filter_map(|item| match item {
-            ProviderItem::Message { role, content } => Some((role.as_str(), content.as_str())),
+            Item::Message { role, content } => Some((role.as_str(), content.as_str())),
             _ => None,
         })
         .collect()

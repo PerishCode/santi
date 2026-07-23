@@ -12,25 +12,23 @@ use santi_api::{
 };
 use santi_core::SantiStore;
 use santi_core::service::{self, Service};
-use santi_provider::{
-    ProviderClient, ProviderEvent, ProviderMetadata, ProviderRequest, ProviderStream,
-};
+use santi_provider::{Event, Metadata, Provider, Request, Streaming};
 
 #[derive(Clone)]
 struct NoopProvider;
 
 #[async_trait]
-impl ProviderClient for NoopProvider {
-    fn metadata(&self) -> ProviderMetadata {
-        ProviderMetadata {
+impl Provider for NoopProvider {
+    fn metadata(&self) -> Metadata {
+        Metadata {
             provider: Arc::from("noop"),
             model: "noop".to_string(),
-            context_budget: None,
+            budget: None,
         }
     }
 
-    async fn stream_response(&self, _request: ProviderRequest) -> Result<ProviderStream, String> {
-        Ok(Box::pin(stream::iter(vec![Ok(ProviderEvent::Completed {
+    async fn stream(&self, _request: Request) -> Result<Streaming, String> {
+        Ok(Box::pin(stream::iter(vec![Ok(Event::Completed {
             response: Some("noop".to_string()),
         })])))
     }

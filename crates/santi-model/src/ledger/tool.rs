@@ -19,7 +19,7 @@ pub struct Provenance {
     pub family: String,
     pub item: Option<Value>,
     pub mark: Option<String>,
-    pub response_id: Option<String>,
+    pub response: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

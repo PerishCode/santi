@@ -211,7 +211,7 @@ impl<'a> Database<'a> {
     }
 }
 
-pub fn item(message: &santi_model::message::Message) -> Option<santi_provider::ProviderItem> {
+pub fn item(message: &santi_model::message::Message) -> Option<santi_provider::Item> {
     let role = match (&message.role, &message.kind) {
         (message::Role::Soul, _) => "assistant",
         (message::Role::System, message::Kind::Text) => "user",
@@ -221,7 +221,7 @@ pub fn item(message: &santi_model::message::Message) -> Option<santi_provider::P
     if content.trim().is_empty() {
         None
     } else {
-        Some(santi_provider::ProviderItem::Message {
+        Some(santi_provider::Item::Message {
             role: role.to_string(),
             content,
         })

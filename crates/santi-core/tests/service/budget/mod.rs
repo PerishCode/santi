@@ -9,7 +9,7 @@ mod memory_pressure;
 
 mod recovery;
 
-fn service_with_budget(temp: &tempfile::TempDir, provider: Arc<dyn ProviderClient>) -> Service {
+fn service_with_budget(temp: &tempfile::TempDir, provider: Arc<dyn Provider>) -> Service {
     Service::open(
         service::Config {
             database_path: temp.path().join("santi.sqlite").display().to_string(),

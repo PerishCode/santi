@@ -5,25 +5,22 @@ use async_trait::async_trait;
 use futures_util::stream;
 use santi_core::material;
 use santi_core::{SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, soul_memory_uri, strand_memory_uri};
-use santi_provider::{ProviderClient, ProviderMetadata, ProviderStream};
+use santi_provider::{Metadata, Provider, Streaming};
 
 #[derive(Clone)]
 struct FakeProvider;
 
 #[async_trait]
-impl ProviderClient for FakeProvider {
-    fn metadata(&self) -> ProviderMetadata {
-        ProviderMetadata {
+impl Provider for FakeProvider {
+    fn metadata(&self) -> Metadata {
+        Metadata {
             provider: Arc::from("fake-provider"),
             model: "fake-model".to_string(),
-            context_budget: None,
+            budget: None,
         }
     }
 
-    async fn stream_response(
-        &self,
-        _request: santi_provider::ProviderRequest,
-    ) -> Result<ProviderStream, String> {
+    async fn stream(&self, _request: santi_provider::Request) -> Result<Streaming, String> {
         Ok(Box::pin(stream::empty()))
     }
 }

@@ -1,4 +1,4 @@
-use santi_provider::ProviderItem;
+use santi_provider::Item;
 
 use super::{SantiStore, span::Span};
 
@@ -6,7 +6,7 @@ mod render;
 use render::*;
 
 impl SantiStore {
-    pub fn assembly_input(&self, strand: &str) -> Result<Vec<ProviderItem>, String> {
+    pub fn assembly_input(&self, strand: &str) -> Result<Vec<Item>, String> {
         let conn = self.conn.lock().unwrap();
         assembly_input_in_conn(&conn, strand)
     }
@@ -17,7 +17,7 @@ impl SantiStore {
         response: &crate::compact::Report,
         summary: &str,
         metadata: serde_json::Value,
-    ) -> Result<Vec<ProviderItem>, String> {
+    ) -> Result<Vec<Item>, String> {
         let conn = self.conn.lock().unwrap();
         let preview = crate::compact::Compact {
             id: response.compact.clone(),
@@ -55,7 +55,7 @@ impl SantiStore {
 pub(super) fn assembly_input_in_conn(
     conn: &rusqlite::Connection,
     strand: &str,
-) -> Result<Vec<ProviderItem>, String> {
+) -> Result<Vec<Item>, String> {
     assembly_input_with_preview(conn, strand, None)
 }
 

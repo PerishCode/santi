@@ -115,7 +115,7 @@ fn fork_copies_inner_compacts() {
 
     let input = store.assembly_input(&child.id).expect("child input");
     assert_eq!(input.len(), 2);
-    let ProviderItem::Message { role, content } = &input[0] else {
+    let Item::Message { role, content } = &input[0] else {
         panic!("expected compact projection message");
     };
     assert_eq!(role, "system");
@@ -160,7 +160,7 @@ fn fork_reuses_tools() {
                 family: "openai".to_string(),
                 item: Some(serde_json::json!({ "type": "function_call", "id": "fc_fork" })),
                 mark: Some("fc_fork".to_string()),
-                response_id: Some("resp_fork".to_string()),
+                response: Some("resp_fork".to_string()),
             },
         })
         .expect("append tool call");
@@ -185,21 +185,18 @@ fn fork_reuses_tools() {
     let child_input = store.assembly_input(&child.id).expect("child input");
     assert_eq!(child_input.len(), 3);
     match &child_input[1] {
-        ProviderItem::FunctionCall {
-            call_id,
-            mark,
-            item,
-            ..
+        Item::Call {
+            call, mark, item, ..
         } => {
-            assert_eq!(call_id, "call_fork");
+            assert_eq!(call, "call_fork");
             assert_eq!(mark.as_deref(), Some("fc_fork"));
             assert_eq!(item.as_ref().expect("raw item")["id"], "fc_fork");
         }
         other => panic!("expected function call, got {other:?}"),
     }
     match &child_input[2] {
-        ProviderItem::FunctionCallOutput { call_id, output } => {
-            assert_eq!(call_id, "call_fork");
+        Item::Output { call, output } => {
+            assert_eq!(call, "call_fork");
             assert!(output.contains("fork"));
         }
         other => panic!("expected function call output, got {other:?}"),

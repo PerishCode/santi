@@ -120,7 +120,7 @@ impl SantiStore {
                     detail: "interrupted by restart",
                 },
             )?;
-            Database::new(&tx).fail_turn(turn_id, error.incident_id.as_deref(), &now)?;
+            Database::new(&tx).fail_turn(turn_id, error.incident.as_deref(), &now)?;
         }
         tx.commit().map_err(|error| error.to_string())?;
         Ok(rows.len())

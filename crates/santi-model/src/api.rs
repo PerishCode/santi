@@ -1,4 +1,4 @@
-use santi_error::SantiError;
+use santi_error::Fault;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
@@ -118,7 +118,7 @@ pub struct SendStrandAcceptedResponse {
 pub struct IngestReceipt {
     pub strand_id: String,
     pub inbox_id: String,
-    pub warning: Option<Box<SantiError>>,
+    pub warning: Option<Box<Fault>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
@@ -137,9 +137,9 @@ pub struct ReceiptTransition {
     pub sequence: i64,
     pub state: ReceiptState,
     pub turn_id: Option<String>,
-    pub incident_id: Option<String>,
+    pub incident: Option<String>,
     pub reconstructed_from: Option<String>,
-    pub occurred_at: Timestamp,
+    pub occurred: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -178,7 +178,7 @@ pub enum StrandSelector {
 #[derive(Debug, Clone)]
 pub enum IngestOutcome {
     Accepted { receipt: IngestReceipt },
-    Rejected { error: Box<SantiError> },
+    Rejected { error: Box<Fault> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

@@ -1,7 +1,7 @@
 use crate::store::{ProviderFault, RuntimeFault};
 use crate::{
-    ActorType, ErrorScope, ErrorSource, MessageContent, MessageIntake, MessageState, SantiError,
-    SantiStreamPayload, Turn, catalog, engine,
+    ActorType, Fault, MessageContent, MessageIntake, MessageState, SantiStreamPayload, Turn,
+    catalog, engine,
 };
 
 use super::super::Service;
@@ -42,7 +42,7 @@ pub(super) struct Metadata {
 #[derive(Debug)]
 enum Cause {
     Provider(Metadata),
-    Budget(Admission, Box<SantiError>),
+    Budget(Admission, Box<Fault>),
     Runtime(Operation),
 }
 
@@ -117,7 +117,7 @@ impl Failure {
         }
     }
 
-    pub(super) fn context_budget(error: SantiError) -> Self {
+    pub(super) fn context_budget(error: Fault) -> Self {
         Self {
             error: error.to_string(),
             partial_assistant_text: String::new(),
@@ -125,7 +125,7 @@ impl Failure {
         }
     }
 
-    pub(super) fn execution_budget(error: SantiError, partial_assistant_text: &str) -> Self {
+    pub(super) fn execution_budget(error: Fault, partial_assistant_text: &str) -> Self {
         Self {
             error: error.to_string(),
             partial_assistant_text: partial_assistant_text.to_string(),
@@ -141,9 +141,9 @@ impl Service {
             partial_assistant_text,
             cause,
         } = failure;
-        let persist_budget = |canonical_error: SantiError, budget: &str| match self
+        let persist_budget = |canonical_error: Fault, budget: &str| match self
             .store
-            .fail_turn_with_incident(turn_id, &error, canonical_error.incident_id.as_deref())
+            .fail_turn_with_incident(turn_id, &error, canonical_error.incident.as_deref())
         {
             Ok(turn) => (Some(turn), canonical_error),
             Err(persistence_error) => {
@@ -186,7 +186,7 @@ impl Service {
         turn_id: &str,
         error: &str,
         metadata: Metadata,
-    ) -> (Option<Turn>, SantiError) {
+    ) -> (Option<Turn>, Fault) {
         match self.store.fail_provider_turn(
             turn_id,
             error,
@@ -219,7 +219,7 @@ impl Service {
         turn_id: &str,
         error: &str,
         operation: Operation,
-    ) -> (Option<Turn>, SantiError) {
+    ) -> (Option<Turn>, Fault) {
         match self.store.fail_runtime_turn(
             turn_id,
             error,
@@ -278,21 +278,21 @@ impl Service {
     }
 }
 
-fn terminal_persistence_error(strand_id: &str, turn_id: &str, detail: String) -> SantiError {
+fn terminal_persistence_error(strand_id: &str, turn_id: &str, detail: String) -> Fault {
     engine().transient(crate::Signal {
         descriptor: catalog::ERROR_ENGINE_PERSISTENCE_FAILED,
-        source: ErrorSource::new("santi-core", "provider_turn_failure"),
-        scope: Some(ErrorScope::new("strand", strand_id)),
+        source: santi_error::Source::new("santi-core", "provider_turn_failure"),
+        scope: Some(santi_error::Scope::new("strand", strand_id)),
         message: "failed to persist provider failure incident".to_string(),
         context: serde_json::json!({ "turn_id": turn_id, "detail": detail }),
     })
 }
 
-fn terminal_runtime_error(strand_id: &str, turn_id: &str, detail: String) -> SantiError {
+fn terminal_runtime_error(strand_id: &str, turn_id: &str, detail: String) -> Fault {
     engine().transient(crate::Signal {
         descriptor: catalog::INTERNAL,
-        source: ErrorSource::new("santi-core", "turn_failure_persistence"),
-        scope: Some(ErrorScope::new("strand", strand_id)),
+        source: santi_error::Source::new("santi-core", "turn_failure_persistence"),
+        scope: Some(santi_error::Scope::new("strand", strand_id)),
         message: "failed to persist turn failure".to_string(),
         context: serde_json::json!({ "turn_id": turn_id, "detail": detail }),
     })

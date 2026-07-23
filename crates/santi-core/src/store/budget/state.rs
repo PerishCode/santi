@@ -1,7 +1,7 @@
 use crate::store::db::Database;
 use santi_provider::ProviderItem;
 
-use crate::{MessageContent, MessageKind, SantiError};
+use crate::{Fault, MessageContent, MessageKind};
 
 use super::{Pressure, context_incident_key};
 
@@ -26,7 +26,7 @@ pub(super) fn open_context_incident(
     db: &Database<'_>,
     strand_id: &str,
     input: Pressure<'_>,
-) -> Result<SantiError, String> {
+) -> Result<Fault, String> {
     db.open_incident(input.into_draft(strand_id))
 }
 
@@ -34,17 +34,17 @@ pub(super) fn repeat_context_incident(
     db: &Database<'_>,
     strand_id: &str,
     operation: &str,
-) -> Result<SantiError, String> {
-    let incident_key = context_incident_key(strand_id);
+) -> Result<Fault, String> {
+    let key = context_incident_key(strand_id);
     let existing = db
-        .active_incident(&incident_key)?
+        .active_incident(&key)?
         .ok_or_else(|| "active context-budget incident missing".to_string())?;
-    db.open_incident(santi_error::IncidentDraft {
-        incident_key,
+    db.open_incident(santi_error::Draft {
+        key,
         descriptor: santi_error::catalog::CONTEXT_BUDGET_EXCEEDED,
         scope: existing.scope,
-        source: santi_error::ErrorSource::new("santi-core", operation),
-        message: existing.latest_message,
-        context: existing.latest_context,
+        source: santi_error::Source::new("santi-core", operation),
+        message: existing.latest.message,
+        context: existing.latest.context,
     })
 }

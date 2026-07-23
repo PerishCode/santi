@@ -39,7 +39,7 @@ fn request_path(paths: &RuntimePaths) -> PathBuf {
 pub fn launch(
     deb: &str,
     previous_deb: Option<&str>,
-) -> Result<UpgradeStarted, Box<santi_core::SantiError>> {
+) -> Result<UpgradeStarted, Box<santi_core::Fault>> {
     let paths = crate::runtime::held().paths.clone();
     let attempt_id = format!("upgrade_{}", Uuid::new_v4().simple());
     ensure_upgrade_idle()
@@ -81,7 +81,7 @@ pub fn launch(
 pub fn run(
     deb: Option<String>,
     previous_deb: Option<String>,
-) -> Result<UpgradeReport, Box<santi_core::SantiError>> {
+) -> Result<UpgradeReport, Box<santi_core::Fault>> {
     let paths = crate::runtime::held().paths.clone();
     let request = match deb {
         Some(deb) => {
@@ -204,7 +204,7 @@ fn ensure_upgrade_idle() -> Result<(), String> {
     }
 }
 
-fn read_request(paths: &RuntimePaths) -> Result<Launch, Box<santi_core::SantiError>> {
+fn read_request(paths: &RuntimePaths) -> Result<Launch, Box<santi_core::Fault>> {
     let attempt_id = format!("upgrade_{}", Uuid::new_v4().simple());
     let raw = fs::read(request_path(paths)).map_err(|error| {
         paths.record_failure(
@@ -246,7 +246,7 @@ impl RuntimePaths {
         deb: &str,
         stage: UpgradeStage,
         detail: String,
-    ) -> Box<santi_core::SantiError> {
+    ) -> Box<santi_core::Fault> {
         let finalize_request = UpgradeFinalizeRequest {
             protocol_version: FINALIZE_PROTOCOL_VERSION,
             attempt_id: attempt_id.to_string(),

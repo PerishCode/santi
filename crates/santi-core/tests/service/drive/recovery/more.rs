@@ -60,9 +60,9 @@ async fn drive_failure_recovers() {
     assert!(runtime.messages.is_empty());
     assert!(runtime.turns.is_empty());
     assert_eq!(runtime.errors.len(), 1);
-    let incident_id = runtime.errors[0].id.clone();
-    assert_eq!(runtime.errors[0].status, santi_core::IncidentStatus::Active);
-    assert_eq!(runtime.errors[0].occurrence_count, 1);
+    let incident = runtime.errors[0].id.clone();
+    assert_eq!(runtime.errors[0].status, santi_core::Status::Active);
+    assert_eq!(runtime.errors[0].occurrences, 1);
     assert_eq!(pending_count(&conn, &strand.id), 1);
 
     let rejected = service
@@ -77,7 +77,7 @@ async fn drive_failure_recovers() {
         .await
         .expect_err("active drive incident should quick-fail later writes");
     assert_eq!(rejected.code, "runtime.strand.drive_failed");
-    assert_eq!(rejected.incident_id.as_deref(), Some(incident_id.as_str()));
+    assert_eq!(rejected.incident.as_deref(), Some(incident.as_str()));
     assert_eq!(rejected.context["accepted_before_failure"], false);
     assert_eq!(pending_count(&conn, &strand.id), 1);
 
@@ -92,15 +92,12 @@ async fn drive_failure_recovers() {
     assert!(!service.is_drive_degraded());
     assert_eq!(pending_count(&conn, &strand.id), 0);
     assert_eq!(runtime.errors.len(), 1);
-    assert_eq!(runtime.errors[0].id, incident_id);
-    assert_eq!(
-        runtime.errors[0].status,
-        santi_core::IncidentStatus::Resolved
-    );
-    assert_eq!(runtime.errors[0].occurrence_count, 2);
+    assert_eq!(runtime.errors[0].id, incident);
+    assert_eq!(runtime.errors[0].status, santi_core::Status::Resolved);
+    assert_eq!(runtime.errors[0].occurrences, 2);
     assert_eq!(runtime.errors[0].revision, 2);
     assert_eq!(
-        runtime.errors[0].resolved_by.as_deref(),
+        runtime.errors[0].resolution.as_ref().unwrap().by.as_deref(),
         Some("strand.drive_started")
     );
     assert!(
@@ -128,8 +125,8 @@ async fn drive_failure_recovers() {
         ]
     );
     assert_eq!(
-        receipt.transitions[1].incident_id.as_deref(),
-        Some(incident_id.as_str())
+        receipt.transitions[1].incident.as_deref(),
+        Some(incident.as_str())
     );
     assert!(
         runtime

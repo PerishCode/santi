@@ -1,8 +1,5 @@
 use crate::store::{ProviderFault, RuntimeFault, SantiStore, db::Database};
-use crate::{
-    EffectTransitionReason, ErrorScope, ErrorSource, IncidentDraft, SantiError, Turn, catalog,
-    timestamp_now,
-};
+use crate::{EffectTransitionReason, Fault, Turn, catalog, timestamp_now};
 use rusqlite::params;
 use serde_json::json;
 
@@ -14,7 +11,7 @@ impl SantiStore {
         turn_id: &str,
         error_text: &str,
         failure: ProviderFault<'_>,
-    ) -> Result<(Turn, SantiError), String> {
+    ) -> Result<(Turn, Fault), String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let strand_id: String = tx
@@ -34,11 +31,11 @@ impl SantiStore {
             params![turn_id, error_text, now],
         )
         .map_err(|error| error.to_string())?;
-        let error = Database::new(&tx).open_incident(IncidentDraft {
-            incident_key: provider_incident_key(&strand_id),
+        let error = Database::new(&tx).open_incident(santi_error::Draft {
+            key: provider_incident_key(&strand_id),
             descriptor: catalog::PROVIDER_TURN_FAILED,
-            scope: ErrorScope::new("strand", &strand_id),
-            source: ErrorSource::new("santi-provider", failure.operation),
+            scope: santi_error::Scope::new("strand", &strand_id),
+            source: santi_error::Source::new("santi-provider", failure.operation),
             message: format!("provider {} failed", failure.stage),
             context: json!({
                 "turn_id": turn_id,
@@ -56,7 +53,7 @@ impl SantiStore {
             EffectTransitionReason::TurnFailedDuringDispatch,
             &now,
         )?;
-        Database::new(&tx).fail_turn(turn_id, error.incident_id.as_deref(), &now)?;
+        Database::new(&tx).fail_turn(turn_id, error.incident.as_deref(), &now)?;
         tx.commit().map_err(|error| error.to_string())?;
         let turn = Database::new(&conn)
             .turn_by_id(turn_id)?
@@ -69,7 +66,7 @@ impl SantiStore {
         turn_id: &str,
         error_text: &str,
         failure: RuntimeFault<'_>,
-    ) -> Result<(Turn, SantiError), String> {
+    ) -> Result<(Turn, Fault), String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let strand_id: String = tx
@@ -96,7 +93,7 @@ impl SantiStore {
             EffectTransitionReason::TurnFailedDuringDispatch,
             &now,
         )?;
-        Database::new(&tx).fail_turn(turn_id, error.incident_id.as_deref(), &now)?;
+        Database::new(&tx).fail_turn(turn_id, error.incident.as_deref(), &now)?;
         tx.commit().map_err(|error| error.to_string())?;
         let turn = Database::new(&conn)
             .turn_by_id(turn_id)?
@@ -112,7 +109,7 @@ impl SantiStore {
         &self,
         turn_id: &str,
         error_text: &str,
-        incident_id: Option<&str>,
+        incident: Option<&str>,
     ) -> Result<Turn, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
@@ -132,7 +129,7 @@ impl SantiStore {
             EffectTransitionReason::TurnFailedDuringDispatch,
             &now,
         )?;
-        Database::new(&tx).fail_turn(turn_id, incident_id, &now)?;
+        Database::new(&tx).fail_turn(turn_id, incident, &now)?;
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)
             .turn_by_id(turn_id)?
@@ -190,12 +187,12 @@ pub(super) fn open_runtime_incident(
     strand_id: &str,
     turn_id: &str,
     failure: RuntimeFault<'_>,
-) -> Result<SantiError, String> {
-    Database::new(conn).open_incident(IncidentDraft {
-        incident_key: runtime_incident_key(strand_id),
+) -> Result<Fault, String> {
+    Database::new(conn).open_incident(santi_error::Draft {
+        key: runtime_incident_key(strand_id),
         descriptor: catalog::RUNTIME_TURN_FAILED,
-        scope: ErrorScope::new("strand", strand_id),
-        source: ErrorSource::new("santi-core", failure.operation),
+        scope: santi_error::Scope::new("strand", strand_id),
+        source: santi_error::Source::new("santi-core", failure.operation),
         message: "turn failed inside the runtime".to_string(),
         context: json!({
             "schema": "santi.error.runtime_turn.v1",

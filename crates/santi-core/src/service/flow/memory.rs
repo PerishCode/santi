@@ -6,8 +6,7 @@ use sha2::{Digest, Sha256};
 
 use crate::store::Ingress;
 use crate::{
-    ErrorScope, ErrorSource, InboxSource, IncidentDraft, IngestOutcome, MessageContent,
-    MessageKind, Strand, catalog, soul_memory_uri,
+    InboxSource, IngestOutcome, MessageContent, MessageKind, Strand, catalog, soul_memory_uri,
 };
 
 use super::super::{Service, drive};
@@ -169,17 +168,17 @@ impl Service {
         snapshot: &Snapshot,
         policy: Policy,
     ) -> Result<(), String> {
-        let incident_key = memory_intervention_incident_key(soul_id);
-        let active = self.store.active_error_incident(&incident_key)?;
+        let key = memory_intervention_incident_key(soul_id);
+        let active = self.store.active_error_incident(&key)?;
         let mutated = if snapshot.source_bytes > policy.operator_threshold_bytes {
             if active.is_some() {
                 false
             } else {
-                self.store.open_error_incident(IncidentDraft {
-                    incident_key,
+                self.store.open_error_incident(santi_error::Draft {
+                    key,
                     descriptor: catalog::SOUL_MEMORY_INTERVENTION_REQUIRED,
-                    scope: ErrorScope::new("soul", soul_id),
-                    source: ErrorSource::new("santi-core", "soul_memory_pressure"),
+                    scope: santi_error::Scope::new("soul", soul_id),
+                    source: santi_error::Source::new("santi-core", "soul_memory_pressure"),
                     message: "soul memory exceeds the human-intervention threshold".to_string(),
                     context: json!({
                         "schema": "santi.error.soul_memory.v1",
@@ -195,7 +194,7 @@ impl Service {
             }
         } else if active.is_some() {
             self.store.resolve_error_incident(
-                &incident_key,
+                &key,
                 "soul_memory_remeasured",
                 json!({
                     "schema": "santi.error.soul_memory.resolution.v1",

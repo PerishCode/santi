@@ -9,8 +9,8 @@ use santi_core::service::Service;
 use santi_core::{
     CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateDownstreamRequest,
     CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, DownstreamCredential,
-    DriveStrandResponse, ForkStrandResponse, HealthResponse, IngestRequest, MaterialRequest,
-    ReceiptStatus, SantiError, SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand,
+    DriveStrandResponse, Fault, ForkStrandResponse, HealthResponse, IngestRequest, MaterialRequest,
+    ReceiptStatus, SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand,
     StrandBudgetSnapshot, StrandDetail, StrandMaterial, StrandRuntimeSnapshot, TurnEventBatch,
     WebhookSubscription,
 };

@@ -1,7 +1,5 @@
 use rusqlite::params;
-use santi_error::{
-    ErrorIncident, ErrorOutbox, ErrorScope, ErrorTransition, IncidentDraft, SantiError,
-};
+use santi_error::{Fault, Incident, Outbox, Transition};
 
 use super::{SantiStore, db::Database};
 use crate::timestamp_now;
@@ -9,7 +7,7 @@ use crate::timestamp_now;
 pub(crate) mod drive;
 
 impl SantiStore {
-    pub fn open_error_incident(&self, draft: IncidentDraft) -> Result<SantiError, String> {
+    pub fn open_error_incident(&self, draft: santi_error::Draft) -> Result<Fault, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let error = Database::new(&tx).open_incident(draft)?;
@@ -19,45 +17,42 @@ impl SantiStore {
 
     pub fn resolve_error_incident(
         &self,
-        incident_key: &str,
+        key: &str,
         resolved_by: &str,
         context: serde_json::Value,
     ) -> Result<bool, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let resolved = Database::new(&tx).resolve_incident(incident_key, resolved_by, context)?;
+        let resolved = Database::new(&tx).resolve_incident(key, resolved_by, context)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(resolved)
     }
 
     pub fn error_incidents(
         &self,
-        scope: &ErrorScope,
+        scope: &santi_error::Scope,
         limit: i64,
-    ) -> Result<Vec<ErrorIncident>, String> {
+    ) -> Result<Vec<Incident>, String> {
         let conn = self.conn.lock().unwrap();
         Database::new(&conn).list_incidents(&scope.kind, &scope.id, limit)
     }
 
-    pub(crate) fn active_error_incident(
-        &self,
-        incident_key: &str,
-    ) -> Result<Option<ErrorIncident>, String> {
+    pub(crate) fn active_error_incident(&self, key: &str) -> Result<Option<Incident>, String> {
         let conn = self.conn.lock().unwrap();
-        Database::new(&conn).active_incident(incident_key)
+        Database::new(&conn).active_incident(key)
     }
 
     pub(crate) fn error_incidents_for_strand(
         &self,
         strand_id: &str,
         limit: i64,
-    ) -> Result<Vec<ErrorIncident>, String> {
-        self.error_incidents(&ErrorScope::new("strand", strand_id), limit)
+    ) -> Result<Vec<Incident>, String> {
+        self.error_incidents(&santi_error::Scope::new("strand", strand_id), limit)
     }
 }
 
-impl ErrorOutbox for SantiStore {
-    fn pending_error_transitions(&self, limit: usize) -> Result<Vec<ErrorTransition>, String> {
+impl Outbox for SantiStore {
+    fn pending(&self, limit: usize) -> Result<Vec<Transition>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
@@ -83,7 +78,7 @@ impl ErrorOutbox for SantiStore {
         Ok(transitions)
     }
 
-    fn mark_error_transition_delivered(&self, transition_id: &str) -> Result<(), String> {
+    fn delivered(&self, transition_id: &str) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE error_transitions SET delivered_at = ?2 WHERE id = ?1 AND delivered_at IS NULL",

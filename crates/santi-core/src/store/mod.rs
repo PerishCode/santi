@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use rusqlite::{Connection, params};
 
 use crate::{
-    ActorType, MessageContent, MessageIntake, MessageKind, MessageState, SantiError, Strand,
+    ActorType, Fault, MessageContent, MessageIntake, MessageKind, MessageState, Strand,
     StrandMessage, StrandTargetType, Turn, prefixed_id, timestamp_now,
 };
 
@@ -72,7 +72,7 @@ pub(crate) enum StartTurnOutcome {
     Started(StartedTurn),
     Running(Turn),
     Idle,
-    Held(SantiError),
+    Held(Fault),
 }
 
 pub(crate) struct ProviderFault<'a> {

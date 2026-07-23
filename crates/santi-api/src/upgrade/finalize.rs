@@ -15,11 +15,11 @@ pub(super) fn persistence_error(
     deb: &str,
     operation: &str,
     detail: impl Into<String>,
-) -> santi_core::SantiError {
+) -> santi_core::Fault {
     santi_core::engine().transient(santi_core::Signal {
         descriptor: santi_core::catalog::ERROR_ENGINE_PERSISTENCE_FAILED,
-        source: santi_core::ErrorSource::new("santi-api", operation),
-        scope: Some(santi_core::ErrorScope::new("runtime", RUNTIME_SCOPE_ID)),
+        source: santi_core::Source::new("santi-api", operation),
+        scope: Some(santi_core::Scope::new("runtime", RUNTIME_SCOPE_ID)),
         message: "error engine could not persist self-upgrade terminal truth".to_string(),
         context: json!({
             "attempt_id": attempt_id,
@@ -42,7 +42,7 @@ fn bounded_detail(value: &str) -> String {
 
 pub fn finalize(
     request: UpgradeFinalizeRequest,
-) -> Result<UpgradeFinalizeReport, Box<santi_core::SantiError>> {
+) -> Result<UpgradeFinalizeReport, Box<santi_core::Fault>> {
     let paths = crate::runtime::held().paths.clone();
     finalize_at(&paths, request)
 }
@@ -50,13 +50,13 @@ pub fn finalize(
 pub fn finalize_at(
     paths: &RuntimePaths,
     request: UpgradeFinalizeRequest,
-) -> Result<UpgradeFinalizeReport, Box<santi_core::SantiError>> {
+) -> Result<UpgradeFinalizeReport, Box<santi_core::Fault>> {
     if request.protocol_version != FINALIZE_PROTOCOL_VERSION {
         return Err(Box::new(santi_core::engine().transient(
             santi_core::Signal {
                 descriptor: santi_core::catalog::INVALID_ARGUMENT,
-                source: santi_core::ErrorSource::new("santi-api", "upgrade.finalize"),
-                scope: Some(santi_core::ErrorScope::new("runtime", RUNTIME_SCOPE_ID)),
+                source: santi_core::Source::new("santi-api", "upgrade.finalize"),
+                scope: Some(santi_core::Scope::new("runtime", RUNTIME_SCOPE_ID)),
                 message: "unsupported upgrade finalization protocol".to_string(),
                 context: json!({
                     "expected": FINALIZE_PROTOCOL_VERSION,
@@ -106,7 +106,7 @@ fn resolve_upgrade(
     store: &santi_core::SantiStore,
     request: &UpgradeFinalizeRequest,
     readiness: super::UpgradeReadiness,
-) -> Result<(), Box<santi_core::SantiError>> {
+) -> Result<(), Box<santi_core::Fault>> {
     store
         .resolve_error_incident(
             UPGRADE_INCIDENT_KEY,
@@ -138,13 +138,13 @@ fn open_execution_failure(
     request: &UpgradeFinalizeRequest,
     failure: &super::UpgradeFailure,
     terminal: &str,
-) -> Result<santi_core::SantiError, Box<santi_core::SantiError>> {
+) -> Result<santi_core::Fault, Box<santi_core::Fault>> {
     store
-        .open_error_incident(santi_core::IncidentDraft {
-            incident_key: UPGRADE_INCIDENT_KEY.to_string(),
+        .open_error_incident(santi_core::error::Draft {
+            key: UPGRADE_INCIDENT_KEY.to_string(),
             descriptor: santi_core::catalog::UPGRADE_FAILED,
-            scope: santi_core::ErrorScope::new("runtime", RUNTIME_SCOPE_ID),
-            source: santi_core::ErrorSource::new("santi-api", failure.stage.operation()),
+            scope: santi_core::Scope::new("runtime", RUNTIME_SCOPE_ID),
+            source: santi_core::Source::new("santi-api", failure.stage.operation()),
             message: format!("self-upgrade failed during {}", failure.stage.operation()),
             context: json!({
                 "attempt_id": request.attempt_id,

@@ -5,7 +5,7 @@ use santi_api::upgrade::{
     UpgradeFinalizeRequest, UpgradeHost, UpgradeReadiness, UpgradeReport, UpgradeTerminal,
     compose_record, run_upgrade,
 };
-use santi_core::{ErrorScope, ErrorSource, IncidentDraft, SantiError, catalog, engine};
+use santi_core::{Fault, catalog, engine};
 
 struct FakeHost {
     calls: Vec<String>,
@@ -134,19 +134,15 @@ impl UpgradeHost for FakeHost {
     }
 }
 
-fn fake_error(
-    descriptor: santi_core::ErrorDescriptor,
-    operation: &str,
-    detail: &str,
-) -> SantiError {
+fn fake_error(descriptor: santi_core::Descriptor, operation: &str, detail: &str) -> Fault {
     engine()
-        .open_incident(
+        .open(
             None,
-            IncidentDraft {
-                incident_key: format!("{}:runtime:default", descriptor.code),
+            santi_core::error::Draft {
+                key: format!("{}:runtime:default", descriptor.code),
                 descriptor,
-                scope: ErrorScope::new("runtime", "default"),
-                source: ErrorSource::new("santi-api", operation),
+                scope: santi_core::Scope::new("runtime", "default"),
+                source: santi_core::Source::new("santi-api", operation),
                 message: detail.to_string(),
                 context: serde_json::json!({"detail": detail}),
             },

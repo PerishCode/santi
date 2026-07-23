@@ -58,15 +58,15 @@ impl SantiStore {
         let transitions = raw_transitions
             .into_iter()
             .map(
-                |(id, sequence, state, turn_id, incident_id, reconstructed_from, occurred_at)| {
+                |(id, sequence, state, turn_id, incident, reconstructed_from, occurred)| {
                     Ok(ReceiptTransition {
                         id,
                         sequence,
                         state: receipt_state_from_db(&state)?,
                         turn_id,
-                        incident_id,
+                        incident,
                         reconstructed_from,
-                        occurred_at,
+                        occurred,
                     })
                 },
             )

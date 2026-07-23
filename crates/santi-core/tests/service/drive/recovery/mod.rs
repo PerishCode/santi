@@ -125,9 +125,15 @@ async fn cold_start_recovers() {
         .expect("strand");
     assert_eq!(runtime.errors.len(), 1);
     assert_eq!(runtime.errors[0].code, "runtime.strand.drive_failed");
-    assert_eq!(runtime.errors[0].context["accepted_before_failure"], false);
-    assert_eq!(runtime.errors[0].context["pending_count"], 1);
-    assert_eq!(runtime.errors[0].source.operation, "cold_start_resume");
+    assert_eq!(
+        runtime.errors[0].first.context["accepted_before_failure"],
+        false
+    );
+    assert_eq!(runtime.errors[0].first.context["pending_count"], 1);
+    assert_eq!(
+        runtime.errors[0].first.source.operation,
+        "cold_start_resume"
+    );
 
     let rejected = restarted
         .send_strand(
@@ -154,10 +160,7 @@ async fn cold_start_recovers() {
         .await;
     assert!(!restarted.is_drive_degraded());
     assert_eq!(pending_count(&conn, &strand.id), 0);
-    assert_eq!(
-        runtime.errors[0].status,
-        santi_core::IncidentStatus::Resolved
-    );
+    assert_eq!(runtime.errors[0].status, santi_core::Status::Resolved);
     assert!(
         runtime
             .messages

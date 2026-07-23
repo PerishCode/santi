@@ -3,10 +3,7 @@ use serde_json::json;
 use crate::context::budget::estimate_provider_parts;
 use crate::service::tools::provider_tools;
 use crate::store::budget::{Admission, Pressure};
-use crate::{
-    ContextBudget, ContextEstimate, ErrorScope, ErrorSource, Execution, IncidentDraft, SantiError,
-    Usage, catalog,
-};
+use crate::{ContextBudget, ContextEstimate, Execution, Fault, Usage, catalog};
 
 use super::super::Service;
 
@@ -62,7 +59,7 @@ impl Service {
         turn_id: &str,
         request: &santi_provider::ProviderRequest,
         estimate: &ContextEstimate,
-    ) -> Result<Option<SantiError>, String> {
+    ) -> Result<Option<Fault>, String> {
         let Some(budget) = self.context_budget() else {
             return Ok(None);
         };
@@ -128,7 +125,7 @@ fn over_budget_reason(total_bytes: i64, budget_bytes: i64) -> String {
 pub(super) enum Verdict {
     Unbounded,
     Bounded(Vec<usize>),
-    Rejected(Box<SantiError>),
+    Rejected(Box<Fault>),
 }
 
 impl Service {
@@ -137,7 +134,7 @@ impl Service {
         strand_id: &str,
         turn_id: &str,
         next_round: usize,
-    ) -> Result<Option<SantiError>, String> {
+    ) -> Result<Option<Fault>, String> {
         let Some(budget) = self.strand_execution_budget(strand_id) else {
             return Ok(None);
         };
@@ -220,7 +217,7 @@ impl Service {
         )))
     }
 
-    fn open_execution_budget_incident(&self, breach: Breach<'_>) -> Result<SantiError, String> {
+    fn open_execution_budget_incident(&self, breach: Breach<'_>) -> Result<Fault, String> {
         let Breach {
             strand,
             turn,
@@ -229,11 +226,11 @@ impl Service {
             reason,
             request,
         } = breach;
-        let error = self.store.open_error_incident(IncidentDraft {
-            incident_key: crate::store::execution_budget_incident_key(strand),
+        let error = self.store.open_error_incident(santi_error::Draft {
+            key: crate::store::execution_budget_incident_key(strand),
             descriptor: catalog::EXECUTION_BUDGET_EXCEEDED,
-            scope: ErrorScope::new("strand", strand),
-            source: ErrorSource::new("santi-core", "turn.execution_budget"),
+            scope: santi_error::Scope::new("strand", strand),
+            source: santi_error::Source::new("santi-core", "turn.execution_budget"),
             message: format!("strand execution budget exceeded: {reason}"),
             context: json!({
                 "schema": "santi.error.execution_budget.v1",

@@ -1,7 +1,6 @@
 use crate::store::Ingress;
 use crate::{
-    ErrorScope, ErrorSource, InboxSource, IngestOutcome, MessageContent, MessageKind, SantiError,
-    Strand, StrandSelector, engine,
+    Fault, InboxSource, IngestOutcome, MessageContent, MessageKind, Strand, StrandSelector, engine,
 };
 
 use super::super::{Service, drive};
@@ -212,11 +211,11 @@ impl Service {
 
 mod dispatch;
 
-fn log_ingest_rejection(error: &SantiError, strand_id: &str, audit: &Audit) {
+fn log_ingest_rejection(error: &Fault, strand_id: &str, audit: &Audit) {
     eprintln!(
         "santi: ingest rejected code={} incident_id={} strand_id={} source_type={} source_ref={} content_bytes={}",
         error.code,
-        error.incident_id.as_deref().unwrap_or("-"),
+        error.incident.as_deref().unwrap_or("-"),
         strand_id,
         audit.source_type,
         audit.source_ref,
@@ -225,14 +224,14 @@ fn log_ingest_rejection(error: &SantiError, strand_id: &str, audit: &Audit) {
 }
 
 pub(super) fn send_error(
-    descriptor: santi_error::ErrorDescriptor,
+    descriptor: santi_error::Descriptor,
     strand_id: &str,
     message: String,
-) -> SantiError {
+) -> Fault {
     engine().transient(crate::Signal {
         descriptor,
-        source: ErrorSource::new("santi-core", "strand_send"),
-        scope: Some(ErrorScope::new("strand", strand_id)),
+        source: santi_error::Source::new("santi-core", "strand_send"),
+        scope: Some(santi_error::Scope::new("strand", strand_id)),
         message,
         context: serde_json::Value::Null,
     })

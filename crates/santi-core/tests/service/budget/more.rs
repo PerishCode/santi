@@ -33,7 +33,7 @@ async fn resume_holds_pending() {
     assert!(runtime.turns.is_empty());
     assert_eq!(runtime.errors.len(), 1);
     assert_eq!(
-        runtime.errors[0].context["reason"],
+        runtime.errors[0].first.context["reason"],
         "pending_drain_would_exceed_budget"
     );
     let conn = Connection::open(db).expect("open sqlite");
@@ -114,9 +114,9 @@ async fn compact_resolves_incident() {
         .await;
     assert_eq!(provider.requests.lock().unwrap().len(), 1);
     assert_eq!(runtime.errors.len(), 1);
-    assert_eq!(runtime.errors[0].status, santi_core::IncidentStatus::Active);
+    assert_eq!(runtime.errors[0].status, santi_core::Status::Active);
     assert_eq!(
-        runtime.errors[0].context["reason"],
+        runtime.errors[0].first.context["reason"],
         "provider_request_exceeds_budget"
     );
     assert!(
@@ -184,9 +184,12 @@ async fn compact_resolves_incident() {
 
     let after = Probe::new(&service).any_completed(&strand.id).await;
     assert_eq!(after.errors.len(), 1);
-    assert_eq!(after.errors[0].status, santi_core::IncidentStatus::Resolved);
+    assert_eq!(after.errors[0].status, santi_core::Status::Resolved);
     assert_eq!(after.errors[0].revision, 2);
-    assert_eq!(after.errors[0].resolved_by.as_deref(), Some("compact_exec"));
+    assert_eq!(
+        after.errors[0].resolution.as_ref().unwrap().by.as_deref(),
+        Some("compact_exec")
+    );
     assert!(
         after
             .messages
@@ -269,5 +272,5 @@ async fn budget_raise_clears_hold_on_ingest() {
         .iter()
         .find(|incident| incident.code == "context.budget.exceeded")
         .expect("context incident recorded");
-    assert_eq!(incident.status, santi_core::IncidentStatus::Resolved);
+    assert_eq!(incident.status, santi_core::Status::Resolved);
 }

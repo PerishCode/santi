@@ -48,7 +48,7 @@ fn renders_events() {
     assert_eq!(
         render_watch_event(
             "turn_failed",
-            r#"{"payload":{"type":"turn_failed","turn_id":"turn_1","error":{"code":"provider.turn.failed","message":"provider request failed","incident_id":"inc_1"}}}"#,
+            r#"{"payload":{"type":"turn_failed","turn_id":"turn_1","error":{"code":"provider.turn.failed","message":"provider request failed","incident":"inc_1"}}}"#,
         )
         .as_deref(),
         Some(
@@ -58,7 +58,7 @@ fn renders_events() {
     assert_eq!(
         render_watch_event(
             "error_transition",
-            r#"{"payload":{"type":"error_transition","transition":{"kind":"opened","incident":{"id":"inc_1","code":"provider.turn.failed","context":{"detail":"secret"}}}}}"#,
+            r#"{"payload":{"type":"error_transition","transition":{"kind":"opened","held":{"id":"inc_1","code":"provider.turn.failed","context":{"detail":"secret"}}}}}"#,
         )
         .as_deref(),
         Some("error opened provider.turn.failed (inc_1)")

@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, Query, State},
 };
 use santi_core::service::Service;
-use santi_core::{ErrorIncident, ErrorScope, SantiError};
+use santi_core::{Fault, Incident};
 
 use super::ApiError;
 
@@ -20,16 +20,16 @@ pub(super) struct ErrorQueryParams {
         ("limit" = Option<i64>, Query)
     ),
     responses(
-        (status = 200, body = Vec<ErrorIncident>),
-        (status = 404, body = SantiError),
-        (status = 500, body = SantiError)
+        (status = 200, body = Vec<Incident>),
+        (status = 404, body = Fault),
+        (status = 500, body = Fault)
     )
 )]
 pub(super) async fn strand_errors(
     State(service): State<Service>,
     Path(strand_id): Path<String>,
     Query(params): Query<ErrorQueryParams>,
-) -> Result<Json<Vec<ErrorIncident>>, ApiError> {
+) -> Result<Json<Vec<Incident>>, ApiError> {
     service
         .strand_errors(&strand_id, params.limit.unwrap_or(50))
         .map_err(ApiError::from_service)?
@@ -46,18 +46,18 @@ pub(super) async fn strand_errors(
         ("limit" = Option<i64>, Query)
     ),
     responses(
-        (status = 200, body = Vec<ErrorIncident>),
-        (status = 500, body = SantiError)
+        (status = 200, body = Vec<Incident>),
+        (status = 500, body = Fault)
     )
 )]
 pub(super) async fn errors(
     State(service): State<Service>,
     Path((scope_kind, scope_id)): Path<(String, String)>,
     Query(params): Query<ErrorQueryParams>,
-) -> Result<Json<Vec<ErrorIncident>>, ApiError> {
+) -> Result<Json<Vec<Incident>>, ApiError> {
     service
         .errors(
-            &ErrorScope::new(scope_kind, scope_id),
+            &santi_core::Scope::new(scope_kind, scope_id),
             params.limit.unwrap_or(50),
         )
         .map(Json)

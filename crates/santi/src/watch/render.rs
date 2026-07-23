@@ -117,7 +117,7 @@ fn render_turn_failure(payload: &serde_json::Value) -> Option<String> {
         .and_then(serde_json::Value::as_str)
         .unwrap_or("unknown error");
     let incident = error
-        .get("incident_id")
+        .get("incident")
         .and_then(serde_json::Value::as_str)
         .map(|id| format!(" (incident {id})"))
         .unwrap_or_default();
@@ -133,7 +133,7 @@ fn render_error_transition(payload: &serde_json::Value) -> Option<String> {
         .get("kind")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("changed");
-    let incident = transition.get("incident")?;
+    let incident = transition.get("held")?;
     let id = incident
         .get("id")
         .and_then(serde_json::Value::as_str)

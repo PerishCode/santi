@@ -10,9 +10,7 @@ use axum::{
 };
 use futures_core::Stream;
 use santi_core::service::Service;
-use santi_core::{
-    ErrorTransition, SantiStreamEvent, SantiStreamPayload, prefixed_id, timestamp_now,
-};
+use santi_core::{SantiStreamEvent, SantiStreamPayload, Transition, prefixed_id, timestamp_now};
 use tokio::sync::broadcast;
 
 use super::ApiError;
@@ -68,7 +66,7 @@ pub(super) async fn error_events(
     security(("downstream_bearer" = [])),
     responses(
         (status = 200, description = "Zone-filtered turn event wake-up stream"),
-        (status = 401, body = santi_core::SantiError)
+        (status = 401, body = santi_core::Fault)
     )
 )]
 pub(super) async fn turn_event_stream(
@@ -129,7 +127,7 @@ async fn receive<T: Clone>(receiver: &mut broadcast::Receiver<T>) -> Option<T> {
     }
 }
 
-fn error_sse_event(transition: ErrorTransition) -> Event {
+fn error_sse_event(transition: Transition) -> Event {
     Event::default()
         .id(transition.id.clone())
         .event("error_transition")
@@ -159,6 +157,6 @@ fn sse_event_name(payload: &SantiStreamPayload) -> &'static str {
         SantiStreamPayload::TurnActivity { .. } => "turn_activity",
         SantiStreamPayload::TurnCompleted { .. } => "turn_completed",
         SantiStreamPayload::TurnFailed { .. } => "turn_failed",
-        SantiStreamPayload::ErrorTransition { .. } => "error_transition",
+        SantiStreamPayload::Transition { .. } => "error_transition",
     }
 }

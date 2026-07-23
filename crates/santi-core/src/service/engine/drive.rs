@@ -1,10 +1,10 @@
-use crate::{SantiError, StrandMessage, Turn};
+use crate::{Fault, StrandMessage, Turn};
 
 pub(crate) enum Outcome {
     Started(Turn, Vec<StrandMessage>),
     Running(Turn),
     Idle,
-    Held(SantiError),
+    Held(Fault),
     Paused,
-    Failed(SantiError),
+    Failed(Fault),
 }

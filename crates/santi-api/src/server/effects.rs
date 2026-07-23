@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, State},
 };
 use santi_core::service::Service;
-use santi_core::{EffectResolutionOutcome, EffectStatus, SantiError};
+use santi_core::{EffectResolutionOutcome, EffectStatus, Fault};
 
 use super::ApiError;
 
@@ -19,8 +19,8 @@ pub struct ResolveEffectRequest {
     params(("effect_id" = String, Path)),
     responses(
         (status = 200, body = EffectStatus),
-        (status = 404, body = SantiError),
-        (status = 500, body = SantiError)
+        (status = 404, body = Fault),
+        (status = 500, body = Fault)
     )
 )]
 pub async fn effect_status(
@@ -41,9 +41,9 @@ pub async fn effect_status(
     request_body = ResolveEffectRequest,
     responses(
         (status = 200, body = EffectStatus),
-        (status = 400, body = SantiError),
-        (status = 404, body = SantiError),
-        (status = 500, body = SantiError)
+        (status = 400, body = Fault),
+        (status = 404, body = Fault),
+        (status = 500, body = Fault)
     )
 )]
 pub async fn resolve_effect(

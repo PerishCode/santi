@@ -48,13 +48,13 @@ fn full_handover_is_idempotent() {
     assert_eq!(second.errors.len(), 2);
 
     let incidents = store
-        .error_incidents(&ErrorScope::new("runtime", "default"), 10)
+        .error_incidents(&santi_core::Scope::new("runtime", "default"), 10)
         .expect("runtime errors");
     assert_eq!(incidents.len(), 2);
     assert!(
         incidents
             .iter()
-            .all(|incident| incident.occurrence_count == 2 && incident.revision == 1)
+            .all(|incident| incident.occurrences == 2 && incident.revision == 1)
     );
     let inbox_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM strand_inbox", [], |row| row.get(0))
@@ -116,14 +116,14 @@ fn next_attempt_bypasses_exhaustion() {
 
     let store = SantiStore::open(&paths.database_path).expect("open store");
     let handover = store
-        .error_incidents(&ErrorScope::new("runtime", "default"), 10)
+        .error_incidents(&santi_core::Scope::new("runtime", "default"), 10)
         .expect("runtime incidents")
         .into_iter()
         .find(|incident| incident.code == "runtime.upgrade.handover_failed")
         .expect("handover incident");
-    assert_eq!(handover.status, IncidentStatus::Resolved);
+    assert_eq!(handover.status, santi_core::Status::Resolved);
     assert_eq!(
-        handover.resolved_by.as_deref(),
+        handover.resolution.as_ref().unwrap().by.as_deref(),
         Some("upgrade.handover_succeeded")
     );
 }

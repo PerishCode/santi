@@ -16,9 +16,8 @@ use santi_api::{
 };
 use santi_core::service::{self, Service};
 use santi_core::{
-    EffectResolutionOutcome, EffectState, ErrorScope, ErrorSource, IngestOutcome, Invocation,
-    MessageContent, MessageKind, MessagePart, SantiStore, SendStrandRequest, ToolCallProvenance,
-    catalog, engine,
+    EffectResolutionOutcome, EffectState, IngestOutcome, Invocation, MessageContent, MessageKind,
+    MessagePart, SantiStore, SendStrandRequest, ToolCallProvenance, catalog, engine,
 };
 use santi_provider::{
     ProviderClient, ProviderContextBudget, ProviderEvent, ProviderMetadata, ProviderRequest,
@@ -84,16 +83,16 @@ fn classifies_errors() {
     );
     let budget = engine().transient(santi_core::Signal {
         descriptor: catalog::CONTEXT_BUDGET_EXCEEDED,
-        source: ErrorSource::new("test", "admission"),
-        scope: Some(ErrorScope::new("strand", "ss_x")),
+        source: santi_core::Source::new("test", "admission"),
+        scope: Some(santi_core::Scope::new("strand", "ss_x")),
         message: "over budget".to_string(),
         context: serde_json::Value::Null,
     });
     assert_eq!(ApiError::from_santi(budget).status(), StatusCode::LOCKED);
     let unavailable = engine().transient(santi_core::Signal {
         descriptor: catalog::STRAND_DRIVE_FAILED,
-        source: ErrorSource::new("test", "driver"),
-        scope: Some(ErrorScope::new("strand", "ss_x")),
+        source: santi_core::Source::new("test", "driver"),
+        scope: Some(santi_core::Scope::new("strand", "ss_x")),
         message: "driver unavailable".to_string(),
         context: serde_json::Value::Null,
     });

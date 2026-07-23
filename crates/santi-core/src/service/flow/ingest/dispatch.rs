@@ -2,9 +2,9 @@ use crate::service::flow::memory::{Gate, drive_maintenance};
 use crate::service::{Service, drive};
 use crate::store::{Launch, StartTurnOutcome, errors::drive::Input};
 use crate::{
-    DriveStrandResponse, DriveStrandState, ErrorScope, ErrorSource, InboxSource, IngestOutcome,
-    MessageContent, MessageKind, SantiError, SantiStreamPayload, SendStrandAcceptedResponse,
-    SendStrandRequest, catalog, engine,
+    DriveStrandResponse, DriveStrandState, Fault, InboxSource, IngestOutcome, MessageContent,
+    MessageKind, SantiStreamPayload, SendStrandAcceptedResponse, SendStrandRequest, catalog,
+    engine,
 };
 
 use super::*;
@@ -14,7 +14,7 @@ impl Service {
         &self,
         strand_id: &str,
         request: SendStrandRequest,
-    ) -> Result<SendStrandAcceptedResponse, SantiError> {
+    ) -> Result<SendStrandAcceptedResponse, Fault> {
         let text = request.text();
         if text.trim().is_empty() {
             return Err(send_error(
@@ -70,7 +70,7 @@ impl Service {
         })
     }
 
-    pub fn drive_strand(&self, strand_id: &str) -> Result<DriveStrandResponse, Box<SantiError>> {
+    pub fn drive_strand(&self, strand_id: &str) -> Result<DriveStrandResponse, Box<Fault>> {
         self.store
             .strand(strand_id)
             .map_err(|message| Box::new(send_error(catalog::INTERNAL, strand_id, message)))?
@@ -219,12 +219,7 @@ impl Service {
         }
     }
 
-    fn record_drive_failure(
-        &self,
-        strand_id: &str,
-        drive: Drive<'_>,
-        detail: String,
-    ) -> SantiError {
+    fn record_drive_failure(&self, strand_id: &str, drive: Drive<'_>, detail: String) -> Fault {
         self.mark_drive_degraded();
         let error = match self.store.record_drive_failure(
             strand_id,
@@ -238,8 +233,8 @@ impl Service {
             Ok(error) => error,
             Err(persistence_error) => engine().transient(crate::Signal {
                 descriptor: catalog::ERROR_ENGINE_PERSISTENCE_FAILED,
-                source: ErrorSource::new("santi-core", "strand_drive_failure"),
-                scope: Some(ErrorScope::new("strand", strand_id)),
+                source: santi_error::Source::new("santi-core", "strand_drive_failure"),
+                scope: Some(santi_error::Scope::new("strand", strand_id)),
                 message: "failed to persist strand driver incident".to_string(),
                 context: serde_json::json!({
                     "accepted_before_failure": drive.accepted_inbox_id.is_some(),
@@ -251,7 +246,7 @@ impl Service {
         eprintln!(
             "santi: strand drive failed code={} incident_id={} strand_id={} operation={} accepted_before_failure={}",
             error.code,
-            error.incident_id.as_deref().unwrap_or("-"),
+            error.incident.as_deref().unwrap_or("-"),
             strand_id,
             drive.operation,
             drive.accepted_inbox_id.is_some(),

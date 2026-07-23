@@ -7,10 +7,10 @@ use super::*;
     request_body = SendStrandRequest,
     responses(
         (status = 200, body = SendStrandAcceptedResponse),
-        (status = 423, body = SantiError),
-        (status = 404, body = SantiError),
-        (status = 500, body = SantiError),
-        (status = 503, body = SantiError)
+        (status = 423, body = Fault),
+        (status = 404, body = Fault),
+        (status = 500, body = Fault),
+        (status = 503, body = Fault)
     )
 )]
 pub async fn send_strand(
@@ -31,10 +31,10 @@ pub async fn send_strand(
     params(("strand_id" = String, Path)),
     responses(
         (status = 200, body = DriveStrandResponse),
-        (status = 404, body = SantiError),
-        (status = 423, body = SantiError),
-        (status = 500, body = SantiError),
-        (status = 503, body = SantiError)
+        (status = 404, body = Fault),
+        (status = 423, body = Fault),
+        (status = 500, body = Fault),
+        (status = 503, body = Fault)
     )
 )]
 pub async fn drive_strand(
@@ -53,8 +53,8 @@ pub async fn drive_strand(
     params(("strand_id" = String, Path)),
     responses(
         (status = 200, body = ForkStrandResponse),
-        (status = 404, body = SantiError),
-        (status = 500, body = SantiError)
+        (status = 404, body = Fault),
+        (status = 500, body = Fault)
     )
 )]
 pub(super) async fn fork_strand(
@@ -74,9 +74,9 @@ pub(super) async fn fork_strand(
     request_body = CompactExecRequest,
     responses(
         (status = 200, body = CompactExecResponse),
-        (status = 400, body = SantiError),
-        (status = 404, body = SantiError),
-        (status = 500, body = SantiError)
+        (status = 400, body = Fault),
+        (status = 404, body = Fault),
+        (status = 500, body = Fault)
     )
 )]
 pub(super) async fn compact_exec(
@@ -101,8 +101,8 @@ pub(super) async fn compact_exec(
     ),
     responses(
         (status = 200, body = CompactQueryResponse),
-        (status = 404, body = SantiError),
-        (status = 500, body = SantiError)
+        (status = 404, body = Fault),
+        (status = 500, body = Fault)
     )
 )]
 pub(super) async fn compact_query(
@@ -135,8 +135,8 @@ pub(super) struct CompactQueryParams {
     params(("strand_id" = String, Path)),
     responses(
         (status = 200, body = StrandRuntimeSnapshot),
-        (status = 404, body = SantiError),
-        (status = 500, body = SantiError)
+        (status = 404, body = Fault),
+        (status = 500, body = Fault)
     )
 )]
 pub(super) async fn runtime_snapshot(
@@ -156,8 +156,8 @@ pub(super) async fn runtime_snapshot(
     params(("strand_id" = String, Path)),
     responses(
         (status = 200, body = StrandBudgetSnapshot),
-        (status = 404, body = SantiError),
-        (status = 500, body = SantiError)
+        (status = 404, body = Fault),
+        (status = 500, body = Fault)
     )
 )]
 pub(super) async fn strand_budget(

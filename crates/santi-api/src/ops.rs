@@ -41,7 +41,7 @@ pub fn doctor() -> Result<DoctorReport, String> {
 pub struct SeedReport {
     pub strand_id: String,
     pub accepted: bool,
-    pub error: Option<santi_core::SantiError>,
+    pub error: Option<santi_core::Fault>,
 }
 
 pub fn inbox_seed(strand_id: &str, text: &str) -> Result<SeedReport, String> {

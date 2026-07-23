@@ -1,7 +1,7 @@
 use super::*;
 
+use santi_core::IngestOutcome;
 use santi_core::service::{self, Service};
-use santi_core::{ErrorScope, IngestOutcome};
 
 const INPUT_BUDGET_BYTES: usize = 32 * 1024;
 const MEMORY_ALLOWANCE_BYTES: usize = INPUT_BUDGET_BYTES / 2;
@@ -198,11 +198,14 @@ async fn pressure_lifecycle() {
     }
 
     let active = service
-        .errors(&ErrorScope::new("soul", santi_core::DEFAULT_SOUL_ID), 10)
+        .errors(
+            &santi_core::Scope::new("soul", santi_core::DEFAULT_SOUL_ID),
+            10,
+        )
         .expect("soul incidents");
     assert_eq!(active.len(), 1);
     assert_eq!(active[0].code, "runtime.soul_memory.intervention_required");
-    assert_eq!(active[0].status, santi_core::IncidentStatus::Active);
+    assert_eq!(active[0].status, santi_core::Status::Active);
     assert!(!active[0].exposure.caller);
     assert!(active[0].exposure.operator);
 
@@ -254,10 +257,13 @@ async fn pressure_lifecycle() {
     }
 
     let resolved = service
-        .errors(&ErrorScope::new("soul", santi_core::DEFAULT_SOUL_ID), 10)
+        .errors(
+            &santi_core::Scope::new("soul", santi_core::DEFAULT_SOUL_ID),
+            10,
+        )
         .expect("resolved soul incidents");
     assert_eq!(resolved.len(), 1);
-    assert_eq!(resolved[0].status, santi_core::IncidentStatus::Resolved);
+    assert_eq!(resolved[0].status, santi_core::Status::Resolved);
 
     let after_relief = service
         .ingest(

@@ -9,9 +9,9 @@ use super::*;
     path = "/api/v1/downstreams",
     responses(
         (status = 200, body = DownstreamCredential),
-        (status = 400, body = SantiError),
-        (status = 409, body = SantiError),
-        (status = 500, body = SantiError)
+        (status = 400, body = Fault),
+        (status = 409, body = Fault),
+        (status = 500, body = Fault)
     )
 )]
 pub(super) async fn create_downstream(
@@ -29,7 +29,7 @@ pub(super) async fn create_downstream(
     path = "/api/v1/downstreams",
     responses(
         (status = 200, body = Vec<DownstreamCredential>),
-        (status = 500, body = SantiError)
+        (status = 500, body = Fault)
     )
 )]
 pub(super) async fn list_downstreams(
@@ -48,11 +48,11 @@ pub(super) async fn list_downstreams(
     request_body = IngestRequest,
     responses(
         (status = 202, body = IngestReceipt),
-        (status = 400, body = SantiError),
-        (status = 401, body = SantiError),
-        (status = 403, body = SantiError),
-        (status = 409, body = SantiError),
-        (status = 500, body = SantiError)
+        (status = 400, body = Fault),
+        (status = 401, body = Fault),
+        (status = 403, body = Fault),
+        (status = 409, body = Fault),
+        (status = 500, body = Fault)
     )
 )]
 pub(super) async fn ingest(

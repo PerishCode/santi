@@ -17,7 +17,7 @@ use std::{
 };
 use tokio::sync::broadcast;
 
-use crate::{ErrorTransition, Execution, SantiStore, SantiStreamEvent, StrandMaterial};
+use crate::{Execution, SantiStore, SantiStreamEvent, StrandMaterial, Transition};
 
 #[derive(Clone)]
 pub struct Service {
@@ -26,7 +26,7 @@ pub struct Service {
     pub(crate) config: Config,
     material_cache: Arc<Mutex<HashMap<materials::Key, StrandMaterial>>>,
     stream_events: broadcast::Sender<SantiStreamEvent>,
-    error_events: broadcast::Sender<ErrorTransition>,
+    error_events: broadcast::Sender<Transition>,
     runtime_notices: notice::Bus,
     execution_budgets: Arc<Mutex<HashMap<String, Execution>>>,
     memory_pressure_lock: Arc<Mutex<()>>,
@@ -168,7 +168,7 @@ impl Service {
         receiver
     }
 
-    pub fn subscribe_error_transitions(&self) -> broadcast::Receiver<ErrorTransition> {
+    pub fn subscribe_error_transitions(&self) -> broadcast::Receiver<Transition> {
         let receiver = self.error_events.subscribe();
         self.dispatch_error_events();
         receiver

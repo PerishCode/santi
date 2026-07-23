@@ -144,8 +144,8 @@ impl SantiStore {
                 format!("strand inbox is full ({pending} pending, gate {STRAND_INBOX_GATE})");
             let error = engine().transient(crate::Signal {
                 descriptor: catalog::INBOX_CAPACITY_EXCEEDED,
-                source: ErrorSource::new("santi-core", "ingest_admission"),
-                scope: Some(ErrorScope::new("strand", strand)),
+                source: santi_error::Source::new("santi-core", "ingest_admission"),
+                scope: Some(santi_error::Scope::new("strand", strand)),
                 message,
                 context: json!({"pending": pending, "gate": STRAND_INBOX_GATE}),
             });

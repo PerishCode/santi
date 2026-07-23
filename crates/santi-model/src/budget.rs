@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use santi_error::ErrorIncident;
+use santi_error::Incident;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 pub struct ContextEstimate {
@@ -24,7 +24,7 @@ pub struct StrandBudgetSnapshot {
     pub strand_id: String,
     pub estimate: ContextEstimate,
     pub budget: Option<ContextBudget>,
-    pub active_incident: Option<ErrorIncident>,
+    pub active_incident: Option<Incident>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

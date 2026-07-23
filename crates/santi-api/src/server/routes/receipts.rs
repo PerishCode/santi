@@ -6,8 +6,8 @@ use super::*;
     params(("inbox_id" = String, Path)),
     responses(
         (status = 200, body = ReceiptStatus),
-        (status = 404, body = SantiError),
-        (status = 500, body = SantiError)
+        (status = 404, body = Fault),
+        (status = 500, body = Fault)
     )
 )]
 pub async fn receipt_status(
@@ -24,7 +24,7 @@ pub async fn receipt_status(
 #[utoipa::path(
     post,
     path = "/api/v1/strands",
-    responses((status = 200, body = CreateStrandResponse), (status = 500, body = SantiError))
+    responses((status = 200, body = CreateStrandResponse), (status = 500, body = Fault))
 )]
 pub(super) async fn create_strand(
     State(service): State<Service>,
@@ -38,7 +38,7 @@ pub(super) async fn create_strand(
 #[utoipa::path(
     get,
     path = "/api/v1/strands",
-    responses((status = 200, body = [Strand]), (status = 500, body = SantiError))
+    responses((status = 200, body = [Strand]), (status = 500, body = Fault))
 )]
 pub(super) async fn list_strands(
     State(service): State<Service>,
@@ -53,7 +53,7 @@ pub(super) async fn list_strands(
     post,
     path = "/api/v1/souls",
     request_body = CreateSoulRequest,
-    responses((status = 200, body = Soul), (status = 500, body = SantiError))
+    responses((status = 200, body = Soul), (status = 500, body = Fault))
 )]
 pub(super) async fn create_soul(
     State(service): State<Service>,
@@ -68,7 +68,7 @@ pub(super) async fn create_soul(
 #[utoipa::path(
     get,
     path = "/api/v1/souls",
-    responses((status = 200, body = [Soul]), (status = 500, body = SantiError))
+    responses((status = 200, body = [Soul]), (status = 500, body = Fault))
 )]
 pub(super) async fn list_souls(
     State(service): State<Service>,
@@ -85,8 +85,8 @@ pub(super) async fn list_souls(
     params(("soul_id" = String, Path)),
     responses(
         (status = 200, body = Soul),
-        (status = 404, body = SantiError),
-        (status = 500, body = SantiError)
+        (status = 404, body = Fault),
+        (status = 500, body = Fault)
     )
 )]
 pub(super) async fn get_soul(
@@ -103,7 +103,7 @@ pub(super) async fn get_soul(
     post,
     path = "/api/v1/webhooks",
     request_body = CreateWebhookRequest,
-    responses((status = 200, body = WebhookSubscription), (status = 500, body = SantiError))
+    responses((status = 200, body = WebhookSubscription), (status = 500, body = Fault))
 )]
 pub(super) async fn create_webhook(
     State(service): State<Service>,
@@ -118,7 +118,7 @@ pub(super) async fn create_webhook(
 #[utoipa::path(
     get,
     path = "/api/v1/webhooks",
-    responses((status = 200, body = [WebhookSubscription]), (status = 500, body = SantiError))
+    responses((status = 200, body = [WebhookSubscription]), (status = 500, body = Fault))
 )]
 pub(super) async fn list_webhooks(
     State(service): State<Service>,
@@ -135,8 +135,8 @@ pub(super) async fn list_webhooks(
     params(("strand_id" = String, Path)),
     responses(
         (status = 200, body = StrandDetail),
-        (status = 404, body = SantiError),
-        (status = 500, body = SantiError)
+        (status = 404, body = Fault),
+        (status = 500, body = Fault)
     )
 )]
 pub(super) async fn get_strand(
@@ -156,8 +156,8 @@ pub(super) async fn get_strand(
     params(("strand_id" = String, Path)),
     responses(
         (status = 200, body = [santi_core::StrandMessage]),
-        (status = 404, body = SantiError),
-        (status = 500, body = SantiError)
+        (status = 404, body = Fault),
+        (status = 500, body = Fault)
     )
 )]
 pub(super) async fn list_messages(
@@ -178,8 +178,8 @@ pub(super) async fn list_messages(
     request_body = MaterialRequest,
     responses(
         (status = 200, body = StrandMaterial),
-        (status = 404, body = SantiError),
-        (status = 500, body = SantiError)
+        (status = 404, body = Fault),
+        (status = 500, body = Fault)
     )
 )]
 pub(super) async fn strand_material(

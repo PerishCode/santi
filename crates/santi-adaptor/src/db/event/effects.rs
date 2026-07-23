@@ -141,7 +141,7 @@ impl Database<'_> {
                     state: EffectState::decode(&row.get::<_, String>(2)?),
                     reason: EffectTransitionReason::decode(&row.get::<_, String>(3)?),
                     evidence: row.get(4)?,
-                    occurred_at: row.get(5)?,
+                    occurred: row.get(5)?,
                 })
             })
             .map_err(|error| error.to_string())?;
@@ -173,7 +173,7 @@ impl Database<'_> {
         turn_id: &str,
         prepared_reason: EffectTransitionReason,
         dispatching_reason: EffectTransitionReason,
-        occurred_at: &str,
+        occurred: &str,
     ) -> Result<(), String> {
         let mut stmt = self
             .conn
@@ -208,7 +208,7 @@ impl Database<'_> {
                 settled_at = CASE WHEN ?4 THEN ?3 ELSE settled_at END
             WHERE id = ?1
             "#,
-                    params![effect_id, next.encode(), occurred_at, settled],
+                    params![effect_id, next.encode(), occurred, settled],
                 )
                 .map_err(|error| error.to_string())?;
             self.append_effect_transition(
@@ -217,7 +217,7 @@ impl Database<'_> {
                     state: next,
                     reason,
                     evidence: None,
-                    time: occurred_at,
+                    time: occurred,
                 },
             )?;
         }

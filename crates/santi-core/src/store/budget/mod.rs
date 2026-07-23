@@ -5,9 +5,7 @@ mod turn;
 pub(crate) use turn::execution_budget_incident_key;
 
 use rusqlite::{OptionalExtension, params};
-use santi_error::{
-    ErrorIncident, ErrorScope, ErrorSource, IncidentDraft, SantiError, catalog, engine,
-};
+use santi_error::{Fault, Incident, catalog, engine};
 use santi_provider::{ProviderItem, ProviderTool};
 use serde_json::{Value, json};
 
@@ -45,12 +43,12 @@ pub(crate) struct Pressure<'a> {
 }
 
 impl Pressure<'_> {
-    fn into_draft(self, strand_id: &str) -> IncidentDraft {
-        IncidentDraft {
-            incident_key: context_incident_key(strand_id),
+    fn into_draft(self, strand_id: &str) -> santi_error::Draft {
+        santi_error::Draft {
+            key: context_incident_key(strand_id),
             descriptor: catalog::CONTEXT_BUDGET_EXCEEDED,
-            scope: ErrorScope::new("strand", strand_id),
-            source: ErrorSource::new("santi-core", self.operation),
+            scope: santi_error::Scope::new("strand", strand_id),
+            source: santi_error::Source::new("santi-core", self.operation),
             message: self.reason_text.to_string(),
             context: json!({
                 "schema": "santi.error.context_budget.v1",
@@ -120,7 +118,7 @@ impl SantiStore {
         &self,
         strand_id: &str,
         input: Pressure<'_>,
-    ) -> Result<SantiError, String> {
+    ) -> Result<Fault, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -133,7 +131,7 @@ impl SantiStore {
     pub(crate) fn active_context_incident(
         &self,
         strand_id: &str,
-    ) -> Result<Option<ErrorIncident>, String> {
+    ) -> Result<Option<Incident>, String> {
         self.active_error_incident(&context_incident_key(strand_id))
     }
 

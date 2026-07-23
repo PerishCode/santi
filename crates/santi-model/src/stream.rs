@@ -5,7 +5,7 @@ use super::{
     ActorType, Compact, MaterialUpdated, MessageEvent, Strand, StrandEffect, StrandMessage,
     ThinkingSpan, Timestamp, ToolCall, ToolResult, Turn,
 };
-use santi_error::{ErrorIncident, ErrorTransition, SantiError};
+use santi_error::{Fault, Incident, Transition};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SantiStreamEvent {
@@ -82,10 +82,10 @@ pub enum SantiStreamPayload {
     },
     TurnFailed {
         turn_id: String,
-        error: Box<SantiError>,
+        error: Box<Fault>,
     },
-    ErrorTransition {
-        transition: Box<ErrorTransition>,
+    Transition {
+        transition: Box<Transition>,
     },
 }
 
@@ -100,5 +100,5 @@ pub struct StrandRuntimeSnapshot {
     pub tool_results: Vec<ToolResult>,
     pub compacts: Vec<Compact>,
     pub effects: Vec<StrandEffect>,
-    pub errors: Vec<ErrorIncident>,
+    pub errors: Vec<Incident>,
 }

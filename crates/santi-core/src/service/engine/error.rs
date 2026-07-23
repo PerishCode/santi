@@ -1,6 +1,4 @@
-use santi_error::ErrorEventSink;
-
-use crate::{ErrorTransition, SantiStreamPayload};
+use crate::{SantiStreamPayload, Transition};
 
 use super::Service;
 
@@ -11,14 +9,14 @@ pub(in crate::service) struct Sink<'a> {
     pub(in crate::service) service: &'a Service,
 }
 
-impl ErrorEventSink for Sink<'_> {
-    fn publish_error_transition(&self, transition: &ErrorTransition) -> Result<(), String> {
-        let strand_delivered = transition.incident.scope.kind == "strand"
+impl santi_error::Sink for Sink<'_> {
+    fn publish(&self, transition: &Transition) -> Result<(), String> {
+        let strand_delivered = transition.held.scope.kind == "strand"
             && self
                 .service
                 .send_stream(
-                    &transition.incident.scope.id,
-                    SantiStreamPayload::ErrorTransition {
+                    &transition.held.scope.id,
+                    SantiStreamPayload::Transition {
                         transition: Box::new(transition.clone()),
                     },
                 )

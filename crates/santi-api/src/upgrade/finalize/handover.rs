@@ -4,8 +4,8 @@ pub(super) fn finalize_handover(
     paths: &RuntimePaths,
     store: &santi_core::SantiStore,
     request: UpgradeFinalizeRequest,
-    mut errors: Vec<santi_core::SantiError>,
-) -> Result<UpgradeFinalizeReport, Box<santi_core::SantiError>> {
+    mut errors: Vec<santi_core::Fault>,
+) -> Result<UpgradeFinalizeReport, Box<santi_core::Fault>> {
     let record = compose_record(&request.attempt_id);
     let seed = paths.seed_attempt_handover(
         &request.soul_id,
@@ -20,11 +20,11 @@ pub(super) fn finalize_handover(
     };
     if let Some(detail) = handover_failure {
         let error = store
-            .open_error_incident(santi_core::IncidentDraft {
-                incident_key: HANDOVER_INCIDENT_KEY.to_string(),
+            .open_error_incident(santi_core::error::Draft {
+                key: HANDOVER_INCIDENT_KEY.to_string(),
                 descriptor: santi_core::catalog::UPGRADE_HANDOVER_FAILED,
-                scope: santi_core::ErrorScope::new("runtime", RUNTIME_SCOPE_ID),
-                source: santi_core::ErrorSource::new("santi-api", "upgrade.handover"),
+                scope: santi_core::Scope::new("runtime", RUNTIME_SCOPE_ID),
+                source: santi_core::Source::new("santi-api", "upgrade.handover"),
                 message: "self-upgrade handover could not use its attempt-scoped ops strand"
                     .to_string(),
                 context: json!({

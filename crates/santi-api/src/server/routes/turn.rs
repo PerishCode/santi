@@ -10,8 +10,8 @@ use super::*;
     ),
     responses(
         (status = 200, body = TurnEventBatch),
-        (status = 401, body = SantiError),
-        (status = 500, body = SantiError)
+        (status = 401, body = Fault),
+        (status = 500, body = Fault)
     )
 )]
 pub(super) async fn turn_events(

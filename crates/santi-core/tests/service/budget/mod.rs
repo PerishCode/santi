@@ -47,7 +47,7 @@ async fn admission_opens_incident() {
         .expect_err("send should be rejected");
 
     assert_eq!(error.code, "context.budget.exceeded");
-    let incident_id = error.incident_id.expect("incident id");
+    let held = error.incident.expect("incident id");
     assert!(error.message.contains("strand context is over budget"));
     assert!(provider.requests.lock().unwrap().is_empty());
     let runtime = service
@@ -58,22 +58,25 @@ async fn admission_opens_incident() {
     assert!(runtime.turns.is_empty(), "rejected send started a turn");
     assert_eq!(runtime.errors.len(), 1);
     let incident = &runtime.errors[0];
-    assert_eq!(incident.id, incident_id);
-    assert_eq!(incident.status, santi_core::IncidentStatus::Active);
-    assert_eq!(incident.occurrence_count, 1);
+    assert_eq!(incident.id, held);
+    assert_eq!(incident.status, santi_core::Status::Active);
+    assert_eq!(incident.occurrences, 1);
     assert_eq!(incident.revision, 1);
-    assert_eq!(incident.source.operation, "ingest_admission");
-    assert_eq!(incident.context["reason"], "candidate_input_exceeds_budget");
+    assert_eq!(incident.first.source.operation, "ingest_admission");
+    assert_eq!(
+        incident.first.context["reason"],
+        "candidate_input_exceeds_budget"
+    );
 
     let transition = std::iter::from_fn(|| events.try_recv().ok())
         .find_map(|event| match event.payload {
-            santi_core::SantiStreamPayload::ErrorTransition { transition } => Some(transition),
+            santi_core::SantiStreamPayload::Transition { transition } => Some(transition),
             _ => None,
         })
         .expect("error transition event");
-    assert_eq!(transition.incident_id, incident_id);
+    assert_eq!(transition.incident, held);
     assert_eq!(transition.revision, 1);
-    assert_eq!(transition.kind, santi_core::ErrorTransitionKind::Opened);
+    assert_eq!(transition.kind, santi_core::Kind::Opened);
 
     let conn = Connection::open(db).expect("open sqlite");
     let delivered: (i64, i64) = conn
@@ -155,7 +158,7 @@ async fn remeasures_hot_memory() {
         .expect("strand errors")
         .expect("strand");
     assert_eq!(incidents.len(), 1);
-    assert_eq!(incidents[0].status, santi_core::IncidentStatus::Resolved);
+    assert_eq!(incidents[0].status, santi_core::Status::Resolved);
 }
 
 #[tokio::test]
@@ -182,7 +185,7 @@ async fn repeats_are_idempotent() {
             )
             .await
             .expect_err("send should be rejected");
-        incident_ids.push(error.incident_id.expect("incident id"));
+        incident_ids.push(error.incident.expect("incident id"));
     }
     assert!(incident_ids.windows(2).all(|ids| ids[0] == ids[1]));
 
@@ -193,10 +196,10 @@ async fn repeats_are_idempotent() {
     assert!(runtime.messages.is_empty());
     assert!(runtime.turns.is_empty());
     assert_eq!(runtime.errors.len(), 1);
-    assert_eq!(runtime.errors[0].occurrence_count, 3);
+    assert_eq!(runtime.errors[0].occurrences, 3);
     assert_eq!(runtime.errors[0].revision, 1);
     assert_eq!(
-        runtime.errors[0].latest_source.operation,
+        runtime.errors[0].latest.source.operation,
         "ingest_active_guard"
     );
 
@@ -224,7 +227,7 @@ async fn repeats_are_idempotent() {
     let event = events.try_recv().expect("pending transition");
     assert!(matches!(
         event.payload,
-        santi_core::SantiStreamPayload::ErrorTransition { .. }
+        santi_core::SantiStreamPayload::Transition { .. }
     ));
     let delivered: i64 = conn
         .query_row(
@@ -269,11 +272,11 @@ async fn store_cannot_bypass() {
     let santi_core::IngestOutcome::Rejected { error } = outcome else {
         panic!("direct enqueue should be rejected by the active incident");
     };
-    assert_eq!(error.incident_id, first.incident_id);
+    assert_eq!(error.incident, first.incident);
     let runtime = service
         .runtime_snapshot(&strand.id)
         .expect("runtime")
         .expect("strand");
-    assert_eq!(runtime.errors[0].occurrence_count, 2);
+    assert_eq!(runtime.errors[0].occurrences, 2);
     assert!(runtime.messages.is_empty());
 }

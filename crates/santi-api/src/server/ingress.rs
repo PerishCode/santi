@@ -8,7 +8,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use santi_core::service::Service;
-use santi_core::{InboxSource, IngestOutcome, SantiError};
+use santi_core::{Fault, InboxSource, IngestOutcome};
 use serde_json::json;
 
 use crate::webhook::{WebhookOutcome, adaptor_for};
@@ -24,11 +24,11 @@ use super::ApiError;
     responses(
         (status = 200, description = "Control response or ignored event"),
         (status = 202, body = santi_core::IngestReceipt),
-        (status = 401, body = SantiError),
-        (status = 423, body = SantiError),
-        (status = 404, body = SantiError),
-        (status = 500, body = SantiError),
-        (status = 503, body = SantiError)
+        (status = 401, body = Fault),
+        (status = 423, body = Fault),
+        (status = 404, body = Fault),
+        (status = 500, body = Fault),
+        (status = 503, body = Fault)
     )
 )]
 pub(super) async fn ingest_webhook(

@@ -60,7 +60,7 @@ impl Database<'_> {
         drop(stmt);
 
         let now = timestamp_now();
-        if let Some(incident_id) = recovered_incident_id {
+        if let Some(incident) = recovered_incident_id {
             for inbox_id in drained_inbox_ids {
                 self.set_state(inbox_id, ReceiptState::MechanicallyRecovered, &now)?;
                 self.append_transition(
@@ -68,7 +68,7 @@ impl Database<'_> {
                     Transition {
                         state: ReceiptState::MechanicallyRecovered,
                         turn: Some(turn_id),
-                        incident: Some(incident_id),
+                        incident: Some(incident),
                         time: &now,
                     },
                 )?;
@@ -92,10 +92,10 @@ impl Database<'_> {
     pub fn fail_turn(
         &self,
         turn_id: &str,
-        incident_id: Option<&str>,
-        occurred_at: &str,
+        incident: Option<&str>,
+        occurred: &str,
     ) -> Result<(), String> {
-        self.transition_turn_receipts(turn_id, ReceiptState::TurnFailed, incident_id, occurred_at)
+        self.transition_turn_receipts(turn_id, ReceiptState::TurnFailed, incident, occurred)
     }
 
     pub fn complete_turn(&self, turn_id: &str, occurred_at: &str) -> Result<(), String> {
@@ -106,8 +106,8 @@ impl Database<'_> {
         &self,
         turn_id: &str,
         state: ReceiptState,
-        incident_id: Option<&str>,
-        occurred_at: &str,
+        incident: Option<&str>,
+        occurred: &str,
     ) -> Result<(), String> {
         let mut stmt = self
             .conn
@@ -131,14 +131,14 @@ impl Database<'_> {
         }
         drop(stmt);
         for inbox_id in receipt_ids {
-            self.set_state(&inbox_id, state.clone(), occurred_at)?;
+            self.set_state(&inbox_id, state.clone(), occurred)?;
             self.append_transition(
                 &inbox_id,
                 Transition {
                     state: state.clone(),
                     turn: Some(turn_id),
-                    incident: incident_id,
-                    time: occurred_at,
+                    incident,
+                    time: occurred,
                 },
             )?;
         }

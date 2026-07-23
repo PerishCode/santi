@@ -1,11 +1,11 @@
 use axum::{Json, http::StatusCode, response::IntoResponse};
-use santi_core::{ErrorCategory, ErrorSource, SantiError, Signal, catalog, engine};
+use santi_core::{Category, Fault, Signal, catalog, engine};
 
 use crate::webhook::WebhookError;
 
 pub struct ApiError {
     status: StatusCode,
-    error: SantiError,
+    error: Fault,
 }
 
 impl ApiError {
@@ -25,7 +25,7 @@ impl ApiError {
         eprintln!("santi-api: internal error: {message}");
         Self::from_santi(engine().transient(Signal {
             descriptor: catalog::INTERNAL,
-            source: ErrorSource::new("santi-api", "http_boundary"),
+            source: santi_core::Source::new("santi-api", "http_boundary"),
             scope: None,
             message: "internal error".to_string(),
             context: serde_json::Value::Null,
@@ -35,7 +35,7 @@ impl ApiError {
     pub fn not_found(message: impl Into<String>) -> Self {
         Self::from_santi(engine().transient(Signal {
             descriptor: catalog::NOT_FOUND,
-            source: ErrorSource::new("santi-api", "http_boundary"),
+            source: santi_core::Source::new("santi-api", "http_boundary"),
             scope: None,
             message: message.into(),
             context: serde_json::Value::Null,
@@ -45,7 +45,7 @@ impl ApiError {
     pub fn bad_request(message: impl Into<String>) -> Self {
         Self::from_santi(engine().transient(Signal {
             descriptor: catalog::INVALID_ARGUMENT,
-            source: ErrorSource::new("santi-api", "http_boundary"),
+            source: santi_core::Source::new("santi-api", "http_boundary"),
             scope: None,
             message: message.into(),
             context: serde_json::Value::Null,
@@ -55,7 +55,7 @@ impl ApiError {
     pub fn unauthorized(message: impl Into<String>) -> Self {
         Self::from_santi(engine().transient(Signal {
             descriptor: catalog::UNAUTHORIZED,
-            source: ErrorSource::new("santi-api", "http_boundary"),
+            source: santi_core::Source::new("santi-api", "http_boundary"),
             scope: None,
             message: message.into(),
             context: serde_json::Value::Null,
@@ -74,7 +74,7 @@ impl ApiError {
         error
     }
 
-    pub fn from_santi(error: SantiError) -> Self {
+    pub fn from_santi(error: Fault) -> Self {
         let status = if error.code == catalog::CONTEXT_BUDGET_EXCEEDED.code {
             StatusCode::LOCKED
         } else if error.code == catalog::WINDOW_MESSAGE_CONFLICT.code {
@@ -83,12 +83,12 @@ impl ApiError {
             StatusCode::PAYLOAD_TOO_LARGE
         } else {
             match error.category {
-                ErrorCategory::Internal => StatusCode::INTERNAL_SERVER_ERROR,
-                ErrorCategory::InvalidInput => StatusCode::BAD_REQUEST,
-                ErrorCategory::NotFound => StatusCode::NOT_FOUND,
-                ErrorCategory::ResourceExhausted => StatusCode::TOO_MANY_REQUESTS,
-                ErrorCategory::Unauthorized => StatusCode::UNAUTHORIZED,
-                ErrorCategory::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+                Category::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+                Category::Invalid => StatusCode::BAD_REQUEST,
+                Category::Missing => StatusCode::NOT_FOUND,
+                Category::Exhausted => StatusCode::TOO_MANY_REQUESTS,
+                Category::Unauthorized => StatusCode::UNAUTHORIZED,
+                Category::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
             }
         };
         Self { status, error }

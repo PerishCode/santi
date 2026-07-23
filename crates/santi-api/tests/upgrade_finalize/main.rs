@@ -10,8 +10,8 @@ use santi_api::{
         UpgradeTerminal, finalize_at, register_attempt_handover_budgets,
     },
 };
+use santi_core::SantiStore;
 use santi_core::service::{self, Service};
-use santi_core::{ErrorScope, IncidentStatus, SantiStore};
 use santi_provider::{
     ProviderClient, ProviderEvent, ProviderMetadata, ProviderRequest, ProviderStream,
 };
@@ -183,10 +183,10 @@ fn rollback_detail_not_projected() {
 
     let store = SantiStore::open(&paths.database_path).expect("open store");
     let incidents = store
-        .error_incidents(&ErrorScope::new("runtime", "default"), 10)
+        .error_incidents(&santi_core::Scope::new("runtime", "default"), 10)
         .expect("runtime errors");
     assert_eq!(incidents.len(), 1);
-    assert_eq!(incidents[0].status, IncidentStatus::Active);
+    assert_eq!(incidents[0].status, santi_core::Status::Active);
     assert!(!incidents[0].exposure.model);
 }
 
@@ -211,13 +211,13 @@ fn success_resolves_incident() {
 
     let store = SantiStore::open(&paths.database_path).expect("open store");
     let incidents = store
-        .error_incidents(&ErrorScope::new("runtime", "default"), 10)
+        .error_incidents(&santi_core::Scope::new("runtime", "default"), 10)
         .expect("runtime errors");
     assert_eq!(incidents.len(), 1);
-    assert_eq!(incidents[0].status, IncidentStatus::Resolved);
+    assert_eq!(incidents[0].status, santi_core::Status::Resolved);
     assert_eq!(incidents[0].revision, 2);
     assert_eq!(
-        incidents[0].resolved_by.as_deref(),
+        incidents[0].resolution.as_ref().unwrap().by.as_deref(),
         Some("upgrade.succeeded")
     );
 }

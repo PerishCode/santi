@@ -55,7 +55,7 @@ pub struct EffectTransition {
     pub state: EffectState,
     pub reason: EffectTransitionReason,
     pub evidence: Option<String>,
-    pub occurred_at: Timestamp,
+    pub occurred: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

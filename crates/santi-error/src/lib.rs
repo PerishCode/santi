@@ -4,42 +4,41 @@ use utoipa::ToSchema;
 
 pub mod catalog;
 mod codec;
-pub use codec::*;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ErrorCategory {
+pub enum Category {
     Internal,
-    InvalidInput,
-    NotFound,
-    ResourceExhausted,
+    Invalid,
+    Missing,
+    Exhausted,
     Unauthorized,
     Unavailable,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ErrorSeverity {
+pub enum Severity {
     Error,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ErrorRetry {
+pub enum Retry {
     Never,
     Later,
-    AfterChange,
-    AfterResolution,
+    Changed,
+    Resolved,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
-pub struct ErrorExposure {
+pub struct Exposure {
     pub caller: bool,
     pub operator: bool,
     pub model: bool,
 }
 
-impl ErrorExposure {
+impl Exposure {
     pub const CALLER_AND_OPERATOR: Self = Self {
         caller: true,
         operator: true,
@@ -50,24 +49,29 @@ impl ErrorExposure {
         operator: true,
         model: false,
     };
+    pub const ALL: Self = Self {
+        caller: true,
+        operator: true,
+        model: true,
+    };
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct ErrorDescriptor {
+pub struct Descriptor {
     pub code: &'static str,
-    pub category: ErrorCategory,
-    pub severity: ErrorSeverity,
-    pub retry: ErrorRetry,
-    pub exposure: ErrorExposure,
+    pub category: Category,
+    pub severity: Severity,
+    pub retry: Retry,
+    pub exposure: Exposure,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
-pub struct ErrorScope {
+pub struct Scope {
     pub kind: String,
     pub id: String,
 }
 
-impl ErrorScope {
+impl Scope {
     pub fn new(kind: impl Into<String>, id: impl Into<String>) -> Self {
         Self {
             kind: kind.into(),
@@ -77,12 +81,12 @@ impl ErrorScope {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
-pub struct ErrorSource {
+pub struct Source {
     pub component: String,
     pub operation: String,
 }
 
-impl ErrorSource {
+impl Source {
     pub fn new(component: impl Into<String>, operation: impl Into<String>) -> Self {
         Self {
             component: component.into(),
@@ -93,113 +97,120 @@ impl ErrorSource {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum IncidentStatus {
+pub enum Status {
     Active,
     Resolved,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct ErrorIncident {
-    pub id: String,
-    pub incident_key: String,
-    pub code: String,
-    pub status: IncidentStatus,
-    pub category: ErrorCategory,
-    pub severity: ErrorSeverity,
-    pub retry: ErrorRetry,
-    pub exposure: ErrorExposure,
-    pub scope: ErrorScope,
-    pub source: ErrorSource,
-    pub latest_source: ErrorSource,
+pub struct Report {
+    pub source: Source,
     pub message: String,
-    pub latest_message: String,
     pub context: Value,
-    pub latest_context: Value,
-    pub occurrence_count: i64,
-    pub revision: i64,
-    pub first_seen_at: String,
-    pub last_seen_at: String,
-    pub resolved_at: Option<String>,
-    pub resolved_by: Option<String>,
+    pub seen: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SantiError {
+pub struct Resolution {
+    pub at: String,
+    pub by: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct Incident {
     pub id: String,
-    pub incident_id: Option<String>,
+    pub key: String,
+    pub code: String,
+    pub status: Status,
+    pub category: Category,
+    pub severity: Severity,
+    pub retry: Retry,
+    pub exposure: Exposure,
+    pub scope: Scope,
+    pub first: Report,
+    pub latest: Report,
+    pub occurrences: i64,
+    pub revision: i64,
+    pub resolution: Option<Resolution>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct Fault {
+    pub id: String,
+    pub incident: Option<String>,
     pub code: String,
     pub message: String,
-    pub category: ErrorCategory,
-    pub severity: ErrorSeverity,
-    pub retry: ErrorRetry,
-    pub exposure: ErrorExposure,
-    pub source: ErrorSource,
-    pub scope: Option<ErrorScope>,
+    pub category: Category,
+    pub severity: Severity,
+    pub retry: Retry,
+    pub exposure: Exposure,
+    pub source: Source,
+    pub scope: Option<Scope>,
     pub context: Value,
 }
 
-impl std::fmt::Display for SantiError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "{}: {}", self.code, self.message)?;
-        if let Some(incident_id) = self.incident_id.as_deref() {
-            write!(formatter, " (incident {incident_id})")?;
+impl std::fmt::Display for Fault {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(out, "{}: {}", self.code, self.message)?;
+        if let Some(incident) = self.incident.as_deref() {
+            write!(out, " (incident {incident})")?;
         }
         Ok(())
     }
 }
 
-impl std::error::Error for SantiError {}
+impl std::error::Error for Fault {}
 
 #[derive(Debug, Clone)]
-pub struct IncidentDraft {
-    pub incident_key: String,
-    pub descriptor: ErrorDescriptor,
-    pub scope: ErrorScope,
-    pub source: ErrorSource,
+pub struct Draft {
+    pub key: String,
+    pub descriptor: Descriptor,
+    pub scope: Scope,
+    pub source: Source,
     pub message: String,
     pub context: Value,
 }
 
 #[derive(Debug, Clone)]
 pub struct Signal {
-    pub descriptor: ErrorDescriptor,
-    pub source: ErrorSource,
-    pub scope: Option<ErrorScope>,
+    pub descriptor: Descriptor,
+    pub source: Source,
+    pub scope: Option<Scope>,
     pub message: String,
     pub context: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ErrorTransitionKind {
+pub enum Kind {
     Opened,
     Resolved,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct ErrorTransition {
+pub struct Transition {
     pub id: String,
-    pub incident_id: String,
+    pub incident: String,
     pub revision: i64,
-    pub kind: ErrorTransitionKind,
-    pub incident: ErrorIncident,
-    pub occurred_at: String,
+    pub kind: Kind,
+    pub held: Incident,
+    pub occurred: String,
 }
 
 #[derive(Debug, Clone)]
-pub struct IncidentMutation {
-    pub incident: ErrorIncident,
-    pub error: SantiError,
-    pub transition: Option<ErrorTransition>,
+pub struct Mutation {
+    pub incident: Incident,
+    pub error: Fault,
+    pub transition: Option<Transition>,
 }
 
-pub trait ErrorOutbox {
-    fn pending_error_transitions(&self, limit: usize) -> Result<Vec<ErrorTransition>, String>;
-    fn mark_error_transition_delivered(&self, transition_id: &str) -> Result<(), String>;
+pub trait Outbox {
+    fn pending(&self, limit: usize) -> Result<Vec<Transition>, String>;
+    fn delivered(&self, transition: &str) -> Result<(), String>;
 }
 
-pub trait ErrorEventSink {
-    fn publish_error_transition(&self, transition: &ErrorTransition) -> Result<(), String>;
+pub trait Sink {
+    fn publish(&self, transition: &Transition) -> Result<(), String>;
 }
 
 mod engine;

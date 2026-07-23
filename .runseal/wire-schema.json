@@ -1,8 +1,9 @@
 {
   "schema": "santi.wire_schema.v2",
-  "digest": "68ec0801b4de6e2a6298b2a2f06df7c95e9476907faf6e98ef3454bbc28e132c",
+  "digest": "3173924caad56b6ed5e455786d69ca1c49bb526191324cce0b808f62c396494f",
   "components": [
     "ActorType",
+    "Category",
     "Compact",
     "CompactCapsuleOptions",
     "CompactExecRequest",
@@ -23,20 +24,14 @@
     "EffectStatus",
     "EffectTransition",
     "EffectTransitionReason",
-    "ErrorCategory",
-    "ErrorExposure",
-    "ErrorIncident",
-    "ErrorRetry",
-    "ErrorScope",
-    "ErrorSeverity",
-    "ErrorSource",
-    "ErrorTransition",
-    "ErrorTransitionKind",
+    "Exposure",
+    "Fault",
     "ForkStrandResponse",
     "HealthResponse",
-    "IncidentStatus",
+    "Incident",
     "IngestReceipt",
     "IngestRequest",
+    "Kind",
     "MaterialKind",
     "MaterialRequest",
     "MaterialUpdated",
@@ -49,11 +44,17 @@
     "ReceiptState",
     "ReceiptStatus",
     "ReceiptTransition",
+    "Report",
+    "Resolution",
     "ResolveEffectRequest",
-    "SantiError",
+    "Retry",
+    "Scope",
     "SendStrandAcceptedResponse",
     "SendStrandRequest",
+    "Severity",
     "Soul",
+    "Source",
+    "Status",
     "Strand",
     "StrandBudgetSnapshot",
     "StrandDetail",
@@ -69,6 +70,7 @@
     "ThinkingSpanState",
     "ToolCall",
     "ToolResult",
+    "Transition",
     "Turn",
     "TurnActivity",
     "TurnActivityState",
@@ -80,6 +82,7 @@
   ],
   "properties": {
     "ActorType": [],
+    "Category": [],
     "Compact": [
       "created_at",
       "end_message_id",
@@ -185,60 +188,30 @@
     "EffectTransition": [
       "evidence",
       "id",
-      "occurred_at",
+      "occurred",
       "reason",
       "sequence",
       "state"
     ],
     "EffectTransitionReason": [],
-    "ErrorCategory": [],
-    "ErrorExposure": [
+    "Exposure": [
       "caller",
       "model",
       "operator"
     ],
-    "ErrorIncident": [
+    "Fault": [
       "category",
       "code",
       "context",
       "exposure",
-      "first_seen_at",
-      "id",
-      "incident_key",
-      "last_seen_at",
-      "latest_context",
-      "latest_message",
-      "latest_source",
-      "message",
-      "occurrence_count",
-      "resolved_at",
-      "resolved_by",
-      "retry",
-      "revision",
-      "scope",
-      "severity",
-      "source",
-      "status"
-    ],
-    "ErrorRetry": [],
-    "ErrorScope": [
-      "id",
-      "kind"
-    ],
-    "ErrorSeverity": [],
-    "ErrorSource": [
-      "component",
-      "operation"
-    ],
-    "ErrorTransition": [
       "id",
       "incident",
-      "incident_id",
-      "kind",
-      "occurred_at",
-      "revision"
+      "message",
+      "retry",
+      "scope",
+      "severity",
+      "source"
     ],
-    "ErrorTransitionKind": [],
     "ForkStrandResponse": [
       "strand"
     ],
@@ -248,7 +221,22 @@
       "ok",
       "service"
     ],
-    "IncidentStatus": [],
+    "Incident": [
+      "category",
+      "code",
+      "exposure",
+      "first",
+      "id",
+      "key",
+      "latest",
+      "occurrences",
+      "resolution",
+      "retry",
+      "revision",
+      "scope",
+      "severity",
+      "status"
+    ],
     "IngestReceipt": [
       "inbox_id",
       "strand_id",
@@ -261,6 +249,7 @@
       "source_ref",
       "text"
     ],
+    "Kind": [],
     "MaterialKind": [],
     "MaterialRequest": [
       "kind"
@@ -315,29 +304,31 @@
     ],
     "ReceiptTransition": [
       "id",
-      "incident_id",
-      "occurred_at",
+      "incident",
+      "occurred",
       "reconstructed_from",
       "sequence",
       "state",
       "turn_id"
     ],
+    "Report": [
+      "context",
+      "message",
+      "seen",
+      "source"
+    ],
+    "Resolution": [
+      "at",
+      "by"
+    ],
     "ResolveEffectRequest": [
       "evidence",
       "outcome"
     ],
-    "SantiError": [
-      "category",
-      "code",
-      "context",
-      "exposure",
+    "Retry": [],
+    "Scope": [
       "id",
-      "incident_id",
-      "message",
-      "retry",
-      "scope",
-      "severity",
-      "source"
+      "kind"
     ],
     "SendStrandAcceptedResponse": [
       "receipt",
@@ -348,11 +339,17 @@
     "SendStrandRequest": [
       "content"
     ],
+    "Severity": [],
     "Soul": [
       "created_at",
       "id",
       "updated_at"
     ],
+    "Source": [
+      "component",
+      "operation"
+    ],
+    "Status": [],
     "Strand": [
       "created_at",
       "external_label",
@@ -449,6 +446,14 @@
       "id",
       "output",
       "tool_call_id"
+    ],
+    "Transition": [
+      "held",
+      "id",
+      "incident",
+      "kind",
+      "occurred",
+      "revision"
     ],
     "Turn": [
       "base_strand_seq",

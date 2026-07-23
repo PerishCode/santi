@@ -2,7 +2,7 @@ use rusqlite::{Connection, params};
 use serde_json::json;
 
 use crate::store::{SantiStore, db::Database};
-use crate::{ErrorScope, ErrorSource, IncidentDraft, SantiError, catalog};
+use crate::{Fault, catalog};
 
 const DRIVE_DETAIL_BYTES: usize = 4096;
 
@@ -21,7 +21,7 @@ pub(in crate::store) fn repeat_active_in_conn(
     conn: &Connection,
     strand_id: &str,
     operation: &str,
-) -> Result<Option<SantiError>, String> {
+) -> Result<Option<Fault>, String> {
     let database = Database::new(conn);
     if database
         .active_incident(&drive_incident_key(strand_id))?
@@ -67,10 +67,7 @@ pub(in crate::store) fn resolve_in_conn(
 }
 
 impl SantiStore {
-    pub(crate) fn reject_if_drive_blocked(
-        &self,
-        strand_id: &str,
-    ) -> Result<Option<SantiError>, String> {
+    pub(crate) fn reject_if_drive_blocked(&self, strand_id: &str) -> Result<Option<Fault>, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -84,7 +81,7 @@ impl SantiStore {
         &self,
         strand_id: &str,
         input: Input<'_>,
-    ) -> Result<SantiError, String> {
+    ) -> Result<Fault, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let pending = pending_count(&tx, strand_id)?;
@@ -104,12 +101,12 @@ impl SantiStore {
     }
 }
 
-fn drive_draft(strand_id: &str, input: Input<'_>, pending: i64) -> IncidentDraft {
-    IncidentDraft {
-        incident_key: drive_incident_key(strand_id),
+fn drive_draft(strand_id: &str, input: Input<'_>, pending: i64) -> santi_error::Draft {
+    santi_error::Draft {
+        key: drive_incident_key(strand_id),
         descriptor: catalog::STRAND_DRIVE_FAILED,
-        scope: ErrorScope::new("strand", strand_id),
-        source: ErrorSource::new("santi-core", input.operation),
+        scope: santi_error::Scope::new("strand", strand_id),
+        source: santi_error::Source::new("santi-core", input.operation),
         message: "strand driver could not start pending work".to_string(),
         context: json!({
             "schema": "santi.error.strand_drive.v1",

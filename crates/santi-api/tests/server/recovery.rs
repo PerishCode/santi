@@ -37,7 +37,7 @@ async fn send_rejection_locks() {
         .expect("read body");
     let body: serde_json::Value = serde_json::from_slice(&body).expect("error json");
     assert_eq!(body["code"], "context.budget.exceeded");
-    assert!(body["incident_id"].as_str().is_some());
+    assert!(body["incident"].as_str().is_some());
     assert_eq!(body["exposure"]["model"], false);
     assert!(
         body.get("reason").is_none(),

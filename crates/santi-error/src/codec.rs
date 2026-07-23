@@ -1,72 +1,82 @@
-use crate::{ErrorCategory, ErrorRetry, ErrorSeverity, ErrorTransitionKind, IncidentStatus};
+use crate::{Category, Kind, Retry, Severity, Status};
 
-pub fn category_db(value: ErrorCategory) -> &'static str {
-    match value {
-        ErrorCategory::Internal => "internal",
-        ErrorCategory::InvalidInput => "invalid_input",
-        ErrorCategory::NotFound => "not_found",
-        ErrorCategory::ResourceExhausted => "resource_exhausted",
-        ErrorCategory::Unauthorized => "unauthorized",
-        ErrorCategory::Unavailable => "unavailable",
+impl Category {
+    pub fn db(self) -> &'static str {
+        match self {
+            Category::Internal => "internal",
+            Category::Invalid => "invalid",
+            Category::Missing => "missing",
+            Category::Exhausted => "exhausted",
+            Category::Unauthorized => "unauthorized",
+            Category::Unavailable => "unavailable",
+        }
+    }
+
+    pub fn read(value: &str) -> Self {
+        match value {
+            "invalid" => Category::Invalid,
+            "missing" => Category::Missing,
+            "exhausted" => Category::Exhausted,
+            "unauthorized" => Category::Unauthorized,
+            "unavailable" => Category::Unavailable,
+            _ => Category::Internal,
+        }
     }
 }
 
-pub fn category_from_db(value: &str) -> ErrorCategory {
-    match value {
-        "invalid_input" => ErrorCategory::InvalidInput,
-        "not_found" => ErrorCategory::NotFound,
-        "resource_exhausted" => ErrorCategory::ResourceExhausted,
-        "unauthorized" => ErrorCategory::Unauthorized,
-        "unavailable" => ErrorCategory::Unavailable,
-        _ => ErrorCategory::Internal,
+impl Severity {
+    pub fn db(self) -> &'static str {
+        match self {
+            Severity::Error => "error",
+        }
+    }
+
+    pub fn read(_value: &str) -> Self {
+        Severity::Error
     }
 }
 
-pub fn severity_db(value: ErrorSeverity) -> &'static str {
-    match value {
-        ErrorSeverity::Error => "error",
+impl Retry {
+    pub fn db(self) -> &'static str {
+        match self {
+            Retry::Never => "never",
+            Retry::Later => "later",
+            Retry::Changed => "changed",
+            Retry::Resolved => "resolved",
+        }
+    }
+
+    pub fn read(value: &str) -> Self {
+        match value {
+            "never" => Retry::Never,
+            "changed" => Retry::Changed,
+            "resolved" => Retry::Resolved,
+            _ => Retry::Later,
+        }
     }
 }
 
-pub fn severity_from_db(_value: &str) -> ErrorSeverity {
-    ErrorSeverity::Error
-}
+impl Status {
+    pub fn db(&self) -> &'static str {
+        match self {
+            Status::Active => "active",
+            Status::Resolved => "resolved",
+        }
+    }
 
-pub fn retry_db(value: ErrorRetry) -> &'static str {
-    match value {
-        ErrorRetry::Never => "never",
-        ErrorRetry::Later => "later",
-        ErrorRetry::AfterChange => "after_change",
-        ErrorRetry::AfterResolution => "after_resolution",
+    pub fn read(value: &str) -> Self {
+        match value {
+            "resolved" => Status::Resolved,
+            _ => Status::Active,
+        }
     }
 }
 
-pub fn retry_from_db(value: &str) -> ErrorRetry {
-    match value {
-        "never" => ErrorRetry::Never,
-        "after_change" => ErrorRetry::AfterChange,
-        "after_resolution" => ErrorRetry::AfterResolution,
-        _ => ErrorRetry::Later,
-    }
-}
-
-pub fn incident_status_db(value: &IncidentStatus) -> &'static str {
-    match value {
-        IncidentStatus::Active => "active",
-        IncidentStatus::Resolved => "resolved",
-    }
-}
-
-pub fn incident_status_from_db(value: &str) -> IncidentStatus {
-    match value {
-        "resolved" => IncidentStatus::Resolved,
-        _ => IncidentStatus::Active,
-    }
-}
-
-pub fn transition_kind_db(value: &ErrorTransitionKind) -> &'static str {
-    match value {
-        ErrorTransitionKind::Opened => "opened",
-        ErrorTransitionKind::Resolved => "resolved",
+impl Kind {
+    pub fn db(&self) -> &'static str {
+        match self {
+            Kind::Opened => "opened",
+            Kind::Resolved => "resolved",
+        }
     }
 }

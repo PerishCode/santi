@@ -23,8 +23,8 @@ async fn preserves_aborted_output() {
     assert_eq!(partial_message.content_text, "partial runtime output");
     assert_no_failure_projection(&runtime);
     assert_eq!(runtime.errors.len(), 1);
-    assert_eq!(runtime.errors[0].source.operation, "turn.stream");
-    assert_eq!(runtime.errors[0].context["stage"], "stream");
+    assert_eq!(runtime.errors[0].first.source.operation, "turn.stream");
+    assert_eq!(runtime.errors[0].first.context["stage"], "stream");
 
     let retry = send_text(&service, &strand.id, "continue with preserved partial").await;
     wait_for_turn(&service, &strand.id, &turn(&retry).id, TurnStatus::Failed).await;
@@ -61,8 +61,8 @@ async fn classifies_response_failure() {
     .await;
     assert_no_failure_projection(&runtime);
     assert_eq!(runtime.errors.len(), 1);
-    assert_eq!(runtime.errors[0].source.operation, "turn.response");
-    assert_eq!(runtime.errors[0].context["stage"], "response");
+    assert_eq!(runtime.errors[0].first.source.operation, "turn.response");
+    assert_eq!(runtime.errors[0].first.context["stage"], "response");
 }
 
 #[tokio::test]
@@ -77,7 +77,7 @@ async fn success_resolves_incident() {
     let strand = service.create_strand().expect("create strand").strand;
     let failed = send_text(&service, &strand.id, "first attempt").await;
     let before = wait_for_turn(&service, &strand.id, &turn(&failed).id, TurnStatus::Failed).await;
-    let incident_id = before.errors[0].id.clone();
+    let held = before.errors[0].id.clone();
 
     let recovered = send_text(&service, &strand.id, "retry after recovery").await;
     let after = wait_for_turn(
@@ -92,17 +92,17 @@ async fn success_resolves_incident() {
     assert_eq!(provider.requests.lock().unwrap().len(), 2);
     assert_eq!(after.errors.len(), 1);
     let incident = &after.errors[0];
-    assert_eq!(incident.id, incident_id);
-    assert_eq!(incident.status, IncidentStatus::Resolved);
-    assert_eq!(incident.occurrence_count, 1);
+    assert_eq!(incident.id, held);
+    assert_eq!(incident.status, santi_core::Status::Resolved);
+    assert_eq!(incident.occurrences, 1);
     assert_eq!(incident.revision, 2);
     assert_eq!(
-        incident.resolved_by.as_deref(),
+        incident.resolution.as_ref().unwrap().by.as_deref(),
         Some("provider.turn_succeeded")
     );
-    assert_eq!(incident.latest_context["turn_id"], turn(&recovered).id);
-    assert_eq!(incident.latest_context["provider"], "fake-provider");
-    assert_eq!(incident.latest_context["model"], "fake-model");
+    assert_eq!(incident.latest.context["turn_id"], turn(&recovered).id);
+    assert_eq!(incident.latest.context["provider"], "fake-provider");
+    assert_eq!(incident.latest.context["model"], "fake-model");
     assert_eq!(
         transition_count(&temp),
         2,
@@ -136,9 +136,12 @@ async fn runtime_receipt_recovers() {
     assert_eq!(runtime.errors.len(), 1);
     let incident = &runtime.errors[0];
     assert_eq!(incident.code, "runtime.turn.failed");
-    assert_eq!(incident.source.component, "santi-core");
-    assert_eq!(incident.source.operation, "turn.thinking_persistence");
-    assert_eq!(incident.context["operation"], "turn.thinking_persistence");
+    assert_eq!(incident.first.source.component, "santi-core");
+    assert_eq!(incident.first.source.operation, "turn.thinking_persistence");
+    assert_eq!(
+        incident.first.context["operation"],
+        "turn.thinking_persistence"
+    );
     assert!(
         runtime
             .turns
@@ -162,7 +165,7 @@ async fn runtime_receipt_recovers() {
         failed_receipt
             .transitions
             .last()
-            .and_then(|event| event.incident_id.as_deref()),
+            .and_then(|event| event.incident.as_deref()),
         Some(incident.id.as_str())
     );
 
@@ -176,9 +179,9 @@ async fn runtime_receipt_recovers() {
         TurnStatus::Completed,
     )
     .await;
-    assert_eq!(runtime.errors[0].status, IncidentStatus::Resolved);
+    assert_eq!(runtime.errors[0].status, santi_core::Status::Resolved);
     assert_eq!(
-        runtime.errors[0].resolved_by.as_deref(),
+        runtime.errors[0].resolution.as_ref().unwrap().by.as_deref(),
         Some("runtime.turn_succeeded")
     );
     let recovered_receipt = service

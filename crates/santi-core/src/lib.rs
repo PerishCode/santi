@@ -5,6 +5,7 @@ pub mod service;
 mod store;
 pub mod workspace;
 
+pub use santi_error as error;
 pub use santi_error::*;
 pub use santi_model::*;
 pub use santi_object as object;

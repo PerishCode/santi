@@ -188,17 +188,17 @@ async fn runtime_outbox_reaches_bus() {
     .expect("open service");
     let store = SantiStore::open(&database_path).expect("open store");
     store
-        .open_error_incident(santi_core::IncidentDraft {
-            incident_key: "runtime.upgrade.failed:runtime:default".to_string(),
+        .open_error_incident(santi_core::error::Draft {
+            key: "runtime.upgrade.failed:runtime:default".to_string(),
             descriptor: santi_core::catalog::UPGRADE_FAILED,
-            scope: santi_core::ErrorScope::new("runtime", "default"),
-            source: santi_core::ErrorSource::new("santi-api", "upgrade.install"),
+            scope: santi_core::Scope::new("runtime", "default"),
+            source: santi_core::Source::new("santi-api", "upgrade.install"),
             message: "upgrade failed".to_string(),
             context: serde_json::json!({"attempt_id": "upgrade_test"}),
         })
         .expect("open incident");
     assert_eq!(
-        santi_core::ErrorOutbox::pending_error_transitions(&store, 10)
+        santi_core::Outbox::pending(&store, 10)
             .expect("pending transitions")
             .len(),
         1
@@ -209,10 +209,10 @@ async fn runtime_outbox_reaches_bus() {
         .await
         .expect("transition timeout")
         .expect("transition");
-    assert_eq!(transition.incident.scope.kind, "runtime");
-    assert_eq!(transition.incident.code, "runtime.upgrade.failed");
+    assert_eq!(transition.held.scope.kind, "runtime");
+    assert_eq!(transition.held.code, "runtime.upgrade.failed");
     assert!(
-        santi_core::ErrorOutbox::pending_error_transitions(&store, 10)
+        santi_core::Outbox::pending(&store, 10)
             .expect("pending transitions")
             .is_empty()
     );
@@ -236,11 +236,11 @@ async fn global_bus_sees_strands() {
     let strand = service.create_strand().expect("create strand").strand;
     let store = SantiStore::open(&database_path).expect("open store");
     store
-        .open_error_incident(santi_core::IncidentDraft {
-            incident_key: format!("test.failed:strand:{}", strand.id),
+        .open_error_incident(santi_core::error::Draft {
+            key: format!("test.failed:strand:{}", strand.id),
             descriptor: santi_core::catalog::INTERNAL,
-            scope: santi_core::ErrorScope::new("strand", &strand.id),
-            source: santi_core::ErrorSource::new("test", "open"),
+            scope: santi_core::Scope::new("strand", &strand.id),
+            source: santi_core::Source::new("test", "open"),
             message: "test failure".to_string(),
             context: serde_json::Value::Null,
         })
@@ -251,5 +251,5 @@ async fn global_bus_sees_strands() {
         .await
         .expect("transition timeout")
         .expect("transition");
-    assert_eq!(transition.incident.scope.id, strand.id);
+    assert_eq!(transition.held.scope.id, strand.id);
 }

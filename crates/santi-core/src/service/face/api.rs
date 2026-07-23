@@ -1,9 +1,9 @@
 use super::*;
 use crate::{
     CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, EffectResolutionOutcome,
-    EffectStatus, ErrorIncident, ErrorScope, IngestOutcome, ReceiptStatus, SantiStreamEvent,
-    SantiStreamPayload, Soul, Strand, StrandBudgetSnapshot, StrandDetail, StrandRuntimeSnapshot,
-    WebhookSubscription, engine, prefixed_id, timestamp_now,
+    EffectStatus, Incident, IngestOutcome, ReceiptStatus, SantiStreamEvent, SantiStreamPayload,
+    Soul, Strand, StrandBudgetSnapshot, StrandDetail, StrandRuntimeSnapshot, WebhookSubscription,
+    engine, prefixed_id, timestamp_now,
 };
 
 pub enum Admission {
@@ -126,7 +126,7 @@ impl Service {
         &self,
         strand_id: &str,
         limit: i64,
-    ) -> Result<Option<Vec<ErrorIncident>>, String> {
+    ) -> Result<Option<Vec<Incident>>, String> {
         let Some(strand) = self.store.strand(strand_id)? else {
             return Ok(None);
         };
@@ -135,7 +135,7 @@ impl Service {
             .map(Some)
     }
 
-    pub fn errors(&self, scope: &ErrorScope, limit: i64) -> Result<Vec<ErrorIncident>, String> {
+    pub fn errors(&self, scope: &santi_error::Scope, limit: i64) -> Result<Vec<Incident>, String> {
         self.store.error_incidents(scope, limit)
     }
 
@@ -187,7 +187,7 @@ impl Service {
 
     pub(in crate::service) fn dispatch_error_events(&self) {
         let sink = error::Sink { service: self };
-        if let Err(error) = engine().dispatch_outbox(&self.store, &sink, 256)
+        if let Err(error) = engine().dispatch(&self.store, &sink, 256)
             && error != error::NO_ERROR_EVENT_SUBSCRIBERS
         {
             eprintln!("santi: error outbox dispatch failed: {error}");

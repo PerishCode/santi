@@ -3,8 +3,8 @@ use futures_util::stream;
 use rusqlite::Connection;
 use santi_core::service::{self, Service};
 use santi_core::{
-    ActorType, ErrorCategory, IncidentStatus, MessageKind, MessagePart, MessageState, ReceiptState,
-    SantiStreamPayload, SendStrandRequest, TurnStatus,
+    ActorType, Category, MessageKind, MessagePart, MessageState, ReceiptState, SantiStreamPayload,
+    SendStrandRequest, TurnStatus,
 };
 use santi_provider::{
     ProviderClient, ProviderEvent, ProviderItem, ProviderMetadata, ProviderRequest, ProviderStream,
@@ -107,17 +107,17 @@ async fn aggregates_provider_failures() {
     assert_eq!(runtime.errors.len(), 1);
     let incident = &runtime.errors[0];
     assert_eq!(incident.code, "provider.turn.failed");
-    assert_eq!(incident.status, IncidentStatus::Active);
-    assert_eq!(incident.category, ErrorCategory::Unavailable);
-    assert_eq!(incident.occurrence_count, 1);
+    assert_eq!(incident.status, santi_core::Status::Active);
+    assert_eq!(incident.category, Category::Unavailable);
+    assert_eq!(incident.occurrences, 1);
     assert_eq!(incident.revision, 1);
-    assert_eq!(incident.source.component, "santi-provider");
-    assert_eq!(incident.source.operation, "turn.request");
-    assert_eq!(incident.context["turn_id"], turn(&first).id);
-    assert_eq!(incident.context["provider"], "fake-provider");
-    assert_eq!(incident.context["model"], "fake-model");
-    assert_eq!(incident.context["stage"], "request");
-    assert_eq!(incident.context["round"], 1);
+    assert_eq!(incident.first.source.component, "santi-provider");
+    assert_eq!(incident.first.source.operation, "turn.request");
+    assert_eq!(incident.first.context["turn_id"], turn(&first).id);
+    assert_eq!(incident.first.context["provider"], "fake-provider");
+    assert_eq!(incident.first.context["model"], "fake-model");
+    assert_eq!(incident.first.context["stage"], "request");
+    assert_eq!(incident.first.context["round"], 1);
     assert!(!incident.exposure.model);
 
     let failed_event = std::iter::from_fn(|| events.try_recv().ok())
@@ -129,10 +129,7 @@ async fn aggregates_provider_failures() {
         })
         .expect("turn_failed event");
     assert_eq!(failed_event.code, "provider.turn.failed");
-    assert_eq!(
-        failed_event.incident_id.as_deref(),
-        Some(incident.id.as_str())
-    );
+    assert_eq!(failed_event.incident.as_deref(), Some(incident.id.as_str()));
     assert_eq!(failed_event.source.operation, "turn.request");
 
     let retry = send_text(&service, &strand.id, "continue after failure").await;
@@ -140,9 +137,9 @@ async fn aggregates_provider_failures() {
     assert_no_failure_projection(&runtime);
     assert_eq!(runtime.errors.len(), 1);
     assert_eq!(runtime.errors[0].id, incident.id);
-    assert_eq!(runtime.errors[0].occurrence_count, 2);
+    assert_eq!(runtime.errors[0].occurrences, 2);
     assert_eq!(runtime.errors[0].revision, 1);
-    assert_eq!(runtime.errors[0].latest_context["turn_id"], turn(&retry).id);
+    assert_eq!(runtime.errors[0].latest.context["turn_id"], turn(&retry).id);
     assert_eq!(
         transition_count(&temp),
         1,

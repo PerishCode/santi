@@ -1,153 +1,153 @@
-use super::{ErrorCategory, ErrorDescriptor, ErrorExposure, ErrorRetry, ErrorSeverity};
+use super::{Category, Descriptor, Exposure, Retry, Severity};
 
-pub const CONTEXT_BUDGET_EXCEEDED: ErrorDescriptor = ErrorDescriptor {
+pub const CONTEXT_BUDGET_EXCEEDED: Descriptor = Descriptor {
     code: "context.budget.exceeded",
-    category: ErrorCategory::ResourceExhausted,
-    severity: ErrorSeverity::Error,
-    retry: ErrorRetry::AfterResolution,
-    exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    category: Category::Exhausted,
+    severity: Severity::Error,
+    retry: Retry::Resolved,
+    exposure: Exposure::CALLER_AND_OPERATOR,
 };
 
-pub const INBOX_CAPACITY_EXCEEDED: ErrorDescriptor = ErrorDescriptor {
+pub const INBOX_CAPACITY_EXCEEDED: Descriptor = Descriptor {
     code: "runtime.inbox.capacity_exceeded",
-    category: ErrorCategory::ResourceExhausted,
-    severity: ErrorSeverity::Error,
-    retry: ErrorRetry::Later,
-    exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    category: Category::Exhausted,
+    severity: Severity::Error,
+    retry: Retry::Later,
+    exposure: Exposure::CALLER_AND_OPERATOR,
 };
 
-pub const EXECUTION_BUDGET_EXCEEDED: ErrorDescriptor = ErrorDescriptor {
+pub const EXECUTION_BUDGET_EXCEEDED: Descriptor = Descriptor {
     code: "runtime.execution_budget.exceeded",
-    category: ErrorCategory::ResourceExhausted,
-    severity: ErrorSeverity::Error,
-    retry: ErrorRetry::AfterChange,
-    exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    category: Category::Exhausted,
+    severity: Severity::Error,
+    retry: Retry::Changed,
+    exposure: Exposure::CALLER_AND_OPERATOR,
 };
 
-pub const SOUL_MEMORY_INTERVENTION_REQUIRED: ErrorDescriptor = ErrorDescriptor {
+pub const SOUL_MEMORY_INTERVENTION_REQUIRED: Descriptor = Descriptor {
     code: "runtime.soul_memory.intervention_required",
-    category: ErrorCategory::ResourceExhausted,
-    severity: ErrorSeverity::Error,
-    retry: ErrorRetry::AfterChange,
-    exposure: ErrorExposure::OPERATOR_ONLY,
+    category: Category::Exhausted,
+    severity: Severity::Error,
+    retry: Retry::Changed,
+    exposure: Exposure::OPERATOR_ONLY,
 };
 
-pub const UPGRADE_FAILED: ErrorDescriptor = ErrorDescriptor {
+pub const UPGRADE_FAILED: Descriptor = Descriptor {
     code: "runtime.upgrade.failed",
-    category: ErrorCategory::Internal,
-    severity: ErrorSeverity::Error,
-    retry: ErrorRetry::AfterChange,
-    exposure: ErrorExposure::OPERATOR_ONLY,
+    category: Category::Internal,
+    severity: Severity::Error,
+    retry: Retry::Changed,
+    exposure: Exposure::OPERATOR_ONLY,
 };
 
-pub const UPGRADE_HANDOVER_FAILED: ErrorDescriptor = ErrorDescriptor {
+pub const UPGRADE_HANDOVER_FAILED: Descriptor = Descriptor {
     code: "runtime.upgrade.handover_failed",
-    category: ErrorCategory::Internal,
-    severity: ErrorSeverity::Error,
-    retry: ErrorRetry::AfterChange,
-    exposure: ErrorExposure::OPERATOR_ONLY,
+    category: Category::Internal,
+    severity: Severity::Error,
+    retry: Retry::Changed,
+    exposure: Exposure::OPERATOR_ONLY,
 };
 
-pub const ERROR_ENGINE_PERSISTENCE_FAILED: ErrorDescriptor = ErrorDescriptor {
+pub const ERROR_ENGINE_PERSISTENCE_FAILED: Descriptor = Descriptor {
     code: "runtime.error_engine.persistence_failed",
-    category: ErrorCategory::Internal,
-    severity: ErrorSeverity::Error,
-    retry: ErrorRetry::Later,
-    exposure: ErrorExposure::OPERATOR_ONLY,
+    category: Category::Internal,
+    severity: Severity::Error,
+    retry: Retry::Later,
+    exposure: Exposure::OPERATOR_ONLY,
 };
 
-pub const PROVIDER_TURN_FAILED: ErrorDescriptor = ErrorDescriptor {
+pub const PROVIDER_TURN_FAILED: Descriptor = Descriptor {
     code: "provider.turn.failed",
-    category: ErrorCategory::Unavailable,
-    severity: ErrorSeverity::Error,
-    retry: ErrorRetry::Later,
-    exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    category: Category::Unavailable,
+    severity: Severity::Error,
+    retry: Retry::Later,
+    exposure: Exposure::CALLER_AND_OPERATOR,
 };
 
-pub const RUNTIME_TURN_FAILED: ErrorDescriptor = ErrorDescriptor {
+pub const RUNTIME_TURN_FAILED: Descriptor = Descriptor {
     code: "runtime.turn.failed",
-    category: ErrorCategory::Internal,
-    severity: ErrorSeverity::Error,
-    retry: ErrorRetry::Later,
-    exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    category: Category::Internal,
+    severity: Severity::Error,
+    retry: Retry::Later,
+    exposure: Exposure::CALLER_AND_OPERATOR,
 };
 
-pub const STRAND_DRIVE_FAILED: ErrorDescriptor = ErrorDescriptor {
+pub const STRAND_DRIVE_FAILED: Descriptor = Descriptor {
     code: "runtime.strand.drive_failed",
-    category: ErrorCategory::Unavailable,
-    severity: ErrorSeverity::Error,
-    retry: ErrorRetry::AfterResolution,
-    exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    category: Category::Unavailable,
+    severity: Severity::Error,
+    retry: Retry::Resolved,
+    exposure: Exposure::CALLER_AND_OPERATOR,
 };
 
-pub const INVALID_ARGUMENT: ErrorDescriptor = ErrorDescriptor {
+pub const INVALID_ARGUMENT: Descriptor = Descriptor {
     code: "request.invalid_argument",
-    category: ErrorCategory::InvalidInput,
-    severity: ErrorSeverity::Error,
-    retry: ErrorRetry::AfterChange,
-    exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    category: Category::Invalid,
+    severity: Severity::Error,
+    retry: Retry::Changed,
+    exposure: Exposure::CALLER_AND_OPERATOR,
 };
 
-pub const NOT_FOUND: ErrorDescriptor = ErrorDescriptor {
+pub const NOT_FOUND: Descriptor = Descriptor {
     code: "resource.not_found",
-    category: ErrorCategory::NotFound,
-    severity: ErrorSeverity::Error,
-    retry: ErrorRetry::AfterChange,
-    exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    category: Category::Missing,
+    severity: Severity::Error,
+    retry: Retry::Changed,
+    exposure: Exposure::CALLER_AND_OPERATOR,
 };
 
-pub const UNAUTHORIZED: ErrorDescriptor = ErrorDescriptor {
+pub const UNAUTHORIZED: Descriptor = Descriptor {
     code: "request.unauthorized",
-    category: ErrorCategory::Unauthorized,
-    severity: ErrorSeverity::Error,
-    retry: ErrorRetry::AfterChange,
-    exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    category: Category::Unauthorized,
+    severity: Severity::Error,
+    retry: Retry::Changed,
+    exposure: Exposure::CALLER_AND_OPERATOR,
 };
 
-pub const INTERNAL: ErrorDescriptor = ErrorDescriptor {
+pub const INTERNAL: Descriptor = Descriptor {
     code: "runtime.internal",
-    category: ErrorCategory::Internal,
-    severity: ErrorSeverity::Error,
-    retry: ErrorRetry::Later,
-    exposure: ErrorExposure::OPERATOR_ONLY,
+    category: Category::Internal,
+    severity: Severity::Error,
+    retry: Retry::Later,
+    exposure: Exposure::OPERATOR_ONLY,
 };
 
-pub const WINDOW_IDENTITY_MISSING: ErrorDescriptor = ErrorDescriptor {
+pub const WINDOW_IDENTITY_MISSING: Descriptor = Descriptor {
     code: "window.identity.missing",
-    category: ErrorCategory::Unauthorized,
-    severity: ErrorSeverity::Error,
-    retry: ErrorRetry::AfterResolution,
-    exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    category: Category::Unauthorized,
+    severity: Severity::Error,
+    retry: Retry::Resolved,
+    exposure: Exposure::CALLER_AND_OPERATOR,
 };
 
-pub const WINDOW_CONTENT_INVALID: ErrorDescriptor = ErrorDescriptor {
+pub const WINDOW_CONTENT_INVALID: Descriptor = Descriptor {
     code: "window.content.invalid",
-    category: ErrorCategory::InvalidInput,
-    severity: ErrorSeverity::Error,
-    retry: ErrorRetry::AfterResolution,
-    exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    category: Category::Invalid,
+    severity: Severity::Error,
+    retry: Retry::Resolved,
+    exposure: Exposure::CALLER_AND_OPERATOR,
 };
 
-pub const WINDOW_CONTENT_OVERSIZE: ErrorDescriptor = ErrorDescriptor {
+pub const WINDOW_CONTENT_OVERSIZE: Descriptor = Descriptor {
     code: "window.content.oversize",
-    category: ErrorCategory::InvalidInput,
-    severity: ErrorSeverity::Error,
-    retry: ErrorRetry::AfterResolution,
-    exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    category: Category::Invalid,
+    severity: Severity::Error,
+    retry: Retry::Resolved,
+    exposure: Exposure::CALLER_AND_OPERATOR,
 };
 
-pub const WINDOW_RATE_LIMITED: ErrorDescriptor = ErrorDescriptor {
+pub const WINDOW_RATE_LIMITED: Descriptor = Descriptor {
     code: "window.rate.limited",
-    category: ErrorCategory::ResourceExhausted,
-    severity: ErrorSeverity::Error,
-    retry: ErrorRetry::Later,
-    exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    category: Category::Exhausted,
+    severity: Severity::Error,
+    retry: Retry::Later,
+    exposure: Exposure::CALLER_AND_OPERATOR,
 };
 
-pub const WINDOW_MESSAGE_CONFLICT: ErrorDescriptor = ErrorDescriptor {
+pub const WINDOW_MESSAGE_CONFLICT: Descriptor = Descriptor {
     code: "window.message.conflict",
-    category: ErrorCategory::InvalidInput,
-    severity: ErrorSeverity::Error,
-    retry: ErrorRetry::AfterResolution,
-    exposure: ErrorExposure::CALLER_AND_OPERATOR,
+    category: Category::Invalid,
+    severity: Severity::Error,
+    retry: Retry::Resolved,
+    exposure: Exposure::CALLER_AND_OPERATOR,
 };

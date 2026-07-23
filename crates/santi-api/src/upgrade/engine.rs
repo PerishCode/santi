@@ -4,7 +4,7 @@ pub fn run_upgrade<H: UpgradeHost>(
     host: &mut H,
     deb: &str,
     grace: Duration,
-) -> Result<UpgradeReport, Box<santi_core::SantiError>> {
+) -> Result<UpgradeReport, Box<santi_core::Fault>> {
     let attempt_id = format!("upgrade_{}", Uuid::new_v4().simple());
     run_upgrade_attempt(host, deb, grace, attempt_id)
 }
@@ -14,7 +14,7 @@ pub(super) fn run_upgrade_attempt<H: UpgradeHost>(
     deb: &str,
     grace: Duration,
     attempt_id: String,
-) -> Result<UpgradeReport, Box<santi_core::SantiError>> {
+) -> Result<UpgradeReport, Box<santi_core::Fault>> {
     if let Err(detail) = host.graceful_stop(grace) {
         let failure = UpgradeFailure {
             stage: UpgradeStage::GracefulStop,
@@ -151,7 +151,7 @@ fn record_fatal<H: UpgradeHost>(
     attempt_id: &str,
     deb: &str,
     failure: UpgradeFailure,
-) -> Box<santi_core::SantiError> {
+) -> Box<santi_core::Fault> {
     let operation = failure.stage.operation();
     let request = UpgradeFinalizeRequest {
         protocol_version: FINALIZE_PROTOCOL_VERSION,

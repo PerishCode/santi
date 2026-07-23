@@ -206,7 +206,7 @@ pub fn migrate_v23_to_v24(conn: &Connection) -> Result<(), String> {
                     incident_id,
                     format!("context.budget.exceeded:strand:{}", block.strand_id),
                     status,
-                    serde_json::to_string(&santi_error::ErrorExposure::CALLER_AND_OPERATOR)
+                    serde_json::to_string(&santi_error::Exposure::CALLER_AND_OPERATOR)
                         .map_err(|error| error.to_string())?,
                     block.strand_id,
                     operation,

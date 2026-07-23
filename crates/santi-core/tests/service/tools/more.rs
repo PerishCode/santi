@@ -36,8 +36,8 @@ async fn rejects_tool_batch() {
         .iter()
         .find(|incident| incident.code == "runtime.execution_budget.exceeded")
         .expect("execution budget incident");
-    assert_eq!(incident.context["reason"], "tool_calls");
-    assert_eq!(incident.context["request"]["tool_calls"], 2);
+    assert_eq!(incident.first.context["reason"], "tool_calls");
+    assert_eq!(incident.first.context["request"]["tool_calls"], 2);
     assert_eq!(provider.requests.lock().unwrap().len(), 1);
 }
 
@@ -83,8 +83,8 @@ async fn reserves_followup_round() {
         .iter()
         .find(|incident| incident.code == "runtime.execution_budget.exceeded")
         .expect("execution budget incident");
-    assert_eq!(incident.context["reason"], "provider_rounds");
-    assert_eq!(incident.context["request"]["provider_round"], 2);
+    assert_eq!(incident.first.context["reason"], "provider_rounds");
+    assert_eq!(incident.first.context["request"]["provider_round"], 2);
     assert_eq!(provider.requests.lock().unwrap().len(), 2);
 }
 
@@ -203,7 +203,7 @@ async fn preserves_retry_usage() {
         .iter()
         .find(|incident| incident.code == "runtime.execution_budget.exceeded")
         .expect("execution budget incident");
-    assert_eq!(incident.context["reason"], "tool_calls");
-    assert_eq!(incident.context["usage"]["tool_calls"], 1);
+    assert_eq!(incident.first.context["reason"], "tool_calls");
+    assert_eq!(incident.first.context["usage"]["tool_calls"], 1);
     assert_eq!(provider.requests.lock().unwrap().len(), 3);
 }

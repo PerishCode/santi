@@ -139,7 +139,7 @@ pub struct UpgradeFinalizeRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpgradeFinalizeReport {
-    pub errors: Vec<santi_core::SantiError>,
+    pub errors: Vec<santi_core::Fault>,
     pub record: Option<String>,
     pub seeded: bool,
     pub seeded_strand_id: Option<String>,
@@ -158,7 +158,7 @@ pub struct UpgradeReport {
     pub record: String,
     pub seeded: bool,
     pub seeded_strand_id: Option<String>,
-    pub errors: Vec<santi_core::SantiError>,
+    pub errors: Vec<santi_core::Fault>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

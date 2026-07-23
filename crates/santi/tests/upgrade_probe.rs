@@ -5,7 +5,7 @@ fn storage_doctor_is_current() {
     let temp = tempfile::tempdir().expect("temp dir");
     let runtime = temp.path().join("runtime");
     let database = runtime.join("db");
-    santi_core::SantiStore::open(&database).expect("current-schema store");
+    santi_core::Store::open(&database).expect("current-schema store");
 
     let output = Command::new(env!("CARGO_BIN_EXE_santi"))
         .args(["doctor", "--storage-only"])

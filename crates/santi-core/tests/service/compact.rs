@@ -8,22 +8,22 @@ fn capsule_dry_run_header() {
     let db = temp.path().join("santi.sqlite");
     let service = Service::open(
         service::Config {
-            database_path: db.display().to_string(),
-            runtime_root: temp.path().join("runtime").display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: db.display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         Arc::new(FakeProvider::default()),
     )
     .expect("open service");
-    let strand = service.create_strand().expect("create strand").strand;
-    let store = SantiStore::open(&db).expect("open store directly");
+    let strand = service.weave().expect("create strand").strand;
+    let store = Store::open(&db).expect("open store directly");
     store
         .append_message(Draft {
             strand: &strand.id,
             actor: message::Role::System,
-            id: store.system_actor_id(),
+            id: store.system(),
             content: message::Content::text("old user detail"),
             state: message::State::Fixed,
             intake: message::Intake::Request,
@@ -47,7 +47,7 @@ fn capsule_dry_run_header() {
         queryability: Some("use compact query for original range".to_string()),
     };
     let dry = service
-        .compact_exec(
+        .exec(
             &strand.id,
             santi_core::compact::Exec {
                 first: None,
@@ -61,13 +61,13 @@ fn capsule_dry_run_header() {
         )
         .expect("dry run");
     assert!(dry.dry);
-    assert_eq!(dry.start_seq, 1);
-    assert_eq!(dry.end_seq, 2);
+    assert_eq!(dry.from, 1);
+    assert_eq!(dry.to, 2);
     assert!(dry.before.is_some());
     assert!(dry.after.is_some());
     assert!(
         service
-            .runtime_snapshot(&strand.id)
+            .snapshot(&strand.id)
             .expect("runtime")
             .expect("strand")
             .compacts
@@ -76,7 +76,7 @@ fn capsule_dry_run_header() {
     );
 
     let response = service
-        .compact_exec(
+        .exec(
             &strand.id,
             santi_core::compact::Exec {
                 first: None,
@@ -98,7 +98,7 @@ fn capsule_dry_run_header() {
         "dry-run estimate should be conservative"
     );
 
-    let input = store.assembly_input(&strand.id).expect("assembly input");
+    let input = store.assembly(&strand.id).expect("assembly input");
     assert_eq!(input.len(), 1);
     let Item::Message { role, content } = &input[0] else {
         panic!("expected compact provider message");
@@ -125,17 +125,17 @@ fn system_boundary_compacts() {
     let db = temp.path().join("santi.sqlite");
     let service = Service::open(
         service::Config {
-            database_path: db.display().to_string(),
-            runtime_root: temp.path().join("runtime").display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: db.display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         Arc::new(FakeProvider::default()),
     )
     .expect("open service");
-    let strand = service.create_strand().expect("create strand").strand;
-    let store = SantiStore::open(&db).expect("open store directly");
+    let strand = service.weave().expect("create strand").strand;
+    let store = Store::open(&db).expect("open store directly");
     store
         .append_santi_system_message(
             &strand.id,
@@ -155,7 +155,7 @@ fn system_boundary_compacts() {
         .expect("append assistant record");
 
     let preview = service
-        .compact_exec(
+        .exec(
             &strand.id,
             santi_core::compact::Exec {
                 first: None,
@@ -168,9 +168,9 @@ fn system_boundary_compacts() {
             },
         )
         .expect("system boundary should compact");
-    assert_eq!(preview.start_seq, 1);
-    assert_eq!(preview.end_seq, 2);
-    assert_eq!(preview.collapsed_count, 2);
+    assert_eq!(preview.from, 1);
+    assert_eq!(preview.to, 2);
+    assert_eq!(preview.collapsed, 2);
 }
 
 #[test]
@@ -179,22 +179,22 @@ fn capsule_seq_boundary() {
     let db = temp.path().join("santi.sqlite");
     let service = Service::open(
         service::Config {
-            database_path: db.display().to_string(),
-            runtime_root: temp.path().join("runtime").display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: db.display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         Arc::new(FakeProvider::default()),
     )
     .expect("open service");
-    let strand = service.create_strand().expect("create strand").strand;
-    let store = SantiStore::open(&db).expect("open store directly");
+    let strand = service.weave().expect("create strand").strand;
+    let store = Store::open(&db).expect("open store directly");
     let user = store
         .append_message(Draft {
             strand: &strand.id,
             actor: message::Role::System,
-            id: store.system_actor_id(),
+            id: store.system(),
             content: message::Content::text("run tool"),
             state: message::State::Fixed,
             intake: message::Intake::Request,
@@ -202,7 +202,7 @@ fn capsule_seq_boundary() {
         .expect("append user")
         .strand_message;
     let turn = store
-        .start_turn(&strand.id, &user.message.id)
+        .start(&strand.id, &user.message.id)
         .expect("start turn")
         .turn;
     store
@@ -221,7 +221,7 @@ fn capsule_seq_boundary() {
         .expect("append tool call");
 
     let err = service
-        .compact_exec(
+        .exec(
             &strand.id,
             santi_core::compact::Exec {
                 first: None,

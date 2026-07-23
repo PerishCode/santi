@@ -1,4 +1,4 @@
-use crate::store::{ProviderFault, RuntimeFault};
+use crate::store::{Misfire, Stumble};
 use crate::{Fault, catalog, engine, turn::Turn};
 use crate::{message, stream};
 
@@ -86,31 +86,23 @@ impl Operation {
 #[derive(Debug)]
 pub(super) struct Failure {
     error: String,
-    partial_assistant_text: String,
+    partial: String,
     cause: Cause,
 }
 
 impl Failure {
-    pub(super) fn runtime(
-        operation: Operation,
-        error: String,
-        partial_assistant_text: &str,
-    ) -> Self {
+    pub(super) fn runtime(operation: Operation, error: String, partial: &str) -> Self {
         Self {
             error,
-            partial_assistant_text: partial_assistant_text.to_string(),
+            partial: partial.to_string(),
             cause: Cause::Runtime(operation),
         }
     }
 
-    pub(super) fn provider(
-        error: String,
-        partial_assistant_text: &str,
-        metadata: Metadata,
-    ) -> Self {
+    pub(super) fn provider(error: String, partial: &str, metadata: Metadata) -> Self {
         Self {
             error,
-            partial_assistant_text: partial_assistant_text.to_string(),
+            partial: partial.to_string(),
             cause: Cause::Provider(metadata),
         }
     }
@@ -118,15 +110,15 @@ impl Failure {
     pub(super) fn context_budget(error: Fault) -> Self {
         Self {
             error: error.to_string(),
-            partial_assistant_text: String::new(),
+            partial: String::new(),
             cause: Cause::Budget(Admission::Context, Box::new(error)),
         }
     }
 
-    pub(super) fn execution_budget(error: Fault, partial_assistant_text: &str) -> Self {
+    pub(super) fn execution_budget(error: Fault, partial: &str) -> Self {
         Self {
             error: error.to_string(),
-            partial_assistant_text: partial_assistant_text.to_string(),
+            partial: partial.to_string(),
             cause: Cause::Budget(Admission::Execution, Box::new(error)),
         }
     }
@@ -136,7 +128,7 @@ impl Service {
     pub(super) fn fail_background_turn(&self, strand: &str, turn: &str, failure: Failure) {
         let Failure {
             error,
-            partial_assistant_text,
+            partial,
             cause,
         } = failure;
         let persist_budget = |canonical_error: Fault, budget: &str| match self
@@ -166,10 +158,10 @@ impl Service {
         };
 
         if let Some(held) = finished {
-            self.persist_partial_output(strand, &held.id, &held, partial_assistant_text);
+            self.persist_partial_output(strand, &held.id, &held, partial);
         }
-        self.dispatch_error_events();
-        self.publish_stream(
+        self.dispatched();
+        self.publish(
             strand,
             stream::Payload::TurnFailed {
                 turn: turn.to_string(),
@@ -188,7 +180,7 @@ impl Service {
         match self.store.fail_provider_turn(
             turn,
             error,
-            ProviderFault {
+            Misfire {
                 provider: &metadata.provider,
                 model: &metadata.model,
                 stage: metadata.stage.name(),
@@ -221,7 +213,7 @@ impl Service {
         match self.store.fail_runtime_turn(
             turn,
             error,
-            RuntimeFault {
+            Stumble {
                 operation: operation.name(),
                 detail: error,
             },
@@ -239,27 +231,21 @@ impl Service {
         }
     }
 
-    fn persist_partial_output(
-        &self,
-        strand: &str,
-        turn: &str,
-        held: &Turn,
-        partial_assistant_text: String,
-    ) {
-        if partial_assistant_text.trim().is_empty() {
+    fn persist_partial_output(&self, strand: &str, turn: &str, held: &Turn, partial: String) {
+        if partial.trim().is_empty() {
             return;
         }
         match self.store.append_message(crate::Draft {
             strand: &held.strand,
             actor: message::Role::Soul,
             id: self.store.default_soul_id(),
-            content: message::Content::text(partial_assistant_text),
+            content: message::Content::text(partial),
             state: message::State::Aborted,
             intake: message::Intake::Record,
         }) {
             Ok(message) => {
                 let seq = message.strand_message.relation.seq;
-                self.publish_stream(
+                self.publish(
                     strand,
                     stream::Payload::MessageCreated {
                         message: message.strand_message,

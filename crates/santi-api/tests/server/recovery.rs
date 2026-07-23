@@ -6,16 +6,16 @@ async fn send_rejection_locks() {
     let temp = tempfile::tempdir().expect("temp dir");
     let service = Service::open(
         service::Config {
-            database_path: temp.path().join("santi.sqlite").display().to_string(),
-            runtime_root: temp.path().join("runtime").display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: temp.path().join("santi.sqlite").display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         Arc::new(BudgetedProvider),
     )
     .expect("open service");
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
 
     let error = send_strand_handler(
         State(service),
@@ -49,20 +49,20 @@ async fn send_rejection_locks() {
 #[tokio::test]
 async fn drive_failure_http_recovery() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let database_path = temp.path().join("santi.sqlite");
+    let database = temp.path().join("santi.sqlite");
     let service = Service::open(
         service::Config {
-            database_path: database_path.display().to_string(),
-            runtime_root: temp.path().join("runtime").display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: database.display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         Arc::new(DriverProvider),
     )
     .expect("open service");
-    let strand = service.create_strand().expect("create strand").strand;
-    let conn = Connection::open(&database_path).expect("open sqlite");
+    let strand = service.weave().expect("create strand").strand;
+    let conn = Connection::open(&database).expect("open sqlite");
     conn.execute_batch(
         r#"
         CREATE TRIGGER force_api_turn_failure

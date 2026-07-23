@@ -83,7 +83,7 @@ pub(super) async fn ingest_webhook(
             "event": event.metadata,
         }));
     match service
-        .ingest_external_source(
+        .sourced(
             &subscription.soul,
             &label,
             event.santi_system_text,

@@ -1,17 +1,17 @@
 use santi_provider::Item;
 
-use super::{SantiStore, span::Span};
+use super::{Store, span::Span};
 
 mod render;
 use render::*;
 
-impl SantiStore {
-    pub fn assembly_input(&self, strand: &str) -> Result<Vec<Item>, String> {
+impl Store {
+    pub fn assembly(&self, strand: &str) -> Result<Vec<Item>, String> {
         let conn = self.conn.lock().unwrap();
-        assembly_input_in_conn(&conn, strand)
+        assembled(&conn, strand)
     }
 
-    pub(crate) fn assembly_input_preview(
+    pub(crate) fn preview(
         &self,
         strand: &str,
         response: &crate::compact::Report,
@@ -28,23 +28,23 @@ impl SantiStore {
             created: None,
             metadata: Some(metadata),
         };
-        assembly_input_with_preview(
+        previewed(
             &conn,
             strand,
             Some(Preview {
                 span: Span {
-                    start_seq: response.start_seq,
-                    end_seq: response.end_seq,
+                    from: response.from,
+                    to: response.to,
                 },
                 absorbed: response.absorbed.as_slice(),
-                content: render_compact_for_provider(
+                content: condensed(
                     &preview,
                     Range {
                         span: Span {
-                            start_seq: response.start_seq,
-                            end_seq: response.end_seq,
+                            from: response.from,
+                            to: response.to,
                         },
-                        collapsed_count: response.collapsed_count,
+                        collapsed: response.collapsed,
                     },
                 ),
             }),
@@ -52,11 +52,8 @@ impl SantiStore {
     }
 }
 
-pub(super) fn assembly_input_in_conn(
-    conn: &rusqlite::Connection,
-    strand: &str,
-) -> Result<Vec<Item>, String> {
-    assembly_input_with_preview(conn, strand, None)
+pub(super) fn assembled(conn: &rusqlite::Connection, strand: &str) -> Result<Vec<Item>, String> {
+    previewed(conn, strand, None)
 }
 
 struct Preview<'a> {
@@ -72,5 +69,5 @@ struct Overlay {
 
 struct Range {
     span: Span,
-    collapsed_count: i64,
+    collapsed: i64,
 }

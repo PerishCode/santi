@@ -3,7 +3,7 @@ use serde_json::Value;
 
 use crate::{now, tag};
 
-use super::{SantiStore, db::Database, span::Span};
+use super::{Store, db::Database, span::Span};
 
 mod plan;
 use crate::compact;
@@ -12,7 +12,7 @@ use plan::*;
 struct Plan {
     span: Span,
     absorbed: Vec<String>,
-    collapsed_count: i64,
+    collapsed: i64,
 }
 
 pub(crate) struct Collapse<'a> {
@@ -23,15 +23,15 @@ pub(crate) struct Collapse<'a> {
     pub metadata: Option<Value>,
 }
 
-impl SantiStore {
-    pub fn create_compact(
+impl Store {
+    pub fn compact(
         &self,
         strand: &str,
         first: &str,
         last: &str,
         summary: &str,
     ) -> Result<compact::Report, String> {
-        self.create_compact_with_metadata(Collapse {
+        self.noted(Collapse {
             strand,
             from: first,
             to: last,
@@ -40,10 +40,7 @@ impl SantiStore {
         })
     }
 
-    pub(crate) fn create_compact_with_metadata(
-        &self,
-        collapse: Collapse<'_>,
-    ) -> Result<compact::Report, String> {
+    pub(crate) fn noted(&self, collapse: Collapse<'_>) -> Result<compact::Report, String> {
         let Collapse {
             strand,
             from,
@@ -53,7 +50,7 @@ impl SantiStore {
         } = collapse;
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let plan = plan_compact_in_tx(&tx, strand, from, to)?;
+        let plan = planned(&tx, strand, from, to)?;
 
         for id in &plan.absorbed {
             tx.execute("DELETE FROM compacts WHERE id = ?1", params![id])
@@ -82,10 +79,10 @@ impl SantiStore {
             compact,
             first: from.to_string(),
             last: to.to_string(),
-            start_seq: plan.span.start_seq,
-            end_seq: plan.span.end_seq,
+            from: plan.span.from,
+            to: plan.span.to,
             absorbed: plan.absorbed,
-            collapsed_count: plan.collapsed_count,
+            collapsed: plan.collapsed,
             dry: false,
             active_incident_resolved: false,
             before: None,
@@ -94,22 +91,22 @@ impl SantiStore {
         })
     }
 
-    pub(crate) fn preview_compact(
+    pub(crate) fn previewing(
         &self,
         strand: &str,
         first: &str,
         last: &str,
     ) -> Result<compact::Report, String> {
         let conn = self.conn.lock().unwrap();
-        let plan = plan_compact_in_tx(&conn, strand, first, last)?;
+        let plan = planned(&conn, strand, first, last)?;
         Ok(compact::Report {
             compact: tag("cmp_preview"),
             first: first.to_string(),
             last: last.to_string(),
-            start_seq: plan.span.start_seq,
-            end_seq: plan.span.end_seq,
+            from: plan.span.from,
+            to: plan.span.to,
             absorbed: plan.absorbed,
-            collapsed_count: plan.collapsed_count,
+            collapsed: plan.collapsed,
             dry: true,
             active_incident_resolved: false,
             before: None,
@@ -118,20 +115,12 @@ impl SantiStore {
         })
     }
 
-    pub(crate) fn message_id_at_seq(
-        &self,
-        strand: &str,
-        seq: i64,
-    ) -> Result<Option<String>, String> {
+    pub(crate) fn seated(&self, strand: &str, seq: i64) -> Result<Option<String>, String> {
         let conn = self.conn.lock().unwrap();
-        message_id_at_seq(&conn, strand, seq)
+        seated(&conn, strand, seq)
     }
 
-    pub(crate) fn update_compact_metadata(
-        &self,
-        compact: &str,
-        metadata: Value,
-    ) -> Result<(), String> {
+    pub(crate) fn annotate(&self, compact: &str, metadata: Value) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         let blob = serde_json::to_string(&metadata).map_err(|error| error.to_string())?;
         conn.execute(
@@ -142,7 +131,7 @@ impl SantiStore {
         Ok(())
     }
 
-    pub fn compact_query(
+    pub fn page(
         &self,
         compact: &str,
         keyword: Option<&str>,
@@ -184,7 +173,7 @@ impl SantiStore {
                 .map_err(|error| error.to_string())?;
             for row in rows {
                 let (seq, kind, target) = row.map_err(|error| error.to_string())?;
-                let text = entry_text(&conn, &kind, &target)?;
+                let text = entry(&conn, &kind, &target)?;
                 if let Some(needle) = &needle
                     && !text.to_lowercase().contains(needle)
                 {
@@ -192,7 +181,7 @@ impl SantiStore {
                 }
                 entries.push(compact::Entry {
                     seq,
-                    kind: parse_target_type(&kind),
+                    kind: targeted(&kind),
                     target,
                     text,
                 });

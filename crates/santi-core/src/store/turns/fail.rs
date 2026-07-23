@@ -1,4 +1,4 @@
-use crate::store::{ProviderFault, RuntimeFault, SantiStore, db::Database};
+use crate::store::{Misfire, Store, Stumble, db::Database};
 use crate::{Fault, catalog, now, turn::Turn};
 use rusqlite::params;
 use serde_json::json;
@@ -6,12 +6,12 @@ use serde_json::json;
 use super::*;
 use crate::effect;
 
-impl SantiStore {
+impl Store {
     pub(crate) fn fail_provider_turn(
         &self,
         turn: &str,
         error: &str,
-        failure: ProviderFault<'_>,
+        failure: Misfire<'_>,
     ) -> Result<(Turn, Fault), String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
@@ -44,7 +44,7 @@ impl SantiStore {
                 "model": failure.model,
                 "stage": failure.stage,
                 "round": failure.round,
-                "detail": bounded_provider_detail(failure.detail),
+                "detail": clipped(failure.detail),
                 "trace": format!("log://turn/{turn}"),
             }),
         })?;
@@ -66,7 +66,7 @@ impl SantiStore {
         &self,
         turn: &str,
         error: &str,
-        failure: RuntimeFault<'_>,
+        failure: Stumble<'_>,
     ) -> Result<(Turn, Fault), String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
@@ -183,7 +183,7 @@ pub(super) fn open_runtime_incident(
     conn: &rusqlite::Connection,
     strand: &str,
     turn: &str,
-    failure: RuntimeFault<'_>,
+    failure: Stumble<'_>,
 ) -> Result<Fault, String> {
     Database::new(conn).open(santi_error::Draft {
         key: runtime_incident_key(strand),
@@ -195,18 +195,18 @@ pub(super) fn open_runtime_incident(
             "schema": "santi.error.runtime_turn.v1",
             "turn": turn,
             "operation": failure.operation,
-            "detail": bounded_provider_detail(failure.detail),
+            "detail": clipped(failure.detail),
             "trace": format!("log://turn/{turn}"),
         }),
     })
 }
 
-pub(super) fn bounded_provider_detail(detail: &str) -> String {
-    if detail.len() <= PROVIDER_DETAIL_BYTES {
+pub(super) fn clipped(detail: &str) -> String {
+    if detail.len() <= BREADTH {
         return detail.to_string();
     }
     let suffix = " [truncated]";
-    let mut end = PROVIDER_DETAIL_BYTES.saturating_sub(suffix.len());
+    let mut end = BREADTH.saturating_sub(suffix.len());
     while end > 0 && !detail.is_char_boundary(end) {
         end -= 1;
     }

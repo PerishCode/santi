@@ -1,10 +1,10 @@
-use super::SantiStore;
+use super::Store;
 use super::db::Database;
 use crate::now;
 use crate::{downstream, ingest};
 
-impl SantiStore {
-    pub fn create_downstream(
+impl Store {
+    pub fn enroll(
         &self,
         id: &str,
         prefix: &str,
@@ -47,7 +47,7 @@ impl SantiStore {
         Database::new(&conn).downstreams()
     }
 
-    pub(crate) fn replay_downstream(
+    pub(crate) fn replayed(
         &self,
         owner: &str,
         request: &str,

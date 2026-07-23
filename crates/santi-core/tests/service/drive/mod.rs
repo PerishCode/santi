@@ -12,19 +12,19 @@ async fn reminder_no_repoke() {
     let provider = Arc::new(FakeProvider::default());
     let service = Service::open(
         service::Config {
-            database_path: temp.path().join("santi.sqlite").display().to_string(),
-            runtime_root: temp.path().join("runtime").display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: temp.path().join("santi.sqlite").display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         provider.clone(),
     )
     .expect("open service");
 
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
     let response = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -44,7 +44,7 @@ async fn reminder_no_repoke() {
         .await;
     sleep(Duration::from_millis(100)).await;
     let runtime = service
-        .runtime_snapshot(&strand.id)
+        .snapshot(&strand.id)
         .expect("runtime snapshot")
         .expect("strand runtime");
 
@@ -85,19 +85,19 @@ async fn concurrent_request_follows() {
     let provider = Arc::new(GatedFirstProvider::new());
     let service = Service::open(
         service::Config {
-            database_path: temp.path().join("santi.sqlite").display().to_string(),
-            runtime_root: temp.path().join("runtime").display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: temp.path().join("santi.sqlite").display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         provider.clone(),
     )
     .expect("open service");
 
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
     let first = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -119,13 +119,13 @@ async fn concurrent_request_follows() {
 
     provider.wait_for_first_request().await;
     let first_receipt = service
-        .receipt_status(&first.receipt.inbox)
+        .receipt(&first.receipt.inbox)
         .expect("first receipt query")
         .expect("first receipt");
     assert_eq!(first_receipt.state, santi_core::receipt::State::Driving);
 
     let second = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -145,13 +145,13 @@ async fn concurrent_request_follows() {
         "coalesced send is still in the inbox, not yet a timeline message"
     );
     let second_receipt = service
-        .receipt_status(&second.receipt.inbox)
+        .receipt(&second.receipt.inbox)
         .expect("second receipt query")
         .expect("second receipt");
     assert_eq!(second_receipt.state, santi_core::receipt::State::Accepted);
 
     let running = service
-        .runtime_snapshot(&strand.id)
+        .snapshot(&strand.id)
         .expect("runtime snapshot")
         .expect("strand runtime");
     assert_eq!(running.turns.len(), 1);
@@ -193,7 +193,7 @@ async fn concurrent_request_follows() {
 
     for inbox in [&first.receipt.inbox, &second.receipt.inbox] {
         let receipt = service
-            .receipt_status(inbox)
+            .receipt(inbox)
             .expect("receipt query")
             .expect("receipt");
         assert_eq!(receipt.state, santi_core::receipt::State::Completed);

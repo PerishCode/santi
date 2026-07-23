@@ -17,50 +17,50 @@ use std::{
 };
 use tokio::sync::broadcast;
 
-use crate::{SantiStore, Transition};
+use crate::{Store, Transition};
 use crate::{budget, material, stream};
 
 #[derive(Clone)]
 pub struct Service {
-    pub(crate) store: SantiStore,
+    pub(crate) store: Store,
     provider: Arc<dyn Provider>,
     pub(crate) config: Config,
-    material_cache: Arc<Mutex<HashMap<materials::Key, material::Material>>>,
-    stream_events: broadcast::Sender<stream::Event>,
-    error_events: broadcast::Sender<Transition>,
-    runtime_notices: notice::Bus,
+    materials: Arc<Mutex<HashMap<materials::Key, material::Material>>>,
+    streams: broadcast::Sender<stream::Event>,
+    errors: broadcast::Sender<Transition>,
+    notices: notice::Bus,
     execution_budgets: Arc<Mutex<HashMap<String, budget::Execution>>>,
     memory_pressure_lock: Arc<Mutex<()>>,
     shutting_down: Arc<AtomicBool>,
-    drive_degraded: Arc<AtomicBool>,
+    degraded: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub database_path: String,
-    pub runtime_root: String,
-    pub execution_root: String,
-    pub bind_addr: Option<String>,
-    pub constitution_path: Option<String>,
+    pub database: String,
+    pub runtime: String,
+    pub execution: String,
+    pub bind: Option<String>,
+    pub constitution: Option<String>,
 }
 
 impl Service {
     pub fn open(config: Config, provider: Arc<dyn Provider>) -> Result<Self, String> {
-        let store = SantiStore::open(&config.database_path)?;
-        store.reconcile_orphaned_turns()?;
-        let drive_degraded = store.active_drive_incident_count()? > 0;
+        let store = Store::open(&config.database)?;
+        store.reconciled()?;
+        let degraded = store.strained()? > 0;
         Ok(Self {
             store,
             provider,
             config,
-            material_cache: Arc::new(Mutex::new(HashMap::new())),
-            stream_events: broadcast::channel(1024).0,
-            error_events: broadcast::channel(1024).0,
-            runtime_notices: notice::Bus::new(),
+            materials: Arc::new(Mutex::new(HashMap::new())),
+            streams: broadcast::channel(1024).0,
+            errors: broadcast::channel(1024).0,
+            notices: notice::Bus::new(),
             execution_budgets: Arc::new(Mutex::new(HashMap::new())),
             memory_pressure_lock: Arc::new(Mutex::new(())),
             shutting_down: Arc::new(AtomicBool::new(false)),
-            drive_degraded: Arc::new(AtomicBool::new(drive_degraded)),
+            degraded: Arc::new(AtomicBool::new(degraded)),
         })
     }
 
@@ -87,18 +87,18 @@ impl Service {
         self.execution_budgets.lock().unwrap().get(strand).cloned()
     }
 
-    pub fn begin_shutdown(&self) {
+    pub fn close(&self) {
         self.shutting_down.store(true, Ordering::SeqCst);
     }
 
-    pub fn is_shutting_down(&self) -> bool {
+    pub fn closing(&self) -> bool {
         self.shutting_down.load(Ordering::SeqCst)
     }
 
-    pub async fn drain_running_turns(&self, cap: Duration) {
+    pub async fn drain(&self, cap: Duration) {
         let start = Instant::now();
         loop {
-            let remaining = match self.store.running_turn_count() {
+            let remaining = match self.store.running() {
                 Ok(0) => return,
                 Ok(remaining) => remaining,
                 Err(error) => {
@@ -116,9 +116,9 @@ impl Service {
         }
     }
 
-    pub fn resume_pending(&self) -> Result<(), String> {
-        self.dispatch_error_events();
-        let pending = self.store.strands_with_pending_requests()?;
+    pub fn resume(&self) -> Result<(), String> {
+        self.dispatched();
+        let pending = self.store.awaiting()?;
         for strand in pending {
             let outcome = self.poke(&strand, "strand_send", None, "cold_start_resume");
             if let drive::Outcome::Failed(error) = outcome
@@ -133,44 +133,44 @@ impl Service {
         Ok(())
     }
 
-    pub fn is_drive_degraded(&self) -> bool {
-        self.drive_degraded.load(Ordering::SeqCst)
+    pub fn degraded(&self) -> bool {
+        self.degraded.load(Ordering::SeqCst)
     }
 
-    pub fn active_drive_incident_count(&self) -> i64 {
-        match self.store.active_drive_incident_count() {
+    pub fn strained(&self) -> i64 {
+        match self.store.strained() {
             Ok(count) => count,
             Err(error) => {
-                self.drive_degraded.store(true, Ordering::SeqCst);
+                self.degraded.store(true, Ordering::SeqCst);
                 eprintln!("santi: drive health count failed: {error}");
                 0
             }
         }
     }
 
-    pub(in crate::service) fn mark_drive_degraded(&self) {
-        self.drive_degraded.store(true, Ordering::SeqCst);
+    pub(in crate::service) fn degrade(&self) {
+        self.degraded.store(true, Ordering::SeqCst);
     }
 
-    pub(in crate::service) fn refresh_drive_health(&self) {
-        match self.store.active_drive_incident_count() {
-            Ok(count) => self.drive_degraded.store(count > 0, Ordering::SeqCst),
+    pub(in crate::service) fn refreshed(&self) {
+        match self.store.strained() {
+            Ok(count) => self.degraded.store(count > 0, Ordering::SeqCst),
             Err(error) => {
-                self.drive_degraded.store(true, Ordering::SeqCst);
+                self.degraded.store(true, Ordering::SeqCst);
                 eprintln!("santi: drive health refresh failed: {error}");
             }
         }
     }
 
-    pub fn subscribe_stream(&self) -> broadcast::Receiver<stream::Event> {
-        let receiver = self.stream_events.subscribe();
-        self.dispatch_error_events();
+    pub fn listen(&self) -> broadcast::Receiver<stream::Event> {
+        let receiver = self.streams.subscribe();
+        self.dispatched();
         receiver
     }
 
-    pub fn subscribe_error_transitions(&self) -> broadcast::Receiver<Transition> {
-        let receiver = self.error_events.subscribe();
-        self.dispatch_error_events();
+    pub fn harken(&self) -> broadcast::Receiver<Transition> {
+        let receiver = self.errors.subscribe();
+        self.dispatched();
         receiver
     }
 }

@@ -14,18 +14,18 @@ async fn failed_receipt_redrives() {
     });
     let service = Service::open(
         service::Config {
-            database_path: temp.path().join("santi.sqlite").display().to_string(),
-            runtime_root: temp.path().join("runtime").display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: temp.path().join("santi.sqlite").display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         provider.clone(),
     )
     .expect("open service");
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
     let failed = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -51,7 +51,7 @@ async fn failed_receipt_redrives() {
     assert_eq!(provider.requests.lock().unwrap().len(), 2);
     assert_eq!(count_messages(&runtime, "one durable obligation"), 1);
     let receipt = service
-        .receipt_status(&failed.receipt.inbox)
+        .receipt(&failed.receipt.inbox)
         .expect("receipt query")
         .expect("receipt");
     assert_eq!(receipt.state, santi_core::receipt::State::Completed);
@@ -74,20 +74,20 @@ async fn failed_receipt_redrives() {
 #[tokio::test]
 async fn cold_start_recovers() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let database_path = temp.path().join("santi.sqlite");
+    let database = temp.path().join("santi.sqlite");
     let config = service::Config {
-        database_path: database_path.display().to_string(),
-        runtime_root: temp.path().join("runtime").display().to_string(),
-        execution_root: temp.path().join("execution").display().to_string(),
-        bind_addr: Some("127.0.0.1:0".to_string()),
-        constitution_path: None,
+        database: database.display().to_string(),
+        runtime: temp.path().join("runtime").display().to_string(),
+        execution: temp.path().join("execution").display().to_string(),
+        bind: Some("127.0.0.1:0".to_string()),
+        constitution: None,
     };
     let service =
         Service::open(config.clone(), Arc::new(FakeProvider::default())).expect("open service");
-    let strand = service.create_strand().expect("create strand").strand;
-    service.begin_shutdown();
+    let strand = service.weave().expect("create strand").strand;
+    service.close();
     let accepted = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -101,7 +101,7 @@ async fn cold_start_recovers() {
     assert!(accepted.turn.is_none());
     drop(service);
 
-    let conn = Connection::open(&database_path).expect("open sqlite");
+    let conn = Connection::open(&database).expect("open sqlite");
     conn.execute_batch(
         r#"
         CREATE TRIGGER force_cold_start_turn_failure
@@ -116,12 +116,12 @@ async fn cold_start_recovers() {
     let restarted =
         Service::open(config, Arc::new(FakeProvider::default())).expect("open restarted service");
     restarted
-        .resume_pending()
+        .resume()
         .expect("strand-local drive failure should permit degraded startup");
-    assert!(restarted.is_drive_degraded());
-    assert_eq!(pending_count(&conn, &strand.id), 1);
+    assert!(restarted.degraded());
+    assert_eq!(pending(&conn, &strand.id), 1);
     let runtime = restarted
-        .runtime_snapshot(&strand.id)
+        .snapshot(&strand.id)
         .expect("runtime")
         .expect("strand");
     assert_eq!(runtime.errors.len(), 1);
@@ -137,7 +137,7 @@ async fn cold_start_recovers() {
     );
 
     let rejected = restarted
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -148,7 +148,7 @@ async fn cold_start_recovers() {
         .await
         .expect_err("active cold-start incident should gate writes");
     assert_eq!(rejected.code, "runtime.strand.drive_failed");
-    assert_eq!(pending_count(&conn, &strand.id), 1);
+    assert_eq!(pending(&conn, &strand.id), 1);
 
     conn.execute_batch("DROP TRIGGER force_cold_start_turn_failure;")
         .expect("remove failure trigger");
@@ -159,8 +159,8 @@ async fn cold_start_recovers() {
     let runtime = Probe::new(&restarted)
         .completed_turn(&strand.id, &turn.id)
         .await;
-    assert!(!restarted.is_drive_degraded());
-    assert_eq!(pending_count(&conn, &strand.id), 0);
+    assert!(!restarted.degraded());
+    assert_eq!(pending(&conn, &strand.id), 0);
     assert_eq!(runtime.errors[0].status, santi_core::Status::Resolved);
     assert!(
         runtime
@@ -170,7 +170,7 @@ async fn cold_start_recovers() {
     );
 }
 
-fn pending_count(conn: &Connection, strand: &str) -> i64 {
+fn pending(conn: &Connection, strand: &str) -> i64 {
     conn.query_row(
         "SELECT COUNT(*) FROM strand_inbox WHERE strand_id = ?1",
         [strand],

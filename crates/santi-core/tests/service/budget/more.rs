@@ -10,8 +10,8 @@ async fn resume_holds_pending() {
         ..FakeProvider::default()
     });
     let service = service_with_budget(&temp, provider.clone());
-    let strand = service.create_strand().expect("create strand").strand;
-    let store = SantiStore::open(&db).expect("open store directly");
+    let strand = service.weave().expect("create strand").strand;
+    let store = Store::open(&db).expect("open store directly");
     let santi_core::ingest::Outcome::Accepted { .. } = store
         .enqueue_inbox(
             &strand.id,
@@ -24,9 +24,9 @@ async fn resume_holds_pending() {
     };
     drop(store);
 
-    service.resume_pending().expect("resume pending");
+    service.resume().expect("resume pending");
     let runtime = service
-        .runtime_snapshot(&strand.id)
+        .snapshot(&strand.id)
         .expect("runtime")
         .expect("strand");
     assert!(provider.requests.lock().unwrap().is_empty());
@@ -55,12 +55,12 @@ async fn rejected_payload_is_ephemeral() {
         ..FakeProvider::default()
     });
     let service = service_with_budget(&temp, provider);
-    let soul = service.list_souls().expect("souls")[0].id.clone();
+    let soul = service.souls().expect("souls")[0].id.clone();
     let source = ingest::Source::new("test").with_metadata(json!({
         "raw": "SOURCE_SECRET_MARKER".repeat(600),
     }));
     let outcome = service
-        .ingest_external_source(
+        .sourced(
             &soul,
             "test:no-payload-audit",
             "MESSAGE_SECRET_MARKER".repeat(500),
@@ -72,7 +72,7 @@ async fn rejected_payload_is_ephemeral() {
     };
 
     let strand = service
-        .list_strands()
+        .strands()
         .expect("strands")
         .into_iter()
         .find(|strand| strand.label.as_deref() == Some("test:no-payload-audit"))
@@ -97,9 +97,9 @@ async fn compact_resolves_incident() {
         bytes: 100_000,
     });
     let service = service_with_budget(&temp, provider.clone());
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
     let response = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -154,7 +154,7 @@ async fn compact_resolves_incident() {
     )
     .expect("seed pre-incident accepted input");
     drop(conn);
-    let store = SantiStore::open(&db).expect("open store directly");
+    let store = Store::open(&db).expect("open store directly");
     let boundary = store
         .append_message(Draft {
             strand: &strand.id,
@@ -168,7 +168,7 @@ async fn compact_resolves_incident() {
         .strand_message;
 
     let compact = service
-        .compact_exec(
+        .exec(
             &strand.id,
             santi_core::compact::Exec {
                 first: Some(first),
@@ -221,8 +221,8 @@ async fn budget_raise_clears_hold_on_ingest() {
         }),
     );
     let rejected = held
-        .ingest_external_event(
-            santi_core::DEFAULT_SOUL_ID,
+        .evented(
+            santi_core::GENESIS,
             "test:operator",
             "over budget".to_string(),
         )
@@ -232,8 +232,8 @@ async fn budget_raise_clears_hold_on_ingest() {
     };
     assert_eq!(error.code, "context.budget.exceeded");
     let repeat = held
-        .ingest_external_event(
-            santi_core::DEFAULT_SOUL_ID,
+        .evented(
+            santi_core::GENESIS,
             "test:operator",
             "still held".to_string(),
         )
@@ -255,8 +255,8 @@ async fn budget_raise_clears_hold_on_ingest() {
         }),
     );
     let outcome = raised
-        .ingest_external_event(
-            santi_core::DEFAULT_SOUL_ID,
+        .evented(
+            santi_core::GENESIS,
             "test:operator",
             "after the raise".to_string(),
         )
@@ -265,7 +265,7 @@ async fn budget_raise_clears_hold_on_ingest() {
         panic!("under-budget hold must auto-clear on ingest remeasure");
     };
     let runtime = raised
-        .runtime_snapshot(&receipt.strand)
+        .snapshot(&receipt.strand)
         .expect("runtime")
         .expect("strand");
     let incident = runtime

@@ -11,12 +11,12 @@ async fn rejects_tool_batch() {
             output_bytes: 1,
         }],
     );
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
     service
         .set_strand_execution_budget(&strand.id, execution_budget(4, 1, 100, 50))
         .expect("set budget");
     let response = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -58,12 +58,12 @@ async fn reserves_followup_round() {
             },
         ],
     );
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
     service
         .set_strand_execution_budget(&strand.id, execution_budget(2, 4, 100, 50))
         .expect("set budget");
     let response = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -106,12 +106,12 @@ async fn bounds_shell_capture() {
             BudgetProviderStep::Complete,
         ],
     );
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
     service
         .set_strand_execution_budget(&strand.id, execution_budget(3, 2, 10, 6))
         .expect("set budget");
     let response = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -165,12 +165,12 @@ async fn preserves_retry_usage() {
             },
         ],
     );
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
     service
         .set_strand_execution_budget(&strand.id, execution_budget(4, 1, 100, 50))
         .expect("set budget");
     let first = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -185,7 +185,7 @@ async fn preserves_retry_usage() {
         .await;
 
     let retry = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {

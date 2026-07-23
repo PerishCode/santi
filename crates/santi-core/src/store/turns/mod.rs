@@ -1,7 +1,7 @@
 use rusqlite::params;
 
 use super::{
-    RuntimeFault, SantiStore, StartedTurn,
+    Begun, Store, Stumble,
     db::{Database, drain},
 };
 use crate::{now, tag, turn::Turn};
@@ -10,18 +10,18 @@ mod completion;
 
 pub use completion::Completion;
 
-const PROVIDER_DETAIL_BYTES: usize = 4096;
+const BREADTH: usize = 4096;
 mod fail;
 use crate::{effect, thinking, tool};
 use fail::{open_runtime_incident, provider_incident_key, runtime_incident_key};
 
-impl SantiStore {
-    pub fn try_start_turn(
+impl Store {
+    pub fn tried(
         &self,
         strand: &str,
         trigger: &str,
         source: Option<&str>,
-    ) -> Result<Option<StartedTurn>, String> {
+    ) -> Result<Option<Begun>, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let running: Option<i64> = tx
@@ -55,15 +55,15 @@ impl SantiStore {
         .map_err(|error| error.to_string())?;
         Database::new(&tx).begin(strand, &turn, &drained.inboxes, None)?;
         tx.commit().map_err(|error| error.to_string())?;
-        Ok(Some(StartedTurn {
+        Ok(Some(Begun {
             turn: Database::new(&conn)
                 .turn(&turn)?
                 .ok_or_else(|| "created turn missing".to_string())?,
-            drained_messages: drained.messages,
+            drained: drained.messages,
         }))
     }
 
-    pub fn latest_turn(&self, strand: &str) -> Result<Option<Turn>, String> {
+    pub fn latest(&self, strand: &str) -> Result<Option<Turn>, String> {
         let conn = self.conn.lock().unwrap();
         let id: Option<String> = conn
             .query_row(
@@ -78,7 +78,7 @@ impl SantiStore {
         }
     }
 
-    pub fn reconcile_orphaned_turns(&self) -> Result<usize, String> {
+    pub fn reconciled(&self) -> Result<usize, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let now = now();
@@ -114,7 +114,7 @@ impl SantiStore {
                 &tx,
                 strand,
                 turn,
-                RuntimeFault {
+                Stumble {
                     operation: "turn.restart_reconcile",
                     detail: "interrupted by restart",
                 },
@@ -125,7 +125,7 @@ impl SantiStore {
         Ok(rows.len())
     }
 
-    pub fn running_turn_count(&self) -> Result<usize, String> {
+    pub fn running(&self) -> Result<usize, String> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
             "SELECT COUNT(*) FROM turns WHERE status = 'running'",
@@ -136,7 +136,7 @@ impl SantiStore {
         .map_err(|error| error.to_string())
     }
 
-    pub fn strands_with_pending_requests(&self) -> Result<Vec<String>, String> {
+    pub fn awaiting(&self) -> Result<Vec<String>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare("SELECT DISTINCT strand_id FROM strand_inbox")

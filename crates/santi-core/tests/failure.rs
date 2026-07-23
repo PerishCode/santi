@@ -25,7 +25,7 @@ struct FailureProvider {
     fail_for_requests: Option<usize>,
     stream_error_after_text: Option<String>,
     response_failure: Option<String>,
-    response_started: bool,
+    started: bool,
 }
 
 #[async_trait]
@@ -63,7 +63,7 @@ impl Provider for FailureProvider {
             ))])));
         }
         let mut events = Vec::new();
-        if self.response_started {
+        if self.started {
             events.push(Ok(Event::Started {
                 response: Some("fake-response-id".to_string()),
             }));
@@ -85,8 +85,8 @@ async fn aggregates_provider_failures() {
         ..FailureProvider::default()
     });
     let service = open_service(&temp, provider.clone());
-    let mut events = service.subscribe_stream();
-    let strand = service.create_strand().expect("create strand").strand;
+    let mut events = service.listen();
+    let strand = service.weave().expect("create strand").strand;
     let first = send_text(&service, &strand.id, "trigger failure").await;
 
     let runtime = wait_for_turn(&service, &strand.id, &turn(&first).id, turn::Status::Failed).await;
@@ -168,11 +168,11 @@ fn turn(response: &santi_core::strand::Posted) -> &santi_core::turn::Turn {
 fn open_service(temp: &tempfile::TempDir, provider: Arc<FailureProvider>) -> Service {
     Service::open(
         service::Config {
-            database_path: temp.path().join("santi.sqlite").display().to_string(),
-            runtime_root: temp.path().join("runtime").display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: temp.path().join("santi.sqlite").display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         provider,
     )
@@ -190,7 +190,7 @@ fn transition_count(temp: &tempfile::TempDir) -> i64 {
 
 async fn send_text(service: &Service, strand: &str, text: &str) -> santi_core::strand::Posted {
     service
-        .send_strand(
+        .send(
             strand,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -210,7 +210,7 @@ async fn wait_for_turn(
 ) -> santi_core::stream::Snapshot {
     for _ in 0..100 {
         let runtime = service
-            .runtime_snapshot(strand)
+            .snapshot(strand)
             .expect("runtime snapshot")
             .expect("strand runtime");
         if runtime
@@ -232,7 +232,7 @@ async fn wait_for_aborted_output(
 ) -> santi_core::stream::Snapshot {
     for _ in 0..100 {
         let runtime = service
-            .runtime_snapshot(strand)
+            .snapshot(strand)
             .expect("runtime snapshot")
             .expect("strand runtime");
         let failed = runtime

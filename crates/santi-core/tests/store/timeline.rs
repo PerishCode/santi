@@ -4,13 +4,13 @@ use santi_core::{message, thinking, tool};
 #[test]
 fn appends_relations_in_order() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let strand = store.create_strand().expect("create strand");
+    let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
+    let strand = store.weave().expect("create strand");
     let user = store
         .append_message(Draft {
             strand: &strand.id,
             actor: message::Role::System,
-            id: store.system_actor_id(),
+            id: store.system(),
             content: message::Content::text("hello ordering"),
             state: message::State::Fixed,
             intake: message::Intake::Request,
@@ -19,7 +19,7 @@ fn appends_relations_in_order() {
         .strand_message;
 
     assert_eq!(user.relation.seq, 1);
-    let input = store.assembly_input(&strand.id).expect("assembly input");
+    let input = store.assembly(&strand.id).expect("assembly input");
     assert_eq!(input.len(), 1);
     assert_text(&input[0], "user", "hello ordering");
 }
@@ -27,8 +27,8 @@ fn appends_relations_in_order() {
 #[test]
 fn maps_santi_system_input() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let strand = store.create_strand().expect("create strand");
+    let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
+    let strand = store.weave().expect("create strand");
     let message = store
         .append_santi_system_message(
             &strand.id,
@@ -40,7 +40,7 @@ fn maps_santi_system_input() {
 
     assert_eq!(message.message.role, message::Role::System);
     assert_eq!(message.message.kind, message::Kind::SantiSystem);
-    let input = store.assembly_input(&strand.id).expect("assembly input");
+    let input = store.assembly(&strand.id).expect("assembly input");
     assert_eq!(input.len(), 1);
     assert_text(
         &input[0],
@@ -52,13 +52,13 @@ fn maps_santi_system_input() {
 #[test]
 fn thinking_becomes_reasoning() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let strand = store.create_strand().expect("create strand");
+    let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
+    let strand = store.weave().expect("create strand");
     let user = store
         .append_message(Draft {
             strand: &strand.id,
             actor: message::Role::System,
-            id: store.system_actor_id(),
+            id: store.system(),
             content: message::Content::text("hello thinking"),
             state: message::State::Fixed,
             intake: message::Intake::Request,
@@ -66,14 +66,14 @@ fn thinking_becomes_reasoning() {
         .expect("append user")
         .strand_message;
     let turn = store
-        .start_turn(&strand.id, &user.message.id)
+        .start(&strand.id, &user.message.id)
         .expect("start turn")
         .turn;
     let thinking = store
         .append_thinking_span(&turn.id, Some("resp_test".to_string()))
         .expect("append thinking");
     let thinking = store
-        .update_thinking_span_summary(&thinking.id, "Looked at the prompt.".to_string())
+        .summarize(&thinking.id, "Looked at the prompt.".to_string())
         .expect("update thinking summary")
         .expect("thinking exists");
     let thinking = store
@@ -82,7 +82,7 @@ fn thinking_becomes_reasoning() {
         .expect("thinking exists");
 
     let snapshot = store
-        .runtime_snapshot(&strand.id)
+        .snapshot(&strand.id)
         .expect("runtime snapshot")
         .expect("strand exists");
     assert_eq!(snapshot.thinking.len(), 1);
@@ -97,7 +97,7 @@ fn thinking_becomes_reasoning() {
         Some(thinking::Reason::FirstTextDelta)
     );
 
-    let input = store.assembly_input(&strand.id).expect("assembly input");
+    let input = store.assembly(&strand.id).expect("assembly input");
     assert_eq!(input.len(), 2);
     assert_text(&input[0], "user", "hello thinking");
     match &input[1] {
@@ -112,14 +112,14 @@ fn thinking_becomes_reasoning() {
 #[test]
 fn timeline_interleaves() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let strand = store.create_strand().expect("create strand");
+    let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
+    let strand = store.weave().expect("create strand");
 
     let user = store
         .append_message(Draft {
             strand: &strand.id,
             actor: message::Role::System,
-            id: store.system_actor_id(),
+            id: store.system(),
             content: message::Content::text("run a command"),
             state: message::State::Fixed,
             intake: message::Intake::Request,
@@ -127,7 +127,7 @@ fn timeline_interleaves() {
         .expect("append user")
         .strand_message;
     let turn = store
-        .start_turn(&strand.id, &user.message.id)
+        .start(&strand.id, &user.message.id)
         .expect("start turn")
         .turn;
     store
@@ -155,7 +155,7 @@ fn timeline_interleaves() {
         .append_soul_assistant_text(&strand.id, "done")
         .expect("append soul assistant text");
 
-    let input = store.assembly_input(&strand.id).expect("assembly input");
+    let input = store.assembly(&strand.id).expect("assembly input");
     assert_eq!(input.len(), 4);
     assert_text(&input[0], "user", "run a command");
     match &input[1] {

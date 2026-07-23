@@ -8,4 +8,4 @@ pub(in crate::store) mod souls;
 pub(in crate::store) mod span;
 pub(in crate::store) mod turn;
 
-use super::SantiStore;
+use super::Store;

@@ -23,13 +23,13 @@ pub(super) fn persistence_error(
         message: "error engine could not persist self-upgrade terminal truth".to_string(),
         context: json!({
             "attempt_id": attempt_id,
-            "artifact": bounded_detail(deb),
-            "detail": bounded_detail(&detail.into()),
+            "artifact": bounded(deb),
+            "detail": bounded(&detail.into()),
         }),
     })
 }
 
-fn bounded_detail(value: &str) -> String {
+fn bounded(value: &str) -> String {
     const LIMIT: usize = 4096;
     let mut chars = value.chars();
     let bounded: String = chars.by_ref().take(LIMIT).collect();
@@ -66,7 +66,7 @@ pub fn finalize_at(
         )));
     }
 
-    let store = santi_core::SantiStore::open(&paths.database_path).map_err(|error| {
+    let store = santi_core::Store::open(&paths.database).map_err(|error| {
         Box::new(persistence_error(
             &request.attempt_id,
             &request.deb,
@@ -103,7 +103,7 @@ pub fn finalize_at(
 }
 
 fn resolve_upgrade(
-    store: &santi_core::SantiStore,
+    store: &santi_core::Store,
     request: &UpgradeFinalizeRequest,
     readiness: super::UpgradeReadiness,
 ) -> Result<(), Box<santi_core::Fault>> {
@@ -113,7 +113,7 @@ fn resolve_upgrade(
             "upgrade.succeeded",
             json!({
                 "attempt_id": request.attempt_id,
-                "artifact": bounded_detail(&request.deb),
+                "artifact": bounded(&request.deb),
                 "terminal": if matches!(readiness, super::UpgradeReadiness::Degraded) {
                     "upgraded_degraded"
                 } else {
@@ -134,7 +134,7 @@ fn resolve_upgrade(
 }
 
 fn open_execution_failure(
-    store: &santi_core::SantiStore,
+    store: &santi_core::Store,
     request: &UpgradeFinalizeRequest,
     failure: &super::UpgradeFailure,
     terminal: &str,
@@ -148,10 +148,10 @@ fn open_execution_failure(
             message: format!("self-upgrade failed during {}", failure.stage.operation()),
             context: json!({
                 "attempt_id": request.attempt_id,
-                "artifact": bounded_detail(&request.deb),
+                "artifact": bounded(&request.deb),
                 "terminal": terminal,
                 "stage": failure.stage,
-                "detail": bounded_detail(&failure.detail),
+                "detail": bounded(&failure.detail),
                 "recovery": failure.recovery,
             }),
         })

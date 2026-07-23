@@ -8,7 +8,7 @@ mod retire;
 fn schema_matches_runtime() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
-    let store = SantiStore::open(&db).expect("open store");
+    let store = Store::open(&db).expect("open store");
     drop(store);
 
     let conn = Connection::open(db).expect("open sqlite");
@@ -66,35 +66,35 @@ fn schema_matches_runtime() {
 #[test]
 fn soul_label_anchoring() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
+    let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
 
-    let soul = store.create_soul().expect("create soul");
+    let soul = store.awaken().expect("create soul");
     assert_ne!(soul.id, store.default_soul_id());
-    assert!(store.list_souls().expect("list").len() >= 2);
+    assert!(store.souls().expect("list").len() >= 2);
     assert!(store.soul(&soul.id).expect("soul").is_some());
 
     let s1 = store
-        .find_labeled_strand(&soul.id, "github:issue:49")
+        .labeled(&soul.id, "github:issue:49")
         .expect("label strand");
     let s1_again = store
-        .find_labeled_strand(&soul.id, "github:issue:49")
+        .labeled(&soul.id, "github:issue:49")
         .expect("label strand again");
     assert_eq!(s1.id, s1_again.id);
     let s2 = store
-        .find_labeled_strand(&soul.id, "github:issue:50")
+        .labeled(&soul.id, "github:issue:50")
         .expect("other label");
     assert_ne!(s1.id, s2.id);
     assert_eq!(s1.soul, soul.id);
-    assert_eq!(store.soul_id_for_strand(&s1.id).expect("soul id"), soul.id);
+    assert_eq!(store.keeper(&s1.id).expect("soul id"), soul.id);
 
     let default_strand = store
-        .find_labeled_strand(store.default_soul_id(), "github:issue:49")
+        .labeled(store.default_soul_id(), "github:issue:49")
         .expect("same label, default soul");
     assert_ne!(default_strand.id, s1.id);
 
     assert!(
         store
-            .find_labeled_strand("soul_does_not_exist", "github:issue:99")
+            .labeled("soul_does_not_exist", "github:issue:99")
             .is_err()
     );
 }
@@ -127,7 +127,7 @@ fn schema_read_matches_open() {
         "a second probe still sees the stale version — the first was read-only"
     );
 
-    let store = SantiStore::open(&db).expect("open store");
+    let store = Store::open(&db).expect("open store");
     drop(store);
     assert_eq!(
         santi_core::version(&db).expect("read post-open"),
@@ -137,7 +137,7 @@ fn schema_read_matches_open() {
 
 #[test]
 fn memory_path_composes() {
-    let path = santi_core::soul_memory_file("/srv/santi/runtime", "soul_default");
+    let path = santi_core::memoir("/srv/santi/runtime", "soul_default");
     assert!(path.ends_with("souls/soul_default/memory/MEMORY.md"));
     assert!(path.starts_with("/srv/santi/runtime"));
 }

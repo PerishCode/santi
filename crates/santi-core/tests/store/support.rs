@@ -1,6 +1,6 @@
 pub(crate) use rusqlite::Connection;
 use santi_core::message;
-pub(crate) use santi_core::{Completion, Draft, Invocation, Item, SantiStore};
+pub(crate) use santi_core::{Completion, Draft, Invocation, Item, Store};
 pub(crate) use serde_json::json;
 
 pub(crate) fn assert_text(item: &Item, role: &str, content: &str) {
@@ -17,7 +17,7 @@ pub(crate) fn assert_text(item: &Item, role: &str, content: &str) {
 }
 
 pub(crate) struct Line<'a> {
-    pub store: &'a SantiStore,
+    pub store: &'a Store,
     pub strand: &'a str,
     pub actor: message::Role,
     pub text: &'a str,
@@ -38,7 +38,7 @@ pub(crate) fn append_timeline_message(line: Line<'_>) {
         message::Intake::Record => {
             let actor = match line.actor {
                 message::Role::Soul => line.store.default_soul_id(),
-                message::Role::System => line.store.system_actor_id(),
+                message::Role::System => line.store.system(),
             };
             line.store
                 .append_message(Draft {

@@ -6,14 +6,14 @@ pub(crate) struct Settlement<'a> {
     pub(crate) state: effect::State,
 }
 
-use crate::store::SantiStore;
+use crate::store::Store;
 use crate::store::db::{Database, Transition};
 use crate::{effect, strand, tool};
 use crate::{now, tag};
 use rusqlite::params;
 
-impl SantiStore {
-    pub fn effect_status(&self, effect: &str) -> Result<Option<effect::Status>, String> {
+impl Store {
+    pub fn effect(&self, effect: &str) -> Result<Option<effect::Status>, String> {
         let conn = self.conn.lock().unwrap();
         let database = Database::new(&conn);
         let Some(held) = database.effect(effect)? else {
@@ -26,7 +26,7 @@ impl SantiStore {
         }))
     }
 
-    pub fn begin_effect_dispatch(&self, effect: &str) -> Result<effect::Effect, String> {
+    pub fn dispatch(&self, effect: &str) -> Result<effect::Effect, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let now = now();
@@ -85,14 +85,14 @@ impl SantiStore {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .map_err(|error| error.to_string())?;
-        let state_allowed = current.0 == allowed_source
+        let allowed = current.0 == allowed_source
             || (allowed_source == "prepared_or_dispatching"
                 && matches!(current.0.as_str(), "prepared" | "dispatching"));
-        if !state_allowed || current.1.as_deref() != Some(call) {
+        if !allowed || current.1.as_deref() != Some(call) {
             return Err("effect/tool-call state mismatch".to_string());
         }
 
-        let tool_result_id = tag("tool_result");
+        let reply = tag("tool_result");
         let now = now();
         let database = Database::new(&tx);
         let strand = database.caller(call)?;
@@ -106,10 +106,10 @@ impl SantiStore {
             INSERT INTO tool_results (id, tool_call_id, output, error_text, created_at)
             VALUES (?1, ?2, ?3, ?4, ?5)
             "#,
-            params![tool_result_id, call, output, error, now],
+            params![reply, call, output, error, now],
         )
         .map_err(|error| error.to_string())?;
-        database.entered(&strand, strand::Target::ToolResult, &tool_result_id)?;
+        database.entered(&strand, strand::Target::ToolResult, &reply)?;
         tx.execute(
             r#"
             UPDATE strand_effects
@@ -117,7 +117,7 @@ impl SantiStore {
                 updated_at = ?5, settled_at = ?5
             WHERE id = ?1
             "#,
-            params![effect, state.encode(), tool_result_id, error, now,],
+            params![effect, state.encode(), reply, error, now,],
         )
         .map_err(|error| error.to_string())?;
         database.shifted(
@@ -125,17 +125,17 @@ impl SantiStore {
             Transition {
                 state,
                 reason,
-                evidence: Some(&format!("tool_result:{tool_result_id}")),
+                evidence: Some(&format!("tool_result:{reply}")),
                 time: &now,
             },
         )?;
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .reply(&tool_result_id)?
+            .reply(&reply)?
             .ok_or_else(|| "created effect tool_result missing".to_string())
     }
 
-    pub fn mark_effect_unknown(
+    pub fn unmark(
         &self,
         effect: &str,
         reason: effect::Reason,
@@ -175,7 +175,7 @@ impl SantiStore {
             .ok_or_else(|| "unknown effect missing".to_string())
     }
 
-    pub fn resolve_effect(
+    pub fn settle(
         &self,
         effect: &str,
         outcome: effect::Outcome,
@@ -225,6 +225,6 @@ impl SantiStore {
         )?;
         tx.commit().map_err(|error| error.to_string())?;
         drop(conn);
-        self.effect_status(effect)
+        self.effect(effect)
     }
 }

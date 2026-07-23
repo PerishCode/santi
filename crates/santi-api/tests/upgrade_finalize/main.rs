@@ -10,7 +10,7 @@ use santi_api::{
         UpgradeTerminal, finalize_at, register_attempt_handover_budgets,
     },
 };
-use santi_core::SantiStore;
+use santi_core::Store;
 use santi_core::service::{self, Service};
 use santi_provider::{Event, Metadata, Provider, Request, Streaming};
 
@@ -54,11 +54,11 @@ fn old_request_defaults() {
 fn attempt_labels_isolate_rooms() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
-    SantiStore::open(&paths.database_path).expect("open");
+    Store::open(&paths.database).expect("open");
 
     let outcome = paths
         .seed_attempt_handover(
-            santi_core::DEFAULT_SOUL_ID,
+            santi_core::GENESIS,
             "upgrade_one",
             Some("ss_stale"),
             "come look",
@@ -67,7 +67,7 @@ fn attempt_labels_isolate_rooms() {
     assert!(outcome.warnings.is_empty());
     let retry = paths
         .seed_attempt_handover(
-            santi_core::DEFAULT_SOUL_ID,
+            santi_core::GENESIS,
             "upgrade_one",
             Some("ss_stale"),
             "come look again",
@@ -76,7 +76,7 @@ fn attempt_labels_isolate_rooms() {
     assert_eq!(retry.strand, outcome.strand);
     let other = paths
         .seed_attempt_handover(
-            santi_core::DEFAULT_SOUL_ID,
+            santi_core::GENESIS,
             "upgrade_two",
             Some("ss_stale"),
             "other attempt",
@@ -84,7 +84,7 @@ fn attempt_labels_isolate_rooms() {
         .expect("seed other attempt");
     assert_ne!(other.strand, outcome.strand);
 
-    let store = SantiStore::open(&paths.database_path).expect("reopen");
+    let store = Store::open(&paths.database).expect("reopen");
     let strand = store.strand(&outcome.strand).unwrap().expect("strand");
     assert_eq!(
         strand.label.as_deref(),
@@ -96,23 +96,23 @@ fn attempt_labels_isolate_rooms() {
         Some("soul:soul_default:ops:upgrade:upgrade_two")
     );
     let started = store
-        .try_start_turn(&outcome.strand, "strand_send", None)
+        .tried(&outcome.strand, "strand_send", None)
         .unwrap()
         .expect("turn starts");
-    assert_eq!(started.drained_messages[0].text, "come look");
-    assert_eq!(started.drained_messages[1].text, "come look again");
+    assert_eq!(started.drained[0].text, "come look");
+    assert_eq!(started.drained[1].text, "come look again");
 }
 
 #[test]
 fn stable_helper_preserves_label() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
-    SantiStore::open(&paths.database_path).expect("open");
+    Store::open(&paths.database).expect("open");
 
     let outcome = paths
-        .seed_come_look(santi_core::DEFAULT_SOUL_ID, None, "stable wake")
+        .seed_come_look(santi_core::GENESIS, None, "stable wake")
         .expect("seed stable label");
-    let store = SantiStore::open(&paths.database_path).expect("reopen");
+    let store = Store::open(&paths.database).expect("reopen");
     let strand = store.strand(&outcome.strand).unwrap().expect("strand");
     assert_eq!(strand.label.as_deref(), Some("soul:soul_default:ops"));
 }
@@ -123,27 +123,27 @@ fn registers_attempt_rooms() {
     let paths = paths_under(temp.path());
     paths
         .seed_attempt_handover(
-            santi_core::DEFAULT_SOUL_ID,
+            santi_core::GENESIS,
             "upgrade_budgeted",
             None,
             "bounded wake",
         )
         .expect("seed attempt room");
     paths
-        .seed_come_look(santi_core::DEFAULT_SOUL_ID, None, "stable wake")
+        .seed_come_look(santi_core::GENESIS, None, "stable wake")
         .expect("seed stable room");
-    SantiStore::open(&paths.database_path)
+    Store::open(&paths.database)
         .expect("open store")
-        .create_strand()
+        .weave()
         .expect("create unlabeled room");
 
     let service = Service::open(
         service::Config {
-            database_path: paths.database_path.display().to_string(),
-            runtime_root: paths.runtime_root.display().to_string(),
-            execution_root: paths.execution_root.display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: paths.database.display().to_string(),
+            runtime: paths.runtime.display().to_string(),
+            execution: paths.execution.display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         Arc::new(NoopProvider),
     )
@@ -173,9 +173,9 @@ fn rollback_detail_not_projected() {
     assert_eq!(report.errors[0].context["detail"], "PACKAGE_SECRET_DETAIL");
     assert!(!report.record.unwrap().contains("PACKAGE_SECRET_DETAIL"));
 
-    let store = SantiStore::open(&paths.database_path).expect("open store");
+    let store = Store::open(&paths.database).expect("open store");
     let incidents = store
-        .error_incidents(&santi_core::Scope::new("runtime", "default"), 10)
+        .incidents(&santi_core::Scope::new("runtime", "default"), 10)
         .expect("runtime errors");
     assert_eq!(incidents.len(), 1);
     assert_eq!(incidents[0].status, santi_core::Status::Active);
@@ -201,9 +201,9 @@ fn success_resolves_incident() {
         finalize_at(&paths, request(UpgradeTerminal::Upgraded)).expect("finalize success");
     assert!(recovered.errors.is_empty());
 
-    let store = SantiStore::open(&paths.database_path).expect("open store");
+    let store = Store::open(&paths.database).expect("open store");
     let incidents = store
-        .error_incidents(&santi_core::Scope::new("runtime", "default"), 10)
+        .incidents(&santi_core::Scope::new("runtime", "default"), 10)
         .expect("runtime errors");
     assert_eq!(incidents.len(), 1);
     assert_eq!(incidents[0].status, santi_core::Status::Resolved);
@@ -228,15 +228,15 @@ fn request_for(attempt_id: &str, terminal: UpgradeTerminal) -> UpgradeFinalizeRe
         terminal,
         readiness: UpgradeReadiness::Ready,
         wake: true,
-        soul: santi_core::DEFAULT_SOUL_ID.to_string(),
+        soul: santi_core::GENESIS.to_string(),
         configured_strand_id: None,
     }
 }
 
 fn paths_under(root: &Path) -> RuntimePaths {
     RuntimePaths {
-        database_path: root.join("runtime").join("db"),
-        runtime_root: root.join("runtime"),
-        execution_root: root.join("execution"),
+        database: root.join("runtime").join("db"),
+        runtime: root.join("runtime"),
+        execution: root.join("execution"),
     }
 }

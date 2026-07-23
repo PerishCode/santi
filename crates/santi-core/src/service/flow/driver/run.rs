@@ -1,8 +1,8 @@
-use crate::assembly::input::provider_input;
-use crate::context::budget::estimate_provider_request;
+use crate::assembly::input::input;
+use crate::context::budget::gauged;
 use crate::service::flow::budget::Verdict;
 use crate::service::flow::failure::{Admission, Failure, Metadata, Operation, Persistence, Stage};
-use crate::service::tools::provider_tools;
+use crate::service::tools::tools;
 use crate::service::{Service, address::Address, notice::Observation, timing};
 use santi_provider::Request;
 
@@ -19,11 +19,11 @@ impl Service {
             Err(failure) => {
                 self.fail_background_turn(&strand, &turn, failure);
             }
-            Ok((last_soul_message, response)) => {
-                self.finalize_turn(&strand, &turn, last_soul_message, response);
+            Ok((last, response)) => {
+                self.finalize_turn(&strand, &turn, last, response);
             }
         }
-        self.drain_runtime_notices(&turn);
+        self.noticed(&turn);
         self.poke(&strand, "strand_send", None, "turn_completion_poke");
         self.resume_after_memory_maintenance(&strand);
     }
@@ -32,11 +32,11 @@ impl Service {
         &self,
         strand: &str,
         turn: &str,
-        last_soul_message: Option<message::Placed>,
+        last: Option<message::Placed>,
         response: Option<String>,
     ) {
-        if let Some(message) = last_soul_message.as_ref() {
-            self.publish_stream(
+        if let Some(message) = last.as_ref() {
+            self.publish(
                 strand,
                 stream::Payload::MessageCompleted {
                     turn: turn.to_string(),
@@ -48,22 +48,20 @@ impl Service {
         match self.store.finish(
             crate::Completion {
                 turn,
-                sequence: last_soul_message
-                    .as_ref()
-                    .map(|message| message.relation.seq),
+                sequence: last.as_ref().map(|message| message.relation.seq),
                 provider: &metadata.provider,
                 model: &metadata.model,
                 response,
             },
-            last_soul_message.as_ref(),
+            last.as_ref(),
         ) {
-            Ok((_, turn_event)) => {
-                self.dispatch_error_events();
-                let (label, text) = match turn_event {
+            Ok((_, turned)) => {
+                self.dispatched();
+                let (label, text) = match turned {
                     Some(event) => (Some(event.label), Some(event.text)),
                     None => (None, None),
                 };
-                self.publish_stream(
+                self.publish(
                     strand,
                     stream::Payload::TurnCompleted {
                         turn: turn.to_string(),
@@ -85,8 +83,8 @@ impl Service {
         strand: &str,
         turn: &str,
     ) -> Result<(Option<message::Placed>, Option<String>), Failure> {
-        let mut assistant_text = String::new();
-        let mut last_soul_message: Option<message::Placed> = None;
+        let mut prose = String::new();
+        let mut last: Option<message::Placed> = None;
         let mut timing = timing::Turn::new(turn);
         let mut round = 0;
         macro_rules! provider_try {
@@ -94,22 +92,22 @@ impl Service {
                 match $expr {
                     Ok(value) => value,
                     Err(error) => {
-                        return Err(Failure::runtime($operation, error, &assistant_text));
+                        return Err(Failure::runtime($operation, error, &prose));
                     }
                 }
             };
         }
 
-        let final_response_id = loop {
-            let next_round = round + 1;
+        let response = loop {
+            let next = round + 1;
             if let Some(error) = provider_try!(
                 Operation::Admission(Admission::Execution),
-                self.admit_execution_round(strand, turn, next_round)
+                self.admit_execution_round(strand, turn, next)
             ) {
-                return Err(Failure::execution_budget(error, &assistant_text));
+                return Err(Failure::execution_budget(error, &prose));
             }
-            round = next_round;
-            let input = provider_try!(Operation::Assembly, provider_input(&self.store, strand));
+            round = next;
+            let input = provider_try!(Operation::Assembly, input(&self.store, strand));
             let metadata = self.provider.metadata();
             let family = metadata.provider.to_string();
             let request = Request {
@@ -119,10 +117,10 @@ impl Service {
                     self.system_prompt_text(strand)
                 )),
                 input,
-                tools: Some(provider_tools()),
+                tools: Some(tools()),
                 previous: None,
             };
-            let estimate = estimate_provider_request(&request);
+            let estimate = gauged(&request);
             if let Some(error) = provider_try!(
                 Operation::Admission(Admission::Context),
                 self.open_over_budget_incident(strand, turn, &request, &estimate)
@@ -130,12 +128,12 @@ impl Service {
                 timing.failed(round, "context_budget", &error.to_string());
                 return Err(Failure::context_budget(error));
             }
-            timing.request_built(
+            timing.built(
                 round,
                 request.input.len(),
                 request.instructions.as_ref().map_or(0, |text| text.len()),
             );
-            self.observe_provider_input(Observation {
+            self.observed(Observation {
                 address: Address { strand, turn },
                 round,
                 provider: &family,
@@ -143,21 +141,21 @@ impl Service {
                 input: &request.input,
                 instructions: request.instructions.as_deref(),
             });
-            self.publish_turn_activity(strand, turn, turn::Motion::Requesting, None);
-            let request_model = request.model.clone();
+            self.stirred(strand, turn, turn::Motion::Requesting, None);
+            let model = request.model.clone();
             let stream = match self.provider.stream(request).await {
                 Ok(stream) => {
-                    timing.http_response_started(round);
+                    timing.reached(round);
                     stream
                 }
                 Err(error) => {
                     timing.failed(round, "http_response", &error);
                     return Err(Failure::provider(
                         error,
-                        &assistant_text,
+                        &prose,
                         Metadata {
                             provider: family.clone(),
-                            model: request_model.clone(),
+                            model: model.clone(),
                             stage: Stage::Request,
                             round,
                         },
@@ -166,68 +164,62 @@ impl Service {
             };
             let Output {
                 calls,
-                completed_response_id,
-                active_provider_response_id,
-                assistant_text: round_assistant_text,
+                completed,
+                active,
+                prose: speech,
             } = Driver {
                 service: self,
                 address: Address { strand, turn },
                 number: round,
                 family: &family,
-                request_model: &request_model,
-                assistant_text: &mut assistant_text,
+                model: &model,
+                prose: &mut prose,
                 timing: &mut timing,
                 calls: Vec::new(),
-                completed_response_id: None,
-                active_provider_response_id: None,
-                current_thinking_span: None,
-                summary_thinking_span: None,
-                reasoning_summary: String::new(),
-                round_assistant_text: String::new(),
-                saw_sse_event: false,
+                completed: None,
+                active: None,
+                span: None,
+                sketch: None,
+                summary: String::new(),
+                speech: String::new(),
+                seen: false,
             }
             .consume(stream)
             .await?;
 
-            if !round_assistant_text.is_empty() {
-                last_soul_message = Some(provider_try!(
+            if !speech.is_empty() {
+                last = Some(provider_try!(
                     Operation::Persistence(Persistence::Assistant),
-                    self.store
-                        .append_soul_assistant_text(strand, &round_assistant_text)
+                    self.store.append_soul_assistant_text(strand, &speech)
                 ));
             }
 
             if calls.is_empty() {
-                break completed_response_id;
+                break completed;
             }
 
-            let output_limits = match provider_try!(
+            let limits = match provider_try!(
                 Operation::Admission(Admission::Execution),
                 self.admit_tool_batch(strand, turn, round, calls.len())
             ) {
                 Verdict::Unbounded => vec![None; calls.len()],
                 Verdict::Bounded(limits) => limits.into_iter().map(Some).collect::<Vec<_>>(),
                 Verdict::Rejected(error) => {
-                    return Err(Failure::execution_budget(*error, &assistant_text));
+                    return Err(Failure::execution_budget(*error, &prose));
                 }
             };
-            timing.tool_outputs_started(round, calls.len());
-            let call_count = calls.len();
-            for (call, output_limit) in calls.into_iter().zip(output_limits) {
-                self.publish_turn_activity(
-                    strand,
-                    turn,
-                    turn::Motion::Running,
-                    active_provider_response_id.clone(),
-                );
+            timing.outputting(round, calls.len());
+            let count = calls.len();
+            for (call, output_limit) in calls.into_iter().zip(limits) {
+                self.stirred(strand, turn, turn::Motion::Running, active.clone());
                 provider_try!(
                     Operation::Tool,
-                    self.handle_tool_call(strand, turn, call, output_limit)
+                    self.tooled(strand, turn, call, output_limit)
                 );
             }
-            timing.tool_outputs_completed(round, call_count);
+            timing.outputted(round, count);
         };
 
-        Ok((last_soul_message, final_response_id))
+        Ok((last, response))
     }
 }

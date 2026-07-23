@@ -1,8 +1,8 @@
 use std::path::{Component, Path, PathBuf};
 
-pub const SOUL_WORKSPACE_URI: &str = "soul://";
-pub const STRAND_WORKSPACE_URI: &str = "strand://";
-pub const MEMORY_FILE: &str = "MEMORY.md";
+pub const SOULSPACE: &str = "soul://";
+pub const STRANDSPACE: &str = "strand://";
+pub const MEMORY: &str = "MEMORY.md";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Root {
@@ -16,48 +16,46 @@ pub struct Uri {
     pub path: PathBuf,
 }
 
-pub fn soul_memory_uri() -> String {
-    workspace_uri(SOUL_WORKSPACE_URI, MEMORY_FILE)
+pub fn soulward() -> String {
+    housed(SOULSPACE, MEMORY)
 }
 
-pub fn strand_memory_uri() -> String {
-    workspace_uri(STRAND_WORKSPACE_URI, MEMORY_FILE)
+pub fn strandward() -> String {
+    housed(STRANDSPACE, MEMORY)
 }
 
-pub fn workspace_uri(root: &str, path: &str) -> String {
+pub fn housed(root: &str, path: &str) -> String {
     if path.is_empty() {
         return root.to_string();
     }
     format!("{root}{}", path.trim_start_matches('/'))
 }
 
-pub fn parse_workspace_uri(value: &str) -> Result<Uri, String> {
-    if let Some(path) = value.strip_prefix(SOUL_WORKSPACE_URI) {
+pub fn parsed(value: &str) -> Result<Uri, String> {
+    if let Some(path) = value.strip_prefix(SOULSPACE) {
         return Ok(Uri {
             root: Root::Soul,
-            path: safe_relative_path(path, SOUL_WORKSPACE_URI)?,
+            path: safed(path, SOULSPACE)?,
         });
     }
-    if let Some(path) = value.strip_prefix(STRAND_WORKSPACE_URI) {
+    if let Some(path) = value.strip_prefix(STRANDSPACE) {
         return Ok(Uri {
             root: Root::Strand,
-            path: safe_relative_path(path, STRAND_WORKSPACE_URI)?,
+            path: safed(path, STRANDSPACE)?,
         });
     }
     if value.starts_with('@') {
         return Err(format!(
-            "unsupported workspace alias: {value}; use {SOUL_WORKSPACE_URI} or {STRAND_WORKSPACE_URI}"
+            "unsupported workspace alias: {value}; use {SOULSPACE} or {STRANDSPACE}"
         ));
     }
     if value.contains("://") {
         return Err(format!("unsupported workspace uri: {value}"));
     }
-    Err(format!(
-        "cwd must use {SOUL_WORKSPACE_URI} or {STRAND_WORKSPACE_URI}"
-    ))
+    Err(format!("cwd must use {SOULSPACE} or {STRANDSPACE}"))
 }
 
-fn safe_relative_path(path: &str, root: &str) -> Result<PathBuf, String> {
+fn safed(path: &str, root: &str) -> Result<PathBuf, String> {
     if path.is_empty() {
         return Ok(PathBuf::new());
     }

@@ -1,31 +1,22 @@
 use std::path::PathBuf;
 
-use santi_core::{
-    SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, parse_workspace_uri, soul_memory_uri,
-    strand_memory_uri, workspace_uri,
-};
+use santi_core::{SOULSPACE, STRANDSPACE, housed, parsed, soulward, strandward};
 
 #[test]
 fn builds_memory_uris() {
-    assert_eq!(soul_memory_uri(), "soul://MEMORY.md");
-    assert_eq!(strand_memory_uri(), "strand://MEMORY.md");
-    assert_eq!(
-        workspace_uri(SOUL_WORKSPACE_URI, "notes/today.md"),
-        "soul://notes/today.md"
-    );
-    assert_eq!(
-        workspace_uri(STRAND_WORKSPACE_URI, "/todo.md"),
-        "strand://todo.md"
-    );
+    assert_eq!(soulward(), "soul://MEMORY.md");
+    assert_eq!(strandward(), "strand://MEMORY.md");
+    assert_eq!(housed(SOULSPACE, "notes/today.md"), "soul://notes/today.md");
+    assert_eq!(housed(STRANDSPACE, "/todo.md"), "strand://todo.md");
 }
 
 #[test]
 fn parses_workspace_roots() {
-    let soul = parse_workspace_uri(SOUL_WORKSPACE_URI).expect("soul root");
+    let soul = parsed(SOULSPACE).expect("soul root");
     assert_eq!(soul.root, santi_core::workspace::Root::Soul);
     assert_eq!(soul.path, PathBuf::new());
 
-    let strand = parse_workspace_uri("strand://notes/today.md").expect("strand path");
+    let strand = parsed("strand://notes/today.md").expect("strand path");
     assert_eq!(strand.root, santi_core::workspace::Root::Strand);
     assert_eq!(strand.path, PathBuf::from("notes/today.md"));
 }
@@ -33,11 +24,11 @@ fn parses_workspace_roots() {
 #[test]
 fn rejects_old_aliases() {
     assert_eq!(
-        parse_workspace_uri("@soul").expect_err("old soul alias"),
+        parsed("@soul").expect_err("old soul alias"),
         "unsupported workspace alias: @soul; use soul:// or strand://"
     );
     assert_eq!(
-        parse_workspace_uri("@strand").expect_err("old strand alias"),
+        parsed("@strand").expect_err("old strand alias"),
         "unsupported workspace alias: @strand; use soul:// or strand://"
     );
 }
@@ -45,15 +36,15 @@ fn rejects_old_aliases() {
 #[test]
 fn rejects_invalid_uris() {
     assert_eq!(
-        parse_workspace_uri("file://tmp").expect_err("unknown scheme"),
+        parsed("file://tmp").expect_err("unknown scheme"),
         "unsupported workspace uri: file://tmp"
     );
     assert_eq!(
-        parse_workspace_uri("relative/path").expect_err("relative path"),
+        parsed("relative/path").expect_err("relative path"),
         "cwd must use soul:// or strand://"
     );
     assert_eq!(
-        parse_workspace_uri("soul://../secret").expect_err("escape"),
+        parsed("soul://../secret").expect_err("escape"),
         "workspace uri cannot escape soul://"
     );
 }

@@ -4,9 +4,9 @@ use santi_api::config::RuntimePaths;
 
 fn paths_under(root: &Path) -> RuntimePaths {
     RuntimePaths {
-        database_path: root.join("runtime").join("db"),
-        runtime_root: root.join("runtime"),
-        execution_root: root.join("execution"),
+        database: root.join("runtime").join("db"),
+        runtime: root.join("runtime"),
+        execution: root.join("execution"),
     }
 }
 
@@ -14,8 +14,8 @@ fn paths_under(root: &Path) -> RuntimePaths {
 fn doctor_reads_runtime() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
-    santi_core::SantiStore::open(&paths.database_path).expect("open store");
-    let memory = santi_core::soul_memory_file(&paths.runtime_root, santi_core::DEFAULT_SOUL_ID);
+    santi_core::Store::open(&paths.database).expect("open store");
+    let memory = santi_core::memoir(&paths.runtime, santi_core::GENESIS);
     std::fs::create_dir_all(memory.parent().unwrap()).unwrap();
     std::fs::write(&memory, "# memory").unwrap();
 
@@ -31,8 +31,8 @@ fn doctor_reads_runtime() {
 fn doctor_rejects_stale() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
-    std::fs::create_dir_all(paths.database_path.parent().unwrap()).unwrap();
-    let conn = rusqlite::Connection::open(&paths.database_path).unwrap();
+    std::fs::create_dir_all(paths.database.parent().unwrap()).unwrap();
+    let conn = rusqlite::Connection::open(&paths.database).unwrap();
     conn.pragma_update(None, "user_version", 5u32).unwrap();
     drop(conn);
 
@@ -46,13 +46,13 @@ fn doctor_rejects_stale() {
 fn doctor_handles_absence() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
-    santi_core::SantiStore::open(&paths.database_path).expect("open store");
+    santi_core::Store::open(&paths.database).expect("open store");
     let report = paths.doctor().expect("doctor");
     assert!(report.ok, "absent memory should be fine: {report:?}");
     assert!(!report.memory_present);
 
     let missing = RuntimePaths {
-        database_path: temp.path().join("void").join("db"),
+        database: temp.path().join("void").join("db"),
         ..paths
     };
     let report = missing.doctor().expect("doctor");
@@ -64,12 +64,12 @@ fn doctor_handles_absence() {
 fn doctor_serializes() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
-    santi_core::SantiStore::open(&paths.database_path).expect("open store");
+    santi_core::Store::open(&paths.database).expect("open store");
     let report = paths.doctor().expect("doctor");
     let json = serde_json::to_string(&report).expect("serialize");
     assert!(json.contains("\"schema_ok\""));
     assert!(json.contains("\"provider\":null"));
-    let _ = PathBuf::from(&report.database_path);
+    let _ = PathBuf::from(&report.database);
 }
 
 #[test]
@@ -77,21 +77,21 @@ fn seed_drains_on_boot() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
     let strand = {
-        let store = santi_core::SantiStore::open(&paths.database_path).expect("open");
-        store.create_strand().expect("create strand").id
+        let store = santi_core::Store::open(&paths.database).expect("open");
+        store.weave().expect("create strand").id
     };
 
     let report = paths.inbox_seed(&strand, "come look").unwrap();
     assert!(report.accepted);
-    let store = santi_core::SantiStore::open(&paths.database_path).expect("reopen");
+    let store = santi_core::Store::open(&paths.database).expect("reopen");
     let started = store
-        .try_start_turn(&strand, "strand_send", None)
+        .tried(&strand, "strand_send", None)
         .unwrap()
         .expect("turn starts");
-    assert_eq!(started.drained_messages.len(), 1);
-    assert_eq!(started.drained_messages[0].text, "come look");
+    assert_eq!(started.drained.len(), 1);
+    assert_eq!(started.drained[0].text, "come look");
     assert_eq!(
-        started.drained_messages[0].message.kind,
+        started.drained[0].message.kind,
         santi_core::message::Kind::SantiSystem
     );
 }
@@ -100,33 +100,33 @@ fn seed_drains_on_boot() {
 fn labeled_seed_drains() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
-    santi_core::SantiStore::open(&paths.database_path).expect("open");
+    santi_core::Store::open(&paths.database).expect("open");
     let label = "soul:soul_default:ops";
 
     let report = paths
-        .inbox_seed_label(santi_core::DEFAULT_SOUL_ID, label, "upgrade finished")
+        .inbox_seed_label(santi_core::GENESIS, label, "upgrade finished")
         .unwrap();
     assert!(report.accepted);
-    let store = santi_core::SantiStore::open(&paths.database_path).expect("reopen");
+    let store = santi_core::Store::open(&paths.database).expect("reopen");
     let strand = store.strand(&report.strand).unwrap().expect("strand");
     assert_eq!(strand.label.as_deref(), Some(label));
     let started = store
-        .try_start_turn(&report.strand, "strand_send", None)
+        .tried(&report.strand, "strand_send", None)
         .unwrap()
         .expect("turn starts");
-    assert_eq!(started.drained_messages[0].text, "upgrade finished");
+    assert_eq!(started.drained[0].text, "upgrade finished");
 }
 
 #[test]
 fn seed_rejects_unknown() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
-    santi_core::SantiStore::open(&paths.database_path).expect("open");
+    santi_core::Store::open(&paths.database).expect("open");
 
     let error = paths.inbox_seed("ss_missing", "x").unwrap_err();
     assert!(error.contains("unknown strand"), "got: {error}");
-    let store = santi_core::SantiStore::open(&paths.database_path).expect("reopen");
-    assert!(store.strands_with_pending_requests().unwrap().is_empty());
+    let store = santi_core::Store::open(&paths.database).expect("reopen");
+    assert!(store.awaiting().unwrap().is_empty());
 }
 
 mod doctor;

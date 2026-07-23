@@ -7,19 +7,19 @@ async fn drain_preserves_provenance() {
     let provider = Arc::new(GatedFirstProvider::new());
     let service = Service::open(
         service::Config {
-            database_path: temp.path().join("santi.sqlite").display().to_string(),
-            runtime_root: temp.path().join("runtime").display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: temp.path().join("santi.sqlite").display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         provider.clone(),
     )
     .expect("open service");
 
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
     let first = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -40,7 +40,7 @@ async fn drain_preserves_provenance() {
     provider.wait_for_first_request().await;
 
     let second = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {

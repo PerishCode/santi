@@ -11,7 +11,7 @@ impl<'a> Probe<'a> {
 
     async fn snapshot(&self, strand: &str) -> santi_core::stream::Snapshot {
         self.service
-            .runtime_snapshot(strand)
+            .snapshot(strand)
             .expect("runtime snapshot")
             .expect("strand runtime")
     }

@@ -5,18 +5,18 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use crate::store::Ingress;
-use crate::{catalog, soul_memory_uri, strand::Strand};
+use crate::{catalog, soulward, strand::Strand};
 
 use super::super::{Service, drive};
 use crate::{ingest, message};
 
-const FALLBACK_INPUT_BUDGET_BYTES: usize = 500_000;
-pub(super) const MEMORY_MAINTENANCE_LABEL: &str = "santi:memory:maintenance";
+const FALLBACK: usize = 500_000;
+pub(super) const MAINTENANCE: &str = "santi:memory:maintenance";
 
 #[derive(Clone, Copy)]
 pub(in crate::service) struct Policy {
-    pub(in crate::service) allowance_bytes: usize,
-    operator_threshold_bytes: usize,
+    pub(in crate::service) allowance: usize,
+    threshold: usize,
 }
 
 pub(super) enum Gate {
@@ -25,7 +25,7 @@ pub(super) enum Gate {
 }
 
 struct Snapshot {
-    source_bytes: usize,
+    weight: usize,
     sha256: String,
 }
 
@@ -35,13 +35,12 @@ impl Service {
             .provider
             .metadata()
             .budget
-            .map_or(FALLBACK_INPUT_BUDGET_BYTES, |budget| budget.bytes);
-        let allowance_bytes = (bytes / 2).max(1);
-        let operator_threshold_bytes =
-            (bytes.saturating_mul(3) / 4).max(allowance_bytes.saturating_add(1));
+            .map_or(FALLBACK, |budget| budget.bytes);
+        let allowance = (bytes / 2).max(1);
+        let threshold = (bytes.saturating_mul(3) / 4).max(allowance.saturating_add(1));
         Policy {
-            allowance_bytes,
-            operator_threshold_bytes,
+            allowance,
+            threshold,
         }
     }
 
@@ -50,13 +49,11 @@ impl Service {
         let policy = self.soul_memory_policy();
         let snapshot = self.soul_memory_snapshot(&strand.soul)?;
         self.reconcile_memory_intervention(&strand.soul, &snapshot, policy)?;
-        if snapshot.source_bytes <= policy.allowance_bytes {
+        if snapshot.weight <= policy.allowance {
             return Ok(Gate::Allow);
         }
 
-        let maintenance = self
-            .store
-            .find_labeled_strand(&strand.soul, MEMORY_MAINTENANCE_LABEL)?;
+        let maintenance = self.store.labeled(&strand.soul, MAINTENANCE)?;
         self.ensure_memory_maintenance_prompt(&maintenance, &snapshot, policy)?;
         if strand.id == maintenance.id {
             Ok(Gate::Allow)
@@ -77,17 +74,17 @@ impl Service {
         let Some(maintenance) = self.store.strand(strand)? else {
             return Ok(());
         };
-        if maintenance.label.as_deref() != Some(MEMORY_MAINTENANCE_LABEL) {
+        if maintenance.label.as_deref() != Some(MAINTENANCE) {
             return Ok(());
         }
         let policy = self.soul_memory_policy();
         let snapshot = self.soul_memory_snapshot(&maintenance.soul)?;
         self.reconcile_memory_intervention(&maintenance.soul, &snapshot, policy)?;
-        if snapshot.source_bytes > policy.allowance_bytes {
+        if snapshot.weight > policy.allowance {
             return Ok(());
         }
 
-        for pending_id in self.store.strands_with_pending_requests()? {
+        for pending_id in self.store.awaiting()? {
             if pending_id == strand {
                 continue;
             }
@@ -107,14 +104,14 @@ impl Service {
     }
 
     fn soul_memory_snapshot(&self, soul: &str) -> Result<Snapshot, String> {
-        let path = self.soul_memory_file(soul);
+        let path = self.memoir(soul);
         let bytes = match fs::read(path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(error) => return Err(error.to_string()),
         };
         Ok(Snapshot {
-            source_bytes: bytes.len(),
+            weight: bytes.len(),
             sha256: hex::encode(Sha256::digest(&bytes)),
         })
     }
@@ -133,9 +130,9 @@ impl Service {
             .any(|message| message.text.contains(&fingerprint));
         let pending = self
             .store
-            .pending_provider_items(&maintenance.id)?
+            .pending(&maintenance.id)?
             .iter()
-            .any(|item| provider_item_contains(item, &fingerprint));
+            .any(|item| contains(item, &fingerprint));
         if recorded || pending {
             return Ok(());
         }
@@ -167,7 +164,7 @@ impl Service {
     ) -> Result<(), String> {
         let key = memory_intervention_incident_key(soul);
         let active = self.store.active_error_incident(&key)?;
-        let mutated = if snapshot.source_bytes > policy.operator_threshold_bytes {
+        let mutated = if snapshot.weight > policy.threshold {
             if active.is_some() {
                 false
             } else {
@@ -179,11 +176,11 @@ impl Service {
                     message: "soul memory exceeds the human-intervention threshold".to_string(),
                     context: json!({
                         "schema": "santi.error.soul_memory.v1",
-                        "source": soul_memory_uri(),
-                        "source_bytes": snapshot.source_bytes,
-                        "allowance_bytes": policy.allowance_bytes,
-                        "operator_threshold_bytes": policy.operator_threshold_bytes,
-                        "maintenance_label": MEMORY_MAINTENANCE_LABEL,
+                        "source": soulward(),
+                        "source_bytes": snapshot.weight,
+                        "allowance_bytes": policy.allowance,
+                        "operator_threshold_bytes": policy.threshold,
+                        "maintenance_label": MAINTENANCE,
                         "runtime_mutated_memory": false,
                     }),
                 })?;
@@ -195,16 +192,16 @@ impl Service {
                 "soul_memory_remeasured",
                 json!({
                     "schema": "santi.error.soul_memory.resolution.v1",
-                    "source_bytes": snapshot.source_bytes,
-                    "allowance_bytes": policy.allowance_bytes,
-                    "operator_threshold_bytes": policy.operator_threshold_bytes,
+                    "source_bytes": snapshot.weight,
+                    "allowance_bytes": policy.allowance,
+                    "operator_threshold_bytes": policy.threshold,
                 }),
             )?
         } else {
             false
         };
         if mutated {
-            self.dispatch_error_events();
+            self.dispatched();
         }
         Ok(())
     }
@@ -217,18 +214,18 @@ fn memory_maintenance_metaprompt(snapshot: &Snapshot, policy: Policy) -> message
             "kind: soul_memory_maintenance".to_string(),
             "scope: soul".to_string(),
             "wake: true".to_string(),
-            format!("source: {}", soul_memory_uri()),
+            format!("source: {}", soulward()),
             format!("source_sha256: {}", snapshot.sha256),
-            format!("source_bytes: {}", snapshot.source_bytes),
-            format!("allowance_bytes: {}", policy.allowance_bytes),
+            format!("source_bytes: {}", snapshot.weight),
+            format!("allowance_bytes: {}", policy.allowance),
             format!(
                 "operator_threshold_bytes: {}",
-                policy.operator_threshold_bytes
+                policy.threshold
             ),
             "state: Other strands for this soul are suspended; their inbound messages remain durably queued.".to_string(),
             format!(
                 "instruction: Inspect your full memory at {} and decide whether and how to organize it.",
-                soul_memory_uri()
+                soulward()
             ),
             "advice: Use bounded reads or file-local processing. Do not echo the whole file into provider context.".to_string(),
             "boundary: Runtime has not changed the source and will never author, archive, summarize, or replace it.".to_string(),
@@ -239,7 +236,7 @@ fn memory_maintenance_metaprompt(snapshot: &Snapshot, policy: Policy) -> message
     )
 }
 
-fn provider_item_contains(item: &Item, needle: &str) -> bool {
+fn contains(item: &Item, needle: &str) -> bool {
     matches!(item, Item::Message { content, .. } if content.contains(needle))
 }
 

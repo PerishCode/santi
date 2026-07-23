@@ -5,23 +5,23 @@ use crate::budget;
 
 const ESTIMATOR: &str = "provider_json_bytes_v1";
 
-pub(crate) fn estimate_provider_request(request: &Request) -> budget::Estimate {
-    estimate_provider_parts(
+pub(crate) fn gauged(request: &Request) -> budget::Estimate {
+    estimated(
         &request.input,
         request.instructions.as_deref(),
         request.tools.as_deref(),
     )
 }
 
-pub(crate) fn estimate_provider_parts(
+pub(crate) fn estimated(
     input: &[Item],
     instructions: Option<&str>,
     tools: Option<&[Tool]>,
 ) -> budget::Estimate {
     let held = input
         .iter()
-        .map(provider_item_value)
-        .map(|value| json_len(&value))
+        .map(valued)
+        .map(|value| weighed(&value))
         .sum::<usize>();
     let told = instructions.map_or(0, |text| text.len());
     let armed = tools
@@ -41,7 +41,7 @@ pub(crate) fn estimate_provider_parts(
     }
 }
 
-pub(crate) fn inbound_provider_item(
+pub(crate) fn inbound(
     kind: &crate::message::Kind,
     content: &crate::message::Content,
 ) -> Option<Item> {
@@ -59,7 +59,7 @@ pub(crate) fn inbound_provider_item(
     })
 }
 
-fn provider_item_value(item: &Item) -> Value {
+fn valued(item: &Item) -> Value {
     match item {
         Item::Message { role, content } => json!({
             "type": "message",
@@ -93,7 +93,7 @@ fn provider_item_value(item: &Item) -> Value {
     }
 }
 
-fn json_len(value: &Value) -> usize {
+fn weighed(value: &Value) -> usize {
     serde_json::to_vec(value)
         .map(|bytes| bytes.len())
         .unwrap_or(0)

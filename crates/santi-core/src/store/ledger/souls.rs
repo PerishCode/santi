@@ -3,12 +3,12 @@ pub(crate) use budget::Ingress;
 use rows::{Decode, collected};
 use rusqlite::params;
 
-use super::{SantiStore, db::Database};
-use crate::store::{StartedTurn, budget, rows};
+use super::{Store, db::Database};
+use crate::store::{Begun, budget, rows};
 use crate::{ingest, message, strand, webhook};
 
-impl SantiStore {
-    pub fn find_labeled_strand(&self, soul: &str, label: &str) -> Result<Strand, String> {
+impl Store {
+    pub fn labeled(&self, soul: &str, label: &str) -> Result<Strand, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let database = Database::new(&tx);
@@ -39,12 +39,12 @@ impl SantiStore {
             .ok_or_else(|| "labeled strand missing".to_string())
     }
 
-    pub fn resolve_strand_selector(&self, selector: &strand::Selector) -> Result<Strand, String> {
+    pub fn selected(&self, selector: &strand::Selector) -> Result<Strand, String> {
         match selector {
             strand::Selector::ById(strand) => self
                 .strand(strand)?
                 .ok_or_else(|| "strand not found".to_string()),
-            strand::Selector::ByLabel { soul, label } => self.find_labeled_strand(soul, label),
+            strand::Selector::ByLabel { soul, label } => self.labeled(soul, label),
         }
     }
 
@@ -75,7 +75,7 @@ impl SantiStore {
         .map(|intake| intake.outcome)
     }
 
-    pub fn create_webhook(
+    pub fn subscribe(
         &self,
         request: webhook::Draft,
     ) -> Result<crate::webhook::Subscription, String> {
@@ -104,7 +104,7 @@ impl SantiStore {
             .ok_or_else(|| "created webhook missing".to_string())
     }
 
-    pub fn list_webhooks(&self) -> Result<Vec<crate::webhook::Subscription>, String> {
+    pub fn webhooks(&self) -> Result<Vec<crate::webhook::Subscription>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
@@ -125,7 +125,7 @@ impl SantiStore {
         Database::new(&conn).webhook(name)
     }
 
-    pub fn create_soul(&self) -> Result<crate::soul::Soul, String> {
+    pub fn awaken(&self) -> Result<crate::soul::Soul, String> {
         let conn = self.conn.lock().unwrap();
         let soul = tag("soul");
         let now = now();
@@ -139,7 +139,7 @@ impl SantiStore {
             .ok_or_else(|| "created soul missing".to_string())
     }
 
-    pub fn list_souls(&self) -> Result<Vec<crate::soul::Soul>, String> {
+    pub fn souls(&self) -> Result<Vec<crate::soul::Soul>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
@@ -165,13 +165,13 @@ impl SantiStore {
         Database::new(&conn).strand(strand)
     }
 
-    pub fn soul_id_for_strand(&self, strand: &str) -> Result<String, String> {
+    pub fn keeper(&self, strand: &str) -> Result<String, String> {
         self.strand(strand)?
             .map(|strand| strand.soul)
             .ok_or_else(|| "strand not found".to_string())
     }
 
-    pub fn start_turn(&self, strand: &str, source: &str) -> Result<StartedTurn, String> {
+    pub fn start(&self, strand: &str, source: &str) -> Result<Begun, String> {
         let conn = self.conn.lock().unwrap();
         let turn = tag("turn");
         let now = now();
@@ -190,11 +190,11 @@ impl SantiStore {
             params![turn, strand, source, now],
         )
         .map_err(|error| error.to_string())?;
-        Ok(StartedTurn {
+        Ok(Begun {
             turn: Database::new(&conn)
                 .turn(&turn)?
                 .ok_or_else(|| "created turn missing".to_string())?,
-            drained_messages: Vec::new(),
+            drained: Vec::new(),
         })
     }
 }

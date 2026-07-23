@@ -24,12 +24,12 @@ use crate::ApiError;
         (status = 500, body = Fault)
     )
 )]
-pub(crate) async fn get_bucket_object(
+pub(crate) async fn fetch(
     State(service): State<Service>,
     Path((soul, strand, key)): Path<(String, String, String)>,
 ) -> Result<Response, ApiError> {
     let payload = service
-        .get_bucket_object(&soul, &strand, &key)
+        .fetch(&soul, &strand, &key)
         .map_err(ApiError::from_service)?
         .ok_or_else(|| ApiError::not_found("object not found"))?;
     Response::builder()

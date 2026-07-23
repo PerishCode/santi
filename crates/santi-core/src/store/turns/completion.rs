@@ -3,7 +3,7 @@ use serde_json::json;
 
 use super::{provider_incident_key, runtime_incident_key};
 use crate::message;
-use crate::store::{SantiStore, db::Database, execution_budget_incident_key};
+use crate::store::{Store, db::Database, execution_budget_incident_key};
 use crate::{now, tag, turn::Turn};
 
 pub struct Completion<'a> {
@@ -14,7 +14,7 @@ pub struct Completion<'a> {
     pub response: Option<String>,
 }
 
-impl SantiStore {
+impl Store {
     pub fn complete(&self, completion: Completion<'_>) -> Result<Turn, String> {
         self.finish(completion, None).map(|(turn, _)| turn)
     }
@@ -105,7 +105,7 @@ impl SantiStore {
                 "model": completion.model,
             }),
         )?;
-        let turn_event = if let (Some(label), Some(reply)) = (
+        let turned = if let (Some(label), Some(reply)) = (
             label.as_deref(),
             message.filter(|message| !message.text.trim().is_empty()),
         ) {
@@ -133,6 +133,6 @@ impl SantiStore {
         let turn = Database::new(&conn)
             .turn(completion.turn)?
             .ok_or_else(|| "completed turn missing".to_string())?;
-        Ok((turn, turn_event))
+        Ok((turn, turned))
     }
 }

@@ -1,11 +1,8 @@
 use super::*;
 use crate::budget;
 
-impl SantiStore {
-    pub(crate) fn start_turn_with_budget(
-        &self,
-        launch: Launch<'_>,
-    ) -> Result<StartTurnOutcome, String> {
+impl Store {
+    pub(crate) fn budgeted(&self, launch: Launch<'_>) -> Result<Opened, String> {
         let Launch {
             strand,
             trigger,
@@ -17,7 +14,7 @@ impl SantiStore {
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
-        let running_id: Option<String> = tx
+        let running: Option<String> = tx
             .query_row(
                 "SELECT id FROM turns WHERE strand_id = ?1 AND status = 'running' LIMIT 1",
                 params![strand],
@@ -25,16 +22,16 @@ impl SantiStore {
             )
             .optional()
             .map_err(|error| error.to_string())?;
-        if let Some(turn) = running_id {
+        if let Some(turn) = running {
             let turn = Database::new(&tx)
                 .turn(&turn)?
                 .ok_or_else(|| "running turn missing".to_string())?;
-            return Ok(StartTurnOutcome::Running(turn));
+            return Ok(Opened::Running(turn));
         }
 
         let database = Database::new(&tx);
-        let pending = super::state::pending_items(&database, strand)?;
-        let has_failed_receipt = recover
+        let pending = super::state::queued(&database, strand)?;
+        let scarred = recover
             && tx
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM inbox_receipts WHERE strand_id = ?1 AND state = 'failed')",
@@ -43,54 +40,54 @@ impl SantiStore {
                 )
                 .map_err(|error| error.to_string())?
                 != 0;
-        if pending.is_empty() && !has_failed_receipt {
-            return Ok(StartTurnOutcome::Idle);
+        if pending.is_empty() && !scarred {
+            return Ok(Opened::Idle);
         }
 
         if database.incident(&context_incident_key(strand))?.is_some() {
             let error =
                 super::state::repeat_context_incident(&database, strand, "pending_active_guard")?;
             tx.commit().map_err(|error| error.to_string())?;
-            return Ok(StartTurnOutcome::Held(error));
+            return Ok(Opened::Held(error));
         }
 
         if let Some(admission) = admission {
-            let mut input = assembly_input_in_conn(&tx, strand)?;
+            let mut input = assembled(&tx, strand)?;
             input.extend(pending);
-            let estimate = crate::context::budget::estimate_provider_parts(
+            let estimate = crate::context::budget::estimated(
                 &input,
                 admission.instructions.as_deref(),
                 Some(admission.tools.as_slice()),
             );
-            if estimate.total > admission.budget_bytes {
-                let reason = over_budget_reason(estimate.total, admission.budget_bytes);
-                let observed_at_seq = database.cursor(strand)?;
-                let error = super::state::open_context_incident(
+            if estimate.total > admission.bytes {
+                let reason = reason(estimate.total, admission.bytes);
+                let observed = database.cursor(strand)?;
+                let error = super::state::press(
                     &database,
                     strand,
                     Pressure {
-                        reason_code: REASON_PENDING,
-                        reason_text: &reason,
+                        code: PENDING,
+                        text: &reason,
                         operation: "pending_drain_admission",
                         provider: Some(&admission.provider),
                         model: Some(&admission.model),
-                        budget_source: Some(&admission.budget_source),
-                        budget_bytes: Some(admission.budget_bytes),
+                        source: Some(&admission.source),
+                        bytes: Some(admission.bytes),
                         estimate: &estimate,
-                        observed_turn_id: None,
-                        observed_at_seq,
+                        observed: None,
+                        at: observed,
                         metadata: Some(json!({"estimator": estimate.estimator})),
                     },
                 )?;
                 tx.commit().map_err(|error| error.to_string())?;
-                return Ok(StartTurnOutcome::Held(error));
+                return Ok(Opened::Held(error));
             }
         }
 
         let turn = tag("turn");
         let drained = drain(&tx, strand, &turn)?;
-        if drained.messages.is_empty() && !has_failed_receipt {
-            return Ok(StartTurnOutcome::Idle);
+        if drained.messages.is_empty() && !scarred {
+            return Ok(Opened::Idle);
         }
         let now = now();
         tx.execute(
@@ -106,24 +103,19 @@ impl SantiStore {
             params![turn, strand, trigger, reference, now],
         )
         .map_err(|error| error.to_string())?;
-        let recovered_incident_id = crate::store::errors::drive::resolve_in_conn(
+        let recovered = crate::store::errors::drive::resolve_in_conn(
             &tx,
             strand,
             &turn,
             drained.messages.len(),
         )?;
-        Database::new(&tx).begin(
-            strand,
-            &turn,
-            &drained.inboxes,
-            recovered_incident_id.as_deref(),
-        )?;
+        Database::new(&tx).begin(strand, &turn, &drained.inboxes, recovered.as_deref())?;
         tx.commit().map_err(|error| error.to_string())?;
-        Ok(StartTurnOutcome::Started(StartedTurn {
+        Ok(Opened::Started(Begun {
             turn: Database::new(&conn)
                 .turn(&turn)?
                 .ok_or_else(|| "created turn missing".to_string())?,
-            drained_messages: drained.messages,
+            drained: drained.messages,
         }))
     }
 }
@@ -135,7 +127,7 @@ pub(crate) fn execution_budget_incident_key(strand: &str) -> String {
     )
 }
 
-impl SantiStore {
+impl Store {
     pub(crate) fn strand_execution_usage(&self, strand: &str) -> Result<budget::Usage, String> {
         let conn = self.conn.lock().unwrap();
         let calls = conn
@@ -173,7 +165,7 @@ impl SantiStore {
         for row in rows {
             let (output, error) = row.map_err(|error| error.to_string())?;
             held = held.saturating_add(match output {
-                Some(output) => captured_output_bytes(&output),
+                Some(output) => captured(&output),
                 None => error.as_deref().map_or(0, str::len),
             });
         }
@@ -184,7 +176,7 @@ impl SantiStore {
     }
 }
 
-fn captured_output_bytes(output: &str) -> usize {
+fn captured(output: &str) -> usize {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
         return output.len();
     };

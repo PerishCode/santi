@@ -5,20 +5,20 @@ use santi_core::{message, soul, strand};
 async fn shutdown_pauses_consumption() {
     let temp = tempfile::tempdir().expect("temp dir");
     let config = service::Config {
-        database_path: temp.path().join("santi.sqlite").display().to_string(),
-        runtime_root: temp.path().join("runtime").display().to_string(),
-        execution_root: temp.path().join("execution").display().to_string(),
-        bind_addr: Some("127.0.0.1:0".to_string()),
-        constitution_path: None,
+        database: temp.path().join("santi.sqlite").display().to_string(),
+        runtime: temp.path().join("runtime").display().to_string(),
+        execution: temp.path().join("execution").display().to_string(),
+        bind: Some("127.0.0.1:0".to_string()),
+        constitution: None,
     };
     let provider = Arc::new(FakeProvider::default());
 
     let strand = {
         let service = Service::open(config.clone(), provider.clone()).expect("open service");
-        service.begin_shutdown();
-        assert!(service.is_shutting_down());
+        service.close();
+        assert!(service.closing());
         let outcome = service
-            .ingest_external_event(
+            .evented(
                 "soul_default",
                 "shutdown:quiesce",
                 "arrived while quiescing".to_string(),
@@ -30,23 +30,20 @@ async fn shutdown_pauses_consumption() {
         }
     };
 
-    let store = SantiStore::open(&config.database_path).expect("open store directly");
+    let store = Store::open(&config.database).expect("open store directly");
     assert_eq!(
-        store.running_turn_count().expect("count"),
+        store.running().expect("count"),
         0,
         "shutdown must not start a turn"
     );
     assert!(
-        store
-            .strands_with_pending_requests()
-            .expect("pending")
-            .contains(&strand),
+        store.awaiting().expect("pending").contains(&strand),
         "the ingested record must still be durably queued"
     );
     drop(store);
 
     let service = Service::open(config, provider.clone()).expect("reopen service");
-    service.resume_pending().expect("resume pending");
+    service.resume().expect("resume pending");
     let runtime = Probe::new(&service).any_completed(&strand).await;
     assert!(
         runtime
@@ -62,28 +59,28 @@ async fn send_targets_soul() {
     let provider = Arc::new(FakeProvider::default());
     let service = Service::open(
         service::Config {
-            database_path: temp.path().join("santi.sqlite").display().to_string(),
-            runtime_root: temp.path().join("runtime").display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: temp.path().join("santi.sqlite").display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         provider.clone(),
     )
     .expect("open service");
 
-    let default_soul = service.list_souls().expect("list souls")[0].id.clone();
+    let default_soul = service.souls().expect("list souls")[0].id.clone();
     let secretary = service
-        .create_soul(soul::Draft {
+        .awaken(soul::Draft {
             memory: Some("# I am the secretary".to_string()),
         })
         .expect("create soul");
     assert_ne!(secretary.id, default_soul);
 
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
     assert_eq!(strand.soul, default_soul);
     let response = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -98,7 +95,7 @@ async fn send_targets_soul() {
     let santi_core::ingest::Outcome::Accepted {
         receipt: secretary_receipt,
     } = service
-        .ingest_external_event(
+        .evented(
             &secretary.id,
             "github:issue:1",
             "hello secretary".to_string(),
@@ -109,7 +106,7 @@ async fn send_targets_soul() {
     };
     let secretary_strand_id = secretary_receipt.strand;
     let secretary_response = service
-        .send_strand(
+        .send(
             &secretary_strand_id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -122,7 +119,7 @@ async fn send_targets_soul() {
     assert_eq!(secretary_response.strand.soul, secretary.id);
 
     let error = service
-        .send_strand(
+        .send(
             "ss_does_not_exist",
             strand::Post {
                 content: vec![message::Part::Text {

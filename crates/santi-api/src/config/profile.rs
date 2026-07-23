@@ -35,7 +35,7 @@ pub struct OpenAiResponsesConfig {
     pub model: String,
     pub base_url: String,
     pub reasoning_effort: Option<String>,
-    pub reasoning_summary: Option<String>,
+    pub summary: Option<String>,
     pub max_output_tokens: Option<u32>,
     pub bytes: usize,
 }
@@ -65,7 +65,7 @@ pub enum Profile {
         #[serde(default)]
         reasoning_effort: Option<String>,
         #[serde(default)]
-        reasoning_summary: Option<String>,
+        summary: Option<String>,
         #[serde(default)]
         max_output_tokens: Option<u32>,
         #[serde(default)]
@@ -105,7 +105,7 @@ pub(super) fn resolve_openai(provider: &str, profile: &Profile) -> Result<Provid
         model,
         base_url,
         reasoning_effort,
-        reasoning_summary,
+        summary,
         max_output_tokens,
         bytes,
     } = profile
@@ -118,11 +118,7 @@ pub(super) fn resolve_openai(provider: &str, profile: &Profile) -> Result<Provid
         base_url: optional_profile_string(base_url, provider, "base_url")?
             .unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
         reasoning_effort: optional_profile_string(reasoning_effort, provider, "reasoning_effort")?,
-        reasoning_summary: optional_profile_string(
-            reasoning_summary,
-            provider,
-            "reasoning_summary",
-        )?,
+        summary: optional_profile_string(summary, provider, "reasoning_summary")?,
         max_output_tokens: *max_output_tokens,
         bytes: required_positive_usize(*bytes, provider, "bytes")?,
     }))
@@ -225,9 +221,9 @@ pub fn santi_home() -> PathBuf {
 
 #[derive(Debug, Clone)]
 pub struct RuntimePaths {
-    pub database_path: PathBuf,
-    pub runtime_root: PathBuf,
-    pub execution_root: PathBuf,
+    pub database: PathBuf,
+    pub runtime: PathBuf,
+    pub execution: PathBuf,
 }
 
 pub(super) fn expand_home(path: &str) -> PathBuf {

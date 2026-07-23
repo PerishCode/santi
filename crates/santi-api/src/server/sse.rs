@@ -27,7 +27,7 @@ pub(super) async fn strand_events(
         .ok_or_else(|| ApiError::not_found("strand not found"))?;
     drop(held);
 
-    let mut receiver = service.subscribe_stream();
+    let mut receiver = service.listen();
     let opened = strand.clone();
     let stream = async_stream::stream! {
         yield Ok(sse_event(santi_core::stream::Event {
@@ -49,10 +49,10 @@ pub(super) async fn strand_events(
     path = "/api/v1/errors/events",
     responses((status = 200, description = "Canonical global error lifecycle stream"))
 )]
-pub(super) async fn error_events(
+pub(super) async fn transitions(
     State(service): State<Service>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let mut receiver = service.subscribe_error_transitions();
+    let mut receiver = service.harken();
     let stream = async_stream::stream! {
         while let Some(transition) = receive(&mut receiver).await {
             yield Ok(error_sse_event(transition));
@@ -78,7 +78,7 @@ pub(super) async fn turn_event_stream(
         .principal(bearer(&headers))
         .map_err(ApiError::from_service)?
         .ok_or_else(|| ApiError::unauthorized("invalid or missing credential"))?;
-    let mut receiver = service.subscribe_stream();
+    let mut receiver = service.listen();
     let stream = async_stream::stream! {
         while receive_turn(&mut receiver, &principal.prefix).await {
             yield Ok(Event::default().event("turn_event_available").data("{}"));

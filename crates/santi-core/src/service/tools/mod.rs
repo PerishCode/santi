@@ -5,23 +5,20 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::workspace;
-use crate::{
-    SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, parse_workspace_uri, soul_memory_uri,
-    strand_memory_uri,
-};
+use crate::{SOULSPACE, STRANDSPACE, parsed, soulward, strandward};
 
 use super::Service;
 use crate::{effect, stream};
 
 mod shell;
 
-pub(crate) fn provider_tools() -> Vec<Tool> {
-    let soul_memory_uri = soul_memory_uri();
-    let strand_memory_uri = strand_memory_uri();
+pub(crate) fn tools() -> Vec<Tool> {
+    let soulward = soulward();
+    let strandward = strandward();
     vec![Tool::Function(Function {
         name: "shell".to_string(),
         description: format!(
-            "Run a shell command. By default commands run in the current execution workspace. Use cwd \"{SOUL_WORKSPACE_URI}\" to work in the current soul workspace, where {soul_memory_uri} is always rendered live in [santi-soul]. Use cwd \"{STRAND_WORKSPACE_URI}\" to work in the current strand workspace, where {strand_memory_uri} is always rendered live in [santi-strand]. Unix-like systems use bash by default; Windows uses pwsh by default."
+            "Run a shell command. By default commands run in the current execution workspace. Use cwd \"{SOULSPACE}\" to work in the current soul workspace, where {soulward} is always rendered live in [santi-soul]. Use cwd \"{STRANDSPACE}\" to work in the current strand workspace, where {strandward} is always rendered live in [santi-strand]. Unix-like systems use bash by default; Windows uses pwsh by default."
         ),
         parameters: json!({
             "type": "object",
@@ -32,7 +29,7 @@ pub(crate) fn provider_tools() -> Vec<Tool> {
                 },
                 "cwd": {
                     "type": "string",
-                    "description": format!("Optional workspace URI. Supports {SOUL_WORKSPACE_URI}, {SOUL_WORKSPACE_URI}<path>, {STRAND_WORKSPACE_URI}, and {STRAND_WORKSPACE_URI}<path>.")
+                    "description": format!("Optional workspace URI. Supports {SOULSPACE}, {SOULSPACE}<path>, {STRANDSPACE}, and {STRANDSPACE}<path>.")
                 }
             },
             "required": ["command"],
@@ -50,7 +47,7 @@ struct Shell<'a> {
 }
 
 impl Service {
-    pub(super) fn handle_tool_call(
+    pub(super) fn tooled(
         &self,
         strand: &str,
         turn: &str,
@@ -64,7 +61,7 @@ impl Service {
             mark: call.mark.clone(),
             response: Some(call.response.clone()),
         };
-        let (tool_call, effect) = self.store.append_effect_call(
+        let (held, effect) = self.store.append_effect_call(
             crate::Invocation {
                 turn,
                 call: &call.call,
@@ -74,14 +71,12 @@ impl Service {
             },
             kind,
         )?;
-        self.publish_stream(
+        self.publish(
             strand,
-            stream::Payload::ToolCallCreated {
-                tool_call: tool_call.clone(),
-            },
+            stream::Payload::ToolCallCreated { call: held.clone() },
         );
         let result = if let Some(effect) = effect {
-            self.handle_shell_effect(Shell {
+            self.shelled(Shell {
                 strand,
                 turn,
                 call: &call,
@@ -92,22 +87,17 @@ impl Service {
             self.store.append_tool_result(
                 &call.call,
                 None,
-                Some(bounded_tool_error(
+                Some(curbed(
                     format!("unsupported tool: {}", call.name),
                     output_limit,
                 )),
             )?
         };
-        self.publish_stream(
-            strand,
-            stream::Payload::ToolResultCreated {
-                tool_result: result,
-            },
-        );
+        self.publish(strand, stream::Payload::ToolResultCreated { result });
         Ok(())
     }
 
-    fn handle_shell_effect(&self, shell: Shell<'_>) -> Result<crate::tool::Reply, String> {
+    fn shelled(&self, shell: Shell<'_>) -> Result<crate::tool::Reply, String> {
         let Shell {
             strand,
             turn,
@@ -115,9 +105,9 @@ impl Service {
             effect,
             limit: output_limit,
         } = shell;
-        let soul = self.store.soul_id_for_strand(strand)?;
-        let prepared = match parse_tool_args::<shell::Args>(&call.arguments)
-            .and_then(|args| self.prepare_shell(strand, turn, &soul, args))
+        let soul = self.store.keeper(strand)?;
+        let prepared = match argued::<shell::Args>(&call.arguments)
+            .and_then(|args| self.prepared(strand, turn, &soul, args))
         {
             Ok(prepared) => prepared,
             Err(error) => {
@@ -126,14 +116,14 @@ impl Service {
                     crate::store::Settlement {
                         call: &call.call,
                         output: None,
-                        error: Some(bounded_tool_error(error, output_limit)),
+                        error: Some(curbed(error, output_limit)),
                         state: effect::State::NotDispatched,
                     },
                 );
             }
         };
-        self.store.begin_effect_dispatch(effect)?;
-        match shell::run_prepared_shell(prepared, output_limit) {
+        self.store.dispatch(effect)?;
+        match shell::ran(prepared, output_limit) {
             shell::Outcome::Captured(output) => self.store.append_effect_tool_result(
                 effect,
                 crate::store::Settlement {
@@ -148,16 +138,13 @@ impl Service {
                 crate::store::Settlement {
                     call: &call.call,
                     output: None,
-                    error: Some(bounded_tool_error(error, output_limit)),
+                    error: Some(curbed(error, output_limit)),
                     state: effect::State::NotDispatched,
                 },
             ),
             shell::Outcome::Unknown(error) => {
-                self.store.mark_effect_unknown(
-                    effect,
-                    effect::Reason::ResultCaptureFailed,
-                    &error,
-                )?;
+                self.store
+                    .unmark(effect, effect::Reason::ResultCaptureFailed, &error)?;
                 Err(format!(
                     "shell effect {effect} outcome is unknown; automatic replay is forbidden: {error}"
                 ))
@@ -165,7 +152,7 @@ impl Service {
         }
     }
 
-    fn prepare_shell(
+    fn prepared(
         &self,
         strand: &str,
         turn: &str,
@@ -175,9 +162,9 @@ impl Service {
         std::fs::create_dir_all(self.soul_memory_dir(soul)).map_err(|error| error.to_string())?;
         std::fs::create_dir_all(self.strand_memory_dir(strand))
             .map_err(|error| error.to_string())?;
-        let cwd = self.resolve_shell_cwd(strand, soul, args.cwd.as_deref())?;
+        let cwd = self.situated(strand, soul, args.cwd.as_deref())?;
         std::fs::create_dir_all(&cwd).map_err(|error| error.to_string())?;
-        let mut command = shell::shell_command(&args.command);
+        let mut command = shell::shell(&args.command);
         command
             .current_dir(&cwd)
             .env("SANTI_SOUL_MEMORY_DIR", self.soul_memory_dir(soul))
@@ -190,16 +177,11 @@ impl Service {
         Ok(shell::Prepared { command, cwd })
     }
 
-    fn resolve_shell_cwd(
-        &self,
-        strand: &str,
-        soul: &str,
-        cwd: Option<&str>,
-    ) -> Result<PathBuf, String> {
+    fn situated(&self, strand: &str, soul: &str, cwd: Option<&str>) -> Result<PathBuf, String> {
         let Some(cwd) = cwd else {
-            return Ok(self.execution_root());
+            return Ok(self.execution());
         };
-        let uri = parse_workspace_uri(cwd)?;
+        let uri = parsed(cwd)?;
         let root = match uri.root {
             workspace::Root::Soul => self.soul_memory_dir(soul),
             workspace::Root::Strand => self.strand_memory_dir(strand),
@@ -207,27 +189,24 @@ impl Service {
         Ok(root.join(uri.path))
     }
 
-    pub(super) fn runtime_root(&self) -> PathBuf {
-        PathBuf::from(&self.config.runtime_root)
+    pub(super) fn runtime(&self) -> PathBuf {
+        PathBuf::from(&self.config.runtime)
     }
 
-    pub(super) fn execution_root(&self) -> PathBuf {
-        PathBuf::from(&self.config.execution_root)
+    pub(super) fn execution(&self) -> PathBuf {
+        PathBuf::from(&self.config.execution)
     }
 
     pub(super) fn soul_memory_dir(&self, soul: &str) -> PathBuf {
-        self.runtime_root().join("souls").join(soul).join("memory")
+        self.runtime().join("souls").join(soul).join("memory")
     }
 
-    pub(super) fn soul_memory_file(&self, soul: &str) -> PathBuf {
-        crate::store::soul_memory_file(self.runtime_root(), soul)
+    pub(super) fn memoir(&self, soul: &str) -> PathBuf {
+        crate::store::memoir(self.runtime(), soul)
     }
 
     pub(super) fn strand_memory_dir(&self, strand: &str) -> PathBuf {
-        self.runtime_root()
-            .join("strands")
-            .join(strand)
-            .join("memory")
+        self.runtime().join("strands").join(strand).join("memory")
     }
 
     pub(super) fn strand_memory_file(&self, strand: &str) -> PathBuf {
@@ -236,14 +215,14 @@ impl Service {
 
     pub(super) fn constitution_file(&self) -> PathBuf {
         self.config
-            .constitution_path
+            .constitution
             .as_ref()
             .map(PathBuf::from)
-            .unwrap_or_else(|| self.runtime_root().join("constitution.md"))
+            .unwrap_or_else(|| self.runtime().join("constitution.md"))
     }
 }
 
-fn bounded_tool_error(error: String, limit: Option<usize>) -> String {
+fn curbed(error: String, limit: Option<usize>) -> String {
     let Some(limit) = limit else {
         return error;
     };
@@ -257,6 +236,6 @@ fn bounded_tool_error(error: String, limit: Option<usize>) -> String {
     error[..end].to_string()
 }
 
-fn parse_tool_args<T: for<'de> Deserialize<'de>>(value: &Value) -> Result<T, String> {
+fn argued<T: for<'de> Deserialize<'de>>(value: &Value) -> Result<T, String> {
     serde_json::from_value(value.clone()).map_err(|error| error.to_string())
 }

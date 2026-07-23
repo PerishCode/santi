@@ -6,13 +6,12 @@ use crate::Fault;
 use super::{Pressure, context_incident_key};
 use crate::message;
 
-pub(super) fn pending_items(db: &Database<'_>, strand: &str) -> Result<Vec<Item>, String> {
+pub(super) fn queued(db: &Database<'_>, strand: &str) -> Result<Vec<Item>, String> {
     let mut items = Vec::new();
     for (kind, blob) in db.pending(strand)? {
         let content =
             serde_json::from_str::<message::Content>(&blob).map_err(|error| error.to_string())?;
-        if let Some(item) =
-            crate::context::budget::inbound_provider_item(&message::Kind::decode(&kind), &content)
+        if let Some(item) = crate::context::budget::inbound(&message::Kind::decode(&kind), &content)
         {
             items.push(item);
         }
@@ -20,12 +19,8 @@ pub(super) fn pending_items(db: &Database<'_>, strand: &str) -> Result<Vec<Item>
     Ok(items)
 }
 
-pub(super) fn open_context_incident(
-    db: &Database<'_>,
-    strand: &str,
-    input: Pressure<'_>,
-) -> Result<Fault, String> {
-    db.open(input.into_draft(strand))
+pub(super) fn press(db: &Database<'_>, strand: &str, input: Pressure<'_>) -> Result<Fault, String> {
+    db.open(input.drafted(strand))
 }
 
 pub(super) fn repeat_context_incident(

@@ -8,19 +8,19 @@ async fn sends_with_runtime() {
     let provider = Arc::new(FakeProvider::default());
     let service = Service::open(
         service::Config {
-            database_path: temp.path().join("santi.sqlite").display().to_string(),
-            runtime_root: temp.path().join("runtime").display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: temp.path().join("santi.sqlite").display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         provider.clone(),
     )
     .expect("open service");
 
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
     let response = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -81,14 +81,14 @@ async fn sends_with_runtime() {
     assert!(instructions.contains("[santi-strand]"));
     assert!(instructions.contains(&format!(
         "{} will always be displayed in [santi-soul].",
-        soul_memory_uri()
+        soulward()
     )));
     assert!(instructions.contains(&format!(
         "{} will always be displayed in [santi-strand].",
-        strand_memory_uri()
+        strandward()
     )));
     assert!(instructions.contains(&format!(
-        "These files have no internal version history; save backups into {SOUL_WORKSPACE_URI} or {STRAND_WORKSPACE_URI} if needed."
+        "These files have no internal version history; save backups into {SOULSPACE} or {STRANDSPACE} if needed."
     )));
     assert!(
         instructions
@@ -101,8 +101,8 @@ async fn sends_with_runtime() {
         instructions
             .contains("Read them as strand facts about the workspace, runtime, or provider flow.")
     );
-    assert!(instructions.contains(&format!("source: {}", soul_memory_uri())));
-    assert!(instructions.contains(&format!("source: {}", strand_memory_uri())));
+    assert!(instructions.contains(&format!("source: {}", soulward())));
+    assert!(instructions.contains(&format!("source: {}", strandward())));
     assert!(!instructions.contains("hint:"));
     assert!(!instructions.contains("@soul"));
     assert!(!instructions.contains("@strand"));
@@ -125,8 +125,8 @@ async fn sends_with_runtime() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(tool_descriptions.contains(&soul_memory_uri()));
-    assert!(tool_descriptions.contains(&strand_memory_uri()));
+    assert!(tool_descriptions.contains(&soulward()));
+    assert!(tool_descriptions.contains(&strandward()));
     assert!(!tool_descriptions.contains("@soul"));
     assert!(!tool_descriptions.contains("@strand"));
 

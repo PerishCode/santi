@@ -4,13 +4,13 @@ use santi_core::{message, tool};
 #[test]
 fn fork_copies_prefix() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let parent = store.create_strand().expect("create parent");
+    let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
+    let parent = store.weave().expect("create parent");
     let first = store
         .append_message(Draft {
             strand: &parent.id,
             actor: message::Role::System,
-            id: store.system_actor_id(),
+            id: store.system(),
             content: message::Content::text("first"),
             state: message::State::Fixed,
             intake: message::Intake::Record,
@@ -21,7 +21,7 @@ fn fork_copies_prefix() {
         .append_message(Draft {
             strand: &parent.id,
             actor: message::Role::System,
-            id: store.system_actor_id(),
+            id: store.system(),
             content: message::Content::text("second"),
             state: message::State::Fixed,
             intake: message::Intake::Record,
@@ -32,7 +32,7 @@ fn fork_copies_prefix() {
         .append_message(Draft {
             strand: &parent.id,
             actor: message::Role::System,
-            id: store.system_actor_id(),
+            id: store.system(),
             content: message::Content::text("third"),
             state: message::State::Fixed,
             intake: message::Intake::Record,
@@ -40,7 +40,7 @@ fn fork_copies_prefix() {
         .expect("append third")
         .strand_message;
 
-    let child = store.fork_strand(&parent.id, 2).expect("fork");
+    let child = store.fork(&parent.id, 2).expect("fork");
     assert_eq!(child.parent.as_deref(), Some(parent.id.as_str()));
     assert_eq!(child.fork, Some(2));
     assert_eq!(child.next, 3);
@@ -65,8 +65,8 @@ fn fork_copies_prefix() {
 #[test]
 fn fork_copies_inner_compacts() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let parent = store.create_strand().expect("create parent");
+    let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
+    let parent = store.weave().expect("create parent");
     let mut messages = Vec::new();
     for text in ["one", "two", "three", "four"] {
         messages.push(
@@ -74,7 +74,7 @@ fn fork_copies_inner_compacts() {
                 .append_message(Draft {
                     strand: &parent.id,
                     actor: message::Role::System,
-                    id: store.system_actor_id(),
+                    id: store.system(),
                     content: message::Content::text(text),
                     state: message::State::Fixed,
                     intake: message::Intake::Record,
@@ -84,7 +84,7 @@ fn fork_copies_inner_compacts() {
         );
     }
     let inside = store
-        .create_compact(
+        .compact(
             &parent.id,
             &messages[0].message.id,
             &messages[1].message.id,
@@ -92,7 +92,7 @@ fn fork_copies_inner_compacts() {
         )
         .expect("inside compact");
     let crossing = store
-        .create_compact(
+        .compact(
             &parent.id,
             &messages[2].message.id,
             &messages[3].message.id,
@@ -100,9 +100,9 @@ fn fork_copies_inner_compacts() {
         )
         .expect("crossing compact");
 
-    let child = store.fork_strand(&parent.id, 3).expect("fork");
+    let child = store.fork(&parent.id, 3).expect("fork");
     let snapshot = store
-        .runtime_snapshot(&child.id)
+        .snapshot(&child.id)
         .expect("snapshot")
         .expect("child snapshot");
     assert_eq!(snapshot.compacts.len(), 1);
@@ -113,7 +113,7 @@ fn fork_copies_inner_compacts() {
     assert_eq!(snapshot.compacts[0].last, inside.last);
     assert_ne!(snapshot.compacts[0].id, crossing.compact);
 
-    let input = store.assembly_input(&child.id).expect("child input");
+    let input = store.assembly(&child.id).expect("child input");
     assert_eq!(input.len(), 2);
     let Item::Message { role, content } = &input[0] else {
         panic!("expected compact projection message");
@@ -133,13 +133,13 @@ fn fork_copies_inner_compacts() {
 #[test]
 fn fork_reuses_tools() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let parent = store.create_strand().expect("create parent");
+    let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
+    let parent = store.weave().expect("create parent");
     let user = store
         .append_message(Draft {
             strand: &parent.id,
             actor: message::Role::System,
-            id: store.system_actor_id(),
+            id: store.system(),
             content: message::Content::text("run"),
             state: message::State::Fixed,
             intake: message::Intake::Request,
@@ -147,7 +147,7 @@ fn fork_reuses_tools() {
         .expect("append user")
         .strand_message;
     let turn = store
-        .start_turn(&parent.id, &user.message.id)
+        .start(&parent.id, &user.message.id)
         .expect("start turn")
         .turn;
     store
@@ -172,9 +172,9 @@ fn fork_reuses_tools() {
         )
         .expect("append tool result");
 
-    let child = store.fork_strand(&parent.id, 3).expect("fork");
+    let child = store.fork(&parent.id, 3).expect("fork");
     let snapshot = store
-        .runtime_snapshot(&child.id)
+        .snapshot(&child.id)
         .expect("snapshot")
         .expect("child snapshot");
     assert_eq!(snapshot.calls.len(), 1);
@@ -182,7 +182,7 @@ fn fork_reuses_tools() {
     assert_eq!(snapshot.results.len(), 1);
     assert_eq!(snapshot.results[0].call, "call_fork");
 
-    let child_input = store.assembly_input(&child.id).expect("child input");
+    let child_input = store.assembly(&child.id).expect("child input");
     assert_eq!(child_input.len(), 3);
     match &child_input[1] {
         Item::Call {
@@ -206,15 +206,12 @@ fn fork_reuses_tools() {
 #[test]
 fn fork_drops_external_state() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
+    let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let parent = store
-        .find_labeled_strand(store.default_soul_id(), "github:issue:fork")
+        .labeled(store.default_soul_id(), "github:issue:fork")
         .expect("label strand");
     assert_eq!(parent.label.as_deref(), Some("github:issue:fork"));
-    let turn = store
-        .start_turn(&parent.id, "manual")
-        .expect("start turn")
-        .turn;
+    let turn = store.start(&parent.id, "manual").expect("start turn").turn;
     store
         .complete(Completion {
             turn: &turn.id,
@@ -230,7 +227,7 @@ fn fork_drops_external_state() {
         .expect("parent");
     assert!(parent.state.is_some());
 
-    let child = store.fork_strand(&parent.id, 0).expect("fork empty prefix");
+    let child = store.fork(&parent.id, 0).expect("fork empty prefix");
 
     assert_eq!(child.parent.as_deref(), Some(parent.id.as_str()));
     assert_eq!(child.fork, Some(0));

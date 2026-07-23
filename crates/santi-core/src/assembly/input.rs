@@ -1,7 +1,7 @@
 use santi_provider::Item;
 
-use crate::SantiStore;
+use crate::Store;
 
-pub(crate) fn provider_input(store: &SantiStore, strand: &str) -> Result<Vec<Item>, String> {
-    store.assembly_input(strand)
+pub(crate) fn input(store: &Store, strand: &str) -> Result<Vec<Item>, String> {
+    store.assembly(strand)
 }

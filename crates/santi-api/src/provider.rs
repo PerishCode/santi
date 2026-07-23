@@ -17,7 +17,7 @@ fn openai_provider(config: OpenAiResponsesConfig) -> Arc<dyn Provider> {
         model: config.model,
         url: config.base_url,
         effort: config.reasoning_effort,
-        summary: config.reasoning_summary,
+        summary: config.summary,
         ceiling: config.max_output_tokens,
         bytes: Some(config.bytes),
     }))

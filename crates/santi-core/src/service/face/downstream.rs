@@ -13,11 +13,11 @@ impl Service {
         self.store.downstreams().map(|downstreams| {
             downstreams
                 .into_iter()
-                .find(|downstream| same_digest(&downstream.digest, &digest))
+                .find(|downstream| same(&downstream.digest, &digest))
         })
     }
 
-    pub fn create_downstream(
+    pub fn enroll(
         &self,
         request: crate::downstream::Draft,
     ) -> Result<downstream::Credential, String> {
@@ -36,14 +36,14 @@ impl Service {
         if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err("downstream digest must be 64 hexadecimal characters".to_string());
         }
-        self.store.create_downstream(id, prefix, &digest)
+        self.store.enroll(id, prefix, &digest)
     }
 
     pub fn downstreams(&self) -> Result<Vec<downstream::Credential>, String> {
         self.store.downstreams()
     }
 
-    pub fn ingest_downstream(
+    pub fn downstream(
         &self,
         bearer: &str,
         mut request: ingest::Request,
@@ -71,15 +71,15 @@ impl Service {
         let digest = hex::encode(Sha256::digest(
             serde_json::to_vec(&request).map_err(|error| error.to_string())?,
         ));
-        if let Some(receipt) =
-            self.store
-                .replay_downstream(&downstream.id, &request.request, &digest)?
+        if let Some(receipt) = self
+            .store
+            .replayed(&downstream.id, &request.request, &digest)?
         {
             return Ok(Admission::Accepted(crate::ingest::Outcome::Accepted {
                 receipt,
             }));
         }
-        let outcome = self.ingest_external(External {
+        let outcome = self.external(External {
             soul: &request.soul,
             label: &request.label,
             text: request.text,
@@ -94,7 +94,7 @@ impl Service {
     }
 }
 
-fn same_digest(left: &str, right: &str) -> bool {
+fn same(left: &str, right: &str) -> bool {
     if left.len() != right.len() {
         return false;
     }

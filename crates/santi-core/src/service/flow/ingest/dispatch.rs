@@ -1,20 +1,16 @@
 use crate::service::flow::memory::{Gate, drive_maintenance};
 use crate::service::{Service, drive};
-use crate::store::{Launch, StartTurnOutcome, errors::drive::Input};
+use crate::store::{Launch, Opened, errors::drive::Input};
 use crate::{Fault, catalog, engine};
 
 use super::*;
 use crate::{ingest, message, strand, stream};
 
 impl Service {
-    pub async fn send_strand(
-        &self,
-        strand: &str,
-        request: strand::Post,
-    ) -> Result<strand::Posted, Fault> {
+    pub async fn send(&self, strand: &str, request: strand::Post) -> Result<strand::Posted, Fault> {
         let text = request.text();
         if text.trim().is_empty() {
-            return Err(send_error(
+            return Err(erred(
                 catalog::INVALID_ARGUMENT,
                 strand,
                 "send content must contain text".to_string(),
@@ -23,10 +19,8 @@ impl Service {
         let strand = self
             .store
             .strand(strand)
-            .map_err(|message| send_error(catalog::INTERNAL, strand, message))?
-            .ok_or_else(|| {
-                send_error(catalog::NOT_FOUND, strand, "strand not found".to_string())
-            })?;
+            .map_err(|message| erred(catalog::INTERNAL, strand, message))?
+            .ok_or_else(|| erred(catalog::NOT_FOUND, strand, "strand not found".to_string()))?;
 
         let (outcome, drive) = self
             .enqueue(
@@ -41,7 +35,7 @@ impl Service {
                     replay: None,
                 },
             )
-            .map_err(|message| send_error(catalog::INTERNAL, &strand.id, message))?;
+            .map_err(|message| erred(catalog::INTERNAL, &strand.id, message))?;
         let receipt = match outcome {
             ingest::Outcome::Accepted { receipt } => receipt,
             ingest::Outcome::Rejected { error } => return Err(*error),
@@ -66,15 +60,15 @@ impl Service {
     pub fn drive_strand(&self, strand: &str) -> Result<crate::drive::Response, Box<Fault>> {
         self.store
             .strand(strand)
-            .map_err(|message| Box::new(send_error(catalog::INTERNAL, strand, message)))?
+            .map_err(|message| Box::new(erred(catalog::INTERNAL, strand, message)))?
             .ok_or_else(|| {
-                Box::new(send_error(
+                Box::new(erred(
                     catalog::NOT_FOUND,
                     strand,
                     "strand not found".to_string(),
                 ))
             })?;
-        match self.poke_failed_receipts(strand, "strand_send", None, "operator_redrive") {
+        match self.poked(strand, "strand_send", None, "operator_redrive") {
             drive::Outcome::Started(turn, _) => Ok(crate::drive::Response {
                 strand: strand.to_string(),
                 state: crate::drive::State::Started,
@@ -103,53 +97,53 @@ impl Service {
         &self,
         strand: &str,
         trigger: &str,
-        accepted_inbox_id: Option<&str>,
+        inbox: Option<&str>,
         operation: &str,
     ) -> drive::Outcome {
-        self.poke_inner(
+        self.poking(
             strand,
             Drive {
                 trigger,
-                accepted_inbox_id,
+                inbox,
                 operation,
-                recover_failed_receipts: false,
+                recovered: false,
             },
         )
     }
 
-    pub(in crate::service) fn poke_failed_receipts(
+    pub(in crate::service) fn poked(
         &self,
         strand: &str,
         trigger: &str,
-        accepted_inbox_id: Option<&str>,
+        inbox: Option<&str>,
         operation: &str,
     ) -> drive::Outcome {
-        self.poke_inner(
+        self.poking(
             strand,
             Drive {
                 trigger,
-                accepted_inbox_id,
+                inbox,
                 operation,
-                recover_failed_receipts: true,
+                recovered: true,
             },
         )
     }
 
-    fn poke_inner(&self, strand: &str, drive: Drive<'_>) -> drive::Outcome {
-        if self.is_shutting_down() {
+    fn poking(&self, strand: &str, drive: Drive<'_>) -> drive::Outcome {
+        if self.closing() {
             return drive::Outcome::Paused;
         }
         let strand = match self.store.strand(strand) {
             Ok(Some(strand)) => strand,
             Ok(None) => {
-                return drive::Outcome::Failed(self.record_drive_failure(
+                return drive::Outcome::Failed(self.stumbled(
                     strand,
                     drive,
                     "strand not found".to_string(),
                 ));
             }
             Err(error) => {
-                return drive::Outcome::Failed(self.record_drive_failure(strand, drive, error));
+                return drive::Outcome::Failed(self.stumbled(strand, drive, error));
             }
         };
         match self.memory_drive_gate(&strand) {
@@ -161,65 +155,61 @@ impl Service {
                 return drive::Outcome::Paused;
             }
             Err(error) => {
-                return drive::Outcome::Failed(self.record_drive_failure(&strand.id, drive, error));
+                return drive::Outcome::Failed(self.stumbled(&strand.id, drive, error));
             }
         }
         if let Err(error) = self.clear_context_incident(&strand.id, "driver_remeasurement") {
-            return drive::Outcome::Failed(self.record_drive_failure(&strand.id, drive, error));
+            return drive::Outcome::Failed(self.stumbled(&strand.id, drive, error));
         }
         let admission = match self.context_admission(&strand.id) {
             Ok(admission) => admission,
             Err(error) => {
-                return drive::Outcome::Failed(self.record_drive_failure(&strand.id, drive, error));
+                return drive::Outcome::Failed(self.stumbled(&strand.id, drive, error));
             }
         };
-        let started = self.store.start_turn_with_budget(Launch {
+        let started = self.store.budgeted(Launch {
             strand: &strand.id,
             trigger: drive.trigger,
             reference: None,
             admission: admission.as_ref(),
-            recover: drive.recover_failed_receipts,
+            recover: drive.recovered,
         });
-        self.dispatch_error_events();
+        self.dispatched();
         match started {
-            Ok(StartTurnOutcome::Started(started)) => {
-                self.refresh_drive_health();
-                for message in started.drained_messages.iter().cloned() {
-                    self.publish_stream(&strand.id, stream::Payload::MessageCreated { message });
+            Ok(Opened::Started(started)) => {
+                self.refreshed();
+                for message in started.drained.iter().cloned() {
+                    self.publish(&strand.id, stream::Payload::MessageCreated { message });
                 }
-                self.publish_stream(
+                self.publish(
                     &strand.id,
                     stream::Payload::TurnStarted {
                         turn: started.turn.clone(),
                     },
                 );
                 let background = self.clone();
-                let background_strand_id = strand.id.clone();
-                let background_turn_id = started.turn.id.clone();
+                let strand = strand.id.clone();
+                let turn = started.turn.id.clone();
                 tokio::spawn(async move {
-                    background
-                        .complete_provider_turn(background_strand_id, background_turn_id)
-                        .await;
+                    background.complete_provider_turn(strand, turn).await;
                 });
-                drive::Outcome::Started(started.turn, started.drained_messages)
+                drive::Outcome::Started(started.turn, started.drained)
             }
-            Ok(StartTurnOutcome::Running(turn)) => drive::Outcome::Running(turn),
-            Ok(StartTurnOutcome::Idle) => drive::Outcome::Idle,
-            Ok(StartTurnOutcome::Held(error)) => drive::Outcome::Held(error),
-            Err(error) => {
-                drive::Outcome::Failed(self.record_drive_failure(&strand.id, drive, error))
-            }
+            Ok(Opened::Running(turn)) => drive::Outcome::Running(turn),
+            Ok(Opened::Idle) => drive::Outcome::Idle,
+            Ok(Opened::Held(error)) => drive::Outcome::Held(error),
+            Err(error) => drive::Outcome::Failed(self.stumbled(&strand.id, drive, error)),
         }
     }
 
-    fn record_drive_failure(&self, strand: &str, drive: Drive<'_>, detail: String) -> Fault {
-        self.mark_drive_degraded();
-        let error = match self.store.record_drive_failure(
+    fn stumbled(&self, strand: &str, drive: Drive<'_>, detail: String) -> Fault {
+        self.degrade();
+        let error = match self.store.stumbled(
             strand,
             Input {
                 operation: drive.operation,
                 trigger: drive.trigger,
-                accepted_inbox_id: drive.accepted_inbox_id,
+                inbox: drive.inbox,
                 detail: &detail,
             },
         ) {
@@ -230,8 +220,8 @@ impl Service {
                 scope: Some(santi_error::Scope::new("strand", strand)),
                 message: "failed to persist strand driver incident".to_string(),
                 context: serde_json::json!({
-                    "accepted_before_failure": drive.accepted_inbox_id.is_some(),
-                    "inbox": drive.accepted_inbox_id,
+                    "accepted_before_failure": drive.inbox.is_some(),
+                    "inbox": drive.inbox,
                     "detail": persistence_error,
                 }),
             }),
@@ -242,9 +232,9 @@ impl Service {
             error.incident.as_deref().unwrap_or("-"),
             strand,
             drive.operation,
-            drive.accepted_inbox_id.is_some(),
+            drive.inbox.is_some(),
         );
-        self.dispatch_error_events();
+        self.dispatched();
         error
     }
 }

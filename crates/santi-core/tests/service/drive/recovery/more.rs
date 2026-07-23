@@ -4,20 +4,20 @@ use santi_core::{message, strand};
 #[tokio::test]
 async fn drive_failure_recovers() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let database_path = temp.path().join("santi.sqlite");
+    let database = temp.path().join("santi.sqlite");
     let service = Service::open(
         service::Config {
-            database_path: database_path.display().to_string(),
-            runtime_root: temp.path().join("runtime").display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: database.display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         Arc::new(FakeProvider::default()),
     )
     .expect("open service");
-    let strand = service.create_strand().expect("create strand").strand;
-    let conn = Connection::open(&database_path).expect("open sqlite");
+    let strand = service.weave().expect("create strand").strand;
+    let conn = Connection::open(&database).expect("open sqlite");
     conn.execute_batch(
         r#"
         CREATE TRIGGER force_turn_insert_failure
@@ -30,7 +30,7 @@ async fn drive_failure_recovers() {
     .expect("install failure trigger");
 
     let accepted = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -48,14 +48,14 @@ async fn drive_failure_recovers() {
     assert_eq!(warning.context["recovery"]["resend"], false);
     let receipt_id = accepted.receipt.inbox.clone();
     let receipt = service
-        .receipt_status(&receipt_id)
+        .receipt(&receipt_id)
         .expect("receipt status")
         .expect("receipt");
     assert_eq!(receipt.state, santi_core::receipt::State::Accepted);
-    assert!(service.is_drive_degraded());
+    assert!(service.degraded());
 
     let runtime = service
-        .runtime_snapshot(&strand.id)
+        .snapshot(&strand.id)
         .expect("runtime")
         .expect("strand");
     assert!(runtime.messages.is_empty());
@@ -64,10 +64,10 @@ async fn drive_failure_recovers() {
     let incident = runtime.errors[0].id.clone();
     assert_eq!(runtime.errors[0].status, santi_core::Status::Active);
     assert_eq!(runtime.errors[0].occurrences, 1);
-    assert_eq!(pending_count(&conn, &strand.id), 1);
+    assert_eq!(pending(&conn, &strand.id), 1);
 
     let rejected = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -80,7 +80,7 @@ async fn drive_failure_recovers() {
     assert_eq!(rejected.code, "runtime.strand.drive_failed");
     assert_eq!(rejected.incident.as_deref(), Some(incident.as_str()));
     assert_eq!(rejected.context["accepted_before_failure"], false);
-    assert_eq!(pending_count(&conn, &strand.id), 1);
+    assert_eq!(pending(&conn, &strand.id), 1);
 
     conn.execute_batch("DROP TRIGGER force_turn_insert_failure;")
         .expect("remove failure trigger");
@@ -90,8 +90,8 @@ async fn drive_failure_recovers() {
     let runtime = Probe::new(&service)
         .completed_turn(&strand.id, &turn.id)
         .await;
-    assert!(!service.is_drive_degraded());
-    assert_eq!(pending_count(&conn, &strand.id), 0);
+    assert!(!service.degraded());
+    assert_eq!(pending(&conn, &strand.id), 0);
     assert_eq!(runtime.errors.len(), 1);
     assert_eq!(runtime.errors[0].id, incident);
     assert_eq!(runtime.errors[0].status, santi_core::Status::Resolved);
@@ -108,7 +108,7 @@ async fn drive_failure_recovers() {
             .any(|message| message.text == "accepted before drive failure")
     );
     let receipt = service
-        .receipt_status(&receipt_id)
+        .receipt(&receipt_id)
         .expect("receipt status")
         .expect("receipt");
     assert_eq!(receipt.state, santi_core::receipt::State::Completed);

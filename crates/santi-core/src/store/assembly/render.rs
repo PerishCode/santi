@@ -12,7 +12,7 @@ struct Items<'a> {
     db: Database<'a>,
 }
 
-pub(super) fn assembly_input_with_preview(
+pub(super) fn previewed(
     conn: &rusqlite::Connection,
     strand: &str,
     preview: Option<Preview<'_>>,
@@ -33,18 +33,12 @@ pub(super) fn assembly_input_with_preview(
             items.db.seat(strand, &compact.last)?,
         ) {
             overlay.push(Overlay {
-                span: Span {
-                    start_seq: from,
-                    end_seq: to,
-                },
-                content: render_compact_for_provider(
+                span: Span { from, to },
+                content: condensed(
                     &compact,
                     Range {
-                        span: Span {
-                            start_seq: from,
-                            end_seq: to,
-                        },
-                        collapsed_count: to.saturating_sub(from).saturating_add(1),
+                        span: Span { from, to },
+                        collapsed: to.saturating_sub(from).saturating_add(1),
                     },
                 ),
             });
@@ -53,13 +47,13 @@ pub(super) fn assembly_input_with_preview(
     if let Some(preview) = preview {
         overlay.push(Overlay {
             span: Span {
-                start_seq: preview.span.start_seq,
-                end_seq: preview.span.end_seq,
+                from: preview.span.from,
+                to: preview.span.to,
             },
             content: preview.content,
         });
     }
-    overlay.sort_by_key(|overlay| overlay.span.start_seq);
+    overlay.sort_by_key(|overlay| overlay.span.from);
 
     let mut stmt = conn
         .prepare(
@@ -85,11 +79,11 @@ pub(super) fn assembly_input_with_preview(
     let mut overlay_emitted = false;
     for row in rows {
         let (seq, kind, target) = row.map_err(|error| error.to_string())?;
-        while overlay_index < overlay.len() && overlay[overlay_index].span.end_seq < seq {
+        while overlay_index < overlay.len() && overlay[overlay_index].span.to < seq {
             overlay_index += 1;
             overlay_emitted = false;
         }
-        if overlay_index < overlay.len() && overlay[overlay_index].span.start_seq <= seq {
+        if overlay_index < overlay.len() && overlay[overlay_index].span.from <= seq {
             if !overlay_emitted {
                 input.push(Item::Message {
                     role: "system".to_string(),
@@ -111,7 +105,7 @@ impl Items<'_> {
         match kind {
             "message" => self.message(target),
             "thinking" => self.thinking(target),
-            "tool_call" => self.tool_call(target),
+            "tool_call" => self.call(target),
             "tool_result" => self.tool_result(target),
             _ => Ok(None),
         }
@@ -137,15 +131,15 @@ impl Items<'_> {
         }))
     }
 
-    fn tool_call(&self, target: &str) -> Result<Option<Item>, String> {
-        let Some(tool_call) = self.db.call(target)? else {
+    fn call(&self, target: &str) -> Result<Option<Item>, String> {
+        let Some(call) = self.db.call(target)? else {
             return Ok(None);
         };
-        let (item, mark) = self.db.material(&tool_call.id)?;
-        let raw = serde_json::to_string(&tool_call.arguments).map_err(|error| error.to_string())?;
+        let (item, mark) = self.db.material(&call.id)?;
+        let raw = serde_json::to_string(&call.arguments).map_err(|error| error.to_string())?;
         Ok(Some(Item::Call {
-            call: tool_call.id,
-            name: tool_call.tool,
+            call: call.id,
+            name: call.tool,
             raw,
             item,
             mark,
@@ -169,30 +163,27 @@ impl Items<'_> {
     }
 }
 
-pub(super) fn render_compact_for_provider(
-    compact: &crate::compact::Compact,
-    fallback_range: Range,
-) -> String {
+pub(super) fn condensed(compact: &crate::compact::Compact, fallback_range: Range) -> String {
     let metadata = compact.metadata.as_ref();
-    let is_capsule = metadata
+    let capsuled = metadata
         .and_then(|metadata| metadata.get("schema"))
         .and_then(|value| value.as_str())
         == Some("santi.compact_capsule.v1");
     let range = metadata.and_then(|metadata| metadata.get("range"));
-    let start_seq = range
+    let from = range
         .and_then(|range| range.get("start_seq"))
         .and_then(|value| value.as_i64());
-    let end_seq = range
+    let to = range
         .and_then(|range| range.get("end_seq"))
         .and_then(|value| value.as_i64());
-    let collapsed_count = range
+    let collapsed = range
         .and_then(|range| range.get("collapsed_count"))
         .and_then(|value| value.as_i64());
-    let pre_total = metadata
+    let before = metadata
         .and_then(|metadata| metadata.get("before"))
         .and_then(|estimate| estimate.get("total"))
         .and_then(|value| value.as_i64());
-    let post_total = metadata
+    let after = metadata
         .and_then(|metadata| metadata.get("after"))
         .and_then(|estimate| estimate.get("total"))
         .and_then(|value| value.as_i64());
@@ -206,30 +197,30 @@ pub(super) fn render_compact_for_provider(
     let header = json!({
         "schema": "santi.compact_projection.visible_header.v1",
         "compact": compact.id,
-        "operation": metadata_str(metadata, "operation")
-            .unwrap_or(if is_capsule { "manual_capsule" } else { "compact_projection" }),
-        "declared_source": metadata_str(metadata, "declared_source").unwrap_or("not_declared"),
-        "source_trust": metadata_str(metadata, "source_trust")
-            .unwrap_or(if is_capsule { "caller_declared" } else { "not_declared" }),
+        "operation": noted(metadata, "operation")
+            .unwrap_or(if capsuled { "manual_capsule" } else { "compact_projection" }),
+        "declared_source": noted(metadata, "declared_source").unwrap_or("not_declared"),
+        "source_trust": noted(metadata, "source_trust")
+            .unwrap_or(if capsuled { "caller_declared" } else { "not_declared" }),
         "covered_message_range": {
             "first": compact.first,
             "last": compact.last,
         },
         "covered_strand_seq": {
-            "start_seq": start_seq.unwrap_or(fallback_range.span.start_seq),
-            "end_seq": end_seq.unwrap_or(fallback_range.span.end_seq),
+            "start_seq": from.unwrap_or(fallback_range.span.from),
+            "end_seq": to.unwrap_or(fallback_range.span.to),
         },
-        "collapsed_entries": collapsed_count.unwrap_or(fallback_range.collapsed_count),
-        "reason": metadata_str(metadata, "reason").unwrap_or("not_declared"),
-        "risk": metadata_str(metadata, "risk").unwrap_or("not_declared"),
-        "queryability": metadata_str(metadata, "queryability")
+        "collapsed_entries": collapsed.unwrap_or(fallback_range.collapsed),
+        "reason": noted(metadata, "reason").unwrap_or("not_declared"),
+        "risk": noted(metadata, "risk").unwrap_or("not_declared"),
+        "queryability": noted(metadata, "queryability")
             .unwrap_or("original spine remains queryable with compact query"),
-        "originals_query": metadata_str(metadata, "originals_query")
+        "originals_query": noted(metadata, "originals_query")
             .map(str::to_string)
             .unwrap_or_else(|| format!("santi compact query --compact-id {}", compact.id)),
         "context_estimate": {
-            "pre_total_bytes": pre_total,
-            "post_total_bytes": post_total,
+            "pre_total_bytes": before,
+            "post_total_bytes": after,
             "budget_input_bytes": budget,
             "ratio": ratio,
         },
@@ -241,10 +232,7 @@ pub(super) fn render_compact_for_provider(
     )
 }
 
-pub(super) fn metadata_str<'a>(
-    metadata: Option<&'a serde_json::Value>,
-    key: &str,
-) -> Option<&'a str> {
+pub(super) fn noted<'a>(metadata: Option<&'a serde_json::Value>, key: &str) -> Option<&'a str> {
     metadata
         .and_then(|metadata| metadata.get(key))
         .and_then(|value| value.as_str())

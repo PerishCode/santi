@@ -33,7 +33,7 @@ struct Launch {
 }
 
 fn request_path(paths: &RuntimePaths) -> PathBuf {
-    paths.runtime_root.join("upgrade.request")
+    paths.runtime.join("upgrade.request")
 }
 
 pub fn launch(
@@ -106,7 +106,7 @@ pub fn run(
             ),
         ));
     }
-    let store = Store::new(&paths.runtime_root);
+    let store = Store::new(&paths.runtime);
     let probe = Dpkg;
     let durable_previous = store.resolve_previous(None, &probe).map_err(|detail| {
         paths.record_failure(
@@ -169,7 +169,7 @@ fn prepare_request(
     deb: &str,
     previous_deb: Option<&str>,
 ) -> Result<Launch, String> {
-    let store = Store::new(&paths.runtime_root);
+    let store = Store::new(&paths.runtime);
     let probe = Dpkg;
     let previous = store.resolve_previous(previous_deb.map(Path::new), &probe)?;
     let candidate = store.stage(Path::new(deb), &probe)?;
@@ -260,7 +260,7 @@ impl RuntimePaths {
             },
             readiness: UpgradeReadiness::Ready,
             wake: false,
-            soul: santi_core::DEFAULT_SOUL_ID.to_string(),
+            soul: santi_core::GENESIS.to_string(),
             configured_strand_id: None,
         };
         match finalize_at(self, finalize_request) {

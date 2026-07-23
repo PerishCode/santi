@@ -77,10 +77,10 @@ impl Provider for MemoryOrganizingProvider {
 #[tokio::test]
 async fn pressure_lifecycle() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let runtime_root = temp.path().join("runtime");
-    let memory_path = runtime_root
+    let runtime = temp.path().join("runtime");
+    let memory_path = runtime
         .join("souls")
-        .join(santi_core::DEFAULT_SOUL_ID)
+        .join(santi_core::GENESIS)
         .join("memory")
         .join("MEMORY.md");
     fs::create_dir_all(memory_path.parent().expect("memory parent")).expect("create memory parent");
@@ -93,20 +93,20 @@ async fn pressure_lifecycle() {
     let provider = Arc::new(MemoryOrganizingProvider::new(memory_path.clone()));
     let service = Service::open(
         service::Config {
-            database_path: temp.path().join("santi.sqlite").display().to_string(),
-            runtime_root: runtime_root.display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: temp.path().join("santi.sqlite").display().to_string(),
+            runtime: runtime.display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         provider.clone(),
     )
     .expect("open service");
-    let first = service.create_strand().expect("first strand").strand;
-    let second = service.create_strand().expect("second strand").strand;
+    let first = service.weave().expect("first strand").strand;
+    let second = service.weave().expect("second strand").strand;
 
     let first_send = service
-        .send_strand(
+        .send(
             &first.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -120,7 +120,7 @@ async fn pressure_lifecycle() {
     provider.wait_for_maintenance_request().await;
 
     let second_send = service
-        .send_strand(
+        .send(
             &second.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -140,7 +140,7 @@ async fn pressure_lifecycle() {
         "runtime must not mutate the source memory"
     );
 
-    let strands = service.list_strands().expect("list strands");
+    let strands = service.strands().expect("list strands");
     let maintenance = strands
         .iter()
         .find(|strand| strand.label.as_deref() == Some(MAINTENANCE_LABEL))
@@ -154,7 +154,7 @@ async fn pressure_lifecycle() {
         "one soul gets exactly one maintenance strand"
     );
     let maintenance_runtime = service
-        .runtime_snapshot(&maintenance.id)
+        .snapshot(&maintenance.id)
         .expect("maintenance runtime")
         .expect("maintenance strand");
     assert_eq!(
@@ -194,10 +194,7 @@ async fn pressure_lifecycle() {
     }
 
     let active = service
-        .errors(
-            &santi_core::Scope::new("soul", santi_core::DEFAULT_SOUL_ID),
-            10,
-        )
+        .errors(&santi_core::Scope::new("soul", santi_core::GENESIS), 10)
         .expect("soul incidents");
     assert_eq!(active.len(), 1);
     assert_eq!(active[0].code, "runtime.soul_memory.intervention_required");
@@ -233,7 +230,7 @@ async fn pressure_lifecycle() {
         (&second, "second queued request"),
     ] {
         let runtime = service
-            .runtime_snapshot(&strand.id)
+            .snapshot(&strand.id)
             .expect("ordinary runtime")
             .expect("ordinary strand");
         assert!(
@@ -253,10 +250,7 @@ async fn pressure_lifecycle() {
     }
 
     let resolved = service
-        .errors(
-            &santi_core::Scope::new("soul", santi_core::DEFAULT_SOUL_ID),
-            10,
-        )
+        .errors(&santi_core::Scope::new("soul", santi_core::GENESIS), 10)
         .expect("resolved soul incidents");
     assert_eq!(resolved.len(), 1);
     assert_eq!(resolved[0].status, santi_core::Status::Resolved);

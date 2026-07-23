@@ -4,10 +4,10 @@ use santi_core::{effect, tool};
 #[test]
 fn restart_ambiguity() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
+    let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let started = start_effect(&store);
     store
-        .begin_effect_dispatch(&started.effect)
+        .dispatch(&started.effect)
         .expect("open dispatch window");
     let (_, prepared) = store
         .append_effect_call(
@@ -23,9 +23,9 @@ fn restart_ambiguity() {
         .expect("append second effect");
     let prepared_id = prepared.expect("prepared effect").id;
 
-    assert_eq!(store.reconcile_orphaned_turns().expect("reconcile"), 1);
+    assert_eq!(store.reconciled().expect("reconcile"), 1);
     let status = store
-        .effect_status(&started.effect)
+        .effect(&started.effect)
         .expect("query effect")
         .expect("effect");
     assert_eq!(status.effect.state, effect::State::Unknown);
@@ -42,7 +42,7 @@ fn restart_ambiguity() {
         ]
     );
     let prepared = store
-        .effect_status(&prepared_id)
+        .effect(&prepared_id)
         .expect("query prepared effect")
         .expect("prepared effect");
     assert_eq!(prepared.effect.state, effect::State::NotDispatched);
@@ -62,7 +62,7 @@ fn restart_ambiguity() {
     );
 
     let resolved = store
-        .resolve_effect(
+        .settle(
             &started.effect,
             effect::Outcome::NotApplied,
             "operator checked the target system",
@@ -92,7 +92,7 @@ fn restart_ambiguity() {
     );
     assert!(
         store
-            .resolve_effect(&started.effect, effect::Outcome::Applied, "second guess",)
+            .settle(&started.effect, effect::Outcome::Applied, "second guess",)
             .is_err(),
         "a settled operator resolution is immutable"
     );

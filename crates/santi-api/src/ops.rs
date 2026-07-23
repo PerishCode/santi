@@ -7,7 +7,7 @@ use crate::runtime::{self, Runtime};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DoctorReport {
-    pub database_path: String,
+    pub database: String,
     pub database_exists: bool,
     pub schema_version: Option<u32>,
     pub expected_schema_version: u32,
@@ -27,7 +27,7 @@ pub struct ProviderDoctorReport {
     pub kind: Option<String>,
     pub model: Option<String>,
     pub bytes: Option<usize>,
-    pub budget_source: Option<String>,
+    pub source: Option<String>,
     pub ok: bool,
     pub error: Option<String>,
 }
@@ -49,7 +49,7 @@ pub fn inbox_seed(strand: &str, text: &str) -> Result<SeedReport, String> {
 }
 
 fn inbox_seed_existing_strand(
-    store: &santi_core::SantiStore,
+    store: &santi_core::Store,
     strand: &str,
     text: &str,
 ) -> Result<SeedReport, String> {
@@ -86,7 +86,7 @@ impl RuntimePaths {
                 kind: Some(provider.kind().to_string()),
                 model: Some(provider.model().to_string()),
                 bytes: Some(provider.bytes()),
-                budget_source: Some("provider_config".to_string()),
+                source: Some("provider_config".to_string()),
                 ok: true,
                 error: None,
             },
@@ -95,7 +95,7 @@ impl RuntimePaths {
                 kind: None,
                 model: None,
                 bytes: None,
-                budget_source: None,
+                source: None,
                 ok: false,
                 error: Some(error.to_string()),
             },
@@ -107,11 +107,10 @@ impl RuntimePaths {
         &self,
         provider: Option<ProviderDoctorReport>,
     ) -> Result<DoctorReport, String> {
-        let database_exists = self.database_path.exists();
-        let schema_version = santi_core::version(&self.database_path)?;
+        let database_exists = self.database.exists();
+        let schema_version = santi_core::version(&self.database)?;
         let schema_ok = schema_version == Some(santi_core::VERSION);
-        let memory_path =
-            santi_core::soul_memory_file(&self.runtime_root, santi_core::DEFAULT_SOUL_ID);
+        let memory_path = santi_core::memoir(&self.runtime, santi_core::GENESIS);
         let memory_present = memory_path.exists();
         let (memory_readable, memory_bytes) = match fs::read(&memory_path) {
             Ok(bytes) => (true, bytes.len() as u64),
@@ -121,12 +120,12 @@ impl RuntimePaths {
         let provider_ok = provider.as_ref().is_none_or(|provider| provider.ok);
 
         Ok(DoctorReport {
-            database_path: self.database_path.display().to_string(),
+            database: self.database.display().to_string(),
             database_exists,
             schema_version,
             expected_schema_version: santi_core::VERSION,
             schema_ok,
-            default_soul_id: santi_core::DEFAULT_SOUL_ID.to_string(),
+            default_soul_id: santi_core::GENESIS.to_string(),
             memory_path: memory_path.display().to_string(),
             memory_present,
             memory_readable,
@@ -137,7 +136,7 @@ impl RuntimePaths {
     }
 
     pub fn inbox_seed(&self, strand: &str, text: &str) -> Result<SeedReport, String> {
-        let store = santi_core::SantiStore::open(&self.database_path)?;
+        let store = santi_core::Store::open(&self.database)?;
         if store.strand(strand)?.is_none() {
             return Err(format!("unknown strand: {strand}"));
         }
@@ -150,8 +149,8 @@ impl RuntimePaths {
         label: &str,
         text: &str,
     ) -> Result<SeedReport, String> {
-        let store = santi_core::SantiStore::open(&self.database_path)?;
-        let strand = store.find_labeled_strand(soul, label)?;
+        let store = santi_core::Store::open(&self.database)?;
+        let strand = store.labeled(soul, label)?;
         inbox_seed_existing_strand(&store, &strand.id, text)
     }
 }

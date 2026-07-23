@@ -9,7 +9,7 @@ use santi_api::runtime::Runtime;
 fn reports_budget() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
-    santi_core::SantiStore::open(&paths.database_path).expect("open store");
+    santi_core::Store::open(&paths.database).expect("open store");
     let held = runtime_under(temp.path(), Some(120000));
 
     let report = paths.doctor_configured(&held).expect("doctor");
@@ -19,14 +19,14 @@ fn reports_budget() {
     assert_eq!(provider.kind.as_deref(), Some("openai_responses"));
     assert_eq!(provider.model.as_deref(), Some("gpt-5.5"));
     assert_eq!(provider.bytes, Some(120000));
-    assert_eq!(provider.budget_source.as_deref(), Some("provider_config"));
+    assert_eq!(provider.source.as_deref(), Some("provider_config"));
 }
 
 #[test]
 fn rejects_missing_budget() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
-    santi_core::SantiStore::open(&paths.database_path).expect("open store");
+    santi_core::Store::open(&paths.database).expect("open store");
     let held = runtime_under(temp.path(), None);
 
     let report = paths.doctor_configured(&held).expect("doctor");
@@ -42,9 +42,9 @@ fn rejects_missing_budget() {
 
 fn paths_under(root: &Path) -> RuntimePaths {
     RuntimePaths {
-        database_path: root.join("runtime").join("db"),
-        runtime_root: root.join("runtime"),
-        execution_root: root.join("execution"),
+        database: root.join("runtime").join("db"),
+        runtime: root.join("runtime"),
+        execution: root.join("execution"),
     }
 }
 

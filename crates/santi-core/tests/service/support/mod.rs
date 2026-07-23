@@ -5,8 +5,7 @@ pub(crate) use rusqlite::{Connection, params};
 use santi_core::service::Service;
 use santi_core::strand;
 pub(crate) use santi_core::{
-    Draft, Invocation, SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, SantiStore, soul_memory_uri,
-    strand_memory_uri,
+    Draft, Invocation, SOULSPACE, STRANDSPACE, Store, soulward, strandward,
 };
 
 mod probe;
@@ -64,7 +63,7 @@ impl Provider for FakeProvider {
             let command = probe_command();
             let arguments = json!({
                 "command": command,
-                "cwd": STRAND_WORKSPACE_URI
+                "cwd": STRANDSPACE
             });
             let raw = arguments.to_string();
             return Ok(Box::pin(stream::iter(vec![
@@ -130,7 +129,7 @@ impl Provider for LargeToolCallProvider {
             };
             let arguments = json!({
                 "command": command,
-                "cwd": STRAND_WORKSPACE_URI,
+                "cwd": STRANDSPACE,
                 "unused_payload": "x".repeat(200_000),
             });
             let raw = arguments.to_string();

@@ -4,7 +4,7 @@ use super::*;
 fn schema_retires_integrated_im_without_touching_sidecar() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
-    drop(SantiStore::open(&db).expect("open current store"));
+    drop(Store::open(&db).expect("open current store"));
     let conn = Connection::open(&db).expect("open sqlite");
     conn.execute_batch(
         r#"
@@ -37,7 +37,7 @@ fn schema_retires_integrated_im_without_touching_sidecar() {
     let sidecar = std::path::PathBuf::from(sidecar);
     std::fs::write(&sidecar, "preserve").expect("write sidecar marker");
 
-    drop(SantiStore::open(&db).expect("migrate v32 to v33"));
+    drop(Store::open(&db).expect("migrate v32 to v33"));
     assert_eq!(
         santi_core::version(&db).expect("schema version"),
         Some(santi_core::VERSION)

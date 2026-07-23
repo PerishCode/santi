@@ -44,9 +44,9 @@ pub(super) struct Store {
 }
 
 impl Store {
-    pub(super) fn new(runtime_root: &Path) -> Self {
+    pub(super) fn new(runtime: &Path) -> Self {
         Self {
-            root: runtime_root.join("upgrade"),
+            root: runtime.join("upgrade"),
         }
     }
 

@@ -98,11 +98,11 @@ impl<'a> Database<'a> {
             })
     }
 
-    pub fn reply(&self, tool_result_id: &str) -> Result<Option<tool::Reply>, String> {
+    pub fn reply(&self, reply: &str) -> Result<Option<tool::Reply>, String> {
         self.conn
             .query_row(
                 "SELECT id, tool_call_id, output, error_text, created_at FROM tool_results WHERE id = ?1 LIMIT 1",
-                params![tool_result_id],
+                params![reply],
                 tool::Reply::decode,
             )
             .optional()

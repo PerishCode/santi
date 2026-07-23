@@ -17,8 +17,8 @@ pub(in crate::service) struct Observation<'a> {
     pub(in crate::service) instructions: Option<&'a str>,
 }
 
-const RUNTIME_NOTICE_QUEUE_CAPACITY: usize = 128;
-pub(in crate::service) const COMPACT_REMINDER_REFERENCE_BYTES: usize = 96 * 1024;
+const NOTICES: usize = 128;
+pub(in crate::service) const REFERENCE: usize = 96 * 1024;
 
 #[derive(Debug, Clone)]
 pub(in crate::service) enum Event {
@@ -32,9 +32,9 @@ impl Event {
         }
     }
 
-    fn dedupe_key(&self) -> Option<String> {
+    fn dedupe(&self) -> Option<String> {
         match self {
-            Self::Observed(event) => event.dedupe_key(),
+            Self::Observed(event) => event.dedupe(),
         }
     }
 }
@@ -48,24 +48,24 @@ pub(in crate::service) struct Observed {
     pub(in crate::service) items: usize,
     pub(in crate::service) input: usize,
     pub(in crate::service) instructions: usize,
-    pub(in crate::service) reference_threshold_bytes: usize,
+    pub(in crate::service) threshold: usize,
     pub(in crate::service) band: String,
 }
 
 impl Observed {
-    fn total_input_bytes(&self) -> usize {
+    fn total(&self) -> usize {
         self.input.saturating_add(self.instructions)
     }
 
-    fn should_remind(&self) -> bool {
-        self.total_input_bytes() >= self.reference_threshold_bytes
+    fn remindable(&self) -> bool {
+        self.total() >= self.threshold
     }
 
-    fn dedupe_key(&self) -> Option<String> {
-        self.should_remind().then(|| {
+    fn dedupe(&self) -> Option<String> {
+        self.remindable().then(|| {
             format!(
                 "compact_reminder:{}:{}:{}",
-                self.address.strand, self.reference_threshold_bytes, self.band
+                self.address.strand, self.threshold, self.band
             )
         })
     }
@@ -79,44 +79,44 @@ pub(in crate::service) struct Bus {
 #[derive(Debug)]
 struct State {
     queue: VecDeque<Event>,
-    queued_or_delivered_keys: HashSet<String>,
+    held: HashSet<String>,
     capacity: usize,
 }
 
 impl Bus {
     pub(in crate::service) fn new() -> Self {
-        Self::with_capacity(RUNTIME_NOTICE_QUEUE_CAPACITY)
+        Self::sized(NOTICES)
     }
 
-    fn with_capacity(capacity: usize) -> Self {
+    fn sized(capacity: usize) -> Self {
         Self {
             inner: Arc::new(Mutex::new(State {
                 queue: VecDeque::new(),
-                queued_or_delivered_keys: HashSet::new(),
+                held: HashSet::new(),
                 capacity,
             })),
         }
     }
 
     pub(in crate::service) fn publish(&self, event: Event) -> bool {
-        let dedupe_key = event.dedupe_key();
+        let dedupe = event.dedupe();
         let mut state = self.inner.lock().unwrap();
-        if let Some(key) = dedupe_key.as_ref()
-            && state.queued_or_delivered_keys.contains(key)
+        if let Some(key) = dedupe.as_ref()
+            && state.held.contains(key)
         {
             return false;
         }
         if state.queue.len() >= state.capacity {
             return false;
         }
-        if let Some(key) = dedupe_key {
-            state.queued_or_delivered_keys.insert(key);
+        if let Some(key) = dedupe {
+            state.held.insert(key);
         }
         state.queue.push_back(event);
         true
     }
 
-    pub(in crate::service) fn drain_for_turn(&self, turn: &str) -> Vec<Event> {
+    pub(in crate::service) fn drained(&self, turn: &str) -> Vec<Event> {
         let mut state = self.inner.lock().unwrap();
         let mut drained = Vec::new();
         let mut kept = VecDeque::with_capacity(state.queue.len());
@@ -139,8 +139,8 @@ impl Default for Bus {
 }
 
 impl Service {
-    pub(in crate::service) fn observe_provider_input(&self, observation: Observation<'_>) {
-        let input = provider_input_bytes(observation.input);
+    pub(in crate::service) fn observed(&self, observation: Observation<'_>) {
+        let input = heft(observation.input);
         let instructions = observation.instructions.map_or(0, str::len);
         let event = Observed {
             address: observation.address.owned(),
@@ -150,37 +150,37 @@ impl Service {
             items: observation.input.len(),
             input,
             instructions,
-            reference_threshold_bytes: COMPACT_REMINDER_REFERENCE_BYTES,
+            threshold: REFERENCE,
             band: "soft".to_string(),
         };
-        let _ = self.runtime_notices.publish(Event::Observed(event));
+        let _ = self.notices.publish(Event::Observed(event));
     }
 
-    pub(in crate::service) fn drain_runtime_notices(&self, turn: &str) {
-        for event in self.runtime_notices.drain_for_turn(turn) {
-            if let Err(error) = self.handle_internal_runtime_event(event) {
+    pub(in crate::service) fn noticed(&self, turn: &str) {
+        for event in self.notices.drained(turn) {
+            if let Err(error) = self.absorbed(event) {
                 eprintln!("santi: internal runtime notice failed: {error}");
             }
         }
     }
 
-    fn handle_internal_runtime_event(&self, event: Event) -> Result<(), String> {
+    fn absorbed(&self, event: Event) -> Result<(), String> {
         match event {
-            Event::Observed(event) => self.maybe_materialize_compact_reminder(event),
+            Event::Observed(event) => self.remind(event),
         }
     }
 
-    fn maybe_materialize_compact_reminder(&self, event: Observed) -> Result<(), String> {
-        if !event.should_remind() {
+    fn remind(&self, event: Observed) -> Result<(), String> {
+        if !event.remindable() {
             return Ok(());
         }
-        let content = compact_reminder_message(&event);
+        let content = reminded(&event);
         let message = self.store.append_santi_system_message(
             &event.address.strand,
             content,
             message::Intake::Record,
         )?;
-        self.publish_stream(
+        self.publish(
             &event.address.strand,
             stream::Payload::MessageCreated {
                 message: message.strand_message,
@@ -190,7 +190,7 @@ impl Service {
     }
 }
 
-fn compact_reminder_message(event: &Observed) -> message::Content {
+fn reminded(event: &Observed) -> message::Content {
     message::Content::text(
         [
             "<system_message>".to_string(),
@@ -205,10 +205,10 @@ fn compact_reminder_message(event: &Observed) -> message::Content {
             format!("items: {}", event.items),
             format!("input: {}", event.input),
             format!("instructions: {}", event.instructions),
-            format!("total_input_bytes: {}", event.total_input_bytes()),
+            format!("total_input_bytes: {}", event.total()),
             format!(
                 "reference_threshold_bytes: {}",
-                event.reference_threshold_bytes
+                event.threshold
             ),
             "summary: This strand is getting large. If useful, you may compact settled context; runtime did not compact or alter provider input.".to_string(),
             "</system_message>".to_string(),
@@ -217,11 +217,11 @@ fn compact_reminder_message(event: &Observed) -> message::Content {
     )
 }
 
-fn provider_input_bytes(input: &[Item]) -> usize {
-    input.iter().map(provider_item_bytes).sum()
+fn heft(input: &[Item]) -> usize {
+    input.iter().map(sized).sum()
 }
 
-fn provider_item_bytes(item: &Item) -> usize {
+fn sized(item: &Item) -> usize {
     match item {
         Item::Message { role, content } => role.len().saturating_add(content.len()),
         Item::Reasoning { id, content } => id

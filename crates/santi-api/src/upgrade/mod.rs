@@ -22,7 +22,7 @@ pub fn register_attempt_handover_budgets(
     service: &santi_core::service::Service,
 ) -> Result<usize, String> {
     let mut registered = 0;
-    for strand in service.list_strands()? {
+    for strand in service.strands()? {
         let expected_prefix = format!("soul:{}:ops:upgrade:", strand.soul);
         let is_attempt_handover = strand
             .label

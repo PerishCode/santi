@@ -24,12 +24,12 @@ pub struct ResolveEffectRequest {
         (status = 500, body = Fault)
     )
 )]
-pub async fn effect_status(
+pub async fn effect(
     State(service): State<Service>,
     Path(effect): Path<String>,
 ) -> Result<Json<effect::Status>, ApiError> {
     service
-        .effect_status(&effect)
+        .effect(&effect)
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("effect not found"))
@@ -47,13 +47,13 @@ pub async fn effect_status(
         (status = 500, body = Fault)
     )
 )]
-pub async fn resolve_effect(
+pub async fn settle(
     State(service): State<Service>,
     Path(effect): Path<String>,
     Json(request): Json<ResolveEffectRequest>,
 ) -> Result<Json<effect::Status>, ApiError> {
     service
-        .resolve_effect(&effect, request.outcome, &request.evidence)
+        .settle(&effect, request.outcome, &request.evidence)
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("effect not found"))

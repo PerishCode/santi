@@ -4,12 +4,12 @@ use santi_core::{ingest, message};
 #[test]
 fn drive_coalesces_redrives() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let strand = store.create_strand().expect("create strand");
+    let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
+    let strand = store.weave().expect("create strand");
 
     assert!(
         store
-            .try_start_turn(&strand.id, "strand_send", None)
+            .tried(&strand.id, "strand_send", None)
             .expect("try")
             .is_none()
     );
@@ -22,11 +22,11 @@ fn drive_coalesces_redrives() {
         intake: message::Intake::Request,
     });
     let started = store
-        .try_start_turn(&strand.id, "strand_send", None)
+        .tried(&strand.id, "strand_send", None)
         .expect("try")
         .expect("turn started");
     assert_eq!(started.turn.status, santi_core::turn::Status::Running);
-    assert_eq!(started.drained_messages.len(), 1);
+    assert_eq!(started.drained.len(), 1);
     let turn = started.turn;
 
     append_timeline_message(Line {
@@ -38,7 +38,7 @@ fn drive_coalesces_redrives() {
     });
     assert!(
         store
-            .try_start_turn(&strand.id, "strand_send", None)
+            .tried(&strand.id, "strand_send", None)
             .expect("try")
             .is_none(),
         "a running turn must block a second concurrent turn"
@@ -55,7 +55,7 @@ fn drive_coalesces_redrives() {
         .expect("complete");
     assert!(
         store
-            .try_start_turn(&strand.id, "strand_send", None)
+            .tried(&strand.id, "strand_send", None)
             .expect("try")
             .is_some(),
         "accumulated request should drive the next turn at completion"
@@ -65,8 +65,8 @@ fn drive_coalesces_redrives() {
 #[test]
 fn drain_commits_pending() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let strand = store.create_strand().expect("create strand");
+    let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
+    let strand = store.weave().expect("create strand");
 
     for text in ["first", "second", "third"] {
         store
@@ -78,20 +78,20 @@ fn drain_commits_pending() {
             .expect("enqueue");
     }
     let started = store
-        .try_start_turn(&strand.id, "strand_send", None)
+        .tried(&strand.id, "strand_send", None)
         .expect("try")
         .expect("turn started");
-    assert_eq!(started.drained_messages.len(), 3);
-    assert_eq!(started.drained_messages[0].text, "first");
-    assert_eq!(started.drained_messages[1].text, "second");
-    assert_eq!(started.drained_messages[2].text, "third");
-    for (index, message) in started.drained_messages.iter().enumerate() {
+    assert_eq!(started.drained.len(), 3);
+    assert_eq!(started.drained[0].text, "first");
+    assert_eq!(started.drained[1].text, "second");
+    assert_eq!(started.drained[2].text, "third");
+    for (index, message) in started.drained.iter().enumerate() {
         assert_eq!(message.relation.seq, (index + 1) as i64);
     }
 
     assert!(
         store
-            .try_start_turn(&strand.id, "strand_send", None)
+            .tried(&strand.id, "strand_send", None)
             .expect("try")
             .is_none()
     );
@@ -101,8 +101,8 @@ fn drain_commits_pending() {
 fn drain_records_provenance() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
-    let store = SantiStore::open(&db).expect("open store");
-    let strand = store.create_strand().expect("create strand");
+    let store = Store::open(&db).expect("open store");
+    let strand = store.weave().expect("create strand");
 
     store
         .enqueue_inbox_with_source(
@@ -128,14 +128,14 @@ fn drain_records_provenance() {
     drop(conn);
 
     let started = store
-        .try_start_turn(&strand.id, "strand_send", None)
+        .tried(&strand.id, "strand_send", None)
         .expect("try")
         .expect("turn started");
-    assert_eq!(started.drained_messages.len(), 1);
-    let drained = &started.drained_messages[0];
+    assert_eq!(started.drained.len(), 1);
+    let drained = &started.drained[0];
 
     let runtime = store
-        .runtime_snapshot(&strand.id)
+        .snapshot(&strand.id)
         .expect("runtime snapshot")
         .expect("strand runtime");
     assert_eq!(runtime.events.len(), 1);
@@ -156,7 +156,7 @@ fn drain_records_provenance() {
     assert_eq!(payload["source"]["ref"], "caller-1");
     assert_eq!(payload["source"]["metadata"]["adaptor"], "fake");
 
-    let input = store.assembly_input(&strand.id).expect("assembly input");
+    let input = store.assembly(&strand.id).expect("assembly input");
     assert_eq!(input.len(), 1);
     assert_text(&input[0], "user", "needs provenance");
 }
@@ -165,8 +165,8 @@ fn drain_records_provenance() {
 fn inbox_gate_rejects() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
-    let store = SantiStore::open(&db).expect("open store");
-    let strand = store.create_strand().expect("create strand");
+    let store = Store::open(&db).expect("open store");
+    let strand = store.weave().expect("create strand");
 
     let mut conn = Connection::open(&db).expect("open sqlite");
     let tx = conn.transaction().expect("begin seed transaction");
@@ -225,8 +225,8 @@ fn inbox_gate_rejects() {
 #[test]
 fn records_do_not_drive() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let strand = store.create_strand().expect("create strand");
+    let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
+    let strand = store.weave().expect("create strand");
 
     append_timeline_message(Line {
         store: &store,
@@ -237,24 +237,19 @@ fn records_do_not_drive() {
     });
     assert!(
         store
-            .try_start_turn(&strand.id, "strand_send", None)
+            .tried(&strand.id, "strand_send", None)
             .expect("try")
             .is_none(),
         "record messages must not drive a turn"
     );
-    assert!(
-        store
-            .strands_with_pending_requests()
-            .expect("scan")
-            .is_empty()
-    );
+    assert!(store.awaiting().expect("scan").is_empty());
 }
 
 #[test]
 fn boot_reconciles_once() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
-    let strand = store.create_strand().expect("create strand");
+    let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
+    let strand = store.weave().expect("create strand");
     append_timeline_message(Line {
         store: &store,
         strand: &strand.id,
@@ -263,13 +258,13 @@ fn boot_reconciles_once() {
         intake: message::Intake::Request,
     });
     store
-        .try_start_turn(&strand.id, "strand_send", None)
+        .tried(&strand.id, "strand_send", None)
         .expect("try")
         .expect("turn started");
-    assert_eq!(store.reconcile_orphaned_turns().expect("reconcile"), 1);
+    assert_eq!(store.reconciled().expect("reconcile"), 1);
     assert!(
         store
-            .try_start_turn(&strand.id, "strand_send", None)
+            .tried(&strand.id, "strand_send", None)
             .expect("try")
             .is_none(),
         "an interrupted turn must not auto-retry its request"
@@ -283,14 +278,14 @@ fn boot_reconciles_once() {
     });
     assert!(
         store
-            .strands_with_pending_requests()
+            .awaiting()
             .expect("scan")
             .iter()
             .any(|id| id == &strand.id)
     );
     assert!(
         store
-            .try_start_turn(&strand.id, "strand_send", None)
+            .tried(&strand.id, "strand_send", None)
             .expect("try")
             .is_some()
     );

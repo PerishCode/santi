@@ -4,7 +4,7 @@ use std::{fs, sync::Arc};
 use async_trait::async_trait;
 use futures_util::stream;
 use santi_core::material;
-use santi_core::{SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, soul_memory_uri, strand_memory_uri};
+use santi_core::{SOULSPACE, STRANDSPACE, soulward, strandward};
 use santi_provider::{Metadata, Provider, Streaming};
 
 #[derive(Clone)]
@@ -44,14 +44,14 @@ fn renders_material_shape() {
     assert!(!text.contains("soul_name"));
     assert!(text.contains(&format!(
         "{} will always be displayed in [santi-soul].",
-        soul_memory_uri()
+        soulward()
     )));
     assert!(text.contains(&format!(
         "{} will always be displayed in [santi-strand].",
-        strand_memory_uri()
+        strandward()
     )));
     assert!(text.contains(&format!(
-        "These files have no internal version history; save backups into {SOUL_WORKSPACE_URI} or {STRAND_WORKSPACE_URI} if needed."
+        "These files have no internal version history; save backups into {SOULSPACE} or {STRANDSPACE} if needed."
     )));
     assert!(text.contains("<system_message> blocks describe Santi runtime facts in this strand."));
     assert!(text.contains(
@@ -62,8 +62,8 @@ fn renders_material_shape() {
     );
     assert!(text.contains("[santi-soul]"));
     assert!(text.contains("[santi-strand]"));
-    assert!(text.contains(&format!("source: {}", soul_memory_uri())));
-    assert!(text.contains(&format!("source: {}", strand_memory_uri())));
+    assert!(text.contains(&format!("source: {}", soulward())));
+    assert!(text.contains(&format!("source: {}", strandward())));
     assert!(text.contains("content:\n---\nplain: value\n---\n# Soul"));
     assert!(text.contains("content:\n# Strand"));
     assert!(!text.contains("hint:"));
@@ -114,12 +114,8 @@ fn projects_utf8_safely() {
     assert!(text.contains("kind: soul_memory_projection"));
     assert!(text.contains("allowance_bytes: 250000"));
     assert!(!text.contains("SOURCE_TAIL"));
-    let source = fs::read_to_string(
-        harness
-            .runtime_root
-            .join("souls/soul_default/memory/MEMORY.md"),
-    )
-    .expect("read source memory");
+    let source = fs::read_to_string(harness.runtime.join("souls/soul_default/memory/MEMORY.md"))
+        .expect("read source memory");
     assert_eq!(
         source, memory,
         "projection must never rewrite source memory"
@@ -131,16 +127,12 @@ async fn external_labels_stay_out_of_prompt() {
     let harness = PromptHarness::open();
     let first = harness
         .service
-        .ingest_external_event(
-            santi_core::DEFAULT_SOUL_ID,
-            "stim:operator",
-            "hello".to_string(),
-        )
+        .evented(santi_core::GENESIS, "stim:operator", "hello".to_string())
         .expect("first strand");
     let second = harness
         .service
-        .ingest_external_event(
-            santi_core::DEFAULT_SOUL_ID,
+        .evented(
+            santi_core::GENESIS,
             "github:ops:issue:PerishCode/santi#1",
             "hello".to_string(),
         )
@@ -167,36 +159,36 @@ struct PromptHarness {
     _temp: tempfile::TempDir,
     service: Service,
     strand: String,
-    runtime_root: std::path::PathBuf,
+    runtime: std::path::PathBuf,
 }
 
 impl PromptHarness {
     fn open() -> Self {
         let temp = tempfile::tempdir().expect("temp dir");
-        let runtime_root = temp.path().join("runtime");
+        let runtime = temp.path().join("runtime");
         let service = Service::open(
             service::Config {
-                database_path: temp.path().join("santi.sqlite").display().to_string(),
-                runtime_root: runtime_root.display().to_string(),
-                execution_root: temp.path().join("execution").display().to_string(),
-                bind_addr: Some("127.0.0.1:0".to_string()),
-                constitution_path: None,
+                database: temp.path().join("santi.sqlite").display().to_string(),
+                runtime: runtime.display().to_string(),
+                execution: temp.path().join("execution").display().to_string(),
+                bind: Some("127.0.0.1:0".to_string()),
+                constitution: None,
             },
             Arc::new(FakeProvider),
         )
         .expect("open service");
-        let strand = service.create_strand().expect("create strand").strand.id;
+        let strand = service.weave().expect("create strand").strand.id;
         Self {
             _temp: temp,
             service,
             strand,
-            runtime_root,
+            runtime,
         }
     }
 
     fn write_soul(&self, text: &str) {
         let path = self
-            .runtime_root
+            .runtime
             .join("souls")
             .join("soul_default")
             .join("memory");
@@ -206,7 +198,7 @@ impl PromptHarness {
 
     fn write_strand(&self, text: &str) {
         let path = self
-            .runtime_root
+            .runtime
             .join("strands")
             .join(&self.strand)
             .join("memory");
@@ -215,8 +207,8 @@ impl PromptHarness {
     }
 
     fn write_constitution(&self, text: &str) {
-        fs::create_dir_all(&self.runtime_root).expect("create runtime dir");
-        fs::write(self.runtime_root.join("constitution.md"), text).expect("write constitution");
+        fs::create_dir_all(&self.runtime).expect("create runtime dir");
+        fs::write(self.runtime.join("constitution.md"), text).expect("write constitution");
     }
 
     fn system_prompt(&self) -> material::Material {

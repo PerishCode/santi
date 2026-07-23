@@ -1,12 +1,12 @@
 use rusqlite::params;
 use santi_error::{Fault, Incident, Outbox, Transition};
 
-use super::{SantiStore, db::Database};
+use super::{Store, db::Database};
 use crate::now;
 
 pub(crate) mod drive;
 
-impl SantiStore {
+impl Store {
     pub fn open_error_incident(&self, draft: santi_error::Draft) -> Result<Fault, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
@@ -28,7 +28,7 @@ impl SantiStore {
         Ok(resolved)
     }
 
-    pub fn error_incidents(
+    pub fn incidents(
         &self,
         scope: &santi_error::Scope,
         limit: i64,
@@ -42,16 +42,12 @@ impl SantiStore {
         Database::new(&conn).incident(key)
     }
 
-    pub(crate) fn error_incidents_for_strand(
-        &self,
-        strand: &str,
-        limit: i64,
-    ) -> Result<Vec<Incident>, String> {
-        self.error_incidents(&santi_error::Scope::new("strand", strand), limit)
+    pub(crate) fn stranded(&self, strand: &str, limit: i64) -> Result<Vec<Incident>, String> {
+        self.incidents(&santi_error::Scope::new("strand", strand), limit)
     }
 }
 
-impl Outbox for SantiStore {
+impl Outbox for Store {
     fn pending(&self, limit: usize) -> Result<Vec<Transition>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn

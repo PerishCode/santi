@@ -15,7 +15,7 @@ use santi_api::{
     receipt_status_handler, resolve_effect_handler, send_strand_handler,
 };
 use santi_core::service::{self, Service};
-use santi_core::{Invocation, SantiStore, catalog, engine};
+use santi_core::{Invocation, Store, catalog, engine};
 use santi_core::{effect, ingest, message, tool};
 use santi_provider::{Cap, Event, Metadata, Provider, Request, Streaming};
 
@@ -122,9 +122,9 @@ fn openapi_lists_error_surfaces() {
 #[tokio::test]
 async fn effect_http_roundtrip() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let database_path = temp.path().join("santi.sqlite");
-    let store = SantiStore::open(&database_path).expect("open store");
-    let strand = store.create_strand().expect("create strand");
+    let database = temp.path().join("santi.sqlite");
+    let store = Store::open(&database).expect("open store");
+    let strand = store.weave().expect("create strand");
     let inbox = match store
         .enqueue_inbox(
             &strand.id,
@@ -137,7 +137,7 @@ async fn effect_http_roundtrip() {
         ingest::Outcome::Rejected { .. } => panic!("unexpected rejection"),
     };
     let turn = store
-        .try_start_turn(&strand.id, "strand_send", None)
+        .tried(&strand.id, "strand_send", None)
         .expect("start turn")
         .expect("started turn")
         .turn;
@@ -154,18 +154,16 @@ async fn effect_http_roundtrip() {
         )
         .expect("append effect");
     let effect = effect.expect("effect").id;
-    store
-        .begin_effect_dispatch(&effect)
-        .expect("open dispatch window");
+    store.dispatch(&effect).expect("open dispatch window");
     drop(store);
 
     let service = Service::open(
         service::Config {
-            database_path: database_path.display().to_string(),
-            runtime_root: temp.path().join("runtime").display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: database.display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         Arc::new(DriverProvider),
     )

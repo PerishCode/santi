@@ -121,11 +121,11 @@ fn budget_service(
     });
     let service = Service::open(
         service::Config {
-            database_path: temp.path().join("santi.sqlite").display().to_string(),
-            runtime_root: temp.path().join("runtime").display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: temp.path().join("santi.sqlite").display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         provider.clone(),
     )
@@ -142,19 +142,19 @@ async fn dispatches_tools() {
     });
     let service = Service::open(
         service::Config {
-            database_path: temp.path().join("santi.sqlite").display().to_string(),
-            runtime_root: temp.path().join("runtime").display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: temp.path().join("santi.sqlite").display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         provider.clone(),
     )
     .expect("open service");
 
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
     let response = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -219,12 +219,12 @@ async fn dispatches_tools() {
         effect.result.as_deref(),
         Some(runtime.results[0].id.as_str())
     );
-    let effect_status = service
-        .effect_status(&effect.id)
+    let effect = service
+        .effect(&effect.id)
         .expect("query effect")
         .expect("shell effect");
     assert_eq!(
-        effect_status
+        effect
             .transitions
             .iter()
             .map(|transition| (&transition.state, &transition.reason))
@@ -238,13 +238,13 @@ async fn dispatches_tools() {
             (&effect::State::Confirmed, &effect::Reason::ResultPersisted),
         ]
     );
-    assert_eq!(effect_status.receipts, vec![response.receipt.inbox.clone()]);
+    assert_eq!(effect.receipts, vec![response.receipt.inbox.clone()]);
     let receipt = service
-        .receipt_status(&response.receipt.inbox)
+        .receipt(&response.receipt.inbox)
         .expect("query receipt")
         .expect("receipt");
     assert_eq!(receipt.effects.len(), 1);
-    assert_eq!(receipt.effects[0].id, effect.id);
+    assert_eq!(receipt.effects[0].id, effect.effect.id);
     assert_eq!(receipt.effects[0].state, effect::State::Confirmed);
 
     let requests = provider.requests.lock().unwrap();

@@ -12,11 +12,11 @@ mod recovery;
 fn service_with_budget(temp: &tempfile::TempDir, provider: Arc<dyn Provider>) -> Service {
     Service::open(
         service::Config {
-            database_path: temp.path().join("santi.sqlite").display().to_string(),
-            runtime_root: temp.path().join("runtime").display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: temp.path().join("santi.sqlite").display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         provider,
     )
@@ -32,11 +32,11 @@ async fn admission_opens_incident() {
         ..FakeProvider::default()
     });
     let service = service_with_budget(&temp, provider.clone());
-    let mut events = service.subscribe_stream();
-    let strand = service.create_strand().expect("create strand").strand;
+    let mut events = service.listen();
+    let strand = service.weave().expect("create strand").strand;
 
     let error = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -52,7 +52,7 @@ async fn admission_opens_incident() {
     assert!(error.message.contains("strand context is over budget"));
     assert!(provider.requests.lock().unwrap().is_empty());
     let runtime = service
-        .runtime_snapshot(&strand.id)
+        .snapshot(&strand.id)
         .expect("runtime")
         .expect("strand");
     assert!(runtime.messages.is_empty(), "rejected send entered spine");
@@ -93,8 +93,8 @@ async fn admission_opens_incident() {
 #[tokio::test]
 async fn remeasures_hot_memory() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let runtime_root = temp.path().join("runtime");
-    let memory_path = runtime_root.join("souls/soul_default/memory/MEMORY.md");
+    let runtime = temp.path().join("runtime");
+    let memory_path = runtime.join("souls/soul_default/memory/MEMORY.md");
     fs::create_dir_all(memory_path.parent().expect("memory parent")).expect("create memory parent");
     fs::write(&memory_path, "m".repeat(9_000)).expect("write initial memory");
     let provider = Arc::new(FakeProvider {
@@ -103,19 +103,19 @@ async fn remeasures_hot_memory() {
     });
     let service = Service::open(
         service::Config {
-            database_path: temp.path().join("santi.sqlite").display().to_string(),
-            runtime_root: runtime_root.display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: temp.path().join("santi.sqlite").display().to_string(),
+            runtime: runtime.display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         provider.clone(),
     )
     .expect("open service");
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
 
     let error = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -130,7 +130,7 @@ async fn remeasures_hot_memory() {
 
     fs::write(&memory_path, "# Small memory\n").expect("shrink memory directly");
     let accepted = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -171,12 +171,12 @@ async fn repeats_are_idempotent() {
         ..FakeProvider::default()
     });
     let service = service_with_budget(&temp, provider);
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
 
     let mut incident_ids = Vec::new();
     for text in ["first rejected", "second rejected", "third rejected"] {
         let error = service
-            .send_strand(
+            .send(
                 &strand.id,
                 strand::Post {
                     content: vec![message::Part::Text {
@@ -191,7 +191,7 @@ async fn repeats_are_idempotent() {
     assert!(incident_ids.windows(2).all(|ids| ids[0] == ids[1]));
 
     let runtime = service
-        .runtime_snapshot(&strand.id)
+        .snapshot(&strand.id)
         .expect("runtime")
         .expect("strand");
     assert!(runtime.messages.is_empty());
@@ -224,7 +224,7 @@ async fn repeats_are_idempotent() {
         .expect("delivered count");
     assert_eq!(delivered, 0, "outbox must wait for a live bus consumer");
 
-    let mut events = service.subscribe_stream();
+    let mut events = service.listen();
     let event = events.try_recv().expect("pending transition");
     assert!(matches!(
         event.payload,
@@ -249,9 +249,9 @@ async fn store_cannot_bypass() {
         ..FakeProvider::default()
     });
     let service = service_with_budget(&temp, provider);
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
     let first = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -262,7 +262,7 @@ async fn store_cannot_bypass() {
         .await
         .expect_err("send should be rejected");
 
-    let store = SantiStore::open(&db).expect("open store directly");
+    let store = Store::open(&db).expect("open store directly");
     let outcome = store
         .enqueue_inbox(
             &strand.id,
@@ -275,7 +275,7 @@ async fn store_cannot_bypass() {
     };
     assert_eq!(error.incident, first.incident);
     let runtime = service
-        .runtime_snapshot(&strand.id)
+        .snapshot(&strand.id)
         .expect("runtime")
         .expect("strand");
     assert_eq!(runtime.errors[0].occurrences, 2);

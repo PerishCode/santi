@@ -11,12 +11,12 @@ use santi_core::{material, receipt, soul, strand, webhook};
         (status = 500, body = Fault)
     )
 )]
-pub async fn receipt_status(
+pub async fn receipt(
     State(service): State<Service>,
     Path(inbox): Path<String>,
 ) -> Result<Json<receipt::Status>, ApiError> {
     let receipt = service
-        .receipt_status(&inbox)
+        .receipt(&inbox)
         .map_err(ApiError::from_service)?
         .ok_or_else(|| ApiError::not_found("receipt not found"))?;
     Ok(Json(receipt))
@@ -27,13 +27,10 @@ pub async fn receipt_status(
     path = "/api/v1/strands",
     responses((status = 200, body = strand::Created), (status = 500, body = Fault))
 )]
-pub(super) async fn create_strand(
+pub(super) async fn weave(
     State(service): State<Service>,
 ) -> Result<Json<strand::Created>, ApiError> {
-    service
-        .create_strand()
-        .map(Json)
-        .map_err(ApiError::from_service)
+    service.weave().map(Json).map_err(ApiError::from_service)
 }
 
 #[utoipa::path(
@@ -41,13 +38,8 @@ pub(super) async fn create_strand(
     path = "/api/v1/strands",
     responses((status = 200, body = [Strand]), (status = 500, body = Fault))
 )]
-pub(super) async fn list_strands(
-    State(service): State<Service>,
-) -> Result<Json<Vec<Strand>>, ApiError> {
-    service
-        .list_strands()
-        .map(Json)
-        .map_err(ApiError::from_service)
+pub(super) async fn strands(State(service): State<Service>) -> Result<Json<Vec<Strand>>, ApiError> {
+    service.strands().map(Json).map_err(ApiError::from_service)
 }
 
 #[utoipa::path(
@@ -56,12 +48,12 @@ pub(super) async fn list_strands(
     request_body = soul::Draft,
     responses((status = 200, body = Soul), (status = 500, body = Fault))
 )]
-pub(super) async fn create_soul(
+pub(super) async fn awaken(
     State(service): State<Service>,
     Json(request): Json<soul::Draft>,
 ) -> Result<Json<Soul>, ApiError> {
     service
-        .create_soul(request)
+        .awaken(request)
         .map(Json)
         .map_err(ApiError::from_service)
 }
@@ -71,13 +63,8 @@ pub(super) async fn create_soul(
     path = "/api/v1/souls",
     responses((status = 200, body = [Soul]), (status = 500, body = Fault))
 )]
-pub(super) async fn list_souls(
-    State(service): State<Service>,
-) -> Result<Json<Vec<Soul>>, ApiError> {
-    service
-        .list_souls()
-        .map(Json)
-        .map_err(ApiError::from_service)
+pub(super) async fn souls(State(service): State<Service>) -> Result<Json<Vec<Soul>>, ApiError> {
+    service.souls().map(Json).map_err(ApiError::from_service)
 }
 
 #[utoipa::path(
@@ -106,12 +93,12 @@ pub(super) async fn get_soul(
     request_body = webhook::Draft,
     responses((status = 200, body = webhook::Subscription), (status = 500, body = Fault))
 )]
-pub(super) async fn create_webhook(
+pub(super) async fn subscribe(
     State(service): State<Service>,
     Json(request): Json<webhook::Draft>,
 ) -> Result<Json<webhook::Subscription>, ApiError> {
     service
-        .create_webhook(request)
+        .subscribe(request)
         .map(Json)
         .map_err(ApiError::from_service)
 }
@@ -121,13 +108,10 @@ pub(super) async fn create_webhook(
     path = "/api/v1/webhooks",
     responses((status = 200, body = [webhook::Subscription]), (status = 500, body = Fault))
 )]
-pub(super) async fn list_webhooks(
+pub(super) async fn webhooks(
     State(service): State<Service>,
 ) -> Result<Json<Vec<webhook::Subscription>>, ApiError> {
-    service
-        .list_webhooks()
-        .map(Json)
-        .map_err(ApiError::from_service)
+    service.webhooks().map(Json).map_err(ApiError::from_service)
 }
 
 #[utoipa::path(

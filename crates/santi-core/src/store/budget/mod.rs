@@ -10,53 +10,53 @@ use santi_provider::{Item, Tool};
 use serde_json::{Value, json};
 
 use super::{
-    STRAND_INBOX_GATE, SantiStore, StartTurnOutcome, StartedTurn,
-    assembly::assembly_input_in_conn,
+    Begun, GATE, Opened, Store,
+    assembly::assembled,
     db::{Database, drain},
 };
 use crate::{budget, ingest, message};
 use crate::{now, tag};
 
-const REASON_PENDING: &str = "pending_drain_would_exceed_budget";
+const PENDING: &str = "pending_drain_would_exceed_budget";
 
 pub(crate) fn context_incident_key(strand: &str) -> String {
     format!("{}:strand:{strand}", catalog::CONTEXT_BUDGET_EXCEEDED.code)
 }
 
 pub(crate) struct Pressure<'a> {
-    pub reason_code: &'a str,
-    pub reason_text: &'a str,
+    pub code: &'a str,
+    pub text: &'a str,
     pub operation: &'a str,
     pub provider: Option<&'a str>,
     pub model: Option<&'a str>,
-    pub budget_source: Option<&'a str>,
-    pub budget_bytes: Option<i64>,
+    pub source: Option<&'a str>,
+    pub bytes: Option<i64>,
     pub estimate: &'a budget::Estimate,
-    pub observed_turn_id: Option<&'a str>,
-    pub observed_at_seq: Option<i64>,
+    pub observed: Option<&'a str>,
+    pub at: Option<i64>,
     pub metadata: Option<Value>,
 }
 
 impl Pressure<'_> {
-    fn into_draft(self, strand: &str) -> santi_error::Draft {
+    fn drafted(self, strand: &str) -> santi_error::Draft {
         santi_error::Draft {
             key: context_incident_key(strand),
             descriptor: catalog::CONTEXT_BUDGET_EXCEEDED,
             scope: santi_error::Scope::new("strand", strand),
             source: santi_error::Source::new("santi-core", self.operation),
-            message: self.reason_text.to_string(),
+            message: self.text.to_string(),
             context: json!({
                 "schema": "santi.error.context_budget.v1",
-                "reason": self.reason_code,
+                "reason": self.code,
                 "provider": self.provider,
                 "model": self.model,
                 "budget": {
-                    "source": self.budget_source,
-                    "input": self.budget_bytes,
+                    "source": self.source,
+                    "input": self.bytes,
                 },
                 "estimate": self.estimate,
-                "observed_turn_id": self.observed_turn_id,
-                "observed_at_seq": self.observed_at_seq,
+                "observed_turn_id": self.observed,
+                "observed_at_seq": self.at,
                 "details": self.metadata,
             }),
         }
@@ -66,8 +66,8 @@ impl Pressure<'_> {
 pub(crate) struct Admission {
     pub provider: String,
     pub model: String,
-    pub budget_source: String,
-    pub budget_bytes: i64,
+    pub source: String,
+    pub bytes: i64,
     pub instructions: Option<String>,
     pub tools: Vec<Tool>,
 }
@@ -100,22 +100,18 @@ pub(crate) struct Launch<'a> {
     pub recover: bool,
 }
 
-impl SantiStore {
-    pub(crate) fn pending_provider_items(&self, strand: &str) -> Result<Vec<Item>, String> {
+impl Store {
+    pub(crate) fn pending(&self, strand: &str) -> Result<Vec<Item>, String> {
         let conn = self.conn.lock().unwrap();
-        state::pending_items(&Database::new(&conn), strand)
+        state::queued(&Database::new(&conn), strand)
     }
 
-    pub(crate) fn open_context_incident(
-        &self,
-        strand: &str,
-        input: Pressure<'_>,
-    ) -> Result<Fault, String> {
+    pub(crate) fn press(&self, strand: &str, input: Pressure<'_>) -> Result<Fault, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
-        let error = state::open_context_incident(&Database::new(&tx), strand, input)?;
+        let error = state::press(&Database::new(&tx), strand, input)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(error)
     }
@@ -148,6 +144,6 @@ impl SantiStore {
     }
 }
 
-pub(super) fn over_budget_reason(total: i64, budget_bytes: i64) -> String {
-    format!("strand context is over budget ({total} estimated bytes, budget {budget_bytes})")
+pub(super) fn reason(total: i64, bytes: i64) -> String {
+    format!("strand context is over budget ({total} estimated bytes, budget {bytes})")
 }

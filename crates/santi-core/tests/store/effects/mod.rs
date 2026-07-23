@@ -9,8 +9,8 @@ struct StartedEffect {
     inbox: String,
 }
 
-fn start_effect(store: &SantiStore) -> StartedEffect {
-    let strand = store.create_strand().expect("create strand");
+fn start_effect(store: &Store) -> StartedEffect {
+    let strand = store.weave().expect("create strand");
     let inbox = match store
         .enqueue_inbox(
             &strand.id,
@@ -23,7 +23,7 @@ fn start_effect(store: &SantiStore) -> StartedEffect {
         ingest::Outcome::Rejected { .. } => panic!("unexpected rejection"),
     };
     let turn = store
-        .try_start_turn(&strand.id, "strand_send", None)
+        .tried(&strand.id, "strand_send", None)
         .expect("start turn")
         .expect("started turn")
         .turn;
@@ -50,7 +50,7 @@ fn start_effect(store: &SantiStore) -> StartedEffect {
 #[test]
 fn prepared_failure() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
+    let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let started = start_effect(&store);
 
     store
@@ -58,7 +58,7 @@ fn prepared_failure() {
         .expect("fail turn");
 
     let status = store
-        .effect_status(&started.effect)
+        .effect(&started.effect)
         .expect("query effect")
         .expect("effect");
     assert_eq!(status.effect.state, effect::State::NotDispatched);
@@ -74,7 +74,7 @@ fn prepared_failure() {
         ]
     );
     let receipt = store
-        .receipt_status(&started.inbox)
+        .receipt(&started.inbox)
         .expect("query receipt")
         .expect("receipt");
     assert_eq!(receipt.state, receipt::State::Failed);
@@ -86,8 +86,8 @@ fn prepared_failure() {
 fn intent_atomicity() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
-    let store = SantiStore::open(&db).expect("open store");
-    let strand = store.create_strand().expect("create strand");
+    let store = Store::open(&db).expect("open store");
+    let strand = store.weave().expect("create strand");
     store
         .enqueue_inbox(
             &strand.id,
@@ -96,7 +96,7 @@ fn intent_atomicity() {
         )
         .expect("enqueue");
     let turn = store
-        .try_start_turn(&strand.id, "strand_send", None)
+        .tried(&strand.id, "strand_send", None)
         .expect("start turn")
         .expect("started turn")
         .turn;

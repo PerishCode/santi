@@ -11,9 +11,9 @@ async fn compact_redrives_receipt() {
         bytes: 100_000,
     });
     let service = service_with_budget(&temp, provider.clone());
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
     let response = service
-        .send_strand(
+        .send(
             &strand.id,
             strand::Post {
                 content: vec![message::Part::Text {
@@ -27,7 +27,7 @@ async fn compact_redrives_receipt() {
         .failed_turn(&strand.id, &accepted_turn(&response).id)
         .await;
     let receipt = service
-        .receipt_status(&response.receipt.inbox)
+        .receipt(&response.receipt.inbox)
         .expect("receipt query")
         .expect("receipt");
     assert_eq!(receipt.state, santi_core::receipt::State::Failed);
@@ -40,7 +40,7 @@ async fn compact_redrives_receipt() {
         .message
         .id
         .clone();
-    let store = SantiStore::open(&db).expect("open store directly");
+    let store = Store::open(&db).expect("open store directly");
     let boundary = store
         .append_message(Draft {
             strand: &strand.id,
@@ -54,7 +54,7 @@ async fn compact_redrives_receipt() {
         .strand_message;
 
     let compact = service
-        .compact_exec(
+        .exec(
             &strand.id,
             santi_core::compact::Exec {
                 first: Some(first),
@@ -75,7 +75,7 @@ async fn compact_redrives_receipt() {
     assert_eq!(runtime.effects[0].state, effect::State::Confirmed);
     assert_eq!(runtime.errors[0].status, santi_core::Status::Resolved);
     let receipt = service
-        .receipt_status(&response.receipt.inbox)
+        .receipt(&response.receipt.inbox)
         .expect("receipt query")
         .expect("receipt");
     assert_eq!(receipt.state, santi_core::receipt::State::Completed);

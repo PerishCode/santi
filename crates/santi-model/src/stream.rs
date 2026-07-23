@@ -33,10 +33,10 @@ pub enum Payload {
         message: crate::message::Placed,
     },
     ToolCallCreated {
-        tool_call: crate::tool::Call,
+        call: crate::tool::Call,
     },
     ToolResultCreated {
-        tool_result: crate::tool::Reply,
+        result: crate::tool::Reply,
     },
     ThinkingCreated {
         thinking: crate::thinking::Span,

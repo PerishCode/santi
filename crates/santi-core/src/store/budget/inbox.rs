@@ -1,7 +1,7 @@
 use super::*;
 use crate::ingest;
 
-impl SantiStore {
+impl Store {
     pub(crate) fn enqueue_inbox_with_context(
         &self,
         ingress: Ingress<'_>,
@@ -92,34 +92,33 @@ impl SantiStore {
 
         if let Some(admission) = admission {
             let database = Database::new(&tx);
-            let mut input = assembly_input_in_conn(&tx, strand)?;
-            input.extend(super::state::pending_items(&database, strand)?);
-            if let Some(candidate) = crate::context::budget::inbound_provider_item(&kind, &content)
-            {
+            let mut input = assembled(&tx, strand)?;
+            input.extend(super::state::queued(&database, strand)?);
+            if let Some(candidate) = crate::context::budget::inbound(&kind, &content) {
                 input.push(candidate);
             }
-            let estimate = crate::context::budget::estimate_provider_parts(
+            let estimate = crate::context::budget::estimated(
                 &input,
                 admission.instructions.as_deref(),
                 Some(admission.tools.as_slice()),
             );
-            if estimate.total > admission.budget_bytes {
-                let reason = over_budget_reason(estimate.total, admission.budget_bytes);
-                let observed_at_seq = database.cursor(strand)?;
-                let error = super::state::open_context_incident(
+            if estimate.total > admission.bytes {
+                let reason = reason(estimate.total, admission.bytes);
+                let observed = database.cursor(strand)?;
+                let error = super::state::press(
                     &database,
                     strand,
                     Pressure {
-                        reason_code: "candidate_input_exceeds_budget",
-                        reason_text: &reason,
+                        code: "candidate_input_exceeds_budget",
+                        text: &reason,
                         operation: "ingest_admission",
                         provider: Some(&admission.provider),
                         model: Some(&admission.model),
-                        budget_source: Some(&admission.budget_source),
-                        budget_bytes: Some(admission.budget_bytes),
+                        source: Some(&admission.source),
+                        bytes: Some(admission.bytes),
                         estimate: &estimate,
-                        observed_turn_id: None,
-                        observed_at_seq,
+                        observed: None,
+                        at: observed,
                         metadata: Some(json!({"estimator": estimate.estimator})),
                     },
                 )?;
@@ -140,15 +139,14 @@ impl SantiStore {
                 |row| row.get(0),
             )
             .map_err(|error| error.to_string())?;
-        if pending >= STRAND_INBOX_GATE {
-            let message =
-                format!("strand inbox is full ({pending} pending, gate {STRAND_INBOX_GATE})");
+        if pending >= GATE {
+            let message = format!("strand inbox is full ({pending} pending, gate {GATE})");
             let error = engine().transient(crate::Signal {
                 descriptor: catalog::INBOX_CAPACITY_EXCEEDED,
                 source: santi_error::Source::new("santi-core", "ingest_admission"),
                 scope: Some(santi_error::Scope::new("strand", strand)),
                 message,
-                context: json!({"pending": pending, "gate": STRAND_INBOX_GATE}),
+                context: json!({"pending": pending, "gate": GATE}),
             });
             return Ok(Intake {
                 outcome: ingest::Outcome::Rejected {

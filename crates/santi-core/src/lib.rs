@@ -13,10 +13,5 @@ pub use santi_model::{
 };
 pub use santi_object as object;
 pub use santi_provider::Item;
-pub use store::{
-    Completion, DEFAULT_SOUL_ID, Draft, Invocation, SantiStore, VERSION, soul_memory_file, version,
-};
-pub use workspace::{
-    MEMORY_FILE, SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, parse_workspace_uri, soul_memory_uri,
-    strand_memory_uri, workspace_uri,
-};
+pub use store::{Completion, Draft, GENESIS, Invocation, Store, VERSION, memoir, version};
+pub use workspace::{MEMORY, SOULSPACE, STRANDSPACE, housed, parsed, soulward, strandward};

@@ -17,13 +17,11 @@ impl Service {
         if let Some(thinking) = progress.current {
             if progress.response.is_some()
                 && thinking.response != progress.response
-                && let Some(updated) = self
-                    .store
-                    .update_thinking_span_response(&thinking.id, progress.response)?
+                && let Some(updated) = self.store.attribute(&thinking.id, progress.response)?
             {
                 *thinking = updated.clone();
                 *progress.summary = Some(updated.clone());
-                self.publish_stream(
+                self.publish(
                     progress.strand,
                     stream::Payload::ThinkingUpdated { thinking: updated },
                 );
@@ -34,7 +32,7 @@ impl Service {
         let thinking = self
             .store
             .append_thinking_span(progress.turn, progress.response)?;
-        self.publish_stream(
+        self.publish(
             progress.strand,
             stream::Payload::ThinkingCreated {
                 thinking: thinking.clone(),
@@ -45,7 +43,7 @@ impl Service {
         Ok(())
     }
 
-    pub(in crate::service) fn update_thinking_span_summary(
+    pub(in crate::service) fn summarize(
         &self,
         strand: &str,
         summary_target: &mut Option<thinking::Span>,
@@ -57,12 +55,9 @@ impl Service {
         let Some(thinking) = summary_target else {
             return Ok(());
         };
-        if let Some(updated) = self
-            .store
-            .update_thinking_span_summary(&thinking.id, summary)?
-        {
+        if let Some(updated) = self.store.summarize(&thinking.id, summary)? {
             *thinking = updated.clone();
-            self.publish_stream(
+            self.publish(
                 strand,
                 stream::Payload::ThinkingUpdated { thinking: updated },
             );
@@ -83,7 +78,7 @@ impl Service {
             .store
             .complete_thinking_span(&thinking.id, completion_reason)?
         {
-            self.publish_stream(
+            self.publish(
                 strand,
                 stream::Payload::ThinkingCompleted {
                     thinking: completed,
@@ -103,7 +98,7 @@ impl Service {
             return Ok(());
         };
         if let Some(failed) = self.store.fail_thinking_span(&thinking.id, error)? {
-            self.publish_stream(
+            self.publish(
                 strand,
                 stream::Payload::ThinkingCompleted { thinking: failed },
             );
@@ -111,14 +106,14 @@ impl Service {
         Ok(())
     }
 
-    pub(in crate::service) fn publish_turn_activity(
+    pub(in crate::service) fn stirred(
         &self,
         strand: &str,
         turn: &str,
         state: turn::Motion,
         response: Option<String>,
     ) {
-        self.publish_stream(
+        self.publish(
             strand,
             stream::Payload::TurnActivity {
                 activity: turn::Activity {

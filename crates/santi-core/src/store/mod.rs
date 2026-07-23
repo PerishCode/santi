@@ -26,28 +26,25 @@ pub use turns::Completion;
 use crate::{message, strand};
 use santi_adaptor::SYSTEM;
 pub use santi_adaptor::VERSION;
-pub const DEFAULT_SOUL_ID: &str = "soul_default";
-const STRAND_INBOX_GATE: i64 = 500;
+pub const GENESIS: &str = "soul_default";
+const GATE: i64 = 500;
 
-pub fn soul_memory_file(
-    runtime_root: impl AsRef<std::path::Path>,
-    soul: &str,
-) -> std::path::PathBuf {
-    runtime_root
+pub fn memoir(runtime: impl AsRef<std::path::Path>, soul: &str) -> std::path::PathBuf {
+    runtime
         .as_ref()
         .join("souls")
         .join(soul)
         .join("memory")
-        .join(crate::workspace::MEMORY_FILE)
+        .join(crate::workspace::MEMORY)
 }
 
 #[derive(Clone)]
-pub struct SantiStore {
+pub struct Store {
     conn: Arc<Mutex<Connection>>,
 }
 
 #[derive(Debug, Clone)]
-pub struct AppendedMessage {
+pub struct Penned {
     pub strand_message: message::Placed,
 }
 
@@ -61,19 +58,19 @@ pub struct Draft<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub struct StartedTurn {
+pub struct Begun {
     pub turn: Turn,
-    pub drained_messages: Vec<message::Placed>,
+    pub drained: Vec<message::Placed>,
 }
 
-pub(crate) enum StartTurnOutcome {
-    Started(StartedTurn),
+pub(crate) enum Opened {
+    Started(Begun),
     Running(Turn),
     Idle,
     Held(Fault),
 }
 
-pub(crate) struct ProviderFault<'a> {
+pub(crate) struct Misfire<'a> {
     pub provider: &'a str,
     pub model: &'a str,
     pub stage: &'a str,
@@ -82,21 +79,21 @@ pub(crate) struct ProviderFault<'a> {
     pub detail: &'a str,
 }
 
-pub(crate) struct RuntimeFault<'a> {
+pub(crate) struct Stumble<'a> {
     pub operation: &'a str,
     pub detail: &'a str,
 }
 
-impl SantiStore {
+impl Store {
     pub fn default_soul_id(&self) -> &'static str {
-        DEFAULT_SOUL_ID
+        GENESIS
     }
 
-    pub fn system_actor_id(&self) -> &'static str {
+    pub fn system(&self) -> &'static str {
         SYSTEM
     }
 
-    pub fn list_strands(&self) -> Result<Vec<Strand>, String> {
+    pub fn strands(&self) -> Result<Vec<Strand>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
@@ -114,7 +111,7 @@ impl SantiStore {
         collected(rows)
     }
 
-    pub fn create_strand(&self) -> Result<Strand, String> {
+    pub fn weave(&self) -> Result<Strand, String> {
         let conn = self.conn.lock().unwrap();
         let strand = tag("ss");
         let now = now();
@@ -126,7 +123,7 @@ impl SantiStore {
             )
             VALUES (?1, ?2, NULL, '', NULL, 1, 0, NULL, NULL, ?3, ?3)
             "#,
-            params![strand, DEFAULT_SOUL_ID, now],
+            params![strand, GENESIS, now],
         )
         .map_err(|error| error.to_string())?;
         Database::new(&conn)
@@ -139,10 +136,7 @@ impl SantiStore {
         Database::new(&conn).messages(strand)
     }
 
-    pub fn runtime_snapshot(
-        &self,
-        strand: &str,
-    ) -> Result<Option<crate::stream::Snapshot>, String> {
+    pub fn snapshot(&self, strand: &str) -> Result<Option<crate::stream::Snapshot>, String> {
         let conn = self.conn.lock().unwrap();
         let database = Database::new(&conn);
         let Some(strand) = database.strand(strand)? else {
@@ -162,7 +156,7 @@ impl SantiStore {
         }))
     }
 
-    pub fn append_message(&self, draft: Draft<'_>) -> Result<AppendedMessage, String> {
+    pub fn append_message(&self, draft: Draft<'_>) -> Result<Penned, String> {
         self.append_message_with_kind(draft, message::Kind::Text)
     }
 
@@ -171,7 +165,7 @@ impl SantiStore {
         strand: &str,
         content: message::Content,
         intake: message::Intake,
-    ) -> Result<AppendedMessage, String> {
+    ) -> Result<Penned, String> {
         self.append_message_with_kind(
             Draft {
                 strand,
@@ -189,7 +183,7 @@ impl SantiStore {
         &self,
         draft: Draft<'_>,
         kind: message::Kind,
-    ) -> Result<AppendedMessage, String> {
+    ) -> Result<Penned, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let message = tag("msg");
@@ -217,7 +211,7 @@ impl SantiStore {
         .map_err(|error| error.to_string())?;
         Database::new(&tx).entered(draft.strand, strand::Target::Message, &message)?;
         tx.commit().map_err(|error| error.to_string())?;
-        Ok(AppendedMessage {
+        Ok(Penned {
             strand_message: Database::new(&conn)
                 .message(&message)?
                 .ok_or_else(|| "created message missing".to_string())?,

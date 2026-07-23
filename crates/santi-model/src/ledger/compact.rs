@@ -52,10 +52,10 @@ pub struct Report {
     pub compact: String,
     pub first: String,
     pub last: String,
-    pub start_seq: i64,
-    pub end_seq: i64,
+    pub from: i64,
+    pub to: i64,
     pub absorbed: Vec<String>,
-    pub collapsed_count: i64,
+    pub collapsed: i64,
     #[serde(default)]
     pub dry: bool,
     #[serde(default)]

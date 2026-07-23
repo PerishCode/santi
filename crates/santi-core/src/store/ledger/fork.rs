@@ -1,10 +1,10 @@
 use rusqlite::params;
 
-use super::{SantiStore, db::Database};
+use super::{Store, db::Database};
 use crate::{now, strand::Strand, tag};
 
-impl SantiStore {
-    pub fn fork_strand(&self, parent: &str, fork: i64) -> Result<Strand, String> {
+impl Store {
+    pub fn fork(&self, parent: &str, fork: i64) -> Result<Strand, String> {
         if fork < 0 {
             return Err("fork must be >= 0".to_string());
         }
@@ -14,12 +14,12 @@ impl SantiStore {
         let parent = database
             .strand(parent)?
             .ok_or_else(|| "parent strand not found".to_string())?;
-        let parent_last_seq = parent.next - 1;
-        if fork > parent_last_seq {
-            return Err(format!("fork {fork} is past parent end {parent_last_seq}"));
+        let inherited = parent.next - 1;
+        if fork > inherited {
+            return Err(format!("fork {fork} is past parent end {inherited}"));
         }
 
-        let child_id = tag("ss");
+        let child = tag("ss");
         let now = now();
         tx.execute(
             r#"
@@ -30,7 +30,7 @@ impl SantiStore {
             VALUES (?1, ?2, NULL, '', NULL, ?3, ?4, ?5, ?6, ?7, ?7)
             "#,
             params![
-                child_id,
+                child,
                 parent.soul,
                 fork + 1,
                 parent.seen.min(fork),
@@ -75,19 +75,19 @@ impl SantiStore {
                 )
                 VALUES (?1, ?2, ?3, ?4, ?5)
                 "#,
-                params![child_id, kind, target, seq, created],
+                params![child, kind, target, seq, created],
             )
             .map_err(|error| error.to_string())?;
         }
 
         for compact in database.compacts(&parent.id)? {
-            let Some(start_seq) = database.seat(&parent.id, &compact.first)? else {
+            let Some(from) = database.seat(&parent.id, &compact.first)? else {
                 continue;
             };
-            let Some(end_seq) = database.seat(&parent.id, &compact.last)? else {
+            let Some(to) = database.seat(&parent.id, &compact.last)? else {
                 continue;
             };
-            if start_seq <= fork && end_seq <= fork {
+            if from <= fork && to <= fork {
                 tx.execute(
                     r#"
                     INSERT INTO compacts (
@@ -97,7 +97,7 @@ impl SantiStore {
                     "#,
                     params![
                         tag("cmp"),
-                        child_id,
+                        child,
                         compact.summary,
                         compact.first,
                         compact.last,
@@ -111,7 +111,7 @@ impl SantiStore {
 
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .strand(&child_id)?
+            .strand(&child)?
             .ok_or_else(|| "forked strand missing".to_string())
     }
 

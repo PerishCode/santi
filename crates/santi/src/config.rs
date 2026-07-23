@@ -79,8 +79,8 @@ impl Default for Upgrade {
 #[cascade(section)]
 pub struct Paths {
     pub database: Option<PathBuf>,
-    pub runtime_root: Option<PathBuf>,
-    pub execution_root: Option<PathBuf>,
+    pub runtime: Option<PathBuf>,
+    pub execution: Option<PathBuf>,
     pub constitution_file: Option<PathBuf>,
 }
 
@@ -131,17 +131,14 @@ fn runtime(held: SantiConfig) -> Runtime {
         provider: held.provider,
         providers: held.providers,
         paths: RuntimePaths {
-            database_path: held
+            database: held
                 .paths
                 .database
                 .unwrap_or_else(|| home.join("runtime").join("db")),
-            runtime_root: held
+            runtime: held.paths.runtime.unwrap_or_else(|| home.join("runtime")),
+            execution: held
                 .paths
-                .runtime_root
-                .unwrap_or_else(|| home.join("runtime")),
-            execution_root: held
-                .paths
-                .execution_root
+                .execution
                 .unwrap_or_else(|| home.join("execution")),
         },
         shutdown_grace: Duration::from_secs(held.server.shutdown_grace_secs),

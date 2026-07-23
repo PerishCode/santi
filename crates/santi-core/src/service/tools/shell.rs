@@ -28,7 +28,7 @@ pub(super) enum Outcome {
     Unknown(String),
 }
 
-pub(super) fn run_prepared_shell(prepared: Prepared, output_limit: Option<usize>) -> Outcome {
+pub(super) fn ran(prepared: Prepared, output_limit: Option<usize>) -> Outcome {
     let Prepared { mut command, cwd } = prepared;
     let child = match command.spawn() {
         Ok(child) => child,
@@ -42,14 +42,14 @@ pub(super) fn run_prepared_shell(prepared: Prepared, output_limit: Option<usize>
                 "exit_code": output.status.code().unwrap_or(-1),
                 "stdout": String::from_utf8_lossy(&output.stdout),
                 "stderr": String::from_utf8_lossy(&output.stderr),
-                "shell": default_shell_name(),
+                "shell": sheller(),
                 "cwd": cwd.display().to_string(),
             })),
             Err(error) => Outcome::Unknown(format!(
                 "shell process was spawned but its result could not be captured: {error}"
             )),
         },
-        Some(limit) => wait_with_bounded_output(child, cwd, limit),
+        Some(limit) => capped(child, cwd, limit),
     }
 }
 
@@ -58,59 +58,59 @@ struct Pipe {
     truncated: bool,
 }
 
-fn wait_with_bounded_output(mut child: Child, cwd: PathBuf, limit: usize) -> Outcome {
+fn capped(mut child: Child, cwd: PathBuf, limit: usize) -> Outcome {
     let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
         let _ = child.kill();
         let _ = child.wait();
         return Outcome::Unknown("shell stdout or stderr pipe was unavailable".to_string());
     };
     let remaining = Arc::new(AtomicUsize::new(limit));
-    let stdout_capture = spawn_pipe_capture(stdout, remaining.clone());
-    let stderr_capture = spawn_pipe_capture(stderr, remaining);
+    let stdout = spawned(stdout, remaining.clone());
+    let stderr = spawned(stderr, remaining);
     let status = child.wait().inspect_err(|_| {
         let _ = child.kill();
         let _ = child.wait();
     });
-    let stdout = join_pipe_capture(stdout_capture, "stdout");
-    let stderr = join_pipe_capture(stderr_capture, "stderr");
+    let stdout = joined(stdout, "stdout");
+    let stderr = joined(stderr, "stderr");
     let (status, stdout, stderr) = match (status, stdout, stderr) {
         (Ok(status), Ok(stdout), Ok(stderr)) => (status, stdout, stderr),
         (status, stdout, stderr) => {
             return Outcome::Unknown(format!(
                 "shell process was spawned but its bounded result could not be captured: status={}; stdout={}; stderr={}",
-                capture_status(status),
-                capture_status(stdout),
-                capture_status(stderr),
+                shown(status),
+                shown(stdout),
+                shown(stderr),
             ));
         }
     };
-    let (stdout_text, stdout_text_truncated) = lossy_prefix(&stdout.bytes, limit);
-    let text_remaining = limit.saturating_sub(stdout_text.len());
-    let (stderr_text, stderr_text_truncated) = lossy_prefix(&stderr.bytes, text_remaining);
-    let output_truncated =
+    let (stdout_text, stdout_text_truncated) = lossy(&stdout.bytes, limit);
+    let remaining = limit.saturating_sub(stdout_text.len());
+    let (stderr_text, stderr_text_truncated) = lossy(&stderr.bytes, remaining);
+    let truncated =
         stdout.truncated || stderr.truncated || stdout_text_truncated || stderr_text_truncated;
     Outcome::Captured(json!({
         "exit_code": status.code().unwrap_or(-1),
         "stdout": stdout_text,
         "stderr": stderr_text,
-        "shell": default_shell_name(),
+        "shell": sheller(),
         "cwd": cwd.display().to_string(),
-        "output_truncated": output_truncated,
+        "output_truncated": truncated,
         "output_limit_bytes": limit,
     }))
 }
 
-fn spawn_pipe_capture<R>(
+fn spawned<R>(
     reader: R,
     remaining: Arc<AtomicUsize>,
 ) -> std::thread::JoinHandle<Result<Pipe, String>>
 where
     R: Read + Send + 'static,
 {
-    std::thread::spawn(move || capture_pipe(reader, &remaining))
+    std::thread::spawn(move || piped(reader, &remaining))
 }
 
-fn capture_pipe(mut reader: impl Read, remaining: &AtomicUsize) -> Result<Pipe, String> {
+fn piped(mut reader: impl Read, remaining: &AtomicUsize) -> Result<Pipe, String> {
     let mut bytes = Vec::new();
     let mut truncated = false;
     let mut chunk = [0u8; 8192];
@@ -119,14 +119,14 @@ fn capture_pipe(mut reader: impl Read, remaining: &AtomicUsize) -> Result<Pipe, 
         if read == 0 {
             break;
         }
-        let keep = reserve_capture_bytes(remaining, read);
+        let keep = reserved(remaining, read);
         bytes.extend_from_slice(&chunk[..keep]);
         truncated |= keep < read;
     }
     Ok(Pipe { bytes, truncated })
 }
 
-fn reserve_capture_bytes(remaining: &AtomicUsize, requested: usize) -> usize {
+fn reserved(remaining: &AtomicUsize, requested: usize) -> usize {
     let mut available = remaining.load(Ordering::Acquire);
     loop {
         let reserved = available.min(requested);
@@ -142,7 +142,7 @@ fn reserve_capture_bytes(remaining: &AtomicUsize, requested: usize) -> usize {
     }
 }
 
-fn join_pipe_capture(
+fn joined(
     handle: std::thread::JoinHandle<Result<Pipe, String>>,
     name: &str,
 ) -> Result<Pipe, String> {
@@ -151,14 +151,14 @@ fn join_pipe_capture(
         .map_err(|_| format!("{name} capture thread panicked"))?
 }
 
-fn capture_status<T, E: std::fmt::Display>(result: Result<T, E>) -> String {
+fn shown<T, E: std::fmt::Display>(result: Result<T, E>) -> String {
     match result {
         Ok(_) => "ok".to_string(),
         Err(error) => error.to_string(),
     }
 }
 
-fn lossy_prefix(bytes: &[u8], limit: usize) -> (String, bool) {
+fn lossy(bytes: &[u8], limit: usize) -> (String, bool) {
     let text = String::from_utf8_lossy(bytes);
     if text.len() <= limit {
         return (text.into_owned(), false);
@@ -169,7 +169,7 @@ fn lossy_prefix(bytes: &[u8], limit: usize) -> (String, bool) {
     }
     (text[..end].to_string(), true)
 }
-pub(super) fn shell_command(command: &str) -> Command {
+pub(super) fn shell(command: &str) -> Command {
     #[cfg(windows)]
     {
         let mut shell = Command::new("pwsh");
@@ -189,6 +189,6 @@ pub(super) fn shell_command(command: &str) -> Command {
     }
 }
 
-fn default_shell_name() -> &'static str {
+fn sheller() -> &'static str {
     if cfg!(windows) { "pwsh" } else { "bash" }
 }

@@ -40,7 +40,7 @@ impl Database<'_> {
         strand: &str,
         turn: &str,
         drained_inbox_ids: &[String],
-        recovered_incident_id: Option<&str>,
+        recovered: Option<&str>,
     ) -> Result<(), String> {
         let mut receipts = drained_inbox_ids.iter().cloned().collect::<BTreeSet<_>>();
         let mut stmt = self
@@ -56,7 +56,7 @@ impl Database<'_> {
         drop(stmt);
 
         let now = now();
-        if let Some(incident) = recovered_incident_id {
+        if let Some(incident) = recovered {
             for inbox in drained_inbox_ids {
                 self.shift(inbox, receipt::State::Recovered, &now)?;
                 self.noted(
@@ -77,7 +77,7 @@ impl Database<'_> {
                 Transition {
                     state: receipt::State::Driving,
                     turn: Some(turn),
-                    incident: recovered_incident_id,
+                    incident: recovered,
                     time: &now,
                 },
             )?;

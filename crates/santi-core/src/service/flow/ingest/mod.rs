@@ -24,7 +24,7 @@ pub(in crate::service) struct External<'a> {
 struct Audit {
     kind: String,
     source: String,
-    content_bytes: usize,
+    weight: usize,
 }
 
 impl Audit {
@@ -40,7 +40,7 @@ impl Audit {
                 .and_then(|source| source.source.as_deref())
                 .unwrap_or("-")
                 .to_string(),
-            content_bytes: content.rendered().len(),
+            weight: content.rendered().len(),
         }
     }
 }
@@ -48,9 +48,9 @@ impl Audit {
 #[derive(Clone, Copy)]
 struct Drive<'a> {
     trigger: &'a str,
-    accepted_inbox_id: Option<&'a str>,
+    inbox: Option<&'a str>,
     operation: &'a str,
-    recover_failed_receipts: bool,
+    recovered: bool,
 }
 
 impl Service {
@@ -78,7 +78,7 @@ impl Service {
         selector: strand::Selector,
         input: Ingest<'_>,
     ) -> Result<ingest::Outcome, String> {
-        let strand = self.store.resolve_strand_selector(&selector)?;
+        let strand = self.store.selected(&selector)?;
         let (outcome, _driven) = self.enqueue(&strand, input)?;
         Ok(outcome)
     }
@@ -103,9 +103,9 @@ impl Service {
                     replay: input.replay,
                 })?;
                 let outcome = intake.outcome;
-                self.dispatch_error_events();
+                self.dispatched();
                 if let ingest::Outcome::Rejected { error } = &outcome {
-                    log_ingest_rejection(error, &strand.id, &audit);
+                    logged(error, &strand.id, &audit);
                 }
                 if intake.inserted {
                     drive_maintenance(self, &maintenance_strand_id);
@@ -114,9 +114,9 @@ impl Service {
             }
         }
         self.clear_context_incident(&strand.id, "ingest_remeasurement")?;
-        if let Some(error) = self.store.reject_if_drive_blocked(&strand.id)? {
-            self.dispatch_error_events();
-            log_ingest_rejection(&error, &strand.id, &audit);
+        if let Some(error) = self.store.gated(&strand.id)? {
+            self.dispatched();
+            logged(&error, &strand.id, &audit);
             return Ok((
                 ingest::Outcome::Rejected {
                     error: Box::new(error),
@@ -134,9 +134,9 @@ impl Service {
             replay: input.replay,
         })?;
         let outcome = intake.outcome;
-        self.dispatch_error_events();
+        self.dispatched();
         if let ingest::Outcome::Rejected { error } = &outcome {
-            log_ingest_rejection(error, &strand.id, &audit);
+            logged(error, &strand.id, &audit);
         }
         let drive = match &outcome {
             ingest::Outcome::Accepted { receipt } if intake.inserted => self.poke(
@@ -161,23 +161,23 @@ impl Service {
         Ok((outcome, drive))
     }
 
-    pub fn ingest_external_event(
+    pub fn evented(
         &self,
         soul: &str,
         label: &str,
         system_text: String,
     ) -> Result<ingest::Outcome, String> {
-        self.ingest_external_source(soul, label, system_text, None)
+        self.sourced(soul, label, system_text, None)
     }
 
-    pub fn ingest_external_source(
+    pub fn sourced(
         &self,
         soul: &str,
         label: &str,
         system_text: String,
         source: Option<ingest::Source>,
     ) -> Result<ingest::Outcome, String> {
-        self.ingest_external(External {
+        self.external(External {
             soul,
             label,
             text: system_text,
@@ -186,16 +186,14 @@ impl Service {
         })
     }
 
-    pub(in crate::service) fn ingest_external(
+    pub(in crate::service) fn external(
         &self,
         input: External<'_>,
     ) -> Result<ingest::Outcome, String> {
-        let strand = self
-            .store
-            .resolve_strand_selector(&strand::Selector::ByLabel {
-                soul: input.soul.to_string(),
-                label: input.label.to_string(),
-            })?;
+        let strand = self.store.selected(&strand::Selector::ByLabel {
+            soul: input.soul.to_string(),
+            label: input.label.to_string(),
+        })?;
         let (outcome, _driven) = self.enqueue(
             &strand,
             Ingest {
@@ -212,7 +210,7 @@ impl Service {
 
 mod dispatch;
 
-fn log_ingest_rejection(error: &Fault, strand: &str, audit: &Audit) {
+fn logged(error: &Fault, strand: &str, audit: &Audit) {
     eprintln!(
         "santi: ingest rejected code={} incident_id={} strand={} kind={} source={} content_bytes={}",
         error.code,
@@ -220,15 +218,11 @@ fn log_ingest_rejection(error: &Fault, strand: &str, audit: &Audit) {
         strand,
         audit.kind,
         audit.source,
-        audit.content_bytes,
+        audit.weight,
     );
 }
 
-pub(super) fn send_error(
-    descriptor: santi_error::Descriptor,
-    strand: &str,
-    message: String,
-) -> Fault {
+pub(super) fn erred(descriptor: santi_error::Descriptor, strand: &str, message: String) -> Fault {
     engine().transient(crate::Signal {
         descriptor,
         source: santi_error::Source::new("santi-core", "strand_send"),

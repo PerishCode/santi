@@ -11,20 +11,20 @@ async fn external_ingest_turn() {
     let provider = Arc::new(FakeProvider::default());
     let service = Service::open(
         service::Config {
-            database_path: temp.path().join("santi.sqlite").display().to_string(),
-            runtime_root: temp.path().join("runtime").display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: temp.path().join("santi.sqlite").display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         provider.clone(),
     )
     .expect("open service");
 
-    let soul = service.list_souls().expect("list souls")[0].id.clone();
+    let soul = service.souls().expect("list souls")[0].id.clone();
     let label = "github:ops:issue:PerishCode/santi#42";
     let santi_core::ingest::Outcome::Accepted { receipt } = service
-        .ingest_external_event(&soul, label, "an external request arrived".to_string())
+        .evented(&soul, label, "an external request arrived".to_string())
         .expect("ingest event")
     else {
         panic!("expected accepted");
@@ -54,7 +54,7 @@ async fn external_ingest_turn() {
     let santi_core::ingest::Outcome::Accepted {
         receipt: receipt_again,
     } = service
-        .ingest_external_event(&soul, label, "a follow-up arrived".to_string())
+        .evented(&soul, label, "a follow-up arrived".to_string())
         .expect("ingest second event")
     else {
         panic!("expected accepted");
@@ -78,20 +78,20 @@ async fn external_ingest_turn() {
 async fn boot_drains_inbox() {
     let temp = tempfile::tempdir().expect("temp dir");
     let config = service::Config {
-        database_path: temp.path().join("santi.sqlite").display().to_string(),
-        runtime_root: temp.path().join("runtime").display().to_string(),
-        execution_root: temp.path().join("execution").display().to_string(),
-        bind_addr: Some("127.0.0.1:0".to_string()),
-        constitution_path: None,
+        database: temp.path().join("santi.sqlite").display().to_string(),
+        runtime: temp.path().join("runtime").display().to_string(),
+        execution: temp.path().join("execution").display().to_string(),
+        bind: Some("127.0.0.1:0".to_string()),
+        constitution: None,
     };
     let provider = Arc::new(FakeProvider::default());
 
     let strand = {
         let service = Service::open(config.clone(), provider.clone()).expect("open service");
-        service.create_strand().expect("create strand").strand.id
+        service.weave().expect("create strand").strand.id
     };
 
-    let store = SantiStore::open(&config.database_path).expect("open store directly");
+    let store = Store::open(&config.database).expect("open store directly");
     store
         .enqueue_inbox(
             &strand,
@@ -102,7 +102,7 @@ async fn boot_drains_inbox() {
     drop(store);
 
     let service = Service::open(config, provider.clone()).expect("reopen service");
-    service.resume_pending().expect("resume pending");
+    service.resume().expect("resume pending");
 
     let runtime = Probe::new(&service).any_completed(&strand).await;
     assert!(

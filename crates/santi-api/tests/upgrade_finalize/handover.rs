@@ -5,15 +5,10 @@ fn full_handover_is_idempotent() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
     let seeded = paths
-        .seed_attempt_handover(
-            santi_core::DEFAULT_SOUL_ID,
-            "upgrade_test",
-            None,
-            "existing wake",
-        )
+        .seed_attempt_handover(santi_core::GENESIS, "upgrade_test", None, "existing wake")
         .expect("initial seed");
-    let store = SantiStore::open(&paths.database_path).expect("open store");
-    let conn = rusqlite::Connection::open(&paths.database_path).expect("open sqlite");
+    let store = Store::open(&paths.database).expect("open store");
+    let conn = rusqlite::Connection::open(&paths.database).expect("open sqlite");
     conn.execute(
         r#"
         WITH RECURSIVE seq(n) AS (
@@ -48,7 +43,7 @@ fn full_handover_is_idempotent() {
     assert_eq!(second.errors.len(), 2);
 
     let incidents = store
-        .error_incidents(&santi_core::Scope::new("runtime", "default"), 10)
+        .incidents(&santi_core::Scope::new("runtime", "default"), 10)
         .expect("runtime errors");
     assert_eq!(incidents.len(), 2);
     assert!(
@@ -73,7 +68,7 @@ fn next_attempt_bypasses_exhaustion() {
     .expect("first finalize");
     let first_strand = first.seeded_strand_id.expect("first seeded strand");
 
-    let conn = rusqlite::Connection::open(&paths.database_path).expect("open sqlite");
+    let conn = rusqlite::Connection::open(&paths.database).expect("open sqlite");
     conn.execute(
         r#"
         WITH RECURSIVE seq(n) AS (
@@ -114,9 +109,9 @@ fn next_attempt_bypasses_exhaustion() {
         Some(first_strand.as_str())
     );
 
-    let store = SantiStore::open(&paths.database_path).expect("open store");
+    let store = Store::open(&paths.database).expect("open store");
     let handover = store
-        .error_incidents(&santi_core::Scope::new("runtime", "default"), 10)
+        .incidents(&santi_core::Scope::new("runtime", "default"), 10)
         .expect("runtime incidents")
         .into_iter()
         .find(|incident| incident.code == "runtime.upgrade.handover_failed")

@@ -5,38 +5,38 @@ use santi_core::{material, message};
 #[test]
 fn fork_syncs_workspace() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let runtime_root = temp.path().join("runtime");
+    let runtime = temp.path().join("runtime");
     let service = Service::open(
         service::Config {
-            database_path: temp.path().join("santi.sqlite").display().to_string(),
-            runtime_root: runtime_root.display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: temp.path().join("santi.sqlite").display().to_string(),
+            runtime: runtime.display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         Arc::new(FakeProvider::default()),
     )
     .expect("open service");
-    let parent = service.create_strand().expect("create parent").strand;
-    let parent_dir = runtime_root.join("strands").join(&parent.id).join("memory");
-    fs::create_dir_all(parent_dir.join("notes")).expect("create parent workspace");
-    fs::write(parent_dir.join("MEMORY.md"), "# Parent strand memory\n").expect("write memory");
-    fs::write(parent_dir.join("notes/plan.md"), "plan v1\n").expect("write note");
+    let parent = service.weave().expect("create parent").strand;
+    let base = runtime.join("strands").join(&parent.id).join("memory");
+    fs::create_dir_all(base.join("notes")).expect("create parent workspace");
+    fs::write(base.join("MEMORY.md"), "# Parent strand memory\n").expect("write memory");
+    fs::write(base.join("notes/plan.md"), "plan v1\n").expect("write note");
 
-    let child = service.fork_strand(&parent.id).expect("fork").strand;
-    let child_dir = runtime_root.join("strands").join(&child.id).join("memory");
+    let child = service.fork(&parent.id).expect("fork").strand;
+    let dir = runtime.join("strands").join(&child.id).join("memory");
     assert_eq!(
-        fs::read_to_string(child_dir.join("MEMORY.md")).expect("child memory"),
+        fs::read_to_string(dir.join("MEMORY.md")).expect("child memory"),
         "# Parent strand memory\n"
     );
     assert_eq!(
-        fs::read_to_string(child_dir.join("notes/plan.md")).expect("child note"),
+        fs::read_to_string(dir.join("notes/plan.md")).expect("child note"),
         "plan v1\n"
     );
 
-    fs::write(parent_dir.join("notes/plan.md"), "parent changed\n").expect("rewrite parent");
+    fs::write(base.join("notes/plan.md"), "parent changed\n").expect("rewrite parent");
     assert_eq!(
-        fs::read_to_string(child_dir.join("notes/plan.md")).expect("child note unchanged"),
+        fs::read_to_string(dir.join("notes/plan.md")).expect("child note unchanged"),
         "plan v1\n"
     );
 }
@@ -46,26 +46,26 @@ fn fork_syncs_workspace() {
 fn fork_rejects_symlink() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
-    let runtime_root = temp.path().join("runtime");
+    let runtime = temp.path().join("runtime");
     let service = Service::open(
         service::Config {
-            database_path: db.display().to_string(),
-            runtime_root: runtime_root.display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: db.display().to_string(),
+            runtime: runtime.display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         Arc::new(FakeProvider::default()),
     )
     .expect("open service");
-    let parent = service.create_strand().expect("create parent").strand;
+    let parent = service.weave().expect("create parent").strand;
     {
-        let store = SantiStore::open(&db).expect("open store directly");
+        let store = Store::open(&db).expect("open store directly");
         let first = store
             .append_message(Draft {
                 strand: &parent.id,
                 actor: message::Role::System,
-                id: store.system_actor_id(),
+                id: store.system(),
                 content: message::Content::text("first"),
                 state: message::State::Fixed,
                 intake: message::Intake::Record,
@@ -76,7 +76,7 @@ fn fork_rejects_symlink() {
             .append_message(Draft {
                 strand: &parent.id,
                 actor: message::Role::System,
-                id: store.system_actor_id(),
+                id: store.system(),
                 content: message::Content::text("second"),
                 state: message::State::Fixed,
                 intake: message::Intake::Record,
@@ -84,7 +84,7 @@ fn fork_rejects_symlink() {
             .expect("append second")
             .strand_message;
         store
-            .create_compact(
+            .compact(
                 &parent.id,
                 &first.message.id,
                 &second.message.id,
@@ -92,23 +92,23 @@ fn fork_rejects_symlink() {
             )
             .expect("parent compact");
     }
-    let parent_dir = runtime_root.join("strands").join(&parent.id).join("memory");
-    fs::create_dir_all(&parent_dir).expect("create parent workspace");
-    fs::write(parent_dir.join("real.md"), "real\n").expect("write target");
-    std::os::unix::fs::symlink("real.md", parent_dir.join("link.md")).expect("create symlink");
+    let base = runtime.join("strands").join(&parent.id).join("memory");
+    fs::create_dir_all(&base).expect("create parent workspace");
+    fs::write(base.join("real.md"), "real\n").expect("write target");
+    std::os::unix::fs::symlink("real.md", base.join("link.md")).expect("create symlink");
 
     let err = service
-        .fork_strand(&parent.id)
+        .fork(&parent.id)
         .expect_err("symlink workspace should fail fork");
     assert!(
         err.contains("cannot copy symlink"),
         "unexpected error: {err}"
     );
 
-    let strands = service.list_strands().expect("list strands");
+    let strands = service.strands().expect("list strands");
     assert_eq!(strands.len(), 1, "fork child strand should be rolled back");
     assert_eq!(strands[0].id, parent.id);
-    let runtime = runtime_root.join("strands");
+    let runtime = runtime.join("strands");
     let child_dirs = fs::read_dir(&runtime)
         .expect("runtime strands dir")
         .filter_map(Result::ok)
@@ -154,17 +154,17 @@ fn fork_prompt_topology() {
     let temp = tempfile::tempdir().expect("temp dir");
     let service = Service::open(
         service::Config {
-            database_path: temp.path().join("santi.sqlite").display().to_string(),
-            runtime_root: temp.path().join("runtime").display().to_string(),
-            execution_root: temp.path().join("execution").display().to_string(),
-            bind_addr: Some("127.0.0.1:0".to_string()),
-            constitution_path: None,
+            database: temp.path().join("santi.sqlite").display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
         },
         Arc::new(FakeProvider::default()),
     )
     .expect("open service");
-    let parent = service.create_strand().expect("create parent").strand;
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store directly");
+    let parent = service.weave().expect("create parent").strand;
+    let store = Store::open(temp.path().join("santi.sqlite")).expect("open store directly");
     store
         .append_santi_system_message(
             &parent.id,
@@ -173,7 +173,7 @@ fn fork_prompt_topology() {
         )
         .expect("append parent entry");
     drop(store);
-    let child = service.fork_strand(&parent.id).expect("fork").strand;
+    let child = service.fork(&parent.id).expect("fork").strand;
 
     let text = service
         .strand_material(

@@ -7,10 +7,10 @@ use rusqlite::{Connection, params};
 
 use super::db::migrate;
 use crate::now;
-use crate::store::DEFAULT_SOUL_ID;
-use crate::store::SantiStore;
+use crate::store::GENESIS;
+use crate::store::Store;
 
-impl SantiStore {
+impl Store {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, String> {
         if let Some(parent) = path.as_ref().parent() {
             std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -22,11 +22,11 @@ impl SantiStore {
             conn: Arc::new(Mutex::new(conn)),
         };
         migrate(&store.conn.lock().unwrap())?;
-        store.seed_defaults()?;
+        store.seeded()?;
         Ok(store)
     }
 
-    fn seed_defaults(&self) -> Result<(), String> {
+    fn seeded(&self) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         let now = now();
         conn.execute(
@@ -34,7 +34,7 @@ impl SantiStore {
             INSERT OR IGNORE INTO souls (id, created_at, updated_at)
             VALUES (?1, ?2, ?2)
             "#,
-            params![DEFAULT_SOUL_ID, now],
+            params![GENESIS, now],
         )
         .map_err(|error| error.to_string())?;
         Ok(())

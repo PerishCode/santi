@@ -1,8 +1,8 @@
-use super::SantiStore;
+use super::Store;
 use super::db::Database;
 use crate::event;
 
-impl SantiStore {
+impl Store {
     pub fn since(
         &self,
         after_seq: i64,

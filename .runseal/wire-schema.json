@@ -1,6 +1,6 @@
 {
   "schema": "santi.wire_schema.v2",
-  "digest": "c69d69855a3353e52b163cdf68d79534b5a47c163ed66ca1d9b8d3b1147d37a7",
+  "digest": "86bfc842d5ca973fa5357ef8a9f9c17b05ce936c2d424fbc67dc6f117c17c462",
   "components": [
     "Health",
     "ResolveEffectRequest",
@@ -154,14 +154,14 @@
       "active_incident_resolved",
       "after",
       "before",
-      "collapsed_count",
+      "collapsed",
       "compact",
       "dry",
-      "end_seq",
       "first",
+      "from",
       "last",
       "ratio",
-      "start_seq"
+      "to"
     ],
     "downstream.Credential": [
       "created",

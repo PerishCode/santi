@@ -14,13 +14,13 @@ use santi_core::{budget, compact, strand, stream};
         (status = 503, body = Fault)
     )
 )]
-pub async fn send_strand(
+pub async fn send(
     State(service): State<Service>,
     Path(strand): Path<String>,
     Json(request): Json<strand::Post>,
 ) -> Result<Json<strand::Posted>, ApiError> {
     service
-        .send_strand(&strand, request)
+        .send(&strand, request)
         .await
         .map(Json)
         .map_err(ApiError::from_santi)
@@ -58,12 +58,12 @@ pub async fn drive_strand(
         (status = 500, body = Fault)
     )
 )]
-pub(super) async fn fork_strand(
+pub(super) async fn fork(
     State(service): State<Service>,
     Path(strand): Path<String>,
 ) -> Result<Json<strand::Forked>, ApiError> {
     service
-        .fork_strand(&strand)
+        .fork(&strand)
         .map(Json)
         .map_err(ApiError::from_service)
 }
@@ -80,13 +80,13 @@ pub(super) async fn fork_strand(
         (status = 500, body = Fault)
     )
 )]
-pub(super) async fn compact_exec(
+pub(super) async fn exec(
     State(service): State<Service>,
     Path(strand): Path<String>,
     Json(request): Json<compact::Exec>,
 ) -> Result<Json<compact::Report>, ApiError> {
     service
-        .compact_exec(&strand, request)
+        .exec(&strand, request)
         .map(Json)
         .map_err(ApiError::from_service)
 }
@@ -106,13 +106,13 @@ pub(super) async fn compact_exec(
         (status = 500, body = Fault)
     )
 )]
-pub(super) async fn compact_query(
+pub(super) async fn page(
     State(service): State<Service>,
     Path(compact): Path<String>,
     Query(params): Query<CompactQueryParams>,
 ) -> Result<Json<compact::Page>, ApiError> {
     service
-        .compact_query(
+        .page(
             &compact,
             params.keyword.as_deref(),
             params.page_index.unwrap_or(0),
@@ -140,12 +140,12 @@ pub(super) struct CompactQueryParams {
         (status = 500, body = Fault)
     )
 )]
-pub(super) async fn runtime_snapshot(
+pub(super) async fn snapshot(
     State(service): State<Service>,
     Path(strand): Path<String>,
 ) -> Result<Json<stream::Snapshot>, ApiError> {
     service
-        .runtime_snapshot(&strand)
+        .snapshot(&strand)
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("strand not found"))

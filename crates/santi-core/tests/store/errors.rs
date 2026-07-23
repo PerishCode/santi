@@ -1,9 +1,9 @@
-use santi_core::{SantiStore, catalog};
+use santi_core::{Store, catalog};
 
 #[test]
 fn generic_ports_are_transactional() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let store = SantiStore::open(temp.path().join("santi.sqlite")).expect("open store");
+    let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let scope = santi_core::Scope::new("runtime", "default");
     let key = "runtime.upgrade.failed:runtime:default";
     let draft = || santi_core::error::Draft {
@@ -19,7 +19,7 @@ fn generic_ports_are_transactional() {
     let repeated = store.open_error_incident(draft()).expect("repeat incident");
     assert_eq!(opened.incident, repeated.incident);
 
-    let incidents = store.error_incidents(&scope, 10).expect("list incidents");
+    let incidents = store.incidents(&scope, 10).expect("list incidents");
     assert_eq!(incidents.len(), 1);
     assert_eq!(incidents[0].occurrences, 2);
     assert_eq!(incidents[0].revision, 1);
@@ -33,7 +33,7 @@ fn generic_ports_are_transactional() {
             )
             .expect("resolve incident")
     );
-    let incidents = store.error_incidents(&scope, 10).expect("list resolved");
+    let incidents = store.incidents(&scope, 10).expect("list resolved");
     assert_eq!(incidents[0].status, santi_core::Status::Resolved);
     assert_eq!(incidents[0].revision, 2);
 }

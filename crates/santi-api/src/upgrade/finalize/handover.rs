@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) fn finalize_handover(
     paths: &RuntimePaths,
-    store: &santi_core::SantiStore,
+    store: &santi_core::Store,
     request: UpgradeFinalizeRequest,
     mut errors: Vec<santi_core::Fault>,
 ) -> Result<UpgradeFinalizeReport, Box<santi_core::Fault>> {
@@ -29,8 +29,8 @@ pub(super) fn finalize_handover(
                     .to_string(),
                 context: json!({
                     "attempt_id": request.attempt_id,
-                    "artifact": bounded_detail(&request.deb),
-                    "detail": bounded_detail(&detail),
+                    "artifact": bounded(&request.deb),
+                    "detail": bounded(&detail),
                     "seeded": seeded,
                     "seeded_strand_id": seeded_strand_id,
                 }),
@@ -51,7 +51,7 @@ pub(super) fn finalize_handover(
                 "upgrade.handover_succeeded",
                 json!({
                     "attempt_id": request.attempt_id,
-                    "artifact": bounded_detail(&request.deb),
+                    "artifact": bounded(&request.deb),
                     "seeded_strand_id": seeded_strand_id,
                 }),
             )

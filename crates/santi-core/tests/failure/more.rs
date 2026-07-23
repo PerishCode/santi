@@ -9,7 +9,7 @@ async fn preserves_aborted_output() {
         ..FailureProvider::default()
     });
     let service = open_service(&temp, provider.clone());
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
     let response = send_text(&service, &strand.id, "trigger stream failure").await;
 
     let runtime = wait_for_aborted_output(&service, &strand.id, &turn(&response).id).await;
@@ -50,7 +50,7 @@ async fn classifies_response_failure() {
         ..FailureProvider::default()
     });
     let service = open_service(&temp, provider);
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
     let response = send_text(&service, &strand.id, "trigger response failure").await;
 
     let runtime = wait_for_turn(
@@ -75,7 +75,7 @@ async fn success_resolves_incident() {
         ..FailureProvider::default()
     });
     let service = open_service(&temp, provider.clone());
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
     let failed = send_text(&service, &strand.id, "first attempt").await;
     let before = wait_for_turn(
         &service,
@@ -121,11 +121,11 @@ async fn success_resolves_incident() {
 async fn runtime_receipt_recovers() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FailureProvider {
-        response_started: true,
+        started: true,
         ..FailureProvider::default()
     });
     let service = open_service(&temp, provider.clone());
-    let strand = service.create_strand().expect("create strand").strand;
+    let strand = service.weave().expect("create strand").strand;
     let conn = Connection::open(temp.path().join("santi.sqlite")).expect("open sqlite");
     conn.execute_batch(
         r#"
@@ -170,7 +170,7 @@ async fn runtime_receipt_recovers() {
             .all(|error| error.code != "provider.turn.failed")
     );
     let failed_receipt = service
-        .receipt_status(&failed.receipt.inbox)
+        .receipt(&failed.receipt.inbox)
         .expect("receipt query")
         .expect("receipt");
     assert_eq!(failed_receipt.state, receipt::State::Failed);
@@ -198,7 +198,7 @@ async fn runtime_receipt_recovers() {
         Some("runtime.turn_succeeded")
     );
     let recovered_receipt = service
-        .receipt_status(&failed.receipt.inbox)
+        .receipt(&failed.receipt.inbox)
         .expect("receipt query")
         .expect("receipt");
     assert_eq!(recovered_receipt.state, receipt::State::Completed);

@@ -14,12 +14,12 @@ use santi_core::ingest;
         (status = 500, body = Fault)
     )
 )]
-pub(super) async fn create_downstream(
+pub(super) async fn enroll(
     State(service): State<Service>,
     Json(request): Json<downstream::Draft>,
 ) -> Result<Json<downstream::Credential>, ApiError> {
     service
-        .create_downstream(request)
+        .enroll(request)
         .map(Json)
         .map_err(ApiError::from_service)
 }
@@ -62,7 +62,7 @@ pub(super) async fn ingest(
 ) -> Result<Json<ingest::Receipt>, ApiError> {
     let token = bearer(&headers);
     match service
-        .ingest_downstream(token, request)
+        .downstream(token, request)
         .map_err(ApiError::from_service)?
     {
         Admission::Accepted(ingest::Outcome::Accepted { receipt }) => Ok(Json(receipt)),

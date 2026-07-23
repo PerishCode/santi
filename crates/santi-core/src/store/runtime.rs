@@ -2,7 +2,7 @@ use rusqlite::params;
 use serde_json::Value;
 
 use super::{
-    SantiStore,
+    Store,
     db::{Database, Prepared},
 };
 use crate::{effect, strand, thinking, tool};
@@ -16,7 +16,7 @@ pub struct Invocation<'a> {
     pub provenance: &'a tool::Provenance,
 }
 
-impl SantiStore {
+impl Store {
     pub fn append_thinking_span(
         &self,
         turn: &str,
@@ -24,7 +24,7 @@ impl SantiStore {
     ) -> Result<thinking::Span, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let thinking_id = tag("thinking");
+        let thinking = tag("thinking");
         let now = now();
         let database = Database::new(&tx);
         let strand = database.holder(turn)?;
@@ -36,17 +36,17 @@ impl SantiStore {
             )
             VALUES (?1, ?2, ?3, 'running', NULL, NULL, NULL, ?4, ?4, NULL)
             "#,
-            params![thinking_id, turn, response, now],
+            params![thinking, turn, response, now],
         )
         .map_err(|error| error.to_string())?;
-        database.entered(&strand, strand::Target::Thinking, &thinking_id)?;
+        database.entered(&strand, strand::Target::Thinking, &thinking)?;
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .span(&thinking_id)?
+            .span(&thinking)?
             .ok_or_else(|| "created thinking_span missing".to_string())
     }
 
-    pub fn update_thinking_span_response(
+    pub fn attribute(
         &self,
         thinking_span_id: &str,
         response: Option<String>,
@@ -66,7 +66,7 @@ impl SantiStore {
         Database::new(&conn).span(thinking_span_id)
     }
 
-    pub fn update_thinking_span_summary(
+    pub fn summarize(
         &self,
         thinking_span_id: &str,
         summary: String,
@@ -109,7 +109,7 @@ impl SantiStore {
 
     pub fn append_tool_call(&self, invocation: Invocation<'_>) -> Result<tool::Call, String> {
         self.append_effect_call(invocation, None)
-            .map(|(tool_call, _)| tool_call)
+            .map(|(call, _)| call)
     }
 
     pub fn append_effect_call(
@@ -136,14 +136,14 @@ impl SantiStore {
             ],
         )
         .map_err(|error| error.to_string())?;
-        let provider_item_text = invocation
+        let texted = invocation
             .provenance
             .item
             .as_ref()
             .map(serde_json::to_string)
             .transpose()
             .map_err(|error| error.to_string())?;
-        if provider_item_text.is_some()
+        if texted.is_some()
             || invocation.provenance.mark.is_some()
             || invocation.provenance.response.is_some()
         {
@@ -156,7 +156,7 @@ impl SantiStore {
                 params![
                     invocation.call,
                     invocation.provenance.family,
-                    provider_item_text,
+                    texted,
                     invocation.provenance.mark,
                     invocation.provenance.response,
                     crate::VERSION,
@@ -178,7 +178,7 @@ impl SantiStore {
             })
             .transpose()?;
         tx.commit().map_err(|error| error.to_string())?;
-        let tool_call = Database::new(&conn)
+        let call = Database::new(&conn)
             .call(invocation.call)?
             .ok_or_else(|| "created tool_call missing".to_string())?;
         let effect = effect
@@ -186,7 +186,7 @@ impl SantiStore {
             .map(|effect| Database::new(&conn).effect(effect))
             .transpose()?
             .flatten();
-        Ok((tool_call, effect))
+        Ok((call, effect))
     }
 
     pub fn append_tool_result(
@@ -197,7 +197,7 @@ impl SantiStore {
     ) -> Result<tool::Reply, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
-        let tool_result_id = tag("tool_result");
+        let reply = tag("tool_result");
         let now = now();
         let database = Database::new(&tx);
         let strand = database.caller(call)?;
@@ -211,13 +211,13 @@ impl SantiStore {
             INSERT INTO tool_results (id, tool_call_id, output, error_text, created_at)
             VALUES (?1, ?2, ?3, ?4, ?5)
             "#,
-            params![tool_result_id, call, output, error, now],
+            params![reply, call, output, error, now],
         )
         .map_err(|error| error.to_string())?;
-        database.entered(&strand, strand::Target::ToolResult, &tool_result_id)?;
+        database.entered(&strand, strand::Target::ToolResult, &reply)?;
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)
-            .reply(&tool_result_id)?
+            .reply(&reply)?
             .ok_or_else(|| "created tool_result missing".to_string())
     }
 

@@ -15,9 +15,7 @@ impl Host {
         candidate: Artifact,
         previous: Artifact,
     ) -> Self {
-        let backup = paths
-            .runtime_root
-            .with_file_name("santi-runtime-backup.tar.gz");
+        let backup = paths.runtime.with_file_name("santi-runtime-backup.tar.gz");
         Self {
             paths,
             backup,
@@ -56,7 +54,7 @@ impl UpgradeHost for Host {
     }
 
     fn snapshot(&mut self) -> Result<(), String> {
-        let root = &self.paths.runtime_root;
+        let root = &self.paths.runtime;
         let parent = root.parent().ok_or("runtime_root has no parent")?;
         let name = root.file_name().ok_or("runtime_root has no name")?;
         let status = Command::new("tar")
@@ -120,7 +118,7 @@ impl UpgradeHost for Host {
             .to_string();
         let parent = self
             .paths
-            .runtime_root
+            .runtime
             .parent()
             .ok_or("runtime_root has no parent")?;
         let status = Command::new("tar")
@@ -156,7 +154,7 @@ impl UpgradeHost for Host {
         request.soul = held
             .handover_soul
             .clone()
-            .unwrap_or_else(|| santi_core::DEFAULT_SOUL_ID.to_string());
+            .unwrap_or_else(|| santi_core::GENESIS.to_string());
         request.configured_strand_id = held.handover_strand.clone();
         let payload = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
         child

@@ -6,8 +6,8 @@ use santi_core::service::Service;
 pub(crate) use santi_core::{
     ActorType, CreateSoulRequest, Draft, EffectState, EffectTransitionReason, InboxSource,
     Invocation, MaterialKind, MaterialRequest, MessageContent, MessageIntake, MessageKind,
-    MessagePart, MessageState, ObjectBucket, ObjectUri, SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI,
-    SantiStore, SendStrandAcceptedResponse, SendStrandRequest, ToolCallProvenance, soul_memory_uri,
+    MessagePart, MessageState, SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, SantiStore,
+    SendStrandAcceptedResponse, SendStrandRequest, ToolCallProvenance, soul_memory_uri,
     strand_memory_uri,
 };
 

@@ -1,4 +1,5 @@
 use super::support::*;
+use santi_core::object;
 use santi_core::service::{self, Service};
 
 #[tokio::test]
@@ -16,17 +17,17 @@ async fn bucket_objects_are_scoped() {
     )
     .expect("open service");
     let strand = service.create_strand().expect("create strand").strand;
-    let bucket = ObjectBucket::new("soul_default", strand.id.as_str()).expect("bucket");
-    let uri = ObjectUri::new(bucket.clone(), "avatars/santi.svg").expect("uri");
+    let bucket = object::Bucket::new("soul_default", strand.id.as_str()).expect("bucket");
+    let uri = object::Uri::new(bucket.clone(), "avatars/santi.svg").expect("uri");
 
     let meta = service
         .put_bucket_object(&uri, b"<svg>avatar</svg>")
         .expect("put object");
-    assert_eq!(meta.uri.as_santi_uri(), uri.as_santi_uri());
+    assert_eq!(meta.uri.to_string(), uri.to_string());
     assert_eq!(meta.len, 17);
     assert_eq!(
         service
-            .renderable_ref(&uri.as_santi_uri())
+            .renderable_ref(&uri.to_string())
             .expect("renderable ref"),
         format!(
             "/api/v1/bucket/soul_default/{}/avatars/santi.svg",

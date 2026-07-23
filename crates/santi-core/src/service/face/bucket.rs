@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::{LocalObjectStore, ObjectBucket, ObjectMeta, ObjectPayload, ObjectUri};
+use crate::object;
 
 use super::Service;
 
@@ -9,12 +9,16 @@ impl Service {
         if !value.starts_with("santi://") {
             return Ok(value.to_string());
         }
-        Ok(ObjectUri::parse(value)?.as_http_path())
+        Ok(object::Uri::parse(value)?.http())
     }
 
-    pub fn put_bucket_object(&self, uri: &ObjectUri, bytes: &[u8]) -> Result<ObjectMeta, String> {
+    pub fn put_bucket_object(
+        &self,
+        uri: &object::Uri,
+        bytes: &[u8],
+    ) -> Result<object::Meta, String> {
         self.ensure_object_bucket(&uri.bucket)?;
-        self.object_store().put_object(uri, bytes)
+        self.object_store().put(uri, bytes)
     }
 
     pub fn get_bucket_object(
@@ -22,46 +26,46 @@ impl Service {
         soul_id: &str,
         strand_id: &str,
         key: &str,
-    ) -> Result<Option<ObjectPayload>, String> {
+    ) -> Result<Option<object::Payload>, String> {
         let uri = self.object_uri(soul_id, strand_id, key)?;
-        self.object_store().get_object(&uri)
+        self.object_store().get(&uri)
     }
 
-    pub fn head_bucket_object(&self, uri: &ObjectUri) -> Result<Option<ObjectMeta>, String> {
+    pub fn head_bucket_object(&self, uri: &object::Uri) -> Result<Option<object::Meta>, String> {
         self.ensure_object_bucket(&uri.bucket)?;
-        self.object_store().head_object(uri)
+        self.object_store().head(uri)
     }
 
-    pub fn delete_bucket_object(&self, uri: &ObjectUri) -> Result<bool, String> {
+    pub fn delete_bucket_object(&self, uri: &object::Uri) -> Result<bool, String> {
         self.ensure_object_bucket(&uri.bucket)?;
-        self.object_store().delete_object(uri)
+        self.object_store().delete(uri)
     }
 
     pub fn list_bucket_objects(
         &self,
-        bucket: &ObjectBucket,
+        bucket: &object::Bucket,
         prefix: Option<&str>,
-    ) -> Result<Vec<ObjectMeta>, String> {
+    ) -> Result<Vec<object::Meta>, String> {
         self.ensure_object_bucket(bucket)?;
-        self.object_store().list_objects(bucket, prefix)
+        self.object_store().list(bucket, prefix)
     }
 
-    fn object_store(&self) -> LocalObjectStore {
-        LocalObjectStore::new(PathBuf::from(&self.config.runtime_root))
+    fn object_store(&self) -> object::Store {
+        object::Store::new(PathBuf::from(&self.config.runtime_root))
     }
 
-    fn object_uri(&self, soul_id: &str, strand_id: &str, key: &str) -> Result<ObjectUri, String> {
-        let bucket = ObjectBucket::new(soul_id, strand_id)?;
+    fn object_uri(&self, soul_id: &str, strand_id: &str, key: &str) -> Result<object::Uri, String> {
+        let bucket = object::Bucket::new(soul_id, strand_id)?;
         self.ensure_object_bucket(&bucket)?;
-        ObjectUri::new(bucket, key)
+        object::Uri::new(bucket, key)
     }
 
-    fn ensure_object_bucket(&self, bucket: &ObjectBucket) -> Result<(), String> {
+    fn ensure_object_bucket(&self, bucket: &object::Bucket) -> Result<(), String> {
         let strand = self
             .store
-            .strand(&bucket.strand_id)?
+            .strand(&bucket.strand)?
             .ok_or_else(|| "strand not found".to_string())?;
-        if strand.soul_id != bucket.soul_id {
+        if strand.soul_id != bucket.soul {
             return Err("soul not found".to_string());
         }
         Ok(())

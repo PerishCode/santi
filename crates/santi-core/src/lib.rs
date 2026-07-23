@@ -7,7 +7,7 @@ pub mod workspace;
 
 pub use santi_error::*;
 pub use santi_model::*;
-pub use santi_object::{LocalObjectStore, ObjectBucket, ObjectMeta, ObjectPayload, ObjectUri};
+pub use santi_object as object;
 pub use santi_provider::ProviderItem;
 pub use store::{
     Completion, DEFAULT_SOUL_ID, Draft, Invocation, SCHEMA_VERSION, SantiStore,

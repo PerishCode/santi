@@ -1,4 +1,5 @@
 use super::*;
+use crate::ingest;
 
 impl SantiStore {
     pub(crate) fn enqueue_inbox_with_context(
@@ -43,8 +44,8 @@ impl SantiStore {
                 return Err("downstream request conflicts with an accepted payload".to_string());
             }
             return Ok(Intake {
-                outcome: IngestOutcome::Accepted {
-                    receipt: IngestReceipt {
+                outcome: ingest::Outcome::Accepted {
+                    receipt: ingest::Receipt {
                         strand,
                         inbox,
                         warning: None,
@@ -63,7 +64,7 @@ impl SantiStore {
         {
             tx.commit().map_err(|error| error.to_string())?;
             return Ok(Intake {
-                outcome: IngestOutcome::Rejected {
+                outcome: ingest::Outcome::Rejected {
                     error: Box::new(error),
                 },
                 inserted: false,
@@ -82,7 +83,7 @@ impl SantiStore {
             )?;
             tx.commit().map_err(|error| error.to_string())?;
             return Ok(Intake {
-                outcome: IngestOutcome::Rejected {
+                outcome: ingest::Outcome::Rejected {
                     error: Box::new(error),
                 },
                 inserted: false,
@@ -124,7 +125,7 @@ impl SantiStore {
                 )?;
                 tx.commit().map_err(|error| error.to_string())?;
                 return Ok(Intake {
-                    outcome: IngestOutcome::Rejected {
+                    outcome: ingest::Outcome::Rejected {
                         error: Box::new(error),
                     },
                     inserted: false,
@@ -150,7 +151,7 @@ impl SantiStore {
                 context: json!({"pending": pending, "gate": STRAND_INBOX_GATE}),
             });
             return Ok(Intake {
-                outcome: IngestOutcome::Rejected {
+                outcome: ingest::Outcome::Rejected {
                     error: Box::new(error),
                 },
                 inserted: false,
@@ -199,8 +200,8 @@ impl SantiStore {
         }
         tx.commit().map_err(|error| error.to_string())?;
         Ok(Intake {
-            outcome: IngestOutcome::Accepted {
-                receipt: IngestReceipt {
+            outcome: ingest::Outcome::Accepted {
+                receipt: ingest::Receipt {
                     strand: strand.to_string(),
                     inbox,
                     warning: None,

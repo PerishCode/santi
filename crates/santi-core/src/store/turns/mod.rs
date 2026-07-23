@@ -4,7 +4,7 @@ use super::{
     RuntimeFault, SantiStore, StartedTurn,
     db::{Database, drain_inbox_in_tx},
 };
-use crate::{EffectTransitionReason, ThinkingSpan, ToolCall, ToolResult, Turn, now, tag};
+use crate::{now, tag, turn::Turn};
 
 mod completion;
 
@@ -12,6 +12,7 @@ pub use completion::Completion;
 
 const PROVIDER_DETAIL_BYTES: usize = 4096;
 mod fail;
+use crate::{effect, thinking, tool};
 use fail::{open_runtime_incident, provider_incident_key, runtime_incident_key};
 
 impl SantiStore {
@@ -95,8 +96,8 @@ impl SantiStore {
         for (turn, strand) in &rows {
             Database::new(&tx).reconcile_effects(
                 turn,
-                EffectTransitionReason::RestartBeforeDispatch,
-                EffectTransitionReason::RestartDuringDispatch,
+                effect::Reason::RestartBeforeDispatch,
+                effect::Reason::RestartDuringDispatch,
                 &now,
             )?;
             tx.execute(
@@ -150,17 +151,17 @@ impl SantiStore {
         Ok(out)
     }
 
-    pub fn tool_calls_for_turn(&self, turn: &str) -> Result<Vec<ToolCall>, String> {
+    pub fn tool_calls_for_turn(&self, turn: &str) -> Result<Vec<tool::Call>, String> {
         let conn = self.conn.lock().unwrap();
         Database::new(&conn).tool_calls_for_turn(turn)
     }
 
-    pub fn thinking_spans_for_turn(&self, turn: &str) -> Result<Vec<ThinkingSpan>, String> {
+    pub fn thinking_spans_for_turn(&self, turn: &str) -> Result<Vec<thinking::Span>, String> {
         let conn = self.conn.lock().unwrap();
         Database::new(&conn).thinking_spans_for_turn(turn)
     }
 
-    pub fn tool_results_for_turn(&self, turn: &str) -> Result<Vec<ToolResult>, String> {
+    pub fn tool_results_for_turn(&self, turn: &str) -> Result<Vec<tool::Reply>, String> {
         let conn = self.conn.lock().unwrap();
         Database::new(&conn).tool_results_for_turn(turn)
     }

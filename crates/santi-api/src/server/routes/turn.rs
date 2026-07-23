@@ -1,4 +1,5 @@
 use super::*;
+use santi_core::event;
 
 #[utoipa::path(
     get,
@@ -9,7 +10,7 @@ use super::*;
         ("limit" = Option<usize>, Query)
     ),
     responses(
-        (status = 200, body = TurnEventBatch),
+        (status = 200, body = event::Batch),
         (status = 401, body = Fault),
         (status = 500, body = Fault)
     )
@@ -18,7 +19,7 @@ pub(super) async fn turn_events(
     State(service): State<Service>,
     headers: axum::http::HeaderMap,
     Query(params): Query<TurnEventParams>,
-) -> Result<Json<TurnEventBatch>, ApiError> {
+) -> Result<Json<event::Batch>, ApiError> {
     let principal = service
         .principal(bearer(&headers))
         .map_err(ApiError::from_service)?

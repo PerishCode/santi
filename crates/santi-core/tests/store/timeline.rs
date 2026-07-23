@@ -1,4 +1,5 @@
 use super::support::*;
+use santi_core::{message, thinking, tool};
 
 #[test]
 fn appends_relations_in_order() {
@@ -8,11 +9,11 @@ fn appends_relations_in_order() {
     let user = store
         .append_message(Draft {
             strand: &strand.id,
-            actor: ActorType::System,
+            actor: message::Role::System,
             id: store.system_actor_id(),
-            content: MessageContent::text("hello ordering"),
-            state: MessageState::Fixed,
-            intake: MessageIntake::Request,
+            content: message::Content::text("hello ordering"),
+            state: message::State::Fixed,
+            intake: message::Intake::Request,
         })
         .expect("append user")
         .strand_message;
@@ -31,14 +32,14 @@ fn maps_santi_system_input() {
     let message = store
         .append_santi_system_message(
             &strand.id,
-            MessageContent::text("<system_message>\nkind: note\n</system_message>"),
-            MessageIntake::Request,
+            message::Content::text("<system_message>\nkind: note\n</system_message>"),
+            message::Intake::Request,
         )
         .expect("append santi system")
         .strand_message;
 
-    assert_eq!(message.message.role, ActorType::System);
-    assert_eq!(message.message.kind, MessageKind::SantiSystem);
+    assert_eq!(message.message.role, message::Role::System);
+    assert_eq!(message.message.kind, message::Kind::SantiSystem);
     let input = store.assembly_input(&strand.id).expect("assembly input");
     assert_eq!(input.len(), 1);
     assert_text(
@@ -56,11 +57,11 @@ fn thinking_becomes_reasoning() {
     let user = store
         .append_message(Draft {
             strand: &strand.id,
-            actor: ActorType::System,
+            actor: message::Role::System,
             id: store.system_actor_id(),
-            content: MessageContent::text("hello thinking"),
-            state: MessageState::Fixed,
-            intake: MessageIntake::Request,
+            content: message::Content::text("hello thinking"),
+            state: message::State::Fixed,
+            intake: message::Intake::Request,
         })
         .expect("append user")
         .strand_message;
@@ -76,7 +77,7 @@ fn thinking_becomes_reasoning() {
         .expect("update thinking summary")
         .expect("thinking exists");
     let thinking = store
-        .complete_thinking_span(&thinking.id, ThinkingCompletionReason::FirstTextDelta)
+        .complete_thinking_span(&thinking.id, thinking::Reason::FirstTextDelta)
         .expect("complete thinking")
         .expect("thinking exists");
 
@@ -93,7 +94,7 @@ fn thinking_becomes_reasoning() {
     );
     assert_eq!(
         snapshot.thinking[0].completion_reason,
-        Some(ThinkingCompletionReason::FirstTextDelta)
+        Some(thinking::Reason::FirstTextDelta)
     );
 
     let input = store.assembly_input(&strand.id).expect("assembly input");
@@ -117,11 +118,11 @@ fn timeline_interleaves() {
     let user = store
         .append_message(Draft {
             strand: &strand.id,
-            actor: ActorType::System,
+            actor: message::Role::System,
             id: store.system_actor_id(),
-            content: MessageContent::text("run a command"),
-            state: MessageState::Fixed,
-            intake: MessageIntake::Request,
+            content: message::Content::text("run a command"),
+            state: message::State::Fixed,
+            intake: message::Intake::Request,
         })
         .expect("append user")
         .strand_message;
@@ -135,7 +136,7 @@ fn timeline_interleaves() {
             call: "call_1",
             name: "shell",
             arguments: &serde_json::json!({ "command": "echo hi" }),
-            provenance: &ToolCallProvenance {
+            provenance: &tool::Provenance {
                 family: "openai".to_string(),
                 item: Some(serde_json::json!({ "type": "function_call", "id": "fc_1" })),
                 mark: Some("fc_1".to_string()),

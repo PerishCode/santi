@@ -3,10 +3,11 @@ use serde_json::{Value, json};
 
 use super::Database;
 use crate::SANTI_SYSTEM_ACTOR_ID;
-use santi_model::{StrandMessage, StrandTargetType, now, tag};
+use santi_model::{message, strand};
+use santi_model::{now, tag};
 
 pub struct DrainedInbox {
-    pub messages: Vec<StrandMessage>,
+    pub messages: Vec<message::Placed>,
     pub inbox_ids: Vec<String>,
 }
 
@@ -65,7 +66,7 @@ pub fn drain_inbox_in_tx(
         )
         .map_err(|error| error.to_string())?;
         let database = Database::new(conn);
-        let relation = database.append_entry_in_tx(strand, StrandTargetType::Message, &message)?;
+        let relation = database.append_entry_in_tx(strand, strand::Target::Message, &message)?;
         database.insert_drain(Drain {
             pending: &pending_entry,
             message: &message,

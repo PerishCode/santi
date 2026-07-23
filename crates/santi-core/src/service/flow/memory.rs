@@ -5,11 +5,10 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use crate::store::Ingress;
-use crate::{
-    InboxSource, IngestOutcome, MessageContent, MessageKind, Strand, catalog, soul_memory_uri,
-};
+use crate::{catalog, soul_memory_uri, strand::Strand};
 
 use super::super::{Service, drive};
+use crate::{ingest, message};
 
 const FALLBACK_INPUT_BUDGET_BYTES: usize = 500_000;
 pub(super) const MEMORY_MAINTENANCE_LABEL: &str = "santi:memory:maintenance";
@@ -143,17 +142,17 @@ impl Service {
 
         let outcome = self.store.enqueue_inbox_while_suspended(Ingress {
             strand: &maintenance.id,
-            kind: MessageKind::SantiSystem,
+            kind: message::Kind::SantiSystem,
             content: memory_maintenance_metaprompt(snapshot, policy),
             source: Some(
-                InboxSource::new("runtime_memory_pressure").with_ref(maintenance.soul.clone()),
+                ingest::Source::new("runtime_memory_pressure").with_ref(maintenance.soul.clone()),
             ),
             admission: None,
             replay: None,
         })?;
         match outcome.outcome {
-            IngestOutcome::Accepted { .. } => Ok(()),
-            IngestOutcome::Rejected { error } => Err(format!(
+            ingest::Outcome::Accepted { .. } => Ok(()),
+            ingest::Outcome::Rejected { error } => Err(format!(
                 "memory maintenance metaprompt was rejected: {}",
                 error.message
             )),
@@ -211,8 +210,8 @@ impl Service {
     }
 }
 
-fn memory_maintenance_metaprompt(snapshot: &Snapshot, policy: Policy) -> MessageContent {
-    MessageContent::text(
+fn memory_maintenance_metaprompt(snapshot: &Snapshot, policy: Policy) -> message::Content {
+    message::Content::text(
         [
             "<system_message>".to_string(),
             "kind: soul_memory_maintenance".to_string(),

@@ -17,18 +17,19 @@ use std::{
 };
 use tokio::sync::broadcast;
 
-use crate::{Execution, SantiStore, SantiStreamEvent, StrandMaterial, Transition};
+use crate::{SantiStore, Transition};
+use crate::{budget, material, stream};
 
 #[derive(Clone)]
 pub struct Service {
     pub(crate) store: SantiStore,
     provider: Arc<dyn ProviderClient>,
     pub(crate) config: Config,
-    material_cache: Arc<Mutex<HashMap<materials::Key, StrandMaterial>>>,
-    stream_events: broadcast::Sender<SantiStreamEvent>,
+    material_cache: Arc<Mutex<HashMap<materials::Key, material::Material>>>,
+    stream_events: broadcast::Sender<stream::Event>,
     error_events: broadcast::Sender<Transition>,
     runtime_notices: notice::Bus,
-    execution_budgets: Arc<Mutex<HashMap<String, Execution>>>,
+    execution_budgets: Arc<Mutex<HashMap<String, budget::Execution>>>,
     memory_pressure_lock: Arc<Mutex<()>>,
     shutting_down: Arc<AtomicBool>,
     drive_degraded: Arc<AtomicBool>,
@@ -66,7 +67,7 @@ impl Service {
     pub fn set_strand_execution_budget(
         &self,
         strand: &str,
-        budget: Execution,
+        budget: budget::Execution,
     ) -> Result<(), String> {
         budget.validate()?;
         if self.store.strand(strand)?.is_none() {
@@ -79,7 +80,10 @@ impl Service {
         Ok(())
     }
 
-    pub(in crate::service) fn strand_execution_budget(&self, strand: &str) -> Option<Execution> {
+    pub(in crate::service) fn strand_execution_budget(
+        &self,
+        strand: &str,
+    ) -> Option<budget::Execution> {
         self.execution_budgets.lock().unwrap().get(strand).cloned()
     }
 
@@ -158,7 +162,7 @@ impl Service {
         }
     }
 
-    pub fn subscribe_stream(&self) -> broadcast::Receiver<SantiStreamEvent> {
+    pub fn subscribe_stream(&self) -> broadcast::Receiver<stream::Event> {
         let receiver = self.stream_events.subscribe();
         self.dispatch_error_events();
         receiver

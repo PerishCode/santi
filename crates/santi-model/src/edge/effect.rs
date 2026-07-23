@@ -1,11 +1,12 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use super::Timestamp;
+use crate::Timestamp;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum EffectState {
+#[schema(as = effect::State)]
+pub enum State {
     Prepared,
     Dispatching,
     Unknown,
@@ -17,7 +18,8 @@ pub enum EffectState {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum EffectTransitionReason {
+#[schema(as = effect::Reason)]
+pub enum Reason {
     IntentPersisted,
     DispatchWindowOpened,
     ResultPersisted,
@@ -33,13 +35,14 @@ pub enum EffectTransitionReason {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct StrandEffect {
+#[schema(as = effect::Effect)]
+pub struct Effect {
     pub id: String,
     pub strand: String,
     pub turn: String,
     pub call: Option<String>,
     pub kind: String,
-    pub state: EffectState,
+    pub state: State,
     pub result: Option<String>,
     pub error: Option<String>,
     pub created: Timestamp,
@@ -49,25 +52,28 @@ pub struct StrandEffect {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct EffectTransition {
+#[schema(as = effect::Transition)]
+pub struct Transition {
     pub id: String,
     pub sequence: i64,
-    pub state: EffectState,
-    pub reason: EffectTransitionReason,
+    pub state: State,
+    pub reason: Reason,
     pub evidence: Option<String>,
     pub occurred: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct EffectStatus {
-    pub effect: StrandEffect,
-    pub transitions: Vec<EffectTransition>,
+#[schema(as = effect::Status)]
+pub struct Status {
+    pub effect: Effect,
+    pub transitions: Vec<Transition>,
     pub receipts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum EffectResolutionOutcome {
+#[schema(as = effect::Outcome)]
+pub enum Outcome {
     Applied,
     NotApplied,
 }

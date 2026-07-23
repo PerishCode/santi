@@ -1,7 +1,7 @@
 use super::*;
 
-use santi_core::IngestOutcome;
 use santi_core::service::{self, Service};
+use santi_core::{ingest, message, strand};
 
 const INPUT_BUDGET_BYTES: usize = 32 * 1024;
 const MEMORY_ALLOWANCE_BYTES: usize = INPUT_BUDGET_BYTES / 2;
@@ -110,8 +110,8 @@ async fn pressure_lifecycle() {
     let first_send = service
         .send_strand(
             &first.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "first queued request".to_string(),
                 }],
             },
@@ -124,8 +124,8 @@ async fn pressure_lifecycle() {
     let second_send = service
         .send_strand(
             &second.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "second queued request".to_string(),
                 }],
             },
@@ -248,7 +248,7 @@ async fn pressure_lifecycle() {
             runtime
                 .turns
                 .iter()
-                .filter(|turn| turn.status == santi_core::TurnStatus::Completed)
+                .filter(|turn| turn.status == santi_core::turn::Status::Completed)
                 .count(),
             1
         );
@@ -265,13 +265,13 @@ async fn pressure_lifecycle() {
 
     let after_relief = service
         .ingest(
-            santi_core::StrandSelector::ById(first.id.clone()),
-            MessageContent::text("normal ingest after relief"),
-            MessageKind::Text,
+            santi_core::strand::Selector::ById(first.id.clone()),
+            message::Content::text("normal ingest after relief"),
+            message::Kind::Text,
             "strand_send",
         )
         .expect("normal ingest");
-    let IngestOutcome::Accepted { receipt } = after_relief else {
+    let ingest::Outcome::Accepted { receipt } = after_relief else {
         panic!("normal ingest was rejected after relief");
     };
     assert!(

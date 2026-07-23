@@ -1,4 +1,5 @@
 use super::support::*;
+use santi_core::{ingest, message};
 
 #[test]
 fn drive_coalesces_redrives() {
@@ -16,24 +17,24 @@ fn drive_coalesces_redrives() {
     append_timeline_message(Line {
         store: &store,
         strand: &strand.id,
-        actor: ActorType::System,
+        actor: message::Role::System,
         text: "hi",
-        intake: MessageIntake::Request,
+        intake: message::Intake::Request,
     });
     let started = store
         .try_start_turn(&strand.id, "strand_send", None)
         .expect("try")
         .expect("turn started");
-    assert_eq!(started.turn.status, santi_core::TurnStatus::Running);
+    assert_eq!(started.turn.status, santi_core::turn::Status::Running);
     assert_eq!(started.drained_messages.len(), 1);
     let turn = started.turn;
 
     append_timeline_message(Line {
         store: &store,
         strand: &strand.id,
-        actor: ActorType::System,
+        actor: message::Role::System,
         text: "and again",
-        intake: MessageIntake::Request,
+        intake: message::Intake::Request,
     });
     assert!(
         store
@@ -69,7 +70,11 @@ fn drain_commits_pending() {
 
     for text in ["first", "second", "third"] {
         store
-            .enqueue_inbox(&strand.id, MessageKind::Text, MessageContent::text(text))
+            .enqueue_inbox(
+                &strand.id,
+                message::Kind::Text,
+                message::Content::text(text),
+            )
             .expect("enqueue");
     }
     let started = store
@@ -102,10 +107,10 @@ fn drain_records_provenance() {
     store
         .enqueue_inbox_with_source(
             &strand.id,
-            MessageKind::Text,
-            MessageContent::text("needs provenance"),
+            message::Kind::Text,
+            message::Content::text("needs provenance"),
             Some(
-                santi_core::InboxSource::new("test")
+                santi_core::ingest::Source::new("test")
                     .with_ref("caller-1")
                     .with_metadata(serde_json::json!({ "adaptor": "fake" })),
             ),
@@ -208,9 +213,9 @@ fn inbox_gate_rejects() {
     drop(conn);
 
     let outcome = store
-        .enqueue_inbox(&strand.id, MessageKind::Text, MessageContent::text("x"))
+        .enqueue_inbox(&strand.id, message::Kind::Text, message::Content::text("x"))
         .expect("enqueue at gate");
-    let IngestOutcome::Rejected { error } = outcome else {
+    let ingest::Outcome::Rejected { error } = outcome else {
         panic!("gate accepted an enqueue after 500 pending rows");
     };
     assert_eq!(error.code, "runtime.inbox.capacity_exceeded");
@@ -226,9 +231,9 @@ fn records_do_not_drive() {
     append_timeline_message(Line {
         store: &store,
         strand: &strand.id,
-        actor: ActorType::Soul,
+        actor: message::Role::Soul,
         text: "a note to self",
-        intake: MessageIntake::Record,
+        intake: message::Intake::Record,
     });
     assert!(
         store
@@ -253,9 +258,9 @@ fn boot_reconciles_once() {
     append_timeline_message(Line {
         store: &store,
         strand: &strand.id,
-        actor: ActorType::System,
+        actor: message::Role::System,
         text: "do a thing",
-        intake: MessageIntake::Request,
+        intake: message::Intake::Request,
     });
     store
         .try_start_turn(&strand.id, "strand_send", None)
@@ -272,9 +277,9 @@ fn boot_reconciles_once() {
     append_timeline_message(Line {
         store: &store,
         strand: &strand.id,
-        actor: ActorType::System,
+        actor: message::Role::System,
         text: "a new thing",
-        intake: MessageIntake::Request,
+        intake: message::Intake::Request,
     });
     assert!(
         store

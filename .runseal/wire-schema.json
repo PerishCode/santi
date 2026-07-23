@@ -1,89 +1,122 @@
 {
   "schema": "santi.wire_schema.v2",
-  "digest": "6ff5be846003bdf3be5021284f5b1946a8481cb58de7f4af8862f1db0ad13ad6",
+  "digest": "30d19b071fae3e67a6dea77e391ec46172dbecb85fc22fb21fd49084e72e249c",
   "components": [
-    "ActorType",
-    "Category",
-    "Compact",
-    "CompactCapsuleOptions",
-    "CompactExecRequest",
-    "CompactExecResponse",
-    "CompactQueryEntry",
-    "CompactQueryResponse",
-    "ContextBudget",
-    "ContextEstimate",
-    "CreateDownstreamRequest",
-    "CreateSoulRequest",
-    "CreateStrandResponse",
-    "CreateWebhookRequest",
-    "DownstreamCredential",
-    "DriveStrandResponse",
-    "DriveStrandState",
-    "EffectResolutionOutcome",
-    "EffectState",
-    "EffectStatus",
-    "EffectTransition",
-    "EffectTransitionReason",
-    "Exposure",
-    "Fault",
-    "ForkStrandResponse",
-    "HealthResponse",
-    "Incident",
-    "IngestReceipt",
-    "IngestRequest",
-    "Kind",
-    "MaterialKind",
-    "MaterialRequest",
-    "MaterialUpdated",
-    "Message",
-    "MessageContent",
-    "MessageEvent",
-    "MessageKind",
-    "MessagePart",
-    "MessageState",
-    "ReceiptState",
-    "ReceiptStatus",
-    "ReceiptTransition",
-    "Report",
-    "Resolution",
+    "Health",
     "ResolveEffectRequest",
-    "Retry",
-    "Scope",
-    "SendStrandAcceptedResponse",
-    "SendStrandRequest",
-    "Severity",
-    "Soul",
-    "Source",
-    "Status",
-    "Strand",
-    "StrandBudgetSnapshot",
-    "StrandDetail",
-    "StrandEffect",
-    "StrandMaterial",
-    "StrandMessage",
-    "StrandMessageRef",
-    "StrandRuntimeSnapshot",
-    "StrandTargetType",
     "String",
-    "ThinkingCompletionReason",
-    "ThinkingSpan",
-    "ThinkingSpanState",
-    "ToolCall",
-    "ToolResult",
-    "Transition",
-    "Turn",
-    "TurnActivity",
-    "TurnActivityState",
-    "TurnEvent",
-    "TurnEventBatch",
-    "TurnStatus",
-    "TurnTriggerType",
-    "WebhookSubscription"
+    "budget.Cap",
+    "budget.Estimate",
+    "budget.Snapshot",
+    "compact.Capsule",
+    "compact.Compact",
+    "compact.Entry",
+    "compact.Exec",
+    "compact.Page",
+    "compact.Report",
+    "downstream.Credential",
+    "downstream.Draft",
+    "drive.Response",
+    "drive.State",
+    "effect.Effect",
+    "effect.Outcome",
+    "effect.Reason",
+    "effect.State",
+    "effect.Status",
+    "effect.Transition",
+    "error.Category",
+    "error.Exposure",
+    "error.Fault",
+    "error.Incident",
+    "error.Kind",
+    "error.Report",
+    "error.Resolution",
+    "error.Retry",
+    "error.Scope",
+    "error.Severity",
+    "error.Source",
+    "error.Status",
+    "error.Transition",
+    "event.Batch",
+    "event.Event",
+    "ingest.Receipt",
+    "ingest.Request",
+    "material.Kind",
+    "material.Material",
+    "material.Request",
+    "material.Updated",
+    "message.Content",
+    "message.Event",
+    "message.Kind",
+    "message.Message",
+    "message.Part",
+    "message.Placed",
+    "message.Relation",
+    "message.Role",
+    "message.State",
+    "receipt.State",
+    "receipt.Status",
+    "receipt.Transition",
+    "soul.Draft",
+    "soul.Soul",
+    "strand.Created",
+    "strand.Detail",
+    "strand.Forked",
+    "strand.Post",
+    "strand.Posted",
+    "strand.Strand",
+    "strand.Target",
+    "stream.Snapshot",
+    "thinking.Reason",
+    "thinking.Span",
+    "thinking.State",
+    "tool.Call",
+    "tool.Reply",
+    "turn.Activity",
+    "turn.Motion",
+    "turn.Status",
+    "turn.Trigger",
+    "turn.Turn",
+    "webhook.Draft",
+    "webhook.Subscription"
   ],
   "properties": {
-    "ActorType": [],
-    "Category": [],
-    "Compact": [
+    "Health": [
+      "degraded",
+      "incidents",
+      "ok",
+      "service"
+    ],
+    "ResolveEffectRequest": [
+      "evidence",
+      "outcome"
+    ],
+    "String": [],
+    "budget.Cap": [
+      "bytes",
+      "source"
+    ],
+    "budget.Estimate": [
+      "estimator",
+      "input",
+      "instructions",
+      "items",
+      "tools",
+      "total"
+    ],
+    "budget.Snapshot": [
+      "budget",
+      "estimate",
+      "incident",
+      "strand"
+    ],
+    "compact.Capsule": [
+      "queryability",
+      "reason",
+      "risk",
+      "source"
+    ],
+    "compact.Compact": [
       "created",
       "first",
       "id",
@@ -92,13 +125,13 @@
       "strand",
       "summary"
     ],
-    "CompactCapsuleOptions": [
-      "queryability",
-      "reason",
-      "risk",
-      "source"
+    "compact.Entry": [
+      "kind",
+      "seq",
+      "target",
+      "text"
     ],
-    "CompactExecRequest": [
+    "compact.Exec": [
       "capsule",
       "dry",
       "first",
@@ -107,7 +140,16 @@
       "summary",
       "to"
     ],
-    "CompactExecResponse": [
+    "compact.Page": [
+      "compact",
+      "entries",
+      "first",
+      "last",
+      "page_index",
+      "page_size",
+      "total"
+    ],
+    "compact.Report": [
       "absorbed",
       "active_incident_resolved",
       "after",
@@ -121,71 +163,46 @@
       "ratio",
       "start_seq"
     ],
-    "CompactQueryEntry": [
-      "kind",
-      "seq",
-      "target",
-      "text"
-    ],
-    "CompactQueryResponse": [
-      "compact",
-      "entries",
-      "first",
-      "last",
-      "page_index",
-      "page_size",
-      "total"
-    ],
-    "ContextBudget": [
-      "bytes",
-      "source"
-    ],
-    "ContextEstimate": [
-      "estimator",
-      "input",
-      "instructions",
-      "items",
-      "tools",
-      "total"
-    ],
-    "CreateDownstreamRequest": [
-      "digest",
-      "id",
-      "prefix"
-    ],
-    "CreateSoulRequest": [
-      "memory"
-    ],
-    "CreateStrandResponse": [
-      "strand"
-    ],
-    "CreateWebhookRequest": [
-      "adaptor",
-      "credential",
-      "name",
-      "soul",
-      "strategy"
-    ],
-    "DownstreamCredential": [
+    "downstream.Credential": [
       "created",
       "id",
       "prefix",
       "updated"
     ],
-    "DriveStrandResponse": [
+    "downstream.Draft": [
+      "digest",
+      "id",
+      "prefix"
+    ],
+    "drive.Response": [
       "state",
       "strand",
       "turn"
     ],
-    "DriveStrandState": [],
-    "EffectResolutionOutcome": [],
-    "EffectState": [],
-    "EffectStatus": [
+    "drive.State": [],
+    "effect.Effect": [
+      "call",
+      "created",
+      "dispatched",
+      "error",
+      "id",
+      "kind",
+      "result",
+      "settled",
+      "state",
+      "strand",
+      "turn",
+      "updated"
+    ],
+    "effect.Outcome": [],
+    "effect.Reason": [],
+    "effect.State": [],
+    "effect.Status": [
       "effect",
       "receipts",
       "transitions"
     ],
-    "EffectTransition": [
+    "effect.Transition": [
       "evidence",
       "id",
       "occurred",
@@ -193,13 +210,13 @@
       "sequence",
       "state"
     ],
-    "EffectTransitionReason": [],
-    "Exposure": [
+    "error.Category": [],
+    "error.Exposure": [
       "caller",
       "model",
       "operator"
     ],
-    "Fault": [
+    "error.Fault": [
       "category",
       "code",
       "context",
@@ -212,16 +229,7 @@
       "severity",
       "source"
     ],
-    "ForkStrandResponse": [
-      "strand"
-    ],
-    "HealthResponse": [
-      "degraded",
-      "incidents",
-      "ok",
-      "service"
-    ],
-    "Incident": [
+    "error.Incident": [
       "category",
       "code",
       "exposure",
@@ -237,29 +245,91 @@
       "severity",
       "status"
     ],
-    "IngestReceipt": [
+    "error.Kind": [],
+    "error.Report": [
+      "context",
+      "message",
+      "seen",
+      "source"
+    ],
+    "error.Resolution": [
+      "at",
+      "by"
+    ],
+    "error.Retry": [],
+    "error.Scope": [
+      "id",
+      "kind"
+    ],
+    "error.Severity": [],
+    "error.Source": [
+      "component",
+      "operation"
+    ],
+    "error.Status": [],
+    "error.Transition": [
+      "held",
+      "id",
+      "incident",
+      "kind",
+      "occurred",
+      "revision"
+    ],
+    "event.Batch": [
+      "cursor",
+      "events"
+    ],
+    "event.Event": [
+      "completed",
+      "id",
+      "label",
+      "strand",
+      "text",
+      "turn"
+    ],
+    "ingest.Receipt": [
       "inbox",
       "strand",
       "warning"
     ],
-    "IngestRequest": [
+    "ingest.Request": [
       "label",
       "request",
       "soul",
       "source",
       "text"
     ],
-    "Kind": [],
-    "MaterialKind": [],
-    "MaterialRequest": [
+    "material.Kind": [],
+    "material.Material": [
+      "content_type",
+      "kind",
+      "strand",
+      "text",
+      "updated"
+    ],
+    "material.Request": [
       "kind"
     ],
-    "MaterialUpdated": [
+    "material.Updated": [
       "kind",
       "strand",
       "updated"
     ],
-    "Message": [
+    "message.Content": [
+      "parts"
+    ],
+    "message.Event": [
+      "action",
+      "actor",
+      "base_version",
+      "created",
+      "id",
+      "message",
+      "payload",
+      "role"
+    ],
+    "message.Kind": [],
+    "message.Message": [
       "actor",
       "content",
       "created",
@@ -271,29 +341,27 @@
       "updated",
       "version"
     ],
-    "MessageContent": [
-      "parts"
-    ],
-    "MessageEvent": [
-      "action",
-      "actor",
-      "base_version",
-      "created",
-      "id",
-      "message",
-      "payload",
-      "role"
-    ],
-    "MessageKind": [],
-    "MessagePart": [
+    "message.Part": [
       "data_base64",
       "mime_type",
       "text",
       "type"
     ],
-    "MessageState": [],
-    "ReceiptState": [],
-    "ReceiptStatus": [
+    "message.Placed": [
+      "message",
+      "relation",
+      "text"
+    ],
+    "message.Relation": [
+      "created",
+      "message",
+      "seq",
+      "strand"
+    ],
+    "message.Role": [],
+    "message.State": [],
+    "receipt.State": [],
+    "receipt.Status": [
       "accepted",
       "effects",
       "inbox",
@@ -302,7 +370,7 @@
       "transitions",
       "updated"
     ],
-    "ReceiptTransition": [
+    "receipt.Transition": [
       "id",
       "incident",
       "occurred",
@@ -311,46 +379,34 @@
       "state",
       "turn"
     ],
-    "Report": [
-      "context",
-      "message",
-      "seen",
-      "source"
+    "soul.Draft": [
+      "memory"
     ],
-    "Resolution": [
-      "at",
-      "by"
-    ],
-    "ResolveEffectRequest": [
-      "evidence",
-      "outcome"
-    ],
-    "Retry": [],
-    "Scope": [
+    "soul.Soul": [
+      "created",
       "id",
-      "kind"
+      "updated"
     ],
-    "SendStrandAcceptedResponse": [
+    "strand.Created": [
+      "strand"
+    ],
+    "strand.Detail": [
+      "messages",
+      "strand"
+    ],
+    "strand.Forked": [
+      "strand"
+    ],
+    "strand.Post": [
+      "content"
+    ],
+    "strand.Posted": [
       "message",
       "receipt",
       "strand",
       "turn"
     ],
-    "SendStrandRequest": [
-      "content"
-    ],
-    "Severity": [],
-    "Soul": [
-      "created",
-      "id",
-      "updated"
-    ],
-    "Source": [
-      "component",
-      "operation"
-    ],
-    "Status": [],
-    "Strand": [
+    "strand.Strand": [
       "created",
       "fork",
       "id",
@@ -363,49 +419,8 @@
       "state",
       "updated"
     ],
-    "StrandBudgetSnapshot": [
-      "budget",
-      "estimate",
-      "incident",
-      "strand"
-    ],
-    "StrandDetail": [
-      "messages",
-      "strand"
-    ],
-    "StrandEffect": [
-      "call",
-      "created",
-      "dispatched",
-      "error",
-      "id",
-      "kind",
-      "result",
-      "settled",
-      "state",
-      "strand",
-      "turn",
-      "updated"
-    ],
-    "StrandMaterial": [
-      "content_type",
-      "kind",
-      "strand",
-      "text",
-      "updated"
-    ],
-    "StrandMessage": [
-      "message",
-      "relation",
-      "text"
-    ],
-    "StrandMessageRef": [
-      "created",
-      "message",
-      "seq",
-      "strand"
-    ],
-    "StrandRuntimeSnapshot": [
+    "strand.Target": [],
+    "stream.Snapshot": [
       "calls",
       "compacts",
       "effects",
@@ -417,10 +432,8 @@
       "thinking",
       "turns"
     ],
-    "StrandTargetType": [],
-    "String": [],
-    "ThinkingCompletionReason": [],
-    "ThinkingSpan": [
+    "thinking.Reason": [],
+    "thinking.Span": [
       "completion_reason",
       "created",
       "error",
@@ -432,30 +445,30 @@
       "turn",
       "updated"
     ],
-    "ThinkingSpanState": [],
-    "ToolCall": [
+    "thinking.State": [],
+    "tool.Call": [
       "arguments",
       "created",
       "id",
       "tool",
       "turn"
     ],
-    "ToolResult": [
+    "tool.Reply": [
       "call",
       "created",
       "error",
       "id",
       "output"
     ],
-    "Transition": [
-      "held",
-      "id",
-      "incident",
-      "kind",
-      "occurred",
-      "revision"
+    "turn.Activity": [
+      "response",
+      "state",
+      "turn"
     ],
-    "Turn": [
+    "turn.Motion": [],
+    "turn.Status": [],
+    "turn.Trigger": [],
+    "turn.Turn": [
       "created",
       "error",
       "finished",
@@ -468,27 +481,14 @@
       "trigger",
       "updated"
     ],
-    "TurnActivity": [
-      "response",
-      "state",
-      "turn"
+    "webhook.Draft": [
+      "adaptor",
+      "credential",
+      "name",
+      "soul",
+      "strategy"
     ],
-    "TurnActivityState": [],
-    "TurnEvent": [
-      "completed",
-      "id",
-      "label",
-      "strand",
-      "text",
-      "turn"
-    ],
-    "TurnEventBatch": [
-      "cursor",
-      "events"
-    ],
-    "TurnStatus": [],
-    "TurnTriggerType": [],
-    "WebhookSubscription": [
+    "webhook.Subscription": [
       "adaptor",
       "created",
       "credential",

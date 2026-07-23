@@ -1,9 +1,6 @@
 pub(crate) use rusqlite::Connection;
-pub(crate) use santi_core::{
-    ActorType, Completion, Draft, EffectResolutionOutcome, EffectState, EffectTransitionReason,
-    IngestOutcome, Invocation, MessageContent, MessageIntake, MessageKind, MessageState,
-    ProviderItem, ReceiptState, SantiStore, ThinkingCompletionReason, ToolCallProvenance,
-};
+use santi_core::message;
+pub(crate) use santi_core::{Completion, Draft, Invocation, ProviderItem, SantiStore};
 pub(crate) use serde_json::json;
 
 pub(crate) fn assert_text(item: &ProviderItem, role: &str, content: &str) {
@@ -22,34 +19,34 @@ pub(crate) fn assert_text(item: &ProviderItem, role: &str, content: &str) {
 pub(crate) struct Line<'a> {
     pub store: &'a SantiStore,
     pub strand: &'a str,
-    pub actor: ActorType,
+    pub actor: message::Role,
     pub text: &'a str,
-    pub intake: MessageIntake,
+    pub intake: message::Intake,
 }
 
 pub(crate) fn append_timeline_message(line: Line<'_>) {
     match line.intake {
-        MessageIntake::Request => {
+        message::Intake::Request => {
             line.store
                 .enqueue_inbox(
                     line.strand,
-                    MessageKind::Text,
-                    MessageContent::text(line.text),
+                    message::Kind::Text,
+                    message::Content::text(line.text),
                 )
                 .expect("enqueue inbox");
         }
-        MessageIntake::Record => {
+        message::Intake::Record => {
             let actor = match line.actor {
-                ActorType::Soul => line.store.default_soul_id(),
-                ActorType::System => line.store.system_actor_id(),
+                message::Role::Soul => line.store.default_soul_id(),
+                message::Role::System => line.store.system_actor_id(),
             };
             line.store
                 .append_message(Draft {
                     strand: line.strand,
                     actor: line.actor,
                     id: actor,
-                    content: MessageContent::text(line.text),
-                    state: MessageState::Fixed,
+                    content: message::Content::text(line.text),
+                    state: message::State::Fixed,
                     intake: line.intake,
                 })
                 .expect("append message");

@@ -1,4 +1,5 @@
 use super::*;
+use crate::budget;
 
 impl SantiStore {
     pub(crate) fn start_turn_with_budget(
@@ -135,7 +136,7 @@ pub(crate) fn execution_budget_incident_key(strand: &str) -> String {
 }
 
 impl SantiStore {
-    pub(crate) fn strand_execution_usage(&self, strand: &str) -> Result<Usage, String> {
+    pub(crate) fn strand_execution_usage(&self, strand: &str) -> Result<budget::Usage, String> {
         let conn = self.conn.lock().unwrap();
         let calls = conn
             .query_row(
@@ -176,7 +177,7 @@ impl SantiStore {
                 None => error.as_deref().map_or(0, str::len),
             });
         }
-        Ok(Usage {
+        Ok(budget::Usage {
             calls: usize::try_from(calls).unwrap_or(usize::MAX),
             output: held,
         })

@@ -14,10 +14,8 @@ use super::{
     assembly::assembly_input_in_conn,
     db::{Database, drain_inbox_in_tx},
 };
-use crate::{
-    ContextEstimate, InboxSource, IngestOutcome, IngestReceipt, MessageContent, MessageKind, Usage,
-    now, tag,
-};
+use crate::{budget, ingest, message};
+use crate::{now, tag};
 
 const REASON_PENDING: &str = "pending_drain_would_exceed_budget";
 
@@ -33,7 +31,7 @@ pub(crate) struct Pressure<'a> {
     pub model: Option<&'a str>,
     pub budget_source: Option<&'a str>,
     pub budget_bytes: Option<i64>,
-    pub estimate: &'a ContextEstimate,
+    pub estimate: &'a budget::Estimate,
     pub observed_turn_id: Option<&'a str>,
     pub observed_at_seq: Option<i64>,
     pub metadata: Option<Value>,
@@ -76,9 +74,9 @@ pub(crate) struct Admission {
 
 pub(crate) struct Ingress<'a> {
     pub strand: &'a str,
-    pub kind: MessageKind,
-    pub content: MessageContent,
-    pub source: Option<InboxSource>,
+    pub kind: message::Kind,
+    pub content: message::Content,
+    pub source: Option<ingest::Source>,
     pub admission: Option<&'a Admission>,
     pub replay: Option<Replay<'a>>,
 }
@@ -90,7 +88,7 @@ pub(crate) struct Replay<'a> {
 }
 
 pub(crate) struct Intake {
-    pub outcome: IngestOutcome,
+    pub outcome: ingest::Outcome,
     pub inserted: bool,
 }
 
@@ -130,7 +128,7 @@ impl SantiStore {
         &self,
         strand: &str,
         resolved_by: &str,
-        estimate: &ContextEstimate,
+        estimate: &budget::Estimate,
     ) -> Result<bool, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn

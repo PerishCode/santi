@@ -1,11 +1,12 @@
 use rusqlite::params;
 use serde_json::Value;
 
-use crate::{CompactExecResponse, CompactQueryEntry, CompactQueryResponse, now, tag};
+use crate::{now, tag};
 
 use super::{SantiStore, db::Database, span::Span};
 
 mod plan;
+use crate::compact;
 use plan::*;
 
 struct Plan {
@@ -29,7 +30,7 @@ impl SantiStore {
         first: &str,
         last: &str,
         summary: &str,
-    ) -> Result<CompactExecResponse, String> {
+    ) -> Result<compact::Report, String> {
         self.create_compact_with_metadata(Collapse {
             strand,
             from: first,
@@ -42,7 +43,7 @@ impl SantiStore {
     pub(crate) fn create_compact_with_metadata(
         &self,
         collapse: Collapse<'_>,
-    ) -> Result<CompactExecResponse, String> {
+    ) -> Result<compact::Report, String> {
         let Collapse {
             strand,
             from,
@@ -77,7 +78,7 @@ impl SantiStore {
         .map_err(|error| error.to_string())?;
         tx.commit().map_err(|error| error.to_string())?;
 
-        Ok(CompactExecResponse {
+        Ok(compact::Report {
             compact,
             first: from.to_string(),
             last: to.to_string(),
@@ -98,10 +99,10 @@ impl SantiStore {
         strand: &str,
         first: &str,
         last: &str,
-    ) -> Result<CompactExecResponse, String> {
+    ) -> Result<compact::Report, String> {
         let conn = self.conn.lock().unwrap();
         let plan = plan_compact_in_tx(&conn, strand, first, last)?;
-        Ok(CompactExecResponse {
+        Ok(compact::Report {
             compact: tag("cmp_preview"),
             first: first.to_string(),
             last: last.to_string(),
@@ -147,7 +148,7 @@ impl SantiStore {
         keyword: Option<&str>,
         page_index: i64,
         page_size: i64,
-    ) -> Result<Option<CompactQueryResponse>, String> {
+    ) -> Result<Option<compact::Page>, String> {
         let conn = self.conn.lock().unwrap();
         let database = Database::new(&conn);
         let Some(compact) = database.compact_by_id(compact)? else {
@@ -189,7 +190,7 @@ impl SantiStore {
                 {
                     continue;
                 }
-                entries.push(CompactQueryEntry {
+                entries.push(compact::Entry {
                     seq,
                     kind: parse_target_type(&kind),
                     target,
@@ -202,7 +203,7 @@ impl SantiStore {
         let skip = page_index.max(0).saturating_mul(page_size.max(0)).max(0) as usize;
         let take = page_size.max(0) as usize;
         let entries = entries.into_iter().skip(skip).take(take).collect();
-        Ok(Some(CompactQueryResponse {
+        Ok(Some(compact::Page {
             compact: compact.id,
             first: compact.first,
             last: compact.last,

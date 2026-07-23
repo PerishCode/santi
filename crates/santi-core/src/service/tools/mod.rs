@@ -6,11 +6,12 @@ use serde_json::{Value, json};
 
 use crate::workspace;
 use crate::{
-    EffectState, EffectTransitionReason, SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI,
-    SantiStreamPayload, parse_workspace_uri, soul_memory_uri, strand_memory_uri,
+    SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, parse_workspace_uri, soul_memory_uri,
+    strand_memory_uri,
 };
 
 use super::Service;
+use crate::{effect, stream};
 
 mod shell;
 
@@ -57,7 +58,7 @@ impl Service {
         output_limit: Option<usize>,
     ) -> Result<(), String> {
         let kind = (call.name == "shell").then_some("shell");
-        let provenance = crate::ToolCallProvenance {
+        let provenance = crate::tool::Provenance {
             family: self.provider.metadata().provider.to_string(),
             item: Some(call.item.clone()),
             mark: call.mark.clone(),
@@ -75,7 +76,7 @@ impl Service {
         )?;
         self.publish_stream(
             strand,
-            SantiStreamPayload::ToolCallCreated {
+            stream::Payload::ToolCallCreated {
                 tool_call: tool_call.clone(),
             },
         );
@@ -99,14 +100,14 @@ impl Service {
         };
         self.publish_stream(
             strand,
-            SantiStreamPayload::ToolResultCreated {
+            stream::Payload::ToolResultCreated {
                 tool_result: result,
             },
         );
         Ok(())
     }
 
-    fn handle_shell_effect(&self, shell: Shell<'_>) -> Result<crate::ToolResult, String> {
+    fn handle_shell_effect(&self, shell: Shell<'_>) -> Result<crate::tool::Reply, String> {
         let Shell {
             strand,
             turn,
@@ -126,7 +127,7 @@ impl Service {
                         call: &call.call_id,
                         output: None,
                         error: Some(bounded_tool_error(error, output_limit)),
-                        state: EffectState::NotDispatched,
+                        state: effect::State::NotDispatched,
                     },
                 );
             }
@@ -139,7 +140,7 @@ impl Service {
                     call: &call.call_id,
                     output: Some(output),
                     error: None,
-                    state: EffectState::Confirmed,
+                    state: effect::State::Confirmed,
                 },
             ),
             shell::Outcome::Failed(error) => self.store.append_effect_tool_result(
@@ -148,13 +149,13 @@ impl Service {
                     call: &call.call_id,
                     output: None,
                     error: Some(bounded_tool_error(error, output_limit)),
-                    state: EffectState::NotDispatched,
+                    state: effect::State::NotDispatched,
                 },
             ),
             shell::Outcome::Unknown(error) => {
                 self.store.mark_effect_unknown(
                     effect_id,
-                    EffectTransitionReason::ResultCaptureFailed,
+                    effect::Reason::ResultCaptureFailed,
                     &error,
                 )?;
                 Err(format!(

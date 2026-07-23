@@ -1,10 +1,9 @@
 use futures_util::StreamExt;
 use santi_provider::{ProviderEvent, ProviderFunctionCall, ProviderStream};
 
-use crate::{ThinkingCompletionReason, ThinkingSpan, TurnActivityState};
-
 use super::super::{Service, address::Address, text::delta, timing, timing::provider_event_name};
 use super::failure::{Failure, Metadata, Operation, Persistence, Stage};
+use crate::{thinking, turn};
 
 mod run;
 
@@ -26,8 +25,8 @@ struct Driver<'a, 'turn> {
     calls: Vec<ProviderFunctionCall>,
     completed_response_id: Option<String>,
     active_provider_response_id: Option<String>,
-    current_thinking_span: Option<ThinkingSpan>,
-    summary_thinking_span: Option<ThinkingSpan>,
+    current_thinking_span: Option<thinking::Span>,
+    summary_thinking_span: Option<thinking::Span>,
     reasoning_summary: String,
     round_assistant_text: String,
     saw_sse_event: bool,
@@ -126,7 +125,7 @@ impl Driver<'_, '_> {
         self.service.publish_turn_activity(
             self.address.strand,
             self.address.turn,
-            TurnActivityState::Thinking,
+            turn::Motion::Thinking,
             response,
         );
         Ok(false)
@@ -160,13 +159,13 @@ impl Driver<'_, '_> {
         let result = self.service.complete_current_thinking_span(
             self.address.strand,
             &mut self.current_thinking_span,
-            ThinkingCompletionReason::ToolCallRequested,
+            thinking::Reason::ToolCallRequested,
         );
         self.runtime(Operation::Persistence(Persistence::Thinking), result)?;
         self.service.publish_turn_activity(
             self.address.strand,
             self.address.turn,
-            TurnActivityState::CallingTool,
+            turn::Motion::Calling,
             self.active_provider_response_id.clone(),
         );
         self.calls.push(call);
@@ -179,7 +178,7 @@ impl Driver<'_, '_> {
         let result = self.service.complete_current_thinking_span(
             self.address.strand,
             &mut self.current_thinking_span,
-            ThinkingCompletionReason::ProviderCompleted,
+            thinking::Reason::ProviderCompleted,
         );
         self.runtime(Operation::Persistence(Persistence::Thinking), result)?;
         self.completed_response_id = response;

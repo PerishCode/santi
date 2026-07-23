@@ -3,18 +3,19 @@ use serde_json::json;
 use crate::context::budget::estimate_provider_parts;
 use crate::service::tools::provider_tools;
 use crate::store::budget::{Admission, Pressure};
-use crate::{ContextBudget, ContextEstimate, Execution, Fault, Usage, catalog};
+use crate::{Fault, catalog};
 
 use super::super::Service;
+use crate::budget;
 
 const REASON_PROVIDER: &str = "provider_request_exceeds_budget";
 
 impl Service {
-    pub(in crate::service) fn context_budget(&self) -> Option<ContextBudget> {
+    pub(in crate::service) fn context_budget(&self) -> Option<budget::Cap> {
         self.provider
             .metadata()
             .context_budget
-            .map(|budget| ContextBudget {
+            .map(|budget| budget::Cap {
                 bytes: budget.bytes as i64,
                 source: budget.source,
             })
@@ -23,7 +24,7 @@ impl Service {
     pub(in crate::service) fn current_context_estimate(
         &self,
         strand: &str,
-    ) -> Result<ContextEstimate, String> {
+    ) -> Result<budget::Estimate, String> {
         let mut input = self.store.assembly_input(strand)?;
         input.extend(self.store.pending_provider_items(strand)?);
         let instructions = self.system_prompt_text(strand)?;
@@ -58,7 +59,7 @@ impl Service {
         strand: &str,
         turn: &str,
         request: &santi_provider::ProviderRequest,
-        estimate: &ContextEstimate,
+        estimate: &budget::Estimate,
     ) -> Result<Option<Fault>, String> {
         let Some(budget) = self.context_budget() else {
             return Ok(None);
@@ -256,8 +257,8 @@ impl Service {
 struct Breach<'a> {
     strand: &'a str,
     turn: &'a str,
-    budget: &'a Execution,
-    usage: Usage,
+    budget: &'a budget::Execution,
+    usage: budget::Usage,
     reason: &'a str,
     request: serde_json::Value,
 }

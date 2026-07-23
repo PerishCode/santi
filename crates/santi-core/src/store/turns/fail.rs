@@ -1,9 +1,10 @@
 use crate::store::{ProviderFault, RuntimeFault, SantiStore, db::Database};
-use crate::{EffectTransitionReason, Fault, Turn, catalog, now};
+use crate::{Fault, catalog, now, turn::Turn};
 use rusqlite::params;
 use serde_json::json;
 
 use super::*;
+use crate::effect;
 
 impl SantiStore {
     pub(crate) fn fail_provider_turn(
@@ -49,8 +50,8 @@ impl SantiStore {
         })?;
         Database::new(&tx).reconcile_effects(
             turn,
-            EffectTransitionReason::TurnFailedBeforeDispatch,
-            EffectTransitionReason::TurnFailedDuringDispatch,
+            effect::Reason::TurnFailedBeforeDispatch,
+            effect::Reason::TurnFailedDuringDispatch,
             &now,
         )?;
         Database::new(&tx).fail_turn(turn, error.incident.as_deref(), &now)?;
@@ -89,8 +90,8 @@ impl SantiStore {
         let error = open_runtime_incident(&tx, &strand, turn, failure)?;
         Database::new(&tx).reconcile_effects(
             turn,
-            EffectTransitionReason::TurnFailedBeforeDispatch,
-            EffectTransitionReason::TurnFailedDuringDispatch,
+            effect::Reason::TurnFailedBeforeDispatch,
+            effect::Reason::TurnFailedDuringDispatch,
             &now,
         )?;
         Database::new(&tx).fail_turn(turn, error.incident.as_deref(), &now)?;
@@ -125,8 +126,8 @@ impl SantiStore {
         .map_err(|error| error.to_string())?;
         Database::new(&tx).reconcile_effects(
             turn,
-            EffectTransitionReason::TurnFailedBeforeDispatch,
-            EffectTransitionReason::TurnFailedDuringDispatch,
+            effect::Reason::TurnFailedBeforeDispatch,
+            effect::Reason::TurnFailedDuringDispatch,
             &now,
         )?;
         Database::new(&tx).fail_turn(turn, incident, &now)?;

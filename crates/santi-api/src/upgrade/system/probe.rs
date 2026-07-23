@@ -40,7 +40,7 @@ pub(super) fn probe_runtime_readiness(binary: &Path) -> Result<Option<UpgradeRea
     if output.stdout.is_empty() {
         return Ok(None);
     }
-    let health: santi_core::HealthResponse = serde_json::from_slice(&output.stdout)
+    let health: santi_core::Health = serde_json::from_slice(&output.stdout)
         .map_err(|error| format!("decode health probe: {error}"))?;
     if health.degraded {
         Ok(Some(UpgradeReadiness::Degraded))

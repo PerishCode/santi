@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, Strand, Timestamp, soul_memory_uri, stamped,
+    SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, Timestamp, soul_memory_uri, stamped, strand::Strand,
     strand_memory_uri,
 };
 

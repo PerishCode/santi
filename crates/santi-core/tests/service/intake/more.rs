@@ -1,4 +1,5 @@
 use super::*;
+use santi_core::{message, soul, strand};
 
 #[tokio::test]
 async fn shutdown_pauses_consumption() {
@@ -24,7 +25,7 @@ async fn shutdown_pauses_consumption() {
             )
             .expect("ingest during shutdown");
         match outcome {
-            santi_core::IngestOutcome::Accepted { receipt } => receipt.strand,
+            santi_core::ingest::Outcome::Accepted { receipt } => receipt.strand,
             other => panic!("expected accepted, got {other:?}"),
         }
     };
@@ -73,7 +74,7 @@ async fn send_targets_soul() {
 
     let default_soul = service.list_souls().expect("list souls")[0].id.clone();
     let secretary = service
-        .create_soul(CreateSoulRequest {
+        .create_soul(soul::Draft {
             memory: Some("# I am the secretary".to_string()),
         })
         .expect("create soul");
@@ -84,8 +85,8 @@ async fn send_targets_soul() {
     let response = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "for whoever".to_string(),
                 }],
             },
@@ -94,7 +95,7 @@ async fn send_targets_soul() {
         .expect("send strand");
     assert_eq!(response.strand.soul, default_soul);
 
-    let santi_core::IngestOutcome::Accepted {
+    let santi_core::ingest::Outcome::Accepted {
         receipt: secretary_receipt,
     } = service
         .ingest_external_event(
@@ -110,8 +111,8 @@ async fn send_targets_soul() {
     let secretary_response = service
         .send_strand(
             &secretary_strand_id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "for the secretary".to_string(),
                 }],
             },
@@ -123,8 +124,8 @@ async fn send_targets_soul() {
     let error = service
         .send_strand(
             "ss_does_not_exist",
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "nobody home".to_string(),
                 }],
             },

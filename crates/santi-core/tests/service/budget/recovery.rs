@@ -1,5 +1,6 @@
 use super::super::support::*;
 use super::service_with_budget;
+use santi_core::{effect, message, strand};
 
 #[tokio::test]
 async fn compact_redrives_receipt() {
@@ -14,8 +15,8 @@ async fn compact_redrives_receipt() {
     let response = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "one compact-recoverable obligation".to_string(),
                 }],
             },
@@ -29,7 +30,7 @@ async fn compact_redrives_receipt() {
         .receipt_status(&response.receipt.inbox)
         .expect("receipt query")
         .expect("receipt");
-    assert_eq!(receipt.state, santi_core::ReceiptState::TurnFailed);
+    assert_eq!(receipt.state, santi_core::receipt::State::Failed);
 
     let first = runtime
         .messages
@@ -43,11 +44,11 @@ async fn compact_redrives_receipt() {
     let boundary = store
         .append_message(Draft {
             strand: &strand.id,
-            actor: ActorType::Soul,
+            actor: message::Role::Soul,
             id: store.default_soul_id(),
-            content: MessageContent::text("manual compact boundary"),
-            state: MessageState::Fixed,
-            intake: MessageIntake::Record,
+            content: message::Content::text("manual compact boundary"),
+            state: message::State::Fixed,
+            intake: message::Intake::Record,
         })
         .expect("append manual boundary")
         .strand_message;
@@ -55,7 +56,7 @@ async fn compact_redrives_receipt() {
     let compact = service
         .compact_exec(
             &strand.id,
-            santi_core::CompactExecRequest {
+            santi_core::compact::Exec {
                 first: Some(first),
                 last: Some(boundary.message.id),
                 from: None,
@@ -71,13 +72,13 @@ async fn compact_redrives_receipt() {
     let runtime = Probe::new(&service).any_completed(&strand.id).await;
     assert_eq!(provider.requests.lock().unwrap().len(), 2);
     assert_eq!(runtime.effects.len(), 1, "effect must not replay");
-    assert_eq!(runtime.effects[0].state, EffectState::Confirmed);
+    assert_eq!(runtime.effects[0].state, effect::State::Confirmed);
     assert_eq!(runtime.errors[0].status, santi_core::Status::Resolved);
     let receipt = service
         .receipt_status(&response.receipt.inbox)
         .expect("receipt query")
         .expect("receipt");
-    assert_eq!(receipt.state, santi_core::ReceiptState::Completed);
+    assert_eq!(receipt.state, santi_core::receipt::State::Completed);
     assert_eq!(
         receipt
             .transitions
@@ -85,11 +86,11 @@ async fn compact_redrives_receipt() {
             .map(|transition| transition.state.clone())
             .collect::<Vec<_>>(),
         vec![
-            santi_core::ReceiptState::Accepted,
-            santi_core::ReceiptState::Driving,
-            santi_core::ReceiptState::TurnFailed,
-            santi_core::ReceiptState::Driving,
-            santi_core::ReceiptState::Completed,
+            santi_core::receipt::State::Accepted,
+            santi_core::receipt::State::Driving,
+            santi_core::receipt::State::Failed,
+            santi_core::receipt::State::Driving,
+            santi_core::receipt::State::Completed,
         ]
     );
 }

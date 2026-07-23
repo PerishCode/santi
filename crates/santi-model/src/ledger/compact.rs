@@ -2,9 +2,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
-use super::{ContextEstimate, StrandTargetType, Timestamp};
+use crate::Timestamp;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[schema(as = compact::Compact)]
 pub struct Compact {
     pub id: String,
     pub strand: String,
@@ -18,7 +19,8 @@ pub struct Compact {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct CompactExecRequest {
+#[schema(as = compact::Exec)]
+pub struct Exec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -29,13 +31,14 @@ pub struct CompactExecRequest {
     pub to: Option<i64>,
     pub summary: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub capsule: Option<CompactCapsuleOptions>,
+    pub capsule: Option<Capsule>,
     #[serde(default)]
     pub dry: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct CompactCapsuleOptions {
+#[schema(as = compact::Capsule)]
+pub struct Capsule {
     pub source: String,
     pub reason: String,
     pub risk: String,
@@ -44,7 +47,8 @@ pub struct CompactCapsuleOptions {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct CompactExecResponse {
+#[schema(as = compact::Report)]
+pub struct Report {
     pub compact: String,
     pub first: String,
     pub last: String,
@@ -57,28 +61,30 @@ pub struct CompactExecResponse {
     #[serde(default)]
     pub active_incident_resolved: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub before: Option<ContextEstimate>,
+    pub before: Option<crate::budget::Estimate>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub after: Option<ContextEstimate>,
+    pub after: Option<crate::budget::Estimate>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ratio: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct CompactQueryEntry {
+#[schema(as = compact::Entry)]
+pub struct Entry {
     pub seq: i64,
-    pub kind: StrandTargetType,
+    pub kind: crate::strand::Target,
     pub target: String,
     pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct CompactQueryResponse {
+#[schema(as = compact::Page)]
+pub struct Page {
     pub compact: String,
     pub first: String,
     pub last: String,
     pub total: i64,
     pub page_index: i64,
     pub page_size: i64,
-    pub entries: Vec<CompactQueryEntry>,
+    pub entries: Vec<Entry>,
 }

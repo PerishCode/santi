@@ -1,8 +1,9 @@
 use crate::rows::*;
 use rusqlite::{OptionalExtension, params};
-use santi_model::{Compact, StrandEffect, ThinkingSpan, ToolCall, ToolResult, Turn};
+use santi_model::{compact::Compact, turn::Turn};
 
 use super::*;
+use santi_model::{effect, thinking, tool};
 
 impl<'a> Database<'a> {
     pub fn turn_by_id(&self, turn: &str) -> Result<Option<Turn>, String> {
@@ -63,12 +64,12 @@ impl<'a> Database<'a> {
             .map_err(|error| error.to_string())
     }
 
-    pub fn tool_call_by_id(&self, call: &str) -> Result<Option<ToolCall>, String> {
+    pub fn tool_call_by_id(&self, call: &str) -> Result<Option<tool::Call>, String> {
         self.conn
             .query_row(
                 "SELECT id, turn_id, tool_name, arguments, created_at FROM tool_calls WHERE id = ?1 LIMIT 1",
                 params![call],
-                ToolCall::decode,
+                tool::Call::decode,
             )
             .optional()
             .map_err(|error| error.to_string())
@@ -97,12 +98,12 @@ impl<'a> Database<'a> {
             })
     }
 
-    pub fn tool_result_by_id(&self, tool_result_id: &str) -> Result<Option<ToolResult>, String> {
+    pub fn tool_result_by_id(&self, tool_result_id: &str) -> Result<Option<tool::Reply>, String> {
         self.conn
             .query_row(
                 "SELECT id, tool_call_id, output, error_text, created_at FROM tool_results WHERE id = ?1 LIMIT 1",
                 params![tool_result_id],
-                ToolResult::decode,
+                tool::Reply::decode,
             )
             .optional()
             .map_err(|error| error.to_string())
@@ -111,7 +112,7 @@ impl<'a> Database<'a> {
     pub fn thinking_span_by_id(
         &self,
         thinking_span_id: &str,
-    ) -> Result<Option<ThinkingSpan>, String> {
+    ) -> Result<Option<thinking::Span>, String> {
         self.conn
             .query_row(
                 r#"
@@ -122,7 +123,7 @@ impl<'a> Database<'a> {
         LIMIT 1
         "#,
                 params![thinking_span_id],
-                ThinkingSpan::decode,
+                thinking::Span::decode,
             )
             .optional()
             .map_err(|error| error.to_string())
@@ -164,7 +165,7 @@ impl<'a> Database<'a> {
         collect_rows(rows)
     }
 
-    pub fn strand_effects(&self, strand: &str) -> Result<Vec<StrandEffect>, String> {
+    pub fn strand_effects(&self, strand: &str) -> Result<Vec<effect::Effect>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -178,7 +179,7 @@ impl<'a> Database<'a> {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map(params![strand], StrandEffect::decode)
+            .query_map(params![strand], effect::Effect::decode)
             .map_err(|error| error.to_string())?;
         collect_rows(rows)
     }

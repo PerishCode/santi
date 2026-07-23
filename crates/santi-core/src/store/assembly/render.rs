@@ -171,7 +171,7 @@ impl Items<'_> {
 }
 
 pub(super) fn render_compact_for_provider(
-    compact: &crate::Compact,
+    compact: &crate::compact::Compact,
     fallback_range: Range,
 ) -> String {
     let metadata = compact.metadata.as_ref();

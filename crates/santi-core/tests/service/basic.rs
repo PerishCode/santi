@@ -1,5 +1,6 @@
 use super::support::*;
 use santi_core::service::{self, Service};
+use santi_core::{message, strand};
 
 #[tokio::test]
 async fn sends_with_runtime() {
@@ -21,8 +22,8 @@ async fn sends_with_runtime() {
     let response = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "hello provider".to_string(),
                 }],
             },
@@ -40,7 +41,7 @@ async fn sends_with_runtime() {
     );
     assert_eq!(
         accepted_turn(&response).status,
-        santi_core::TurnStatus::Running
+        santi_core::turn::Status::Running
     );
     let runtime = Probe::new(&service)
         .completed_turn(&strand.id, &accepted_turn(&response).id)

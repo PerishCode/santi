@@ -34,7 +34,7 @@ pub fn register_attempt_handover_budgets(
         }
         service.set_strand_execution_budget(
             &strand.id,
-            santi_core::Execution {
+            santi_core::budget::Execution {
                 profile: HANDOVER_BUDGET_PROFILE.to_string(),
                 rounds: HANDOVER_MAX_PROVIDER_ROUNDS,
                 calls: HANDOVER_MAX_TOOL_CALLS,

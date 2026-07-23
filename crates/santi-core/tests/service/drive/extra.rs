@@ -1,4 +1,5 @@
 use super::*;
+use santi_core::{message, strand};
 
 #[tokio::test]
 async fn drain_preserves_provenance() {
@@ -20,8 +21,8 @@ async fn drain_preserves_provenance() {
     let first = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "first request".to_string(),
                 }],
             },
@@ -41,8 +42,8 @@ async fn drain_preserves_provenance() {
     let second = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "second request".to_string(),
                 }],
             },

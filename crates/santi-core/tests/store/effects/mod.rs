@@ -1,4 +1,5 @@
 use super::support::*;
+use santi_core::{effect, ingest, message, receipt, tool};
 
 mod more;
 
@@ -13,13 +14,13 @@ fn start_effect(store: &SantiStore) -> StartedEffect {
     let inbox = match store
         .enqueue_inbox(
             &strand.id,
-            MessageKind::Text,
-            MessageContent::text("run an external effect"),
+            message::Kind::Text,
+            message::Content::text("run an external effect"),
         )
         .expect("enqueue")
     {
-        IngestOutcome::Accepted { receipt } => receipt.inbox,
-        IngestOutcome::Rejected { .. } => panic!("unexpected rejection"),
+        ingest::Outcome::Accepted { receipt } => receipt.inbox,
+        ingest::Outcome::Rejected { .. } => panic!("unexpected rejection"),
     };
     let turn = store
         .try_start_turn(&strand.id, "strand_send", None)
@@ -34,7 +35,7 @@ fn start_effect(store: &SantiStore) -> StartedEffect {
                 call: &call,
                 name: "shell",
                 arguments: &json!({"command": "printf external"}),
-                provenance: &ToolCallProvenance::default(),
+                provenance: &tool::Provenance::default(),
             },
             Some("shell"),
         )
@@ -60,7 +61,7 @@ fn prepared_failure() {
         .effect_status(&started.effect_id)
         .expect("query effect")
         .expect("effect");
-    assert_eq!(status.effect.state, EffectState::NotDispatched);
+    assert_eq!(status.effect.state, effect::State::NotDispatched);
     assert_eq!(
         status
             .transitions
@@ -68,17 +69,17 @@ fn prepared_failure() {
             .map(|transition| transition.reason.clone())
             .collect::<Vec<_>>(),
         vec![
-            EffectTransitionReason::IntentPersisted,
-            EffectTransitionReason::TurnFailedBeforeDispatch,
+            effect::Reason::IntentPersisted,
+            effect::Reason::TurnFailedBeforeDispatch,
         ]
     );
     let receipt = store
         .receipt_status(&started.inbox)
         .expect("query receipt")
         .expect("receipt");
-    assert_eq!(receipt.state, ReceiptState::TurnFailed);
+    assert_eq!(receipt.state, receipt::State::Failed);
     assert_eq!(receipt.effects.len(), 1);
-    assert_eq!(receipt.effects[0].state, EffectState::NotDispatched);
+    assert_eq!(receipt.effects[0].state, effect::State::NotDispatched);
 }
 
 #[test]
@@ -90,8 +91,8 @@ fn intent_atomicity() {
     store
         .enqueue_inbox(
             &strand.id,
-            MessageKind::Text,
-            MessageContent::text("run an external effect"),
+            message::Kind::Text,
+            message::Content::text("run an external effect"),
         )
         .expect("enqueue");
     let turn = store
@@ -119,7 +120,7 @@ fn intent_atomicity() {
                     call: "call_atomic",
                     name: "shell",
                     arguments: &json!({"command": "printf atomic"}),
-                    provenance: &ToolCallProvenance::default(),
+                    provenance: &tool::Provenance::default(),
                 },
                 Some("shell"),
             )

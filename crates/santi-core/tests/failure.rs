@@ -1,11 +1,9 @@
 use async_trait::async_trait;
 use futures_util::stream;
 use rusqlite::Connection;
+use santi_core::Category;
 use santi_core::service::{self, Service};
-use santi_core::{
-    ActorType, Category, MessageKind, MessagePart, MessageState, ReceiptState, SantiStreamPayload,
-    SendStrandRequest, TurnStatus,
-};
+use santi_core::{message, strand, turn};
 use santi_provider::{
     ProviderClient, ProviderEvent, ProviderItem, ProviderMetadata, ProviderRequest, ProviderStream,
 };
@@ -95,7 +93,7 @@ async fn aggregates_provider_failures() {
     let strand = service.create_strand().expect("create strand").strand;
     let first = send_text(&service, &strand.id, "trigger failure").await;
 
-    let runtime = wait_for_turn(&service, &strand.id, &turn(&first).id, TurnStatus::Failed).await;
+    let runtime = wait_for_turn(&service, &strand.id, &turn(&first).id, turn::Status::Failed).await;
     let failed_turn = runtime
         .turns
         .iter()
@@ -122,7 +120,9 @@ async fn aggregates_provider_failures() {
 
     let failed_event = std::iter::from_fn(|| events.try_recv().ok())
         .find_map(|event| match event.payload {
-            SantiStreamPayload::TurnFailed { turn: held, error } if held == turn(&first).id => {
+            santi_core::stream::Payload::TurnFailed { turn: held, error }
+                if held == turn(&first).id =>
+            {
                 Some(error)
             }
             _ => None,
@@ -133,7 +133,7 @@ async fn aggregates_provider_failures() {
     assert_eq!(failed_event.source.operation, "turn.request");
 
     let retry = send_text(&service, &strand.id, "continue after failure").await;
-    let runtime = wait_for_turn(&service, &strand.id, &turn(&retry).id, TurnStatus::Failed).await;
+    let runtime = wait_for_turn(&service, &strand.id, &turn(&retry).id, turn::Status::Failed).await;
     assert_no_failure_projection(&runtime);
     assert_eq!(runtime.errors.len(), 1);
     assert_eq!(runtime.errors[0].id, incident.id);
@@ -155,17 +155,17 @@ async fn aggregates_provider_failures() {
     }));
 }
 
-fn assert_no_failure_projection(runtime: &santi_core::StrandRuntimeSnapshot) {
+fn assert_no_failure_projection(runtime: &santi_core::stream::Snapshot) {
     assert!(
         runtime
             .messages
             .iter()
-            .all(|message| message.message.kind != MessageKind::SantiSystem),
+            .all(|message| message.message.kind != message::Kind::SantiSystem),
         "provider failure must not append a model-visible system message"
     );
 }
 
-fn turn(response: &santi_core::SendStrandAcceptedResponse) -> &santi_core::Turn {
+fn turn(response: &santi_core::strand::Posted) -> &santi_core::turn::Turn {
     response.turn.as_ref().expect("send should start a turn")
 }
 
@@ -192,16 +192,12 @@ fn transition_count(temp: &tempfile::TempDir) -> i64 {
         .expect("transition count")
 }
 
-async fn send_text(
-    service: &Service,
-    strand: &str,
-    text: &str,
-) -> santi_core::SendStrandAcceptedResponse {
+async fn send_text(service: &Service, strand: &str, text: &str) -> santi_core::strand::Posted {
     service
         .send_strand(
             strand,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: text.to_string(),
                 }],
             },
@@ -214,8 +210,8 @@ async fn wait_for_turn(
     service: &Service,
     strand: &str,
     turn: &str,
-    status: TurnStatus,
-) -> santi_core::StrandRuntimeSnapshot {
+    status: turn::Status,
+) -> santi_core::stream::Snapshot {
     for _ in 0..100 {
         let runtime = service
             .runtime_snapshot(strand)
@@ -237,7 +233,7 @@ async fn wait_for_aborted_output(
     service: &Service,
     strand: &str,
     turn: &str,
-) -> santi_core::StrandRuntimeSnapshot {
+) -> santi_core::stream::Snapshot {
     for _ in 0..100 {
         let runtime = service
             .runtime_snapshot(strand)
@@ -246,10 +242,10 @@ async fn wait_for_aborted_output(
         let failed = runtime
             .turns
             .iter()
-            .any(|held| held.id == turn && held.status == TurnStatus::Failed);
+            .any(|held| held.id == turn && held.status == turn::Status::Failed);
         let partial_recorded = runtime.messages.iter().any(|message| {
-            message.message.role == ActorType::Soul
-                && message.message.state == MessageState::Aborted
+            message.message.role == message::Role::Soul
+                && message.message.state == message::State::Aborted
         });
         if failed && partial_recorded {
             return runtime;

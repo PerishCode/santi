@@ -9,20 +9,20 @@ impl<'a> Probe<'a> {
         Self { service }
     }
 
-    async fn snapshot(&self, strand: &str) -> santi_core::StrandRuntimeSnapshot {
+    async fn snapshot(&self, strand: &str) -> santi_core::stream::Snapshot {
         self.service
             .runtime_snapshot(strand)
             .expect("runtime snapshot")
             .expect("strand runtime")
     }
 
-    pub(crate) async fn any_completed(&self, strand: &str) -> santi_core::StrandRuntimeSnapshot {
+    pub(crate) async fn any_completed(&self, strand: &str) -> santi_core::stream::Snapshot {
         for _ in 0..50 {
             let runtime = self.snapshot(strand).await;
             if runtime
                 .turns
                 .iter()
-                .any(|turn| turn.status == santi_core::TurnStatus::Completed)
+                .any(|turn| turn.status == santi_core::turn::Status::Completed)
             {
                 return runtime;
             }
@@ -35,13 +35,13 @@ impl<'a> Probe<'a> {
         &self,
         strand: &str,
         count: usize,
-    ) -> santi_core::StrandRuntimeSnapshot {
+    ) -> santi_core::stream::Snapshot {
         for _ in 0..50 {
             let runtime = self.snapshot(strand).await;
             if runtime
                 .turns
                 .iter()
-                .filter(|turn| turn.status == santi_core::TurnStatus::Completed)
+                .filter(|turn| turn.status == santi_core::turn::Status::Completed)
                 .count()
                 >= count
             {
@@ -56,13 +56,13 @@ impl<'a> Probe<'a> {
         &self,
         strand: &str,
         turn: &str,
-    ) -> santi_core::StrandRuntimeSnapshot {
+    ) -> santi_core::stream::Snapshot {
         for _ in 0..50 {
             let runtime = self.snapshot(strand).await;
             if runtime
                 .turns
                 .iter()
-                .any(|held| held.id == turn && held.status == santi_core::TurnStatus::Completed)
+                .any(|held| held.id == turn && held.status == santi_core::turn::Status::Completed)
             {
                 return runtime;
             }
@@ -75,13 +75,13 @@ impl<'a> Probe<'a> {
         &self,
         strand: &str,
         turn: &str,
-    ) -> santi_core::StrandRuntimeSnapshot {
+    ) -> santi_core::stream::Snapshot {
         for _ in 0..50 {
             let runtime = self.snapshot(strand).await;
             if runtime
                 .turns
                 .iter()
-                .any(|held| held.id == turn && held.status == santi_core::TurnStatus::Failed)
+                .any(|held| held.id == turn && held.status == santi_core::turn::Status::Failed)
             {
                 return runtime;
             }
@@ -94,7 +94,7 @@ impl<'a> Probe<'a> {
         &self,
         strand: &str,
         needle: &str,
-    ) -> santi_core::StrandRuntimeSnapshot {
+    ) -> santi_core::stream::Snapshot {
         for _ in 0..50 {
             let runtime = self.snapshot(strand).await;
             if runtime
@@ -110,7 +110,7 @@ impl<'a> Probe<'a> {
     }
 }
 
-pub(crate) fn count_messages(runtime: &santi_core::StrandRuntimeSnapshot, text: &str) -> usize {
+pub(crate) fn count_messages(runtime: &santi_core::stream::Snapshot, text: &str) -> usize {
     runtime
         .messages
         .iter()

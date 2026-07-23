@@ -1,13 +1,9 @@
 use rusqlite::Row;
-use santi_model::{
-    ActorType, Compact, DownstreamCredential, EffectState, Message, MessageContent, MessageEvent,
-    MessageKind, MessageState, Soul, Strand, StrandEffect, StrandMessage, StrandMessageRef,
-    ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState, ToolCall, ToolResult, Turn,
-    TurnStatus, TurnTriggerType, WebhookSubscription,
-};
+use santi_model::{compact::Compact, soul::Soul, strand::Strand, turn::Turn};
 use serde_json::Value;
 
 use super::*;
+use santi_model::{downstream, effect, message, thinking, tool, turn, webhook};
 
 impl Decode for Soul {
     fn decode(row: &Row<'_>) -> rusqlite::Result<Self> {
@@ -19,7 +15,7 @@ impl Decode for Soul {
     }
 }
 
-impl Decode for DownstreamCredential {
+impl Decode for downstream::Credential {
     fn decode(row: &Row<'_>) -> rusqlite::Result<Self> {
         Ok(Self {
             id: row.get(0)?,
@@ -31,7 +27,7 @@ impl Decode for DownstreamCredential {
     }
 }
 
-impl Decode for WebhookSubscription {
+impl Decode for webhook::Subscription {
     fn decode(row: &Row<'_>) -> rusqlite::Result<Self> {
         Ok(Self {
             name: row.get(0)?,
@@ -64,10 +60,10 @@ impl Decode for Strand {
     }
 }
 
-impl Decode for Message {
+impl Decode for message::Message {
     fn decode(row: &Row<'_>) -> rusqlite::Result<Self> {
         let content_json: String = row.get(4)?;
-        let content = serde_json::from_str::<MessageContent>(&content_json).map_err(|error| {
+        let content = serde_json::from_str::<message::Content>(&content_json).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
                 4,
                 rusqlite::types::Type::Text,
@@ -76,11 +72,11 @@ impl Decode for Message {
         })?;
         Ok(Self {
             id: row.get(0)?,
-            role: ActorType::decode(row.get::<_, String>(1)?.as_str()),
+            role: message::Role::decode(row.get::<_, String>(1)?.as_str()),
             actor: row.get(2)?,
-            kind: MessageKind::decode(row.get::<_, String>(3)?.as_str()),
+            kind: message::Kind::decode(row.get::<_, String>(3)?.as_str()),
             content,
-            state: MessageState::decode(row.get::<_, String>(5)?.as_str()),
+            state: message::State::decode(row.get::<_, String>(5)?.as_str()),
             version: row.get(6)?,
             deleted: row.get(7)?,
             created: row.get(8)?,
@@ -89,7 +85,7 @@ impl Decode for Message {
     }
 }
 
-impl Decode for MessageEvent {
+impl Decode for message::Event {
     fn decode(row: &Row<'_>) -> rusqlite::Result<Self> {
         let payload_json: String = row.get(6)?;
         let payload = serde_json::from_str::<Value>(&payload_json).map_err(|error| {
@@ -103,7 +99,7 @@ impl Decode for MessageEvent {
             id: row.get(0)?,
             message: row.get(1)?,
             action: row.get(2)?,
-            role: ActorType::decode(row.get::<_, String>(3)?.as_str()),
+            role: message::Role::decode(row.get::<_, String>(3)?.as_str()),
             actor: row.get(4)?,
             base_version: row.get(5)?,
             payload,
@@ -112,20 +108,20 @@ impl Decode for MessageEvent {
     }
 }
 
-impl Decode for StrandMessage {
+impl Decode for message::Placed {
     fn decode(row: &Row<'_>) -> rusqlite::Result<Self> {
         let content_json: String = row.get(8)?;
-        let content = serde_json::from_str::<MessageContent>(&content_json).map_err(|error| {
+        let content = serde_json::from_str::<message::Content>(&content_json).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
                 8,
                 rusqlite::types::Type::Text,
                 Box::new(error),
             )
         })?;
-        let role = ActorType::decode(row.get::<_, String>(5)?.as_str());
-        let kind = MessageKind::decode(row.get::<_, String>(7)?.as_str());
-        let state = MessageState::decode(row.get::<_, String>(9)?.as_str());
-        let message = Message {
+        let role = message::Role::decode(row.get::<_, String>(5)?.as_str());
+        let kind = message::Kind::decode(row.get::<_, String>(7)?.as_str());
+        let state = message::State::decode(row.get::<_, String>(9)?.as_str());
+        let message = message::Message {
             id: row.get(4)?,
             role,
             actor: row.get(6)?,
@@ -139,7 +135,7 @@ impl Decode for StrandMessage {
         };
         let text = message.content.rendered();
         Ok(Self {
-            relation: StrandMessageRef {
+            relation: message::Relation {
                 strand: row.get(0)?,
                 message: row.get(1)?,
                 seq: row.get(2)?,
@@ -156,11 +152,11 @@ impl Decode for Turn {
         Ok(Self {
             id: row.get(0)?,
             strand: row.get(1)?,
-            trigger: TurnTriggerType::decode(row.get::<_, String>(2)?.as_str()),
+            trigger: turn::Trigger::decode(row.get::<_, String>(2)?.as_str()),
             source: row.get(3)?,
             from: row.get(4)?,
             to: row.get(5)?,
-            status: TurnStatus::decode(row.get::<_, String>(6)?.as_str()),
+            status: turn::Status::decode(row.get::<_, String>(6)?.as_str()),
             error: row.get(7)?,
             created: row.get(8)?,
             updated: row.get(9)?,
@@ -169,7 +165,7 @@ impl Decode for Turn {
     }
 }
 
-impl Decode for ToolCall {
+impl Decode for tool::Call {
     fn decode(row: &Row<'_>) -> rusqlite::Result<Self> {
         let arguments_text: String = row.get(3)?;
         let arguments = serde_json::from_str::<Value>(&arguments_text).map_err(|error| {
@@ -189,7 +185,7 @@ impl Decode for ToolCall {
     }
 }
 
-impl Decode for ToolResult {
+impl Decode for tool::Reply {
     fn decode(row: &Row<'_>) -> rusqlite::Result<Self> {
         let output_text: Option<String> = row.get(2)?;
         Ok(Self {
@@ -202,18 +198,18 @@ impl Decode for ToolResult {
     }
 }
 
-impl Decode for ThinkingSpan {
+impl Decode for thinking::Span {
     fn decode(row: &Row<'_>) -> rusqlite::Result<Self> {
         Ok(Self {
             id: row.get(0)?,
             turn: row.get(1)?,
             response: row.get(2)?,
-            state: ThinkingSpanState::decode(row.get::<_, String>(3)?.as_str()),
+            state: thinking::State::decode(row.get::<_, String>(3)?.as_str()),
             summary: row.get(4)?,
             completion_reason: row
                 .get::<_, Option<String>>(5)?
                 .as_deref()
-                .map(ThinkingCompletionReason::decode),
+                .map(thinking::Reason::decode),
             error: row.get(6)?,
             created: row.get(7)?,
             updated: row.get(8)?,
@@ -237,7 +233,7 @@ impl Decode for Compact {
     }
 }
 
-impl Decode for StrandEffect {
+impl Decode for effect::Effect {
     fn decode(row: &Row<'_>) -> rusqlite::Result<Self> {
         Ok(Self {
             id: row.get(0)?,
@@ -245,7 +241,7 @@ impl Decode for StrandEffect {
             turn: row.get(2)?,
             call: row.get(3)?,
             kind: row.get(4)?,
-            state: EffectState::decode(&row.get::<_, String>(5)?),
+            state: effect::State::decode(&row.get::<_, String>(5)?),
             result: row.get(6)?,
             error: row.get(7)?,
             created: row.get(8)?,

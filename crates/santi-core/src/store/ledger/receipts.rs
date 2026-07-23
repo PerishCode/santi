@@ -1,11 +1,11 @@
 use rusqlite::{OptionalExtension, params};
 
+use crate::receipt;
 use crate::store::SantiStore;
 use crate::store::db::{Database, receipt_state_from_db};
-use crate::{ReceiptStatus, ReceiptTransition};
 
 impl SantiStore {
-    pub fn receipt_status(&self, inbox: &str) -> Result<Option<ReceiptStatus>, String> {
+    pub fn receipt_status(&self, inbox: &str) -> Result<Option<receipt::Status>, String> {
         let conn = self.conn.lock().unwrap();
         let receipt = conn
             .query_row(
@@ -58,7 +58,7 @@ impl SantiStore {
         let transitions = raw_transitions
             .into_iter()
             .map(|(id, sequence, state, turn, incident, rebuilt, occurred)| {
-                Ok(ReceiptTransition {
+                Ok(receipt::Transition {
                     id,
                     sequence,
                     state: receipt_state_from_db(&state)?,
@@ -70,7 +70,7 @@ impl SantiStore {
             })
             .collect::<Result<Vec<_>, String>>()?;
         let effects = Database::new(&conn).effects_for_receipt(&inbox)?;
-        Ok(Some(ReceiptStatus {
+        Ok(Some(receipt::Status {
             inbox,
             strand,
             state: receipt_state_from_db(&state)?,

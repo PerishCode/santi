@@ -7,6 +7,7 @@ mod codec;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[schema(as = error::Category)]
 pub enum Category {
     Internal,
     Invalid,
@@ -18,12 +19,14 @@ pub enum Category {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[schema(as = error::Severity)]
 pub enum Severity {
     Error,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[schema(as = error::Retry)]
 pub enum Retry {
     Never,
     Later,
@@ -32,6 +35,7 @@ pub enum Retry {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[schema(as = error::Exposure)]
 pub struct Exposure {
     pub caller: bool,
     pub operator: bool,
@@ -66,6 +70,7 @@ pub struct Descriptor {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[schema(as = error::Scope)]
 pub struct Scope {
     pub kind: String,
     pub id: String,
@@ -81,6 +86,7 @@ impl Scope {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[schema(as = error::Source)]
 pub struct Source {
     pub component: String,
     pub operation: String,
@@ -97,12 +103,14 @@ impl Source {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[schema(as = error::Status)]
 pub enum Status {
     Active,
     Resolved,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[schema(as = error::Report)]
 pub struct Report {
     pub source: Source,
     pub message: String,
@@ -111,12 +119,14 @@ pub struct Report {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[schema(as = error::Resolution)]
 pub struct Resolution {
     pub at: String,
     pub by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[schema(as = error::Incident)]
 pub struct Incident {
     pub id: String,
     pub key: String,
@@ -135,6 +145,7 @@ pub struct Incident {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[schema(as = error::Fault)]
 pub struct Fault {
     pub id: String,
     pub incident: Option<String>,
@@ -182,12 +193,14 @@ pub struct Signal {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[schema(as = error::Kind)]
 pub enum Kind {
     Opened,
     Resolved,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[schema(as = error::Transition)]
 pub struct Transition {
     pub id: String,
     pub incident: String,

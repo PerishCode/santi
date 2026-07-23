@@ -4,7 +4,8 @@ use utoipa::ToSchema;
 use santi_error::Incident;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
-pub struct ContextEstimate {
+#[schema(as = budget::Estimate)]
+pub struct Estimate {
     pub estimator: String,
     pub items: i64,
     pub input: i64,
@@ -14,16 +15,18 @@ pub struct ContextEstimate {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
-pub struct ContextBudget {
+#[schema(as = budget::Cap)]
+pub struct Cap {
     pub bytes: i64,
     pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct StrandBudgetSnapshot {
+#[schema(as = budget::Snapshot)]
+pub struct Snapshot {
     pub strand: String,
-    pub estimate: ContextEstimate,
-    pub budget: Option<ContextBudget>,
+    pub estimate: Estimate,
+    pub budget: Option<Cap>,
     pub incident: Option<Incident>,
 }
 

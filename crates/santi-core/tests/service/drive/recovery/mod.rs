@@ -1,6 +1,7 @@
 use super::super::support::*;
 use rusqlite::Connection;
 use santi_core::service::{self, Service};
+use santi_core::{message, strand};
 
 mod more;
 
@@ -26,8 +27,8 @@ async fn failed_receipt_redrives() {
     let failed = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "one durable obligation".to_string(),
                 }],
             },
@@ -41,7 +42,7 @@ async fn failed_receipt_redrives() {
     let driven = service
         .drive_strand(&strand.id)
         .expect("explicit failed-receipt redrive");
-    assert_eq!(driven.state, santi_core::DriveStrandState::Started);
+    assert_eq!(driven.state, santi_core::drive::State::Started);
     let recovered_turn = driven.turn.expect("recovery turn");
     let runtime = Probe::new(&service)
         .completed_turn(&strand.id, &recovered_turn.id)
@@ -53,7 +54,7 @@ async fn failed_receipt_redrives() {
         .receipt_status(&failed.receipt.inbox)
         .expect("receipt query")
         .expect("receipt");
-    assert_eq!(receipt.state, santi_core::ReceiptState::Completed);
+    assert_eq!(receipt.state, santi_core::receipt::State::Completed);
     assert_eq!(
         receipt
             .transitions
@@ -61,11 +62,11 @@ async fn failed_receipt_redrives() {
             .map(|transition| transition.state.clone())
             .collect::<Vec<_>>(),
         vec![
-            santi_core::ReceiptState::Accepted,
-            santi_core::ReceiptState::Driving,
-            santi_core::ReceiptState::TurnFailed,
-            santi_core::ReceiptState::Driving,
-            santi_core::ReceiptState::Completed,
+            santi_core::receipt::State::Accepted,
+            santi_core::receipt::State::Driving,
+            santi_core::receipt::State::Failed,
+            santi_core::receipt::State::Driving,
+            santi_core::receipt::State::Completed,
         ]
     );
 }
@@ -88,8 +89,8 @@ async fn cold_start_recovers() {
     let accepted = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "pending across restart".to_string(),
                 }],
             },
@@ -138,8 +139,8 @@ async fn cold_start_recovers() {
     let rejected = restarted
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "must still quick-fail".to_string(),
                 }],
             },

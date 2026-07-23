@@ -3,32 +3,30 @@ pub(crate) struct Settlement<'a> {
     pub(crate) call: &'a str,
     pub(crate) output: Option<Value>,
     pub(crate) error: Option<String>,
-    pub(crate) state: EffectState,
+    pub(crate) state: effect::State,
 }
 
 use crate::store::SantiStore;
 use crate::store::db::{Database, Transition};
-use crate::{
-    EffectResolutionOutcome, EffectState, EffectStatus, EffectTransitionReason, StrandEffect,
-    StrandTargetType, ToolResult, now, tag,
-};
+use crate::{effect, strand, tool};
+use crate::{now, tag};
 use rusqlite::params;
 
 impl SantiStore {
-    pub fn effect_status(&self, effect_id: &str) -> Result<Option<EffectStatus>, String> {
+    pub fn effect_status(&self, effect_id: &str) -> Result<Option<effect::Status>, String> {
         let conn = self.conn.lock().unwrap();
         let database = Database::new(&conn);
         let Some(effect) = database.find_effect(effect_id)? else {
             return Ok(None);
         };
-        Ok(Some(EffectStatus {
+        Ok(Some(effect::Status {
             transitions: database.effect_transitions(effect_id)?,
             receipts: database.receipts(effect_id)?,
             effect,
         }))
     }
 
-    pub fn begin_effect_dispatch(&self, effect_id: &str) -> Result<StrandEffect, String> {
+    pub fn begin_effect_dispatch(&self, effect_id: &str) -> Result<effect::Effect, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let now = now();
@@ -48,8 +46,8 @@ impl SantiStore {
         Database::new(&tx).append_effect_transition(
             effect_id,
             Transition {
-                state: EffectState::Dispatching,
-                reason: EffectTransitionReason::DispatchWindowOpened,
+                state: effect::State::Dispatching,
+                reason: effect::Reason::DispatchWindowOpened,
                 evidence: None,
                 time: &now,
             },
@@ -64,7 +62,7 @@ impl SantiStore {
         &self,
         effect_id: &str,
         settlement: Settlement<'_>,
-    ) -> Result<ToolResult, String> {
+    ) -> Result<tool::Reply, String> {
         let Settlement {
             call,
             output,
@@ -72,11 +70,10 @@ impl SantiStore {
             state,
         } = settlement;
         let (allowed_source, reason) = match state {
-            EffectState::Confirmed => ("dispatching", EffectTransitionReason::ResultPersisted),
-            EffectState::NotDispatched => (
-                "prepared_or_dispatching",
-                EffectTransitionReason::DispatchRejected,
-            ),
+            effect::State::Confirmed => ("dispatching", effect::Reason::ResultPersisted),
+            effect::State::NotDispatched => {
+                ("prepared_or_dispatching", effect::Reason::DispatchRejected)
+            }
             _ => return Err("invalid terminal effect state for a tool result".to_string()),
         };
         let mut conn = self.conn.lock().unwrap();
@@ -112,7 +109,7 @@ impl SantiStore {
             params![tool_result_id, call, output_text, error, now],
         )
         .map_err(|error| error.to_string())?;
-        database.append_entry_in_tx(&strand, StrandTargetType::ToolResult, &tool_result_id)?;
+        database.append_entry_in_tx(&strand, strand::Target::ToolResult, &tool_result_id)?;
         tx.execute(
             r#"
             UPDATE strand_effects
@@ -141,10 +138,10 @@ impl SantiStore {
     pub fn mark_effect_unknown(
         &self,
         effect_id: &str,
-        reason: EffectTransitionReason,
+        reason: effect::Reason,
         evidence: &str,
-    ) -> Result<StrandEffect, String> {
-        if !matches!(reason, EffectTransitionReason::ResultCaptureFailed) {
+    ) -> Result<effect::Effect, String> {
+        if !matches!(reason, effect::Reason::ResultCaptureFailed) {
             return Err("invalid live unknown-effect reason".to_string());
         }
         let mut conn = self.conn.lock().unwrap();
@@ -166,7 +163,7 @@ impl SantiStore {
         Database::new(&tx).append_effect_transition(
             effect_id,
             Transition {
-                state: EffectState::Unknown,
+                state: effect::State::Unknown,
                 reason,
                 evidence: Some(evidence),
                 time: &now,
@@ -181,21 +178,21 @@ impl SantiStore {
     pub fn resolve_effect(
         &self,
         effect_id: &str,
-        outcome: EffectResolutionOutcome,
+        outcome: effect::Outcome,
         evidence: &str,
-    ) -> Result<Option<EffectStatus>, String> {
+    ) -> Result<Option<effect::Status>, String> {
         let evidence = evidence.trim();
         if evidence.is_empty() {
             return Err("effect resolution evidence must not be empty".to_string());
         }
         let (state, reason) = match outcome {
-            EffectResolutionOutcome::Applied => (
-                EffectState::ResolvedApplied,
-                EffectTransitionReason::OperatorResolvedApplied,
+            effect::Outcome::Applied => (
+                effect::State::ResolvedApplied,
+                effect::Reason::OperatorResolvedApplied,
             ),
-            EffectResolutionOutcome::NotApplied => (
-                EffectState::ResolvedNotApplied,
-                EffectTransitionReason::OperatorResolvedNotApplied,
+            effect::Outcome::NotApplied => (
+                effect::State::ResolvedNotApplied,
+                effect::Reason::OperatorResolvedNotApplied,
             ),
         };
         let mut conn = self.conn.lock().unwrap();

@@ -1,11 +1,12 @@
 use super::*;
+use santi_core::{material, receipt, soul, strand, webhook};
 
 #[utoipa::path(
     get,
     path = "/api/v1/receipts/{inbox}",
     params(("inbox" = String, Path)),
     responses(
-        (status = 200, body = ReceiptStatus),
+        (status = 200, body = receipt::Status),
         (status = 404, body = Fault),
         (status = 500, body = Fault)
     )
@@ -13,7 +14,7 @@ use super::*;
 pub async fn receipt_status(
     State(service): State<Service>,
     Path(inbox): Path<String>,
-) -> Result<Json<ReceiptStatus>, ApiError> {
+) -> Result<Json<receipt::Status>, ApiError> {
     let receipt = service
         .receipt_status(&inbox)
         .map_err(ApiError::from_service)?
@@ -24,11 +25,11 @@ pub async fn receipt_status(
 #[utoipa::path(
     post,
     path = "/api/v1/strands",
-    responses((status = 200, body = CreateStrandResponse), (status = 500, body = Fault))
+    responses((status = 200, body = strand::Created), (status = 500, body = Fault))
 )]
 pub(super) async fn create_strand(
     State(service): State<Service>,
-) -> Result<Json<CreateStrandResponse>, ApiError> {
+) -> Result<Json<strand::Created>, ApiError> {
     service
         .create_strand()
         .map(Json)
@@ -52,12 +53,12 @@ pub(super) async fn list_strands(
 #[utoipa::path(
     post,
     path = "/api/v1/souls",
-    request_body = CreateSoulRequest,
+    request_body = soul::Draft,
     responses((status = 200, body = Soul), (status = 500, body = Fault))
 )]
 pub(super) async fn create_soul(
     State(service): State<Service>,
-    Json(request): Json<CreateSoulRequest>,
+    Json(request): Json<soul::Draft>,
 ) -> Result<Json<Soul>, ApiError> {
     service
         .create_soul(request)
@@ -102,13 +103,13 @@ pub(super) async fn get_soul(
 #[utoipa::path(
     post,
     path = "/api/v1/webhooks",
-    request_body = CreateWebhookRequest,
-    responses((status = 200, body = WebhookSubscription), (status = 500, body = Fault))
+    request_body = webhook::Draft,
+    responses((status = 200, body = webhook::Subscription), (status = 500, body = Fault))
 )]
 pub(super) async fn create_webhook(
     State(service): State<Service>,
-    Json(request): Json<CreateWebhookRequest>,
-) -> Result<Json<WebhookSubscription>, ApiError> {
+    Json(request): Json<webhook::Draft>,
+) -> Result<Json<webhook::Subscription>, ApiError> {
     service
         .create_webhook(request)
         .map(Json)
@@ -118,11 +119,11 @@ pub(super) async fn create_webhook(
 #[utoipa::path(
     get,
     path = "/api/v1/webhooks",
-    responses((status = 200, body = [WebhookSubscription]), (status = 500, body = Fault))
+    responses((status = 200, body = [webhook::Subscription]), (status = 500, body = Fault))
 )]
 pub(super) async fn list_webhooks(
     State(service): State<Service>,
-) -> Result<Json<Vec<WebhookSubscription>>, ApiError> {
+) -> Result<Json<Vec<webhook::Subscription>>, ApiError> {
     service
         .list_webhooks()
         .map(Json)
@@ -134,7 +135,7 @@ pub(super) async fn list_webhooks(
     path = "/api/v1/strands/{strand}",
     params(("strand" = String, Path)),
     responses(
-        (status = 200, body = StrandDetail),
+        (status = 200, body = strand::Detail),
         (status = 404, body = Fault),
         (status = 500, body = Fault)
     )
@@ -142,7 +143,7 @@ pub(super) async fn list_webhooks(
 pub(super) async fn get_strand(
     State(service): State<Service>,
     Path(strand): Path<String>,
-) -> Result<Json<StrandDetail>, ApiError> {
+) -> Result<Json<strand::Detail>, ApiError> {
     service
         .strand(&strand)
         .map_err(ApiError::from_service)?
@@ -155,7 +156,7 @@ pub(super) async fn get_strand(
     path = "/api/v1/strands/{strand}/messages",
     params(("strand" = String, Path)),
     responses(
-        (status = 200, body = [santi_core::StrandMessage]),
+        (status = 200, body = [santi_core::message::Placed]),
         (status = 404, body = Fault),
         (status = 500, body = Fault)
     )
@@ -163,7 +164,7 @@ pub(super) async fn get_strand(
 pub(super) async fn list_messages(
     State(service): State<Service>,
     Path(strand): Path<String>,
-) -> Result<Json<Vec<santi_core::StrandMessage>>, ApiError> {
+) -> Result<Json<Vec<santi_core::message::Placed>>, ApiError> {
     service
         .strand(&strand)
         .map_err(ApiError::from_service)?
@@ -175,9 +176,9 @@ pub(super) async fn list_messages(
     post,
     path = "/api/v1/strands/{strand}/materials",
     params(("strand" = String, Path)),
-    request_body = MaterialRequest,
+    request_body = material::Request,
     responses(
-        (status = 200, body = StrandMaterial),
+        (status = 200, body = material::Material),
         (status = 404, body = Fault),
         (status = 500, body = Fault)
     )
@@ -185,8 +186,8 @@ pub(super) async fn list_messages(
 pub(super) async fn strand_material(
     State(service): State<Service>,
     Path(strand): Path<String>,
-    Json(request): Json<MaterialRequest>,
-) -> Result<Json<StrandMaterial>, ApiError> {
+    Json(request): Json<material::Request>,
+) -> Result<Json<material::Material>, ApiError> {
     service
         .strand_material(&strand, request)
         .map(Json)

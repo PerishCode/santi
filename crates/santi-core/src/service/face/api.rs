@@ -1,25 +1,21 @@
 use super::*;
-use crate::{
-    CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, EffectResolutionOutcome,
-    EffectStatus, Incident, IngestOutcome, ReceiptStatus, SantiStreamEvent, SantiStreamPayload,
-    Soul, Strand, StrandBudgetSnapshot, StrandDetail, StrandRuntimeSnapshot, WebhookSubscription,
-    engine, now, tag,
-};
+use crate::{Incident, engine, now, soul::Soul, strand::Strand, tag};
+use crate::{budget, effect, ingest, receipt, soul, strand, stream, webhook};
 
 pub enum Admission {
-    Accepted(IngestOutcome),
+    Accepted(ingest::Outcome),
     Denied,
     Forbidden,
 }
 
 impl Service {
-    pub fn create_strand(&self) -> Result<CreateStrandResponse, String> {
-        Ok(CreateStrandResponse {
+    pub fn create_strand(&self) -> Result<strand::Created, String> {
+        Ok(strand::Created {
             strand: self.store.create_strand()?,
         })
     }
 
-    pub fn create_soul(&self, request: CreateSoulRequest) -> Result<Soul, String> {
+    pub fn create_soul(&self, request: soul::Draft) -> Result<Soul, String> {
         let soul = self.store.create_soul()?;
         if let Some(memory) = request
             .memory
@@ -44,10 +40,7 @@ impl Service {
         self.store.soul(soul)
     }
 
-    pub fn create_webhook(
-        &self,
-        request: CreateWebhookRequest,
-    ) -> Result<WebhookSubscription, String> {
+    pub fn create_webhook(&self, request: webhook::Draft) -> Result<webhook::Subscription, String> {
         let name = request.name.trim();
         let adaptor = request.adaptor.trim();
         let soul = request.soul.trim();
@@ -73,7 +66,7 @@ impl Service {
         if !matches!(strategy, "per_thread" | "single") {
             return Err("strategy must be 'per_thread' or 'single'".to_string());
         }
-        self.store.create_webhook(CreateWebhookRequest {
+        self.store.create_webhook(webhook::Draft {
             name: name.to_string(),
             adaptor: adaptor.to_string(),
             soul: soul.to_string(),
@@ -82,36 +75,36 @@ impl Service {
         })
     }
 
-    pub fn list_webhooks(&self) -> Result<Vec<WebhookSubscription>, String> {
+    pub fn list_webhooks(&self) -> Result<Vec<webhook::Subscription>, String> {
         self.store.list_webhooks()
     }
 
-    pub fn webhook(&self, name: &str) -> Result<Option<WebhookSubscription>, String> {
+    pub fn webhook(&self, name: &str) -> Result<Option<webhook::Subscription>, String> {
         self.store.webhook(name)
     }
     pub fn list_strands(&self) -> Result<Vec<Strand>, String> {
         self.store.list_strands()
     }
 
-    pub fn strand(&self, strand: &str) -> Result<Option<StrandDetail>, String> {
+    pub fn strand(&self, strand: &str) -> Result<Option<strand::Detail>, String> {
         let Some(strand) = self.store.strand(strand)? else {
             return Ok(None);
         };
-        Ok(Some(StrandDetail {
+        Ok(Some(strand::Detail {
             messages: self.store.strand_messages(&strand.id)?,
             strand,
         }))
     }
 
-    pub fn runtime_snapshot(&self, strand: &str) -> Result<Option<StrandRuntimeSnapshot>, String> {
+    pub fn runtime_snapshot(&self, strand: &str) -> Result<Option<stream::Snapshot>, String> {
         self.store.runtime_snapshot(strand)
     }
 
-    pub fn strand_budget(&self, strand: &str) -> Result<Option<StrandBudgetSnapshot>, String> {
+    pub fn strand_budget(&self, strand: &str) -> Result<Option<budget::Snapshot>, String> {
         let Some(strand) = self.store.strand(strand)? else {
             return Ok(None);
         };
-        Ok(Some(StrandBudgetSnapshot {
+        Ok(Some(budget::Snapshot {
             strand: strand.id.clone(),
             estimate: self.current_context_estimate(&strand.id)?,
             budget: self.context_budget(),
@@ -132,34 +125,34 @@ impl Service {
         self.store.error_incidents(scope, limit)
     }
 
-    pub fn receipt_status(&self, inbox: &str) -> Result<Option<ReceiptStatus>, String> {
+    pub fn receipt_status(&self, inbox: &str) -> Result<Option<receipt::Status>, String> {
         self.store.receipt_status(inbox)
     }
 
-    pub fn effect_status(&self, effect_id: &str) -> Result<Option<EffectStatus>, String> {
+    pub fn effect_status(&self, effect_id: &str) -> Result<Option<effect::Status>, String> {
         self.store.effect_status(effect_id)
     }
 
     pub fn resolve_effect(
         &self,
         effect_id: &str,
-        outcome: EffectResolutionOutcome,
+        outcome: effect::Outcome,
         evidence: &str,
-    ) -> Result<Option<EffectStatus>, String> {
+    ) -> Result<Option<effect::Status>, String> {
         self.store.resolve_effect(effect_id, outcome, evidence)
     }
 
-    pub(crate) fn publish_stream(&self, strand: &str, payload: SantiStreamPayload) {
+    pub(crate) fn publish_stream(&self, strand: &str, payload: stream::Payload) {
         let _ = self.send_stream(strand, payload);
     }
 
     pub(in crate::service) fn send_stream(
         &self,
         strand: &str,
-        payload: SantiStreamPayload,
+        payload: stream::Payload,
     ) -> Result<(), ()> {
         self.stream_events
-            .send(SantiStreamEvent {
+            .send(stream::Event {
                 id: tag("stream"),
                 strand: strand.to_string(),
                 created: now(),
@@ -174,7 +167,7 @@ impl Service {
         after_seq: i64,
         prefix: &str,
         limit: usize,
-    ) -> Result<crate::TurnEventBatch, String> {
+    ) -> Result<crate::event::Batch, String> {
         self.store.turn_events_since(after_seq, prefix, limit)
     }
 

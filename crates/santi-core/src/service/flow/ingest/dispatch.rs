@@ -1,20 +1,17 @@
 use crate::service::flow::memory::{Gate, drive_maintenance};
 use crate::service::{Service, drive};
 use crate::store::{Launch, StartTurnOutcome, errors::drive::Input};
-use crate::{
-    DriveStrandResponse, DriveStrandState, Fault, InboxSource, IngestOutcome, MessageContent,
-    MessageKind, SantiStreamPayload, SendStrandAcceptedResponse, SendStrandRequest, catalog,
-    engine,
-};
+use crate::{Fault, catalog, engine};
 
 use super::*;
+use crate::{ingest, message, strand, stream};
 
 impl Service {
     pub async fn send_strand(
         &self,
         strand: &str,
-        request: SendStrandRequest,
-    ) -> Result<SendStrandAcceptedResponse, Fault> {
+        request: strand::Post,
+    ) -> Result<strand::Posted, Fault> {
         let text = request.text();
         if text.trim().is_empty() {
             return Err(send_error(
@@ -35,19 +32,19 @@ impl Service {
             .enqueue(
                 &strand,
                 Ingest {
-                    content: MessageContent {
+                    content: message::Content {
                         parts: request.content,
                     },
-                    kind: MessageKind::Text,
+                    kind: message::Kind::Text,
                     trigger: "strand_send",
-                    source: Some(InboxSource::new("strand_send").with_ref(strand.id.clone())),
+                    source: Some(ingest::Source::new("strand_send").with_ref(strand.id.clone())),
                     replay: None,
                 },
             )
             .map_err(|message| send_error(catalog::INTERNAL, &strand.id, message))?;
         let receipt = match outcome {
-            IngestOutcome::Accepted { receipt } => receipt,
-            IngestOutcome::Rejected { error } => return Err(*error),
+            ingest::Outcome::Accepted { receipt } => receipt,
+            ingest::Outcome::Rejected { error } => return Err(*error),
         };
         let (turn, message) = match drive {
             drive::Outcome::Started(turn, mut drained) => (Some(turn), drained.pop()),
@@ -58,7 +55,7 @@ impl Service {
             | drive::Outcome::Failed(_) => (None, None),
         };
 
-        Ok(SendStrandAcceptedResponse {
+        Ok(strand::Posted {
             strand,
             receipt,
             turn,
@@ -66,7 +63,7 @@ impl Service {
         })
     }
 
-    pub fn drive_strand(&self, strand: &str) -> Result<DriveStrandResponse, Box<Fault>> {
+    pub fn drive_strand(&self, strand: &str) -> Result<crate::drive::Response, Box<Fault>> {
         self.store
             .strand(strand)
             .map_err(|message| Box::new(send_error(catalog::INTERNAL, strand, message)))?
@@ -78,24 +75,24 @@ impl Service {
                 ))
             })?;
         match self.poke_failed_receipts(strand, "strand_send", None, "operator_redrive") {
-            drive::Outcome::Started(turn, _) => Ok(DriveStrandResponse {
+            drive::Outcome::Started(turn, _) => Ok(crate::drive::Response {
                 strand: strand.to_string(),
-                state: DriveStrandState::Started,
+                state: crate::drive::State::Started,
                 turn: Some(turn),
             }),
-            drive::Outcome::Running(turn) => Ok(DriveStrandResponse {
+            drive::Outcome::Running(turn) => Ok(crate::drive::Response {
                 strand: strand.to_string(),
-                state: DriveStrandState::Running,
+                state: crate::drive::State::Running,
                 turn: Some(turn),
             }),
-            drive::Outcome::Idle => Ok(DriveStrandResponse {
+            drive::Outcome::Idle => Ok(crate::drive::Response {
                 strand: strand.to_string(),
-                state: DriveStrandState::Idle,
+                state: crate::drive::State::Idle,
                 turn: None,
             }),
-            drive::Outcome::Paused => Ok(DriveStrandResponse {
+            drive::Outcome::Paused => Ok(crate::drive::Response {
                 strand: strand.to_string(),
-                state: DriveStrandState::Paused,
+                state: crate::drive::State::Paused,
                 turn: None,
             }),
             drive::Outcome::Held(error) | drive::Outcome::Failed(error) => Err(Box::new(error)),
@@ -188,11 +185,11 @@ impl Service {
             Ok(StartTurnOutcome::Started(started)) => {
                 self.refresh_drive_health();
                 for message in started.drained_messages.iter().cloned() {
-                    self.publish_stream(&strand.id, SantiStreamPayload::MessageCreated { message });
+                    self.publish_stream(&strand.id, stream::Payload::MessageCreated { message });
                 }
                 self.publish_stream(
                     &strand.id,
-                    SantiStreamPayload::TurnStarted {
+                    stream::Payload::TurnStarted {
                         turn: started.turn.clone(),
                     },
                 );

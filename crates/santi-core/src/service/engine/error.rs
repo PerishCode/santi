@@ -1,6 +1,7 @@
-use crate::{SantiStreamPayload, Transition};
+use crate::Transition;
 
 use super::Service;
+use crate::stream;
 
 pub(in crate::service) const NO_ERROR_EVENT_SUBSCRIBERS: &str =
     "error event bus has no subscribers";
@@ -16,7 +17,7 @@ impl santi_error::Sink for Sink<'_> {
                 .service
                 .send_stream(
                     &transition.held.scope.id,
-                    SantiStreamPayload::Transition {
+                    stream::Payload::Transition {
                         transition: Box::new(transition.clone()),
                     },
                 )

@@ -1,6 +1,4 @@
-use crate::*;
-
-impl EffectState {
+impl crate::effect::State {
     pub fn encode(&self) -> &'static str {
         match self {
             Self::Prepared => "prepared",
@@ -26,7 +24,7 @@ impl EffectState {
     }
 }
 
-impl EffectTransitionReason {
+impl crate::effect::Reason {
     pub fn encode(&self) -> &'static str {
         match self {
             Self::IntentPersisted => "intent_persisted",
@@ -62,7 +60,7 @@ impl EffectTransitionReason {
     }
 }
 
-impl ActorType {
+impl crate::message::Role {
     pub fn encode(&self) -> &'static str {
         match self {
             Self::Soul => "soul",
@@ -78,7 +76,7 @@ impl ActorType {
     }
 }
 
-impl MessageState {
+impl crate::message::State {
     pub fn encode(&self) -> &'static str {
         match self {
             Self::Pending => "pending",
@@ -97,7 +95,7 @@ impl MessageState {
     }
 }
 
-impl MessageKind {
+impl crate::message::Kind {
     pub fn encode(&self) -> &'static str {
         match self {
             Self::Text => "text",
@@ -114,7 +112,7 @@ impl MessageKind {
     }
 }
 
-impl TurnTriggerType {
+impl crate::turn::Trigger {
     pub fn decode(value: &str) -> Self {
         match value {
             "strand_send" => Self::StrandSend,
@@ -124,7 +122,7 @@ impl TurnTriggerType {
     }
 }
 
-impl TurnStatus {
+impl crate::turn::Status {
     pub fn decode(value: &str) -> Self {
         match value {
             "running" => Self::Running,
@@ -135,7 +133,7 @@ impl TurnStatus {
     }
 }
 
-impl ThinkingSpanState {
+impl crate::thinking::State {
     pub fn encode(&self) -> &'static str {
         match self {
             Self::Running => "running",
@@ -154,7 +152,7 @@ impl ThinkingSpanState {
     }
 }
 
-impl ThinkingCompletionReason {
+impl crate::thinking::Reason {
     pub fn encode(&self) -> &'static str {
         match self {
             Self::FirstTextDelta => "first_text_delta",
@@ -173,7 +171,7 @@ impl ThinkingCompletionReason {
     }
 }
 
-impl StrandTargetType {
+impl crate::strand::Target {
     pub fn encode(&self) -> &'static str {
         match self {
             Self::Message => "message",

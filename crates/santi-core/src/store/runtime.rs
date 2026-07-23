@@ -5,17 +5,15 @@ use super::{
     SantiStore,
     db::{Database, Prepared},
 };
-use crate::{
-    StrandEffect, StrandTargetType, ThinkingCompletionReason, ThinkingSpan, ThinkingSpanState,
-    ToolCall, ToolCallProvenance, ToolResult, now, tag,
-};
+use crate::{effect, strand, thinking, tool};
+use crate::{now, tag};
 
 pub struct Invocation<'a> {
     pub turn: &'a str,
     pub call: &'a str,
     pub name: &'a str,
     pub arguments: &'a Value,
-    pub provenance: &'a ToolCallProvenance,
+    pub provenance: &'a tool::Provenance,
 }
 
 impl SantiStore {
@@ -23,7 +21,7 @@ impl SantiStore {
         &self,
         turn: &str,
         response: Option<String>,
-    ) -> Result<ThinkingSpan, String> {
+    ) -> Result<thinking::Span, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let thinking_id = tag("thinking");
@@ -41,7 +39,7 @@ impl SantiStore {
             params![thinking_id, turn, response, now],
         )
         .map_err(|error| error.to_string())?;
-        database.append_entry_in_tx(&strand, StrandTargetType::Thinking, &thinking_id)?;
+        database.append_entry_in_tx(&strand, strand::Target::Thinking, &thinking_id)?;
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)
             .thinking_span_by_id(&thinking_id)?
@@ -52,7 +50,7 @@ impl SantiStore {
         &self,
         thinking_span_id: &str,
         response: Option<String>,
-    ) -> Result<Option<ThinkingSpan>, String> {
+    ) -> Result<Option<thinking::Span>, String> {
         let conn = self.conn.lock().unwrap();
         let now = now();
         conn.execute(
@@ -72,7 +70,7 @@ impl SantiStore {
         &self,
         thinking_span_id: &str,
         summary: String,
-    ) -> Result<Option<ThinkingSpan>, String> {
+    ) -> Result<Option<thinking::Span>, String> {
         let conn = self.conn.lock().unwrap();
         let now = now();
         conn.execute(
@@ -91,11 +89,11 @@ impl SantiStore {
     pub fn complete_thinking_span(
         &self,
         thinking_span_id: &str,
-        completion_reason: ThinkingCompletionReason,
-    ) -> Result<Option<ThinkingSpan>, String> {
+        completion_reason: thinking::Reason,
+    ) -> Result<Option<thinking::Span>, String> {
         self.finish_thinking_span(
             thinking_span_id,
-            ThinkingSpanState::Completed,
+            thinking::State::Completed,
             Some(completion_reason),
             None,
         )
@@ -105,16 +103,11 @@ impl SantiStore {
         &self,
         thinking_span_id: &str,
         error: String,
-    ) -> Result<Option<ThinkingSpan>, String> {
-        self.finish_thinking_span(
-            thinking_span_id,
-            ThinkingSpanState::Failed,
-            None,
-            Some(error),
-        )
+    ) -> Result<Option<thinking::Span>, String> {
+        self.finish_thinking_span(thinking_span_id, thinking::State::Failed, None, Some(error))
     }
 
-    pub fn append_tool_call(&self, invocation: Invocation<'_>) -> Result<ToolCall, String> {
+    pub fn append_tool_call(&self, invocation: Invocation<'_>) -> Result<tool::Call, String> {
         self.append_effect_call(invocation, None)
             .map(|(tool_call, _)| tool_call)
     }
@@ -123,7 +116,7 @@ impl SantiStore {
         &self,
         invocation: Invocation<'_>,
         effect: Option<&str>,
-    ) -> Result<(ToolCall, Option<StrandEffect>), String> {
+    ) -> Result<(tool::Call, Option<effect::Effect>), String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let now = now();
@@ -172,7 +165,7 @@ impl SantiStore {
             )
             .map_err(|error| error.to_string())?;
         }
-        database.append_entry_in_tx(&strand, StrandTargetType::ToolCall, invocation.call)?;
+        database.append_entry_in_tx(&strand, strand::Target::ToolCall, invocation.call)?;
         let effect_id = effect
             .map(|kind| {
                 Database::new(&tx).insert_prepared(Prepared {
@@ -201,7 +194,7 @@ impl SantiStore {
         call: &str,
         output: Option<Value>,
         error: Option<String>,
-    ) -> Result<ToolResult, String> {
+    ) -> Result<tool::Reply, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let tool_result_id = tag("tool_result");
@@ -221,7 +214,7 @@ impl SantiStore {
             params![tool_result_id, call, output_text, error, now],
         )
         .map_err(|error| error.to_string())?;
-        database.append_entry_in_tx(&strand, StrandTargetType::ToolResult, &tool_result_id)?;
+        database.append_entry_in_tx(&strand, strand::Target::ToolResult, &tool_result_id)?;
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)
             .tool_result_by_id(&tool_result_id)?
@@ -232,7 +225,7 @@ impl SantiStore {
         &self,
         strand: &str,
         text: &str,
-    ) -> Result<crate::StrandMessage, String> {
+    ) -> Result<crate::message::Placed, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let soul: String = tx
@@ -244,7 +237,7 @@ impl SantiStore {
             .map_err(|error| error.to_string())?;
         let message = tag("msg");
         let now = now();
-        let content_json = serde_json::to_string(&crate::MessageContent::text(text))
+        let content_json = serde_json::to_string(&crate::message::Content::text(text))
             .map_err(|error| error.to_string())?;
         tx.execute(
             r#"
@@ -257,7 +250,7 @@ impl SantiStore {
             params![message, soul, content_json, now],
         )
         .map_err(|error| error.to_string())?;
-        Database::new(&tx).append_entry_in_tx(strand, StrandTargetType::Message, &message)?;
+        Database::new(&tx).append_entry_in_tx(strand, strand::Target::Message, &message)?;
         tx.commit().map_err(|error| error.to_string())?;
         Database::new(&conn)
             .message_by_id(&message)?
@@ -267,10 +260,10 @@ impl SantiStore {
     fn finish_thinking_span(
         &self,
         thinking_span_id: &str,
-        state: ThinkingSpanState,
-        completion_reason: Option<ThinkingCompletionReason>,
+        state: thinking::State,
+        completion_reason: Option<thinking::Reason>,
         error: Option<String>,
-    ) -> Result<Option<ThinkingSpan>, String> {
+    ) -> Result<Option<thinking::Span>, String> {
         let conn = self.conn.lock().unwrap();
         let now = now();
         conn.execute(
@@ -286,9 +279,7 @@ impl SantiStore {
             params![
                 thinking_span_id,
                 state.encode(),
-                completion_reason
-                    .as_ref()
-                    .map(ThinkingCompletionReason::encode),
+                completion_reason.as_ref().map(thinking::Reason::encode),
                 error,
                 now
             ],

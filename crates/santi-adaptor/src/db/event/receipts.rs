@@ -3,10 +3,11 @@ use std::collections::BTreeSet;
 use rusqlite::params;
 
 use super::Database;
-use santi_model::{ReceiptState, now, tag};
+use santi_model::receipt;
+use santi_model::{now, tag};
 
 struct Transition<'a> {
-    state: ReceiptState,
+    state: receipt::State,
     turn: Option<&'a str>,
     incident: Option<&'a str>,
     time: &'a str,
@@ -26,7 +27,7 @@ impl Database<'_> {
         self.append_transition(
             inbox,
             Transition {
-                state: ReceiptState::Accepted,
+                state: receipt::State::Accepted,
                 turn: None,
                 incident: None,
                 time: accepted,
@@ -57,11 +58,11 @@ impl Database<'_> {
         let now = now();
         if let Some(incident) = recovered_incident_id {
             for inbox in drained_inbox_ids {
-                self.set_state(inbox, ReceiptState::MechanicallyRecovered, &now)?;
+                self.set_state(inbox, receipt::State::Recovered, &now)?;
                 self.append_transition(
                     inbox,
                     Transition {
-                        state: ReceiptState::MechanicallyRecovered,
+                        state: receipt::State::Recovered,
                         turn: Some(turn),
                         incident: Some(incident),
                         time: &now,
@@ -70,11 +71,11 @@ impl Database<'_> {
             }
         }
         for inbox in receipts {
-            self.set_state(&inbox, ReceiptState::Driving, &now)?;
+            self.set_state(&inbox, receipt::State::Driving, &now)?;
             self.append_transition(
                 &inbox,
                 Transition {
-                    state: ReceiptState::Driving,
+                    state: receipt::State::Driving,
                     turn: Some(turn),
                     incident: recovered_incident_id,
                     time: &now,
@@ -90,17 +91,17 @@ impl Database<'_> {
         incident: Option<&str>,
         occurred: &str,
     ) -> Result<(), String> {
-        self.transition_turn_receipts(turn, ReceiptState::TurnFailed, incident, occurred)
+        self.transition_turn_receipts(turn, receipt::State::Failed, incident, occurred)
     }
 
     pub fn complete_turn(&self, turn: &str, occurred_at: &str) -> Result<(), String> {
-        self.transition_turn_receipts(turn, ReceiptState::Completed, None, occurred_at)
+        self.transition_turn_receipts(turn, receipt::State::Completed, None, occurred_at)
     }
 
     fn transition_turn_receipts(
         &self,
         turn: &str,
-        state: ReceiptState,
+        state: receipt::State,
         incident: Option<&str>,
         occurred: &str,
     ) -> Result<(), String> {
@@ -140,7 +141,7 @@ impl Database<'_> {
         Ok(())
     }
 
-    fn set_state(&self, inbox: &str, state: ReceiptState, updated: &str) -> Result<(), String> {
+    fn set_state(&self, inbox: &str, state: receipt::State, updated: &str) -> Result<(), String> {
         self.conn
             .execute(
                 "UPDATE inbox_receipts SET state = ?2, updated_at = ?3 WHERE id = ?1",
@@ -174,23 +175,23 @@ impl Database<'_> {
     }
 }
 
-pub fn receipt_state_db(state: &ReceiptState) -> &'static str {
+pub fn receipt_state_db(state: &receipt::State) -> &'static str {
     match state {
-        ReceiptState::Accepted => "accepted",
-        ReceiptState::MechanicallyRecovered => "mechanically_recovered",
-        ReceiptState::Driving => "driving",
-        ReceiptState::TurnFailed => "turn_failed",
-        ReceiptState::Completed => "completed",
+        receipt::State::Accepted => "accepted",
+        receipt::State::Recovered => "mechanically_recovered",
+        receipt::State::Driving => "driving",
+        receipt::State::Failed => "turn_failed",
+        receipt::State::Completed => "completed",
     }
 }
 
-pub fn receipt_state_from_db(state: &str) -> Result<ReceiptState, String> {
+pub fn receipt_state_from_db(state: &str) -> Result<receipt::State, String> {
     match state {
-        "accepted" => Ok(ReceiptState::Accepted),
-        "mechanically_recovered" => Ok(ReceiptState::MechanicallyRecovered),
-        "driving" => Ok(ReceiptState::Driving),
-        "turn_failed" => Ok(ReceiptState::TurnFailed),
-        "completed" => Ok(ReceiptState::Completed),
+        "accepted" => Ok(receipt::State::Accepted),
+        "mechanically_recovered" => Ok(receipt::State::Recovered),
+        "driving" => Ok(receipt::State::Driving),
+        "turn_failed" => Ok(receipt::State::Failed),
+        "completed" => Ok(receipt::State::Completed),
         _ => Err(format!("unknown receipt state: {state}")),
     }
 }

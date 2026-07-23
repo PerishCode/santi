@@ -10,11 +10,12 @@ use axum::{
 };
 use futures_core::Stream;
 use santi_core::service::Service;
-use santi_core::{SantiStreamEvent, SantiStreamPayload, Transition, now, tag};
+use santi_core::{Transition, now, tag};
 use tokio::sync::broadcast;
 
 use super::ApiError;
 use super::routes::bearer;
+use santi_core::stream;
 
 pub(super) async fn strand_events(
     State(service): State<Service>,
@@ -29,11 +30,11 @@ pub(super) async fn strand_events(
     let mut receiver = service.subscribe_stream();
     let opened = strand.clone();
     let stream = async_stream::stream! {
-        yield Ok(sse_event(SantiStreamEvent {
+        yield Ok(sse_event(santi_core::stream::Event {
             id: tag("stream"),
             strand: opened,
             created: now(),
-            payload: SantiStreamPayload::StreamOpen,
+            payload: stream::Payload::StreamOpen,
         }));
 
         while let Some(event) = receive_strand(&mut receiver, &strand).await {
@@ -87,9 +88,9 @@ pub(super) async fn turn_event_stream(
 }
 
 async fn receive_strand(
-    receiver: &mut broadcast::Receiver<SantiStreamEvent>,
+    receiver: &mut broadcast::Receiver<stream::Event>,
     strand: &str,
-) -> Option<SantiStreamEvent> {
+) -> Option<stream::Event> {
     loop {
         let event = receive(receiver).await?;
         if event.strand == strand {
@@ -98,12 +99,12 @@ async fn receive_strand(
     }
 }
 
-async fn receive_turn(receiver: &mut broadcast::Receiver<SantiStreamEvent>, prefix: &str) -> bool {
+async fn receive_turn(receiver: &mut broadcast::Receiver<stream::Event>, prefix: &str) -> bool {
     loop {
         let Some(event) = receive(receiver).await else {
             return false;
         };
-        if let SantiStreamPayload::TurnCompleted {
+        if let stream::Payload::TurnCompleted {
             label: Some(label), ..
         } = event.payload
             && label.starts_with(prefix)
@@ -130,29 +131,29 @@ fn error_sse_event(transition: Transition) -> Event {
         .data(serde_json::to_string(&transition).unwrap_or_else(|_| "{}".to_string()))
 }
 
-fn sse_event(event: SantiStreamEvent) -> Event {
+fn sse_event(event: stream::Event) -> Event {
     Event::default()
         .id(event.id.clone())
         .event(sse_event_name(&event.payload))
         .data(serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string()))
 }
 
-fn sse_event_name(payload: &SantiStreamPayload) -> &'static str {
+fn sse_event_name(payload: &stream::Payload) -> &'static str {
     match payload {
-        SantiStreamPayload::StreamOpen => "stream_open",
-        SantiStreamPayload::MessageCreated { .. } => "message_created",
-        SantiStreamPayload::MessageDelta { .. } => "message_delta",
-        SantiStreamPayload::MessageCompleted { .. } => "message_completed",
-        SantiStreamPayload::ToolCallCreated { .. } => "tool_call_created",
-        SantiStreamPayload::ToolResultCreated { .. } => "tool_result_created",
-        SantiStreamPayload::ThinkingCreated { .. } => "thinking_created",
-        SantiStreamPayload::ThinkingUpdated { .. } => "thinking_updated",
-        SantiStreamPayload::ThinkingCompleted { .. } => "thinking_completed",
-        SantiStreamPayload::MaterialUpdated { .. } => "material_updated",
-        SantiStreamPayload::TurnStarted { .. } => "turn_started",
-        SantiStreamPayload::TurnActivity { .. } => "turn_activity",
-        SantiStreamPayload::TurnCompleted { .. } => "turn_completed",
-        SantiStreamPayload::TurnFailed { .. } => "turn_failed",
-        SantiStreamPayload::Transition { .. } => "error_transition",
+        stream::Payload::StreamOpen => "stream_open",
+        stream::Payload::MessageCreated { .. } => "message_created",
+        stream::Payload::MessageDelta { .. } => "message_delta",
+        stream::Payload::MessageCompleted { .. } => "message_completed",
+        stream::Payload::ToolCallCreated { .. } => "tool_call_created",
+        stream::Payload::ToolResultCreated { .. } => "tool_result_created",
+        stream::Payload::ThinkingCreated { .. } => "thinking_created",
+        stream::Payload::ThinkingUpdated { .. } => "thinking_updated",
+        stream::Payload::ThinkingCompleted { .. } => "thinking_completed",
+        stream::Payload::MaterialUpdated { .. } => "material_updated",
+        stream::Payload::TurnStarted { .. } => "turn_started",
+        stream::Payload::TurnActivity { .. } => "turn_activity",
+        stream::Payload::TurnCompleted { .. } => "turn_completed",
+        stream::Payload::TurnFailed { .. } => "turn_failed",
+        stream::Payload::Transition { .. } => "error_transition",
     }
 }

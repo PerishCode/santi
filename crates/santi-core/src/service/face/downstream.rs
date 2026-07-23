@@ -1,11 +1,11 @@
-use santi_model::{DownstreamCredential, InboxSource, IngestRequest};
 use sha2::{Digest as _, Sha256};
 
 use super::{Admission, Service};
 use crate::service::flow::ingest::External;
+use crate::{downstream, ingest};
 
 impl Service {
-    pub fn principal(&self, bearer: &str) -> Result<Option<DownstreamCredential>, String> {
+    pub fn principal(&self, bearer: &str) -> Result<Option<downstream::Credential>, String> {
         if bearer.is_empty() {
             return Ok(None);
         }
@@ -19,8 +19,8 @@ impl Service {
 
     pub fn create_downstream(
         &self,
-        request: crate::CreateDownstreamRequest,
-    ) -> Result<DownstreamCredential, String> {
+        request: crate::downstream::Draft,
+    ) -> Result<downstream::Credential, String> {
         let id = request.id.trim();
         let prefix = request.prefix.trim();
         let digest = request.digest.trim().to_ascii_lowercase();
@@ -39,14 +39,14 @@ impl Service {
         self.store.create_downstream(id, prefix, &digest)
     }
 
-    pub fn list_downstreams(&self) -> Result<Vec<DownstreamCredential>, String> {
+    pub fn list_downstreams(&self) -> Result<Vec<downstream::Credential>, String> {
         self.store.list_downstreams()
     }
 
     pub fn ingest_downstream(
         &self,
         bearer: &str,
-        mut request: IngestRequest,
+        mut request: ingest::Request,
     ) -> Result<Admission, String> {
         if bearer.is_empty() {
             return Ok(Admission::Denied);
@@ -67,7 +67,7 @@ impl Service {
         let source = request
             .source
             .clone()
-            .map(|reference| InboxSource::new("downstream").with_ref(reference));
+            .map(|reference| ingest::Source::new("downstream").with_ref(reference));
         let digest = hex::encode(Sha256::digest(
             serde_json::to_vec(&request).map_err(|error| error.to_string())?,
         ));
@@ -75,7 +75,7 @@ impl Service {
             self.store
                 .replay_downstream(&downstream.id, &request.request, &digest)?
         {
-            return Ok(Admission::Accepted(crate::IngestOutcome::Accepted {
+            return Ok(Admission::Accepted(crate::ingest::Outcome::Accepted {
                 receipt,
             }));
         }

@@ -1,4 +1,5 @@
 use super::*;
+use santi_core::{message, strand};
 
 #[tokio::test]
 async fn rejects_tool_batch() {
@@ -17,8 +18,8 @@ async fn rejects_tool_batch() {
     let response = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "request an oversized batch".to_string(),
                 }],
             },
@@ -64,8 +65,8 @@ async fn reserves_followup_round() {
     let response = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "keep calling tools".to_string(),
                 }],
             },
@@ -112,8 +113,8 @@ async fn bounds_shell_capture() {
     let response = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "capture bounded output".to_string(),
                 }],
             },
@@ -171,8 +172,8 @@ async fn preserves_retry_usage() {
     let first = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "first attempt".to_string(),
                 }],
             },
@@ -186,8 +187,8 @@ async fn preserves_retry_usage() {
     let retry = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "retry".to_string(),
                 }],
             },

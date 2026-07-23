@@ -1,11 +1,10 @@
 use std::{fs, path::Path};
 
-use crate::ForkStrandResponse;
-
 use super::Service;
+use crate::strand;
 
 impl Service {
-    pub fn fork_strand(&self, parent: &str) -> Result<ForkStrandResponse, String> {
+    pub fn fork_strand(&self, parent: &str) -> Result<strand::Forked, String> {
         let parent = self
             .store
             .strand(parent)?
@@ -22,7 +21,7 @@ impl Service {
             let _ = self.store.delete_fork_child_strand(&child.id);
             return Err(format!("fork workspace sync failed: {error}"));
         }
-        Ok(ForkStrandResponse { strand: child })
+        Ok(strand::Forked { strand: child })
     }
 
     fn sync_fork_workspace(&self, parent: &str, child_strand_id: &str) -> Result<(), String> {

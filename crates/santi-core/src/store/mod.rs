@@ -2,10 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::{Connection, params};
 
-use crate::{
-    ActorType, Fault, MessageContent, MessageIntake, MessageKind, MessageState, Strand,
-    StrandMessage, StrandTargetType, Turn, now, tag,
-};
+use crate::{Fault, now, strand::Strand, tag, turn::Turn};
 
 mod assembly;
 pub(crate) mod budget;
@@ -26,6 +23,7 @@ use rows::{Decode, collect_rows};
 pub use runtime::Invocation;
 pub use turns::Completion;
 
+use crate::{message, strand};
 use santi_adaptor::SANTI_SYSTEM_ACTOR_ID;
 pub use santi_adaptor::SCHEMA_VERSION;
 pub const DEFAULT_SOUL_ID: &str = "soul_default";
@@ -50,22 +48,22 @@ pub struct SantiStore {
 
 #[derive(Debug, Clone)]
 pub struct AppendedMessage {
-    pub strand_message: StrandMessage,
+    pub strand_message: message::Placed,
 }
 
 pub struct Draft<'a> {
     pub strand: &'a str,
-    pub actor: ActorType,
+    pub actor: message::Role,
     pub id: &'a str,
-    pub content: MessageContent,
-    pub state: MessageState,
-    pub intake: MessageIntake,
+    pub content: message::Content,
+    pub state: message::State,
+    pub intake: message::Intake,
 }
 
 #[derive(Debug, Clone)]
 pub struct StartedTurn {
     pub turn: Turn,
-    pub drained_messages: Vec<StrandMessage>,
+    pub drained_messages: Vec<message::Placed>,
 }
 
 pub(crate) enum StartTurnOutcome {
@@ -136,7 +134,7 @@ impl SantiStore {
             .ok_or_else(|| "created strand missing".to_string())
     }
 
-    pub fn strand_messages(&self, strand: &str) -> Result<Vec<StrandMessage>, String> {
+    pub fn strand_messages(&self, strand: &str) -> Result<Vec<message::Placed>, String> {
         let conn = self.conn.lock().unwrap();
         Database::new(&conn).strand_messages(strand)
     }
@@ -144,13 +142,13 @@ impl SantiStore {
     pub fn runtime_snapshot(
         &self,
         strand: &str,
-    ) -> Result<Option<crate::StrandRuntimeSnapshot>, String> {
+    ) -> Result<Option<crate::stream::Snapshot>, String> {
         let conn = self.conn.lock().unwrap();
         let database = Database::new(&conn);
         let Some(strand) = database.strand_by_id(strand)? else {
             return Ok(None);
         };
-        Ok(Some(crate::StrandRuntimeSnapshot {
+        Ok(Some(crate::stream::Snapshot {
             messages: database.strand_messages(&strand.id)?,
             events: database.message_events_for_strand(&strand.id)?,
             turns: database.turns_for_strand(&strand.id)?,
@@ -165,32 +163,32 @@ impl SantiStore {
     }
 
     pub fn append_message(&self, draft: Draft<'_>) -> Result<AppendedMessage, String> {
-        self.append_message_with_kind(draft, MessageKind::Text)
+        self.append_message_with_kind(draft, message::Kind::Text)
     }
 
     pub fn append_santi_system_message(
         &self,
         strand: &str,
-        content: MessageContent,
-        intake: MessageIntake,
+        content: message::Content,
+        intake: message::Intake,
     ) -> Result<AppendedMessage, String> {
         self.append_message_with_kind(
             Draft {
                 strand,
-                actor: ActorType::System,
+                actor: message::Role::System,
                 id: SANTI_SYSTEM_ACTOR_ID,
                 content,
-                state: MessageState::Fixed,
+                state: message::State::Fixed,
                 intake,
             },
-            MessageKind::SantiSystem,
+            message::Kind::SantiSystem,
         )
     }
 
     fn append_message_with_kind(
         &self,
         draft: Draft<'_>,
-        kind: MessageKind,
+        kind: message::Kind,
     ) -> Result<AppendedMessage, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
@@ -218,7 +216,7 @@ impl SantiStore {
             ],
         )
         .map_err(|error| error.to_string())?;
-        Database::new(&tx).append_entry_in_tx(draft.strand, StrandTargetType::Message, &message)?;
+        Database::new(&tx).append_entry_in_tx(draft.strand, strand::Target::Message, &message)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(AppendedMessage {
             strand_message: Database::new(&conn)

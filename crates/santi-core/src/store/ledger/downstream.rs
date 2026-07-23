@@ -1,8 +1,7 @@
-use santi_model::{DownstreamCredential, IngestReceipt};
-
 use super::SantiStore;
 use super::db::Database;
 use crate::now;
+use crate::{downstream, ingest};
 
 impl SantiStore {
     pub fn create_downstream(
@@ -10,7 +9,7 @@ impl SantiStore {
         id: &str,
         prefix: &str,
         digest: &str,
-    ) -> Result<DownstreamCredential, String> {
+    ) -> Result<downstream::Credential, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -43,7 +42,7 @@ impl SantiStore {
         Ok(downstream)
     }
 
-    pub fn list_downstreams(&self) -> Result<Vec<DownstreamCredential>, String> {
+    pub fn list_downstreams(&self) -> Result<Vec<downstream::Credential>, String> {
         let conn = self.conn.lock().unwrap();
         Database::new(&conn).list_downstreams()
     }
@@ -53,7 +52,7 @@ impl SantiStore {
         owner: &str,
         request: &str,
         digest: &str,
-    ) -> Result<Option<IngestReceipt>, String> {
+    ) -> Result<Option<ingest::Receipt>, String> {
         let conn = self.conn.lock().unwrap();
         let Some((accepted, strand, inbox)) = Database::new(&conn).replay(owner, request)? else {
             return Ok(None);
@@ -61,7 +60,7 @@ impl SantiStore {
         if accepted != digest {
             return Err("downstream request conflicts with an accepted payload".to_string());
         }
-        Ok(Some(IngestReceipt {
+        Ok(Some(ingest::Receipt {
             strand,
             inbox,
             warning: None,

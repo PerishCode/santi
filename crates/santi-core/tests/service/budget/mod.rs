@@ -1,6 +1,7 @@
 use super::support::*;
 use rusqlite::Connection;
 use santi_core::service::{self, Service};
+use santi_core::{message, strand};
 
 mod more;
 
@@ -37,8 +38,8 @@ async fn admission_opens_incident() {
     let error = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "this should not enter the strand".to_string(),
                 }],
             },
@@ -70,7 +71,7 @@ async fn admission_opens_incident() {
 
     let transition = std::iter::from_fn(|| events.try_recv().ok())
         .find_map(|event| match event.payload {
-            santi_core::SantiStreamPayload::Transition { transition } => Some(transition),
+            santi_core::stream::Payload::Transition { transition } => Some(transition),
             _ => None,
         })
         .expect("error transition event");
@@ -116,8 +117,8 @@ async fn remeasures_hot_memory() {
     let error = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "x".repeat(15_000),
                 }],
             },
@@ -131,8 +132,8 @@ async fn remeasures_hot_memory() {
     let accepted = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "new request after material relief".to_string(),
                 }],
             },
@@ -177,8 +178,8 @@ async fn repeats_are_idempotent() {
         let error = service
             .send_strand(
                 &strand.id,
-                SendStrandRequest {
-                    content: vec![MessagePart::Text {
+                strand::Post {
+                    content: vec![message::Part::Text {
                         text: text.to_string(),
                     }],
                 },
@@ -227,7 +228,7 @@ async fn repeats_are_idempotent() {
     let event = events.try_recv().expect("pending transition");
     assert!(matches!(
         event.payload,
-        santi_core::SantiStreamPayload::Transition { .. }
+        santi_core::stream::Payload::Transition { .. }
     ));
     let delivered: i64 = conn
         .query_row(
@@ -252,8 +253,8 @@ async fn store_cannot_bypass() {
     let first = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "first rejected".to_string(),
                 }],
             },
@@ -265,11 +266,11 @@ async fn store_cannot_bypass() {
     let outcome = store
         .enqueue_inbox(
             &strand.id,
-            MessageKind::Text,
-            MessageContent::text("direct bypass attempt"),
+            message::Kind::Text,
+            message::Content::text("direct bypass attempt"),
         )
         .expect("direct enqueue");
-    let santi_core::IngestOutcome::Rejected { error } = outcome else {
+    let santi_core::ingest::Outcome::Rejected { error } = outcome else {
         panic!("direct enqueue should be rejected by the active incident");
     };
     assert_eq!(error.incident, first.incident);

@@ -4,10 +4,10 @@ use crate::service::flow::budget::Verdict;
 use crate::service::flow::failure::{Admission, Failure, Metadata, Operation, Persistence, Stage};
 use crate::service::tools::provider_tools;
 use crate::service::{Service, address::Address, notice::Observation, timing};
-use crate::{SantiStreamPayload, StrandMessage, TurnActivityState};
 use santi_provider::ProviderRequest;
 
 use super::*;
+use crate::{message, stream, turn};
 
 impl Service {
     pub(in crate::service::flow) async fn complete_provider_turn(
@@ -32,13 +32,13 @@ impl Service {
         &self,
         strand: &str,
         turn: &str,
-        last_soul_message: Option<StrandMessage>,
+        last_soul_message: Option<message::Placed>,
         response: Option<String>,
     ) {
         if let Some(message) = last_soul_message.as_ref() {
             self.publish_stream(
                 strand,
-                SantiStreamPayload::MessageCompleted {
+                stream::Payload::MessageCompleted {
                     turn: turn.to_string(),
                     message: message.clone(),
                 },
@@ -65,7 +65,7 @@ impl Service {
                 };
                 self.publish_stream(
                     strand,
-                    SantiStreamPayload::TurnCompleted {
+                    stream::Payload::TurnCompleted {
                         turn: turn.to_string(),
                         label,
                         text,
@@ -84,9 +84,9 @@ impl Service {
         &self,
         strand: &str,
         turn: &str,
-    ) -> Result<(Option<StrandMessage>, Option<String>), Failure> {
+    ) -> Result<(Option<message::Placed>, Option<String>), Failure> {
         let mut assistant_text = String::new();
-        let mut last_soul_message: Option<StrandMessage> = None;
+        let mut last_soul_message: Option<message::Placed> = None;
         let mut timing = timing::Turn::new(turn);
         let mut round = 0;
         macro_rules! provider_try {
@@ -143,7 +143,7 @@ impl Service {
                 input: &request.input,
                 instructions: request.instructions.as_deref(),
             });
-            self.publish_turn_activity(strand, turn, TurnActivityState::Requesting, None);
+            self.publish_turn_activity(strand, turn, turn::Motion::Requesting, None);
             let request_model = request.model.clone();
             let stream = match self.provider.stream_response(request).await {
                 Ok(stream) => {
@@ -217,7 +217,7 @@ impl Service {
                 self.publish_turn_activity(
                     strand,
                     turn,
-                    TurnActivityState::RunningTool,
+                    turn::Motion::Running,
                     active_provider_response_id.clone(),
                 );
                 provider_try!(

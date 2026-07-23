@@ -2,19 +2,16 @@ use serde_json::json;
 
 use super::tools::provider_tools;
 use crate::context::budget::estimate_provider_parts;
-use crate::{
-    CompactCapsuleOptions, CompactExecRequest, CompactExecResponse, CompactQueryResponse,
-    ContextBudget, ContextEstimate,
-};
 
 use super::Service;
+use crate::{budget, compact};
 
 impl Service {
     pub fn compact_exec(
         &self,
         strand: &str,
-        request: CompactExecRequest,
-    ) -> Result<CompactExecResponse, String> {
+        request: compact::Exec,
+    ) -> Result<compact::Report, String> {
         let summary = request.summary.trim();
         if summary.is_empty() {
             return Err("compact summary must not be empty".to_string());
@@ -121,7 +118,7 @@ impl Service {
     fn resolve_compact_boundaries(
         &self,
         strand: &str,
-        request: &CompactExecRequest,
+        request: &compact::Exec,
     ) -> Result<(String, String), String> {
         let from_id = request
             .first
@@ -153,10 +150,10 @@ impl Service {
     fn estimate_preview_compact(
         &self,
         strand: &str,
-        response: &CompactExecResponse,
+        response: &compact::Report,
         summary: &str,
         metadata: serde_json::Value,
-    ) -> Result<ContextEstimate, String> {
+    ) -> Result<budget::Estimate, String> {
         let input = self
             .store
             .assembly_input_preview(strand, response, summary, metadata)?;
@@ -175,7 +172,7 @@ impl Service {
         keyword: Option<&str>,
         page_index: i64,
         page_size: i64,
-    ) -> Result<Option<CompactQueryResponse>, String> {
+    ) -> Result<Option<compact::Page>, String> {
         self.store
             .compact_query(compact, keyword, page_index, page_size)
     }
@@ -183,11 +180,11 @@ impl Service {
 
 struct Capsule<'a> {
     compact: Option<&'a str>,
-    capsule: &'a CompactCapsuleOptions,
-    response: Option<&'a CompactExecResponse>,
-    before: Option<&'a ContextEstimate>,
-    after: Option<&'a ContextEstimate>,
-    budget: Option<&'a ContextBudget>,
+    capsule: &'a compact::Capsule,
+    response: Option<&'a compact::Report>,
+    before: Option<&'a budget::Estimate>,
+    after: Option<&'a budget::Estimate>,
+    budget: Option<&'a budget::Cap>,
     ratio: Option<f64>,
 }
 
@@ -230,7 +227,7 @@ fn compact_capsule_metadata(input: Capsule<'_>) -> serde_json::Value {
     })
 }
 
-fn compact_compression_ratio(before: &ContextEstimate, after: &ContextEstimate) -> Option<f64> {
+fn compact_compression_ratio(before: &budget::Estimate, after: &budget::Estimate) -> Option<f64> {
     if before.total <= 0 {
         return None;
     }

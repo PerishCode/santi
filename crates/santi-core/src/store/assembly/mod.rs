@@ -14,12 +14,12 @@ impl SantiStore {
     pub(crate) fn assembly_input_preview(
         &self,
         strand: &str,
-        response: &crate::CompactExecResponse,
+        response: &crate::compact::Report,
         summary: &str,
         metadata: serde_json::Value,
     ) -> Result<Vec<ProviderItem>, String> {
         let conn = self.conn.lock().unwrap();
-        let preview = crate::Compact {
+        let preview = crate::compact::Compact {
             id: response.compact.clone(),
             strand: strand.to_string(),
             summary: summary.to_string(),

@@ -7,13 +7,14 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
+use santi_core::Fault;
 use santi_core::service::Service;
-use santi_core::{Fault, InboxSource, IngestOutcome};
 use serde_json::json;
 
 use crate::webhook::{WebhookOutcome, adaptor_for};
 
 use super::ApiError;
+use santi_core::ingest;
 
 #[utoipa::path(
     post,
@@ -23,7 +24,7 @@ use super::ApiError;
     request_body(content_type = "application/json", description = "Raw provider event payload"),
     responses(
         (status = 200, description = "Control response or ignored event"),
-        (status = 202, body = santi_core::IngestReceipt),
+        (status = 202, body = santi_core::ingest::Receipt),
         (status = 401, body = Fault),
         (status = 423, body = Fault),
         (status = 404, body = Fault),
@@ -71,7 +72,7 @@ pub(super) async fn ingest_webhook(
     } else {
         event.label.clone()
     };
-    let source = InboxSource::new("webhook")
+    let source = ingest::Source::new("webhook")
         .with_ref(format!("{}:{name}", subscription.adaptor))
         .with_metadata(json!({
             "subscription": name,
@@ -90,9 +91,9 @@ pub(super) async fn ingest_webhook(
         )
         .map_err(ApiError::from_service)?
     {
-        IngestOutcome::Accepted { receipt } => {
+        ingest::Outcome::Accepted { receipt } => {
             Ok((StatusCode::ACCEPTED, Json(receipt)).into_response())
         }
-        IngestOutcome::Rejected { error } => Err(ApiError::from_santi(*error)),
+        ingest::Outcome::Rejected { error } => Err(ApiError::from_santi(*error)),
     }
 }

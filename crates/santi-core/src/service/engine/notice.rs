@@ -5,9 +5,8 @@ use std::{
 
 use santi_provider::ProviderItem;
 
-use crate::{MessageContent, MessageIntake, SantiStreamPayload};
-
 use super::{Service, address::Address};
+use crate::{message, stream};
 
 pub(in crate::service) struct Observation<'a> {
     pub(in crate::service) address: Address<&'a str>,
@@ -179,11 +178,11 @@ impl Service {
         let message = self.store.append_santi_system_message(
             &event.address.strand,
             content,
-            MessageIntake::Record,
+            message::Intake::Record,
         )?;
         self.publish_stream(
             &event.address.strand,
-            SantiStreamPayload::MessageCreated {
+            stream::Payload::MessageCreated {
                 message: message.strand_message,
             },
         );
@@ -191,8 +190,8 @@ impl Service {
     }
 }
 
-fn compact_reminder_message(event: &Observed) -> MessageContent {
-    MessageContent::text(
+fn compact_reminder_message(event: &Observed) -> message::Content {
+    message::Content::text(
         [
             "<system_message>".to_string(),
             "kind: compact_reminder".to_string(),

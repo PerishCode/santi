@@ -1,8 +1,5 @@
-use crate::{
-    ActorType, SantiStreamPayload, ThinkingCompletionReason, ThinkingSpan, TurnActivityState,
-};
-
 use super::super::{Service, address::Address, timing};
+use crate::{message, stream, thinking, turn};
 
 pub(in crate::service) struct Update<'a, 'turn> {
     pub(in crate::service) address: Address<&'a str>,
@@ -10,7 +7,7 @@ pub(in crate::service) struct Update<'a, 'turn> {
     pub(in crate::service) round_assistant_text: &'a mut String,
     pub(in crate::service) timing: &'a timing::Turn<'turn>,
     pub(in crate::service) round: usize,
-    pub(in crate::service) current_thinking_span: &'a mut Option<ThinkingSpan>,
+    pub(in crate::service) current_thinking_span: &'a mut Option<thinking::Span>,
     pub(in crate::service) active_provider_response_id: &'a Option<String>,
 }
 
@@ -25,12 +22,12 @@ impl Service {
             self.complete_current_thinking_span(
                 update.address.strand,
                 update.current_thinking_span,
-                ThinkingCompletionReason::FirstTextDelta,
+                thinking::Reason::FirstTextDelta,
             )?;
             self.publish_turn_activity(
                 update.address.strand,
                 update.address.turn,
-                TurnActivityState::Generating,
+                turn::Motion::Generating,
                 update.active_provider_response_id.clone(),
             );
         }
@@ -38,10 +35,10 @@ impl Service {
         update.round_assistant_text.push_str(&delta);
         self.publish_stream(
             update.address.strand,
-            SantiStreamPayload::MessageDelta {
+            stream::Payload::MessageDelta {
                 message: format!("stream_{}", update.address.turn),
                 turn: update.address.turn.to_string(),
-                role: ActorType::Soul,
+                role: message::Role::Soul,
                 text: delta,
             },
         );

@@ -3,10 +3,8 @@ use std::{fs, sync::Arc};
 
 use async_trait::async_trait;
 use futures_util::stream;
-use santi_core::{
-    MaterialKind, MaterialRequest, SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, StrandMaterial,
-    soul_memory_uri, strand_memory_uri,
-};
+use santi_core::material;
+use santi_core::{SOUL_WORKSPACE_URI, STRAND_WORKSPACE_URI, soul_memory_uri, strand_memory_uri};
 use santi_provider::{ProviderClient, ProviderMetadata, ProviderStream};
 
 #[derive(Clone)]
@@ -150,13 +148,13 @@ async fn external_labels_stay_out_of_prompt() {
             "hello".to_string(),
         )
         .expect("second strand");
-    let santi_core::IngestOutcome::Accepted {
+    let santi_core::ingest::Outcome::Accepted {
         receipt: first_receipt,
     } = first
     else {
         panic!("first ingest rejected");
     };
-    let santi_core::IngestOutcome::Accepted {
+    let santi_core::ingest::Outcome::Accepted {
         receipt: second_receipt,
     } = second
     else {
@@ -224,16 +222,16 @@ impl PromptHarness {
         fs::write(self.runtime_root.join("constitution.md"), text).expect("write constitution");
     }
 
-    fn system_prompt(&self) -> StrandMaterial {
+    fn system_prompt(&self) -> material::Material {
         self.system_prompt_for(&self.strand)
     }
 
-    fn system_prompt_for(&self, strand: &str) -> StrandMaterial {
+    fn system_prompt_for(&self, strand: &str) -> material::Material {
         self.service
             .strand_material(
                 strand,
-                MaterialRequest {
-                    kind: MaterialKind::SystemPrompt,
+                material::Request {
+                    kind: material::Kind::SystemPrompt,
                 },
             )
             .expect("system prompt material")

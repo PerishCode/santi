@@ -1,16 +1,15 @@
 use crate::store::Ingress;
-use crate::{
-    Fault, InboxSource, IngestOutcome, MessageContent, MessageKind, Strand, StrandSelector, engine,
-};
+use crate::{Fault, engine, strand::Strand};
 
 use super::super::{Service, drive};
 use super::memory::{Gate, drive_maintenance};
+use crate::{ingest, message, strand};
 
 pub(in crate::service) struct Ingest<'a> {
-    pub(in crate::service) content: MessageContent,
-    pub(in crate::service) kind: MessageKind,
+    pub(in crate::service) content: message::Content,
+    pub(in crate::service) kind: message::Kind,
     pub(in crate::service) trigger: &'a str,
-    pub(in crate::service) source: Option<InboxSource>,
+    pub(in crate::service) source: Option<ingest::Source>,
     pub(in crate::service) replay: Option<crate::store::Replay<'a>>,
 }
 
@@ -18,7 +17,7 @@ pub(in crate::service) struct External<'a> {
     pub(in crate::service) soul: &'a str,
     pub(in crate::service) label: &'a str,
     pub(in crate::service) text: String,
-    pub(in crate::service) source: Option<InboxSource>,
+    pub(in crate::service) source: Option<ingest::Source>,
     pub(in crate::service) replay: Option<crate::store::Replay<'a>>,
 }
 
@@ -29,7 +28,7 @@ struct Audit {
 }
 
 impl Audit {
-    fn new(content: &MessageContent, source: &Option<InboxSource>) -> Self {
+    fn new(content: &message::Content, source: &Option<ingest::Source>) -> Self {
         Self {
             kind: source
                 .as_ref()
@@ -57,11 +56,11 @@ struct Drive<'a> {
 impl Service {
     pub fn ingest(
         &self,
-        selector: StrandSelector,
-        content: MessageContent,
-        kind: MessageKind,
+        selector: strand::Selector,
+        content: message::Content,
+        kind: message::Kind,
         trigger: &str,
-    ) -> Result<IngestOutcome, String> {
+    ) -> Result<ingest::Outcome, String> {
         self.accept(
             selector,
             Ingest {
@@ -76,9 +75,9 @@ impl Service {
 
     pub(in crate::service) fn accept(
         &self,
-        selector: StrandSelector,
+        selector: strand::Selector,
         input: Ingest<'_>,
-    ) -> Result<IngestOutcome, String> {
+    ) -> Result<ingest::Outcome, String> {
         let strand = self.store.resolve_strand_selector(&selector)?;
         let (outcome, _driven) = self.enqueue(&strand, input)?;
         Ok(outcome)
@@ -88,7 +87,7 @@ impl Service {
         &self,
         strand: &Strand,
         input: Ingest<'_>,
-    ) -> Result<(IngestOutcome, drive::Outcome), String> {
+    ) -> Result<(ingest::Outcome, drive::Outcome), String> {
         let audit = Audit::new(&input.content, &input.source);
         match self.memory_drive_gate(strand)? {
             Gate::Allow => {}
@@ -105,7 +104,7 @@ impl Service {
                 })?;
                 let outcome = intake.outcome;
                 self.dispatch_error_events();
-                if let IngestOutcome::Rejected { error } = &outcome {
+                if let ingest::Outcome::Rejected { error } = &outcome {
                     log_ingest_rejection(error, &strand.id, &audit);
                 }
                 if intake.inserted {
@@ -119,7 +118,7 @@ impl Service {
             self.dispatch_error_events();
             log_ingest_rejection(&error, &strand.id, &audit);
             return Ok((
-                IngestOutcome::Rejected {
+                ingest::Outcome::Rejected {
                     error: Box::new(error),
                 },
                 drive::Outcome::Idle,
@@ -136,20 +135,22 @@ impl Service {
         })?;
         let outcome = intake.outcome;
         self.dispatch_error_events();
-        if let IngestOutcome::Rejected { error } = &outcome {
+        if let ingest::Outcome::Rejected { error } = &outcome {
             log_ingest_rejection(error, &strand.id, &audit);
         }
         let drive = match &outcome {
-            IngestOutcome::Accepted { receipt } if intake.inserted => self.poke(
+            ingest::Outcome::Accepted { receipt } if intake.inserted => self.poke(
                 &strand.id,
                 input.trigger,
                 Some(&receipt.inbox),
                 "ingest_poke",
             ),
-            IngestOutcome::Accepted { .. } | IngestOutcome::Rejected { .. } => drive::Outcome::Idle,
+            ingest::Outcome::Accepted { .. } | ingest::Outcome::Rejected { .. } => {
+                drive::Outcome::Idle
+            }
         };
         let mut outcome = outcome;
-        if let IngestOutcome::Accepted { receipt } = &mut outcome {
+        if let ingest::Outcome::Accepted { receipt } = &mut outcome {
             receipt.warning = match &drive {
                 drive::Outcome::Failed(error) | drive::Outcome::Held(error) => {
                     Some(Box::new(error.clone()))
@@ -165,7 +166,7 @@ impl Service {
         soul: &str,
         label: &str,
         system_text: String,
-    ) -> Result<IngestOutcome, String> {
+    ) -> Result<ingest::Outcome, String> {
         self.ingest_external_source(soul, label, system_text, None)
     }
 
@@ -174,8 +175,8 @@ impl Service {
         soul: &str,
         label: &str,
         system_text: String,
-        source: Option<InboxSource>,
-    ) -> Result<IngestOutcome, String> {
+        source: Option<ingest::Source>,
+    ) -> Result<ingest::Outcome, String> {
         self.ingest_external(External {
             soul,
             label,
@@ -188,18 +189,18 @@ impl Service {
     pub(in crate::service) fn ingest_external(
         &self,
         input: External<'_>,
-    ) -> Result<IngestOutcome, String> {
+    ) -> Result<ingest::Outcome, String> {
         let strand = self
             .store
-            .resolve_strand_selector(&StrandSelector::ByLabel {
+            .resolve_strand_selector(&strand::Selector::ByLabel {
                 soul: input.soul.to_string(),
                 label: input.label.to_string(),
             })?;
         let (outcome, _driven) = self.enqueue(
             &strand,
             Ingest {
-                content: MessageContent::text(input.text),
-                kind: MessageKind::SantiSystem,
+                content: message::Content::text(input.text),
+                kind: message::Kind::SantiSystem,
                 trigger: "system",
                 source: input.source,
                 replay: input.replay,

@@ -1,9 +1,9 @@
 use crate::store::{db::Database, span::Span};
-use crate::{ActorType, MessageKind, MessageState, StrandTargetType};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 
 use super::*;
+use crate::{message, strand};
 
 pub(super) fn plan_compact_in_tx(
     conn: &Connection,
@@ -15,10 +15,13 @@ pub(super) fn plan_compact_in_tx(
         let message = Database::new(conn)
             .message_record_by_id(id)?
             .ok_or_else(|| format!("compact {label} message not found"))?;
-        let is_projected = message.role == ActorType::Soul
-            || (message.role == ActorType::System
-                && matches!(message.kind, MessageKind::Text | MessageKind::SantiSystem));
-        if !is_projected || message.state != MessageState::Fixed {
+        let is_projected = message.role == message::Role::Soul
+            || (message.role == message::Role::System
+                && matches!(
+                    message.kind,
+                    message::Kind::Text | message::Kind::SantiSystem
+                ));
+        if !is_projected || message.state != message::State::Fixed {
             return Err(format!(
                 "compact {label} boundary must be a fixed projected message"
             ));
@@ -125,12 +128,12 @@ pub(super) fn value_text(value: &Value) -> String {
     }
 }
 
-pub(super) fn parse_target_type(value: &str) -> StrandTargetType {
+pub(super) fn parse_target_type(value: &str) -> strand::Target {
     match value {
-        "compact" => StrandTargetType::Compact,
-        "thinking" => StrandTargetType::Thinking,
-        "tool_call" => StrandTargetType::ToolCall,
-        "tool_result" => StrandTargetType::ToolResult,
-        _ => StrandTargetType::Message,
+        "compact" => strand::Target::Compact,
+        "thinking" => strand::Target::Thinking,
+        "tool_call" => strand::Target::ToolCall,
+        "tool_result" => strand::Target::ToolResult,
+        _ => strand::Target::Message,
     }
 }

@@ -1,7 +1,8 @@
-use crate::{Fault, StrandMessage, Turn};
+use crate::message;
+use crate::{Fault, turn::Turn};
 
 pub(crate) enum Outcome {
-    Started(Turn, Vec<StrandMessage>),
+    Started(Turn, Vec<message::Placed>),
     Running(Turn),
     Idle,
     Held(Fault),

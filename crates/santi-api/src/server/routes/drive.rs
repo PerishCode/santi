@@ -1,12 +1,13 @@
 use super::*;
+use santi_core::{budget, compact, strand, stream};
 
 #[utoipa::path(
     post,
     path = "/api/v1/strands/{strand}/send",
     params(("strand" = String, Path)),
-    request_body = SendStrandRequest,
+    request_body = strand::Post,
     responses(
-        (status = 200, body = SendStrandAcceptedResponse),
+        (status = 200, body = strand::Posted),
         (status = 423, body = Fault),
         (status = 404, body = Fault),
         (status = 500, body = Fault),
@@ -16,8 +17,8 @@ use super::*;
 pub async fn send_strand(
     State(service): State<Service>,
     Path(strand): Path<String>,
-    Json(request): Json<SendStrandRequest>,
-) -> Result<Json<SendStrandAcceptedResponse>, ApiError> {
+    Json(request): Json<strand::Post>,
+) -> Result<Json<strand::Posted>, ApiError> {
     service
         .send_strand(&strand, request)
         .await
@@ -30,7 +31,7 @@ pub async fn send_strand(
     path = "/api/v1/strands/{strand}/drive",
     params(("strand" = String, Path)),
     responses(
-        (status = 200, body = DriveStrandResponse),
+        (status = 200, body = drive::Response),
         (status = 404, body = Fault),
         (status = 423, body = Fault),
         (status = 500, body = Fault),
@@ -40,7 +41,7 @@ pub async fn send_strand(
 pub async fn drive_strand(
     State(service): State<Service>,
     Path(strand): Path<String>,
-) -> Result<Json<DriveStrandResponse>, ApiError> {
+) -> Result<Json<drive::Response>, ApiError> {
     service
         .drive_strand(&strand)
         .map(Json)
@@ -52,7 +53,7 @@ pub async fn drive_strand(
     path = "/api/v1/strands/{strand}/fork",
     params(("strand" = String, Path)),
     responses(
-        (status = 200, body = ForkStrandResponse),
+        (status = 200, body = strand::Forked),
         (status = 404, body = Fault),
         (status = 500, body = Fault)
     )
@@ -60,7 +61,7 @@ pub async fn drive_strand(
 pub(super) async fn fork_strand(
     State(service): State<Service>,
     Path(strand): Path<String>,
-) -> Result<Json<ForkStrandResponse>, ApiError> {
+) -> Result<Json<strand::Forked>, ApiError> {
     service
         .fork_strand(&strand)
         .map(Json)
@@ -71,9 +72,9 @@ pub(super) async fn fork_strand(
     post,
     path = "/api/v1/strands/{strand}/compact",
     params(("strand" = String, Path)),
-    request_body = CompactExecRequest,
+    request_body = compact::Exec,
     responses(
-        (status = 200, body = CompactExecResponse),
+        (status = 200, body = compact::Report),
         (status = 400, body = Fault),
         (status = 404, body = Fault),
         (status = 500, body = Fault)
@@ -82,8 +83,8 @@ pub(super) async fn fork_strand(
 pub(super) async fn compact_exec(
     State(service): State<Service>,
     Path(strand): Path<String>,
-    Json(request): Json<CompactExecRequest>,
-) -> Result<Json<CompactExecResponse>, ApiError> {
+    Json(request): Json<compact::Exec>,
+) -> Result<Json<compact::Report>, ApiError> {
     service
         .compact_exec(&strand, request)
         .map(Json)
@@ -100,7 +101,7 @@ pub(super) async fn compact_exec(
         ("page_size" = Option<i64>, Query)
     ),
     responses(
-        (status = 200, body = CompactQueryResponse),
+        (status = 200, body = compact::Page),
         (status = 404, body = Fault),
         (status = 500, body = Fault)
     )
@@ -109,7 +110,7 @@ pub(super) async fn compact_query(
     State(service): State<Service>,
     Path(compact): Path<String>,
     Query(params): Query<CompactQueryParams>,
-) -> Result<Json<CompactQueryResponse>, ApiError> {
+) -> Result<Json<compact::Page>, ApiError> {
     service
         .compact_query(
             &compact,
@@ -134,7 +135,7 @@ pub(super) struct CompactQueryParams {
     path = "/api/v1/strands/{strand}/runtime",
     params(("strand" = String, Path)),
     responses(
-        (status = 200, body = StrandRuntimeSnapshot),
+        (status = 200, body = stream::Snapshot),
         (status = 404, body = Fault),
         (status = 500, body = Fault)
     )
@@ -142,7 +143,7 @@ pub(super) struct CompactQueryParams {
 pub(super) async fn runtime_snapshot(
     State(service): State<Service>,
     Path(strand): Path<String>,
-) -> Result<Json<StrandRuntimeSnapshot>, ApiError> {
+) -> Result<Json<stream::Snapshot>, ApiError> {
     service
         .runtime_snapshot(&strand)
         .map_err(ApiError::from_service)?
@@ -155,7 +156,7 @@ pub(super) async fn runtime_snapshot(
     path = "/api/v1/strands/{strand}/budget",
     params(("strand" = String, Path)),
     responses(
-        (status = 200, body = StrandBudgetSnapshot),
+        (status = 200, body = budget::Snapshot),
         (status = 404, body = Fault),
         (status = 500, body = Fault)
     )
@@ -163,7 +164,7 @@ pub(super) async fn runtime_snapshot(
 pub(super) async fn strand_budget(
     State(service): State<Service>,
     Path(strand): Path<String>,
-) -> Result<Json<StrandBudgetSnapshot>, ApiError> {
+) -> Result<Json<budget::Snapshot>, ApiError> {
     service
         .strand_budget(&strand)
         .map_err(ApiError::from_service)?

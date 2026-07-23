@@ -1,8 +1,9 @@
 use rusqlite::params;
 
-use santi_model::{ThinkingSpan, ToolCall, ToolResult, Turn};
+use santi_model::turn::Turn;
 
 use super::{Database, Decode, collect_rows};
+use santi_model::{thinking, tool};
 
 impl Database<'_> {
     pub fn turns_for_strand(&self, strand: &str) -> Result<Vec<Turn>, String> {
@@ -25,7 +26,7 @@ impl Database<'_> {
         collect_rows(rows)
     }
 
-    pub fn soul_tool_calls(&self, strand: &str) -> Result<Vec<ToolCall>, String> {
+    pub fn soul_tool_calls(&self, strand: &str) -> Result<Vec<tool::Call>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -39,12 +40,12 @@ impl Database<'_> {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map(params![strand], ToolCall::decode)
+            .query_map(params![strand], tool::Call::decode)
             .map_err(|error| error.to_string())?;
         collect_rows(rows)
     }
 
-    pub fn tool_calls_for_turn(&self, turn: &str) -> Result<Vec<ToolCall>, String> {
+    pub fn tool_calls_for_turn(&self, turn: &str) -> Result<Vec<tool::Call>, String> {
         let mut stmt = self
             .conn
         .prepare(
@@ -52,12 +53,12 @@ impl Database<'_> {
         )
         .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map(params![turn], ToolCall::decode)
+            .query_map(params![turn], tool::Call::decode)
             .map_err(|error| error.to_string())?;
         collect_rows(rows)
     }
 
-    pub fn soul_thinking_spans(&self, strand: &str) -> Result<Vec<ThinkingSpan>, String> {
+    pub fn soul_thinking_spans(&self, strand: &str) -> Result<Vec<thinking::Span>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -73,12 +74,12 @@ impl Database<'_> {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map(params![strand], ThinkingSpan::decode)
+            .query_map(params![strand], thinking::Span::decode)
             .map_err(|error| error.to_string())?;
         collect_rows(rows)
     }
 
-    pub fn thinking_spans_for_turn(&self, turn: &str) -> Result<Vec<ThinkingSpan>, String> {
+    pub fn thinking_spans_for_turn(&self, turn: &str) -> Result<Vec<thinking::Span>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -92,12 +93,12 @@ impl Database<'_> {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map(params![turn], ThinkingSpan::decode)
+            .query_map(params![turn], thinking::Span::decode)
             .map_err(|error| error.to_string())?;
         collect_rows(rows)
     }
 
-    pub fn soul_tool_results(&self, strand: &str) -> Result<Vec<ToolResult>, String> {
+    pub fn soul_tool_results(&self, strand: &str) -> Result<Vec<tool::Reply>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -111,12 +112,12 @@ impl Database<'_> {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map(params![strand], ToolResult::decode)
+            .query_map(params![strand], tool::Reply::decode)
             .map_err(|error| error.to_string())?;
         collect_rows(rows)
     }
 
-    pub fn tool_results_for_turn(&self, turn: &str) -> Result<Vec<ToolResult>, String> {
+    pub fn tool_results_for_turn(&self, turn: &str) -> Result<Vec<tool::Reply>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -130,7 +131,7 @@ impl Database<'_> {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map(params![turn], ToolResult::decode)
+            .query_map(params![turn], tool::Reply::decode)
             .map_err(|error| error.to_string())?;
         collect_rows(rows)
     }

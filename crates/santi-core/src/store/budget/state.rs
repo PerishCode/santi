@@ -1,17 +1,18 @@
 use crate::store::db::Database;
 use santi_provider::ProviderItem;
 
-use crate::{Fault, MessageContent, MessageKind};
+use crate::Fault;
 
 use super::{Pressure, context_incident_key};
+use crate::message;
 
 pub(super) fn pending_items(db: &Database<'_>, strand: &str) -> Result<Vec<ProviderItem>, String> {
     let mut items = Vec::new();
     for (kind, content_json) in db.pending_inbox_rows(strand)? {
-        let content = serde_json::from_str::<MessageContent>(&content_json)
+        let content = serde_json::from_str::<message::Content>(&content_json)
             .map_err(|error| error.to_string())?;
         if let Some(item) =
-            crate::context::budget::inbound_provider_item(&MessageKind::decode(&kind), &content)
+            crate::context::budget::inbound_provider_item(&message::Kind::decode(&kind), &content)
         {
             items.push(item);
         }

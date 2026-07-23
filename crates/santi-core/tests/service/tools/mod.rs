@@ -1,5 +1,6 @@
 use super::support::*;
 use santi_core::service::{self, Service};
+use santi_core::{effect, message, strand};
 
 mod more;
 
@@ -106,8 +107,8 @@ fn execution_budget(
     calls: usize,
     output: usize,
     shell: usize,
-) -> santi_core::Execution {
-    santi_core::Execution {
+) -> santi_core::budget::Execution {
+    santi_core::budget::Execution {
         profile: "test_budget".to_string(),
         rounds,
         calls,
@@ -161,8 +162,8 @@ async fn dispatches_tools() {
     let response = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "run tool".to_string(),
                 }],
             },
@@ -172,7 +173,7 @@ async fn dispatches_tools() {
 
     assert_eq!(
         accepted_turn(&response).status,
-        santi_core::TurnStatus::Running
+        santi_core::turn::Status::Running
     );
     let runtime = Probe::new(&service)
         .completed_turn(&strand.id, &accepted_turn(&response).id)
@@ -219,7 +220,7 @@ async fn dispatches_tools() {
     let effect = &runtime.effects[0];
     assert_eq!(effect.call.as_deref(), Some("call_shell"));
     assert_eq!(effect.kind, "shell");
-    assert_eq!(effect.state, EffectState::Confirmed);
+    assert_eq!(effect.state, effect::State::Confirmed);
     assert_eq!(
         effect.result.as_deref(),
         Some(runtime.results[0].id.as_str())
@@ -235,18 +236,12 @@ async fn dispatches_tools() {
             .map(|transition| (&transition.state, &transition.reason))
             .collect::<Vec<_>>(),
         vec![
+            (&effect::State::Prepared, &effect::Reason::IntentPersisted),
             (
-                &EffectState::Prepared,
-                &EffectTransitionReason::IntentPersisted
+                &effect::State::Dispatching,
+                &effect::Reason::DispatchWindowOpened,
             ),
-            (
-                &EffectState::Dispatching,
-                &EffectTransitionReason::DispatchWindowOpened,
-            ),
-            (
-                &EffectState::Confirmed,
-                &EffectTransitionReason::ResultPersisted
-            ),
+            (&effect::State::Confirmed, &effect::Reason::ResultPersisted),
         ]
     );
     assert_eq!(effect_status.receipts, vec![response.receipt.inbox.clone()]);
@@ -256,7 +251,7 @@ async fn dispatches_tools() {
         .expect("receipt");
     assert_eq!(receipt.effects.len(), 1);
     assert_eq!(receipt.effects[0].id, effect.id);
-    assert_eq!(receipt.effects[0].state, EffectState::Confirmed);
+    assert_eq!(receipt.effects[0].state, effect::State::Confirmed);
 
     let requests = provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);

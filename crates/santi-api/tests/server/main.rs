@@ -15,10 +15,8 @@ use santi_api::{
     receipt_status_handler, resolve_effect_handler, send_strand_handler,
 };
 use santi_core::service::{self, Service};
-use santi_core::{
-    EffectResolutionOutcome, EffectState, IngestOutcome, Invocation, MessageContent, MessageKind,
-    MessagePart, SantiStore, SendStrandRequest, ToolCallProvenance, catalog, engine,
-};
+use santi_core::{Invocation, SantiStore, catalog, engine};
+use santi_core::{effect, ingest, message, tool};
 use santi_provider::{
     ProviderClient, ProviderContextBudget, ProviderEvent, ProviderMetadata, ProviderRequest,
     ProviderStream,
@@ -115,10 +113,10 @@ fn openapi_lists_error_surfaces() {
     assert!(document.contains("/api/v1/receipts/{inbox}"));
     assert!(document.contains("/api/v1/effects/{effect_id}"));
     assert!(document.contains("/api/v1/effects/{effect_id}/resolve"));
-    assert!(document.contains("EffectTransitionReason"));
-    assert!(document.contains("IngestReceipt"));
+    assert!(document.contains("effect.Reason"));
+    assert!(document.contains("ingest.Receipt"));
     assert!(document.contains("/api/v1/turn-events/stream"));
-    assert!(document.contains("TurnEventBatch"));
+    assert!(document.contains("event.Batch"));
     assert!(document.contains("request"));
     assert!(document.contains("downstream_bearer"));
     assert!(!document.contains("credential_env"));
@@ -133,13 +131,13 @@ async fn effect_http_roundtrip() {
     let inbox = match store
         .enqueue_inbox(
             &strand.id,
-            MessageKind::Text,
-            MessageContent::text("run effect"),
+            message::Kind::Text,
+            message::Content::text("run effect"),
         )
         .expect("enqueue")
     {
-        IngestOutcome::Accepted { receipt } => receipt.inbox,
-        IngestOutcome::Rejected { .. } => panic!("unexpected rejection"),
+        ingest::Outcome::Accepted { receipt } => receipt.inbox,
+        ingest::Outcome::Rejected { .. } => panic!("unexpected rejection"),
     };
     let turn = store
         .try_start_turn(&strand.id, "strand_send", None)
@@ -153,7 +151,7 @@ async fn effect_http_roundtrip() {
                 call: "call_api_effect",
                 name: "shell",
                 arguments: &serde_json::json!({"command": "printf api"}),
-                provenance: &ToolCallProvenance::default(),
+                provenance: &tool::Provenance::default(),
             },
             Some("shell"),
         )
@@ -185,14 +183,14 @@ async fn effect_http_roundtrip() {
             error.message()
         ),
     };
-    assert_eq!(queried.effect.state, EffectState::Unknown);
+    assert_eq!(queried.effect.state, effect::State::Unknown);
     assert_eq!(queried.receipts, vec![inbox]);
 
     let error = resolve_effect_handler(
         State(service.clone()),
         Path(effect_id.clone()),
         Json(ResolveEffectRequest {
-            outcome: EffectResolutionOutcome::Applied,
+            outcome: effect::Outcome::Applied,
             evidence: "   ".to_string(),
         }),
     )
@@ -204,7 +202,7 @@ async fn effect_http_roundtrip() {
         State(service),
         Path(effect_id),
         Json(ResolveEffectRequest {
-            outcome: EffectResolutionOutcome::Applied,
+            outcome: effect::Outcome::Applied,
             evidence: "operator found the target marker".to_string(),
         }),
     )
@@ -217,7 +215,7 @@ async fn effect_http_roundtrip() {
             error.message()
         ),
     };
-    assert_eq!(resolved.effect.state, EffectState::ResolvedApplied);
+    assert_eq!(resolved.effect.state, effect::State::ResolvedApplied);
 }
 
 mod recovery;

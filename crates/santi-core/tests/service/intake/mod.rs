@@ -1,4 +1,5 @@
 use super::support::*;
+use santi_core::message;
 use santi_core::service::{self, Service};
 
 mod downstream;
@@ -22,7 +23,7 @@ async fn external_ingest_turn() {
 
     let soul = service.list_souls().expect("list souls")[0].id.clone();
     let label = "github:ops:issue:PerishCode/santi#42";
-    let santi_core::IngestOutcome::Accepted { receipt } = service
+    let santi_core::ingest::Outcome::Accepted { receipt } = service
         .ingest_external_event(&soul, label, "an external request arrived".to_string())
         .expect("ingest event")
     else {
@@ -35,7 +36,7 @@ async fn external_ingest_turn() {
         runtime
             .turns
             .iter()
-            .any(|turn| turn.trigger == santi_core::TurnTriggerType::System)
+            .any(|turn| turn.trigger == santi_core::turn::Trigger::System)
     );
     assert!(
         runtime
@@ -50,7 +51,7 @@ async fn external_ingest_turn() {
             .any(|message| message.text == "hi from runtime")
     );
 
-    let santi_core::IngestOutcome::Accepted {
+    let santi_core::ingest::Outcome::Accepted {
         receipt: receipt_again,
     } = service
         .ingest_external_event(&soul, label, "a follow-up arrived".to_string())
@@ -94,8 +95,8 @@ async fn boot_drains_inbox() {
     store
         .enqueue_inbox(
             &strand,
-            MessageKind::Text,
-            MessageContent::text("stranded before the crash"),
+            message::Kind::Text,
+            message::Content::text("stranded before the crash"),
         )
         .expect("enqueue inbox");
     drop(store);

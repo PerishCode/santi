@@ -1,8 +1,8 @@
 use rusqlite::{OptionalExtension, params};
-use santi_model::DownstreamCredential;
 
 use super::Database;
 use crate::rows::{Decode, collect_rows};
+use santi_model::downstream;
 
 pub struct ReplayInsert<'a> {
     pub owner: &'a str,
@@ -35,7 +35,7 @@ impl Database<'_> {
         Ok(())
     }
 
-    pub fn downstream_by_id(&self, id: &str) -> Result<Option<DownstreamCredential>, String> {
+    pub fn downstream_by_id(&self, id: &str) -> Result<Option<downstream::Credential>, String> {
         self.conn
             .query_row(
                 r#"
@@ -43,13 +43,13 @@ impl Database<'_> {
                 FROM downstreams WHERE id = ?1 LIMIT 1
                 "#,
                 params![id],
-                DownstreamCredential::decode,
+                downstream::Credential::decode,
             )
             .optional()
             .map_err(|error| error.to_string())
     }
 
-    pub fn list_downstreams(&self) -> Result<Vec<DownstreamCredential>, String> {
+    pub fn list_downstreams(&self) -> Result<Vec<downstream::Credential>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -60,7 +60,7 @@ impl Database<'_> {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map([], DownstreamCredential::decode)
+            .query_map([], downstream::Credential::decode)
             .map_err(|error| error.to_string())?;
         collect_rows(rows)
     }

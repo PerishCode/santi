@@ -1,7 +1,7 @@
 use rusqlite::params;
 
 use super::{SantiStore, db::Database};
-use crate::{Strand, now, tag};
+use crate::{now, strand::Strand, tag};
 
 impl SantiStore {
     pub fn fork_strand(&self, parent: &str, fork: i64) -> Result<Strand, String> {

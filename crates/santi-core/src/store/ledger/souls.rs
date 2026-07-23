@@ -1,13 +1,11 @@
-use crate::{
-    CreateWebhookRequest, InboxSource, IngestOutcome, MessageContent, MessageKind, Strand,
-    StrandSelector, now, tag,
-};
+use crate::{now, strand::Strand, tag};
 pub(crate) use budget::Ingress;
 use rows::{Decode, collect_rows};
 use rusqlite::params;
 
 use super::{SantiStore, db::Database};
 use crate::store::{StartedTurn, budget, rows};
+use crate::{ingest, message, strand, webhook};
 
 impl SantiStore {
     pub fn find_labeled_strand(&self, soul: &str, label: &str) -> Result<Strand, String> {
@@ -41,31 +39,31 @@ impl SantiStore {
             .ok_or_else(|| "labeled strand missing".to_string())
     }
 
-    pub fn resolve_strand_selector(&self, selector: &StrandSelector) -> Result<Strand, String> {
+    pub fn resolve_strand_selector(&self, selector: &strand::Selector) -> Result<Strand, String> {
         match selector {
-            StrandSelector::ById(strand) => self
+            strand::Selector::ById(strand) => self
                 .strand(strand)?
                 .ok_or_else(|| "strand not found".to_string()),
-            StrandSelector::ByLabel { soul, label } => self.find_labeled_strand(soul, label),
+            strand::Selector::ByLabel { soul, label } => self.find_labeled_strand(soul, label),
         }
     }
 
     pub fn enqueue_inbox(
         &self,
         strand: &str,
-        kind: MessageKind,
-        content: MessageContent,
-    ) -> Result<IngestOutcome, String> {
+        kind: message::Kind,
+        content: message::Content,
+    ) -> Result<ingest::Outcome, String> {
         self.enqueue_inbox_with_source(strand, kind, content, None)
     }
 
     pub fn enqueue_inbox_with_source(
         &self,
         strand: &str,
-        kind: MessageKind,
-        content: MessageContent,
-        source: Option<InboxSource>,
-    ) -> Result<IngestOutcome, String> {
+        kind: message::Kind,
+        content: message::Content,
+        source: Option<ingest::Source>,
+    ) -> Result<ingest::Outcome, String> {
         self.enqueue_inbox_with_context(Ingress {
             strand,
             kind,
@@ -79,8 +77,8 @@ impl SantiStore {
 
     pub fn create_webhook(
         &self,
-        request: CreateWebhookRequest,
-    ) -> Result<crate::WebhookSubscription, String> {
+        request: webhook::Draft,
+    ) -> Result<crate::webhook::Subscription, String> {
         let conn = self.conn.lock().unwrap();
         let now = now();
         let strategy = request.strategy.as_deref().unwrap_or("per_thread");
@@ -106,7 +104,7 @@ impl SantiStore {
             .ok_or_else(|| "created webhook missing".to_string())
     }
 
-    pub fn list_webhooks(&self) -> Result<Vec<crate::WebhookSubscription>, String> {
+    pub fn list_webhooks(&self) -> Result<Vec<crate::webhook::Subscription>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
@@ -117,17 +115,17 @@ impl SantiStore {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map([], crate::WebhookSubscription::decode)
+            .query_map([], crate::webhook::Subscription::decode)
             .map_err(|error| error.to_string())?;
         collect_rows(rows)
     }
 
-    pub fn webhook(&self, name: &str) -> Result<Option<crate::WebhookSubscription>, String> {
+    pub fn webhook(&self, name: &str) -> Result<Option<crate::webhook::Subscription>, String> {
         let conn = self.conn.lock().unwrap();
         Database::new(&conn).webhook_by_name(name)
     }
 
-    pub fn create_soul(&self) -> Result<crate::Soul, String> {
+    pub fn create_soul(&self) -> Result<crate::soul::Soul, String> {
         let conn = self.conn.lock().unwrap();
         let soul = tag("soul");
         let now = now();
@@ -141,7 +139,7 @@ impl SantiStore {
             .ok_or_else(|| "created soul missing".to_string())
     }
 
-    pub fn list_souls(&self) -> Result<Vec<crate::Soul>, String> {
+    pub fn list_souls(&self) -> Result<Vec<crate::soul::Soul>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
@@ -152,12 +150,12 @@ impl SantiStore {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map([], crate::Soul::decode)
+            .query_map([], crate::soul::Soul::decode)
             .map_err(|error| error.to_string())?;
         collect_rows(rows)
     }
 
-    pub fn soul(&self, soul: &str) -> Result<Option<crate::Soul>, String> {
+    pub fn soul(&self, soul: &str) -> Result<Option<crate::soul::Soul>, String> {
         let conn = self.conn.lock().unwrap();
         Database::new(&conn).soul_by_id(soul)
     }

@@ -1,8 +1,6 @@
 use crate::store::{ProviderFault, RuntimeFault};
-use crate::{
-    ActorType, Fault, MessageContent, MessageIntake, MessageState, SantiStreamPayload, Turn,
-    catalog, engine,
-};
+use crate::{Fault, catalog, engine, turn::Turn};
+use crate::{message, stream};
 
 use super::super::Service;
 
@@ -173,7 +171,7 @@ impl Service {
         self.dispatch_error_events();
         self.publish_stream(
             strand,
-            SantiStreamPayload::TurnFailed {
+            stream::Payload::TurnFailed {
                 turn: turn.to_string(),
                 error: Box::new(canonical_error),
             },
@@ -253,17 +251,17 @@ impl Service {
         }
         match self.store.append_message(crate::Draft {
             strand: &held.strand,
-            actor: ActorType::Soul,
+            actor: message::Role::Soul,
             id: self.store.default_soul_id(),
-            content: MessageContent::text(partial_assistant_text),
-            state: MessageState::Aborted,
-            intake: MessageIntake::Record,
+            content: message::Content::text(partial_assistant_text),
+            state: message::State::Aborted,
+            intake: message::Intake::Record,
         }) {
             Ok(message) => {
                 let seq = message.strand_message.relation.seq;
                 self.publish_stream(
                     strand,
-                    SantiStreamPayload::MessageCreated {
+                    stream::Payload::MessageCreated {
                         message: message.strand_message,
                     },
                 );

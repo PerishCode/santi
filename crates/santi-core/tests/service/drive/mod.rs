@@ -4,6 +4,7 @@ mod recovery;
 
 use super::support::*;
 use santi_core::service::{self, Service};
+use santi_core::{message, strand};
 
 #[tokio::test]
 async fn reminder_no_repoke() {
@@ -25,8 +26,8 @@ async fn reminder_no_repoke() {
     let response = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "x".repeat(128 * 1024),
                 }],
             },
@@ -62,7 +63,7 @@ async fn reminder_no_repoke() {
         runtime
             .turns
             .iter()
-            .filter(|turn| turn.status == santi_core::TurnStatus::Completed)
+            .filter(|turn| turn.status == santi_core::turn::Status::Completed)
             .count(),
         1,
         "compact reminder completion path must leave exactly one completed turn"
@@ -98,8 +99,8 @@ async fn concurrent_request_follows() {
     let first = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "first request".to_string(),
                 }],
             },
@@ -121,13 +122,13 @@ async fn concurrent_request_follows() {
         .receipt_status(&first.receipt.inbox)
         .expect("first receipt query")
         .expect("first receipt");
-    assert_eq!(first_receipt.state, santi_core::ReceiptState::Driving);
+    assert_eq!(first_receipt.state, santi_core::receipt::State::Driving);
 
     let second = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "second request".to_string(),
                 }],
             },
@@ -147,14 +148,14 @@ async fn concurrent_request_follows() {
         .receipt_status(&second.receipt.inbox)
         .expect("second receipt query")
         .expect("second receipt");
-    assert_eq!(second_receipt.state, santi_core::ReceiptState::Accepted);
+    assert_eq!(second_receipt.state, santi_core::receipt::State::Accepted);
 
     let running = service
         .runtime_snapshot(&strand.id)
         .expect("runtime snapshot")
         .expect("strand runtime");
     assert_eq!(running.turns.len(), 1);
-    assert_eq!(running.turns[0].status, santi_core::TurnStatus::Running);
+    assert_eq!(running.turns[0].status, santi_core::turn::Status::Running);
     assert_eq!(count_messages(&running, "first request"), 1);
     assert_eq!(count_messages(&running, "second request"), 0);
     assert_eq!(provider.requests.lock().unwrap().len(), 1);
@@ -195,7 +196,7 @@ async fn concurrent_request_follows() {
             .receipt_status(inbox)
             .expect("receipt query")
             .expect("receipt");
-        assert_eq!(receipt.state, santi_core::ReceiptState::Completed);
+        assert_eq!(receipt.state, santi_core::receipt::State::Completed);
     }
 
     assert_eq!(runtime.turns.len(), 2);
@@ -203,7 +204,7 @@ async fn concurrent_request_follows() {
         runtime
             .turns
             .iter()
-            .all(|turn| turn.status == santi_core::TurnStatus::Completed)
+            .all(|turn| turn.status == santi_core::turn::Status::Completed)
     );
     assert_eq!(count_messages(&runtime, "first request"), 1);
     assert_eq!(count_messages(&runtime, "second request"), 1);

@@ -1,5 +1,6 @@
 use super::support::*;
 use santi_core::service::{self, Service};
+use santi_core::{material, message};
 
 #[test]
 fn fork_syncs_workspace() {
@@ -63,22 +64,22 @@ fn fork_rejects_symlink() {
         let first = store
             .append_message(Draft {
                 strand: &parent.id,
-                actor: ActorType::System,
+                actor: message::Role::System,
                 id: store.system_actor_id(),
-                content: MessageContent::text("first"),
-                state: MessageState::Fixed,
-                intake: MessageIntake::Record,
+                content: message::Content::text("first"),
+                state: message::State::Fixed,
+                intake: message::Intake::Record,
             })
             .expect("append first")
             .strand_message;
         let second = store
             .append_message(Draft {
                 strand: &parent.id,
-                actor: ActorType::System,
+                actor: message::Role::System,
                 id: store.system_actor_id(),
-                content: MessageContent::text("second"),
-                state: MessageState::Fixed,
-                intake: MessageIntake::Record,
+                content: message::Content::text("second"),
+                state: message::State::Fixed,
+                intake: message::Intake::Record,
             })
             .expect("append second")
             .strand_message;
@@ -167,8 +168,8 @@ fn fork_prompt_topology() {
     store
         .append_santi_system_message(
             &parent.id,
-            MessageContent::text("<system_message>\nkind: seed\n</system_message>"),
-            MessageIntake::Record,
+            message::Content::text("<system_message>\nkind: seed\n</system_message>"),
+            message::Intake::Record,
         )
         .expect("append parent entry");
     drop(store);
@@ -177,8 +178,8 @@ fn fork_prompt_topology() {
     let text = service
         .strand_material(
             &child.id,
-            MaterialRequest {
-                kind: MaterialKind::SystemPrompt,
+            material::Request {
+                kind: material::Kind::SystemPrompt,
             },
         )
         .expect("system prompt")

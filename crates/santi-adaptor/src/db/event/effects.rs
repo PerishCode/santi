@@ -2,7 +2,8 @@ use rusqlite::{OptionalExtension, params};
 
 use super::Database;
 use crate::rows::{Decode, collect_rows};
-use santi_model::{EffectState, EffectTransition, EffectTransitionReason, StrandEffect, tag};
+use santi_model::effect;
+use santi_model::tag;
 
 const EFFECT_COLUMNS: &str = r#"
     id, strand_id, turn_id, tool_call_id, effect_type, state,
@@ -18,8 +19,8 @@ pub struct Prepared<'a> {
 }
 
 pub struct Transition<'a> {
-    pub state: EffectState,
-    pub reason: EffectTransitionReason,
+    pub state: effect::State,
+    pub reason: effect::Reason,
     pub evidence: Option<&'a str>,
     pub time: &'a str,
 }
@@ -50,8 +51,8 @@ impl Database<'_> {
         self.append_effect_transition(
             &effect_id,
             Transition {
-                state: EffectState::Prepared,
-                reason: EffectTransitionReason::IntentPersisted,
+                state: effect::State::Prepared,
+                reason: effect::Reason::IntentPersisted,
                 evidence: None,
                 time: prepared.time,
             },
@@ -86,18 +87,18 @@ impl Database<'_> {
         Ok(())
     }
 
-    pub fn find_effect(&self, effect_id: &str) -> Result<Option<StrandEffect>, String> {
+    pub fn find_effect(&self, effect_id: &str) -> Result<Option<effect::Effect>, String> {
         self.conn
             .query_row(
                 &format!("SELECT {EFFECT_COLUMNS} FROM strand_effects WHERE id = ?1 LIMIT 1"),
                 params![effect_id],
-                StrandEffect::decode,
+                effect::Effect::decode,
             )
             .optional()
             .map_err(|error| error.to_string())
     }
 
-    pub fn effects_for_receipt(&self, inbox: &str) -> Result<Vec<StrandEffect>, String> {
+    pub fn effects_for_receipt(&self, inbox: &str) -> Result<Vec<effect::Effect>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -114,12 +115,12 @@ impl Database<'_> {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map(params![inbox], StrandEffect::decode)
+            .query_map(params![inbox], effect::Effect::decode)
             .map_err(|error| error.to_string())?;
         collect_rows(rows)
     }
 
-    pub fn effect_transitions(&self, effect_id: &str) -> Result<Vec<EffectTransition>, String> {
+    pub fn effect_transitions(&self, effect_id: &str) -> Result<Vec<effect::Transition>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -133,11 +134,11 @@ impl Database<'_> {
             .map_err(|error| error.to_string())?;
         let rows = stmt
             .query_map(params![effect_id], |row| {
-                Ok(EffectTransition {
+                Ok(effect::Transition {
                     id: row.get(0)?,
                     sequence: row.get(1)?,
-                    state: EffectState::decode(&row.get::<_, String>(2)?),
-                    reason: EffectTransitionReason::decode(&row.get::<_, String>(3)?),
+                    state: effect::State::decode(&row.get::<_, String>(2)?),
+                    reason: effect::Reason::decode(&row.get::<_, String>(3)?),
                     evidence: row.get(4)?,
                     occurred: row.get(5)?,
                 })
@@ -169,8 +170,8 @@ impl Database<'_> {
     pub fn reconcile_effects(
         &self,
         turn: &str,
-        prepared_reason: EffectTransitionReason,
-        dispatching_reason: EffectTransitionReason,
+        prepared_reason: effect::Reason,
+        dispatching_reason: effect::Reason,
         occurred: &str,
     ) -> Result<(), String> {
         let mut stmt = self
@@ -194,9 +195,9 @@ impl Database<'_> {
 
         for (effect_id, state) in rows {
             let (next, reason, settled) = if state == "prepared" {
-                (EffectState::NotDispatched, prepared_reason.clone(), true)
+                (effect::State::NotDispatched, prepared_reason.clone(), true)
             } else {
-                (EffectState::Unknown, dispatching_reason.clone(), false)
+                (effect::State::Unknown, dispatching_reason.clone(), false)
             };
             self.conn
                 .execute(

@@ -1,4 +1,5 @@
 use super::*;
+use santi_core::{message, strand};
 
 #[tokio::test]
 async fn send_rejection_locks() {
@@ -19,8 +20,8 @@ async fn send_rejection_locks() {
     let error = send_strand_handler(
         State(service),
         Path(strand.id),
-        Json(SendStrandRequest {
-            content: vec![MessagePart::Text {
+        Json(strand::Post {
+            content: vec![message::Part::Text {
                 text: "this exceeds the tiny budget".to_string(),
             }],
         }),
@@ -76,8 +77,8 @@ async fn drive_failure_http_recovery() {
     let accepted = send_strand_handler(
         State(service.clone()),
         Path(strand.id.clone()),
-        Json(SendStrandRequest {
-            content: vec![MessagePart::Text {
+        Json(strand::Post {
+            content: vec![message::Part::Text {
                 text: "x".to_string(),
             }],
         }),
@@ -105,7 +106,7 @@ async fn drive_failure_http_recovery() {
         ),
     };
     assert_eq!(receipt.inbox, accepted.receipt.inbox);
-    assert_eq!(receipt.state, santi_core::ReceiptState::Accepted);
+    assert_eq!(receipt.state, santi_core::receipt::State::Accepted);
 
     let health = health_handler(State(service.clone())).await.into_response();
     assert_eq!(health.status(), StatusCode::SERVICE_UNAVAILABLE);
@@ -130,7 +131,7 @@ async fn drive_failure_http_recovery() {
             error.message()
         ),
     };
-    assert_eq!(driven.state, santi_core::DriveStrandState::Started);
+    assert_eq!(driven.state, santi_core::drive::State::Started);
 
     let health = health_handler(State(service)).await.into_response();
     assert_eq!(health.status(), StatusCode::OK);

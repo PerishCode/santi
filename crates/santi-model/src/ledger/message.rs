@@ -2,18 +2,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
-use super::Timestamp;
+use crate::Timestamp;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ActorType {
+#[schema(as = message::Role)]
+pub enum Role {
     Soul,
     System,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum MessageState {
+#[schema(as = message::State)]
+pub enum State {
     Pending,
     Fixed,
     Aborted,
@@ -21,19 +23,22 @@ pub enum MessageState {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum MessageKind {
+#[schema(as = message::Kind)]
+pub enum Kind {
     Text,
     SantiSystem,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct MessageContent {
-    pub parts: Vec<MessagePart>,
+#[schema(as = message::Content)]
+pub struct Content {
+    pub parts: Vec<Part>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum MessagePart {
+#[schema(as = message::Part)]
+pub enum Part {
     Text {
         text: String,
     },
@@ -43,10 +48,10 @@ pub enum MessagePart {
     },
 }
 
-impl MessageContent {
+impl Content {
     pub fn text(text: impl Into<String>) -> Self {
         Self {
-            parts: vec![MessagePart::Text { text: text.into() }],
+            parts: vec![Part::Text { text: text.into() }],
         }
     }
 
@@ -54,8 +59,8 @@ impl MessageContent {
         self.parts
             .iter()
             .filter_map(|part| match part {
-                MessagePart::Text { text } => Some(text.as_str()),
-                MessagePart::Image { .. } => None,
+                Part::Text { text } => Some(text.as_str()),
+                Part::Image { .. } => None,
             })
             .collect::<Vec<_>>()
             .join("\n\n")
@@ -63,25 +68,26 @@ impl MessageContent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MessageIntake {
+pub enum Intake {
     Request,
     Record,
 }
 
-impl MessageIntake {
+impl Intake {
     pub fn is_request(self) -> bool {
-        matches!(self, MessageIntake::Request)
+        matches!(self, Intake::Request)
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[schema(as = message::Message)]
 pub struct Message {
     pub id: String,
-    pub role: ActorType,
+    pub role: Role,
     pub actor: String,
-    pub kind: MessageKind,
-    pub content: MessageContent,
-    pub state: MessageState,
+    pub kind: Kind,
+    pub content: Content,
+    pub state: State,
     pub version: i64,
     pub deleted: Option<Timestamp>,
     pub created: Timestamp,
@@ -89,7 +95,8 @@ pub struct Message {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct StrandMessageRef {
+#[schema(as = message::Relation)]
+pub struct Relation {
     pub strand: String,
     pub message: String,
     pub seq: i64,
@@ -97,18 +104,20 @@ pub struct StrandMessageRef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct StrandMessage {
-    pub relation: StrandMessageRef,
+#[schema(as = message::Placed)]
+pub struct Placed {
+    pub relation: Relation,
     pub message: Message,
     pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct MessageEvent {
+#[schema(as = message::Event)]
+pub struct Event {
     pub id: String,
     pub message: String,
     pub action: String,
-    pub role: ActorType,
+    pub role: Role,
     pub actor: String,
     pub base_version: i64,
     pub payload: Value,

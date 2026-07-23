@@ -19,7 +19,7 @@ fn open() -> (tempfile::TempDir, Service) {
 
 fn register(service: &Service, id: &str, prefix: &str, token: &str) {
     service
-        .create_downstream(santi_core::CreateDownstreamRequest {
+        .create_downstream(santi_core::downstream::Draft {
             id: id.to_string(),
             prefix: prefix.to_string(),
             digest: hex::encode(Sha256::digest(token.as_bytes())),
@@ -27,8 +27,8 @@ fn register(service: &Service, id: &str, prefix: &str, token: &str) {
         .expect("create downstream");
 }
 
-fn receipt(admission: service::Admission) -> santi_core::IngestReceipt {
-    let service::Admission::Accepted(santi_core::IngestOutcome::Accepted { receipt }) = admission
+fn receipt(admission: service::Admission) -> santi_core::ingest::Receipt {
+    let service::Admission::Accepted(santi_core::ingest::Outcome::Accepted { receipt }) = admission
     else {
         panic!("expected accepted admission")
     };
@@ -40,7 +40,7 @@ async fn credential_and_zone_gate_ingest() {
     let (_temp, service) = open();
     register(&service, "stim", "stim:", "s3cret");
     let soul = service.list_souls().expect("list souls")[0].id.clone();
-    let request = santi_core::IngestRequest {
+    let request = santi_core::ingest::Request {
         soul: soul.clone(),
         label: "stim:alice".to_string(),
         text: "hello".to_string(),
@@ -63,7 +63,7 @@ async fn credential_and_zone_gate_ingest() {
         service
             .ingest_downstream(
                 "s3cret",
-                santi_core::IngestRequest {
+                santi_core::ingest::Request {
                     label: "other:bob".to_string(),
                     request: "stim-message-2".to_string(),
                     ..request
@@ -79,7 +79,7 @@ async fn request_key_replays_receipt_and_rejects_changed_payload() {
     let (_temp, service) = open();
     register(&service, "stim", "stim:", "s3cret");
     let soul = service.list_souls().expect("list souls")[0].id.clone();
-    let request = santi_core::IngestRequest {
+    let request = santi_core::ingest::Request {
         soul,
         label: "stim:alice".to_string(),
         text: "hello".to_string(),
@@ -101,7 +101,7 @@ async fn request_key_replays_receipt_and_rejects_changed_payload() {
     let strand_count = service.list_strands().expect("list strands").len();
     let error = match service.ingest_downstream(
         "s3cret",
-        santi_core::IngestRequest {
+        santi_core::ingest::Request {
             label: "stim:bob".to_string(),
             text: "changed".to_string(),
             ..request
@@ -121,7 +121,7 @@ async fn request_key_replays_receipt_and_rejects_changed_payload() {
 fn registration_is_unique_idempotent_and_secret_free() {
     let (_temp, service) = open();
     let digest = hex::encode(Sha256::digest(b"s3cret"));
-    let request = santi_core::CreateDownstreamRequest {
+    let request = santi_core::downstream::Draft {
         id: "stim".to_string(),
         prefix: "stim:".to_string(),
         digest: digest.clone(),
@@ -135,11 +135,11 @@ fn registration_is_unique_idempotent_and_secret_free() {
     assert_eq!(repeated.id, created.id);
     let exposed = serde_json::to_value(&created).expect("serialize downstream");
     assert!(exposed.get("digest").is_none());
-    let decoded: santi_core::DownstreamCredential =
+    let decoded: santi_core::downstream::Credential =
         serde_json::from_value(exposed).expect("deserialize public downstream");
     assert!(decoded.digest.is_empty());
     let overlap = service
-        .create_downstream(santi_core::CreateDownstreamRequest {
+        .create_downstream(santi_core::downstream::Draft {
             id: "nested".to_string(),
             prefix: "stim:nested:".to_string(),
             digest: hex::encode(Sha256::digest(b"nested")),
@@ -147,7 +147,7 @@ fn registration_is_unique_idempotent_and_secret_free() {
         .expect_err("overlap must fail");
     assert!(overlap.contains("overlaps"));
     let reused = service
-        .create_downstream(santi_core::CreateDownstreamRequest {
+        .create_downstream(santi_core::downstream::Draft {
             id: "github".to_string(),
             prefix: "github:".to_string(),
             digest,

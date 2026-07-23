@@ -1,4 +1,5 @@
 use super::support::*;
+use santi_core::{message, tool};
 
 #[test]
 fn fork_copies_prefix() {
@@ -8,33 +9,33 @@ fn fork_copies_prefix() {
     let first = store
         .append_message(Draft {
             strand: &parent.id,
-            actor: ActorType::System,
+            actor: message::Role::System,
             id: store.system_actor_id(),
-            content: MessageContent::text("first"),
-            state: MessageState::Fixed,
-            intake: MessageIntake::Record,
+            content: message::Content::text("first"),
+            state: message::State::Fixed,
+            intake: message::Intake::Record,
         })
         .expect("append first")
         .strand_message;
     let second = store
         .append_message(Draft {
             strand: &parent.id,
-            actor: ActorType::System,
+            actor: message::Role::System,
             id: store.system_actor_id(),
-            content: MessageContent::text("second"),
-            state: MessageState::Fixed,
-            intake: MessageIntake::Record,
+            content: message::Content::text("second"),
+            state: message::State::Fixed,
+            intake: message::Intake::Record,
         })
         .expect("append second")
         .strand_message;
     let third = store
         .append_message(Draft {
             strand: &parent.id,
-            actor: ActorType::System,
+            actor: message::Role::System,
             id: store.system_actor_id(),
-            content: MessageContent::text("third"),
-            state: MessageState::Fixed,
-            intake: MessageIntake::Record,
+            content: message::Content::text("third"),
+            state: message::State::Fixed,
+            intake: message::Intake::Record,
         })
         .expect("append third")
         .strand_message;
@@ -72,11 +73,11 @@ fn fork_copies_inner_compacts() {
             store
                 .append_message(Draft {
                     strand: &parent.id,
-                    actor: ActorType::System,
+                    actor: message::Role::System,
                     id: store.system_actor_id(),
-                    content: MessageContent::text(text),
-                    state: MessageState::Fixed,
-                    intake: MessageIntake::Record,
+                    content: message::Content::text(text),
+                    state: message::State::Fixed,
+                    intake: message::Intake::Record,
                 })
                 .expect("append")
                 .strand_message,
@@ -137,11 +138,11 @@ fn fork_reuses_tools() {
     let user = store
         .append_message(Draft {
             strand: &parent.id,
-            actor: ActorType::System,
+            actor: message::Role::System,
             id: store.system_actor_id(),
-            content: MessageContent::text("run"),
-            state: MessageState::Fixed,
-            intake: MessageIntake::Request,
+            content: message::Content::text("run"),
+            state: message::State::Fixed,
+            intake: message::Intake::Request,
         })
         .expect("append user")
         .strand_message;
@@ -155,7 +156,7 @@ fn fork_reuses_tools() {
             call: "call_fork",
             name: "shell",
             arguments: &serde_json::json!({ "command": "echo fork" }),
-            provenance: &ToolCallProvenance {
+            provenance: &tool::Provenance {
                 family: "openai".to_string(),
                 item: Some(serde_json::json!({ "type": "function_call", "id": "fc_fork" })),
                 mark: Some("fc_fork".to_string()),

@@ -1,5 +1,6 @@
 use super::support::*;
 use santi_core::service::{self, Service};
+use santi_core::{message, strand};
 
 #[tokio::test]
 async fn emits_turn_completed() {
@@ -22,8 +23,8 @@ async fn emits_turn_completed() {
     let response = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "say hi".to_string(),
                 }],
             },
@@ -35,7 +36,7 @@ async fn emits_turn_completed() {
     let completed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events.recv().await.expect("stream event").payload {
-                santi_core::SantiStreamPayload::TurnCompleted { turn, .. } => break turn,
+                santi_core::stream::Payload::TurnCompleted { turn, .. } => break turn,
                 _ => continue,
             }
         }
@@ -64,7 +65,7 @@ async fn labeled_turn_emits_envelope_and_records_outbox() {
     let mut events = service.subscribe_stream();
     let soul = service.list_souls().expect("list souls")[0].id.clone();
     let label = "github:ops:issue:PerishCode/santi#7";
-    let santi_core::IngestOutcome::Accepted { .. } = service
+    let santi_core::ingest::Outcome::Accepted { .. } = service
         .ingest_external_event(&soul, label, "external request".to_string())
         .expect("ingest event")
     else {
@@ -73,7 +74,7 @@ async fn labeled_turn_emits_envelope_and_records_outbox() {
 
     let (label_seen, text_seen) = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if let santi_core::SantiStreamPayload::TurnCompleted { label, text, .. } =
+            if let santi_core::stream::Payload::TurnCompleted { label, text, .. } =
                 events.recv().await.expect("stream event").payload
             {
                 break (label, text);
@@ -117,7 +118,7 @@ async fn downstream_batch_isolates_zone_and_advances_over_other_zones() {
         .expect("ingest github");
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if let santi_core::SantiStreamPayload::TurnCompleted {
+            if let santi_core::stream::Payload::TurnCompleted {
                 label: Some(label), ..
             } = stream.recv().await.expect("stream event").payload
                 && label == "github:issue:1"
@@ -140,7 +141,7 @@ async fn downstream_batch_isolates_zone_and_advances_over_other_zones() {
         .expect("ingest stim");
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if let santi_core::SantiStreamPayload::TurnCompleted {
+            if let santi_core::stream::Payload::TurnCompleted {
                 label: Some(label), ..
             } = stream.recv().await.expect("stream event").payload
                 && label == "stim:alice"

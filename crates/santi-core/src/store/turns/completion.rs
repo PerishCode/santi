@@ -2,8 +2,9 @@ use rusqlite::params;
 use serde_json::json;
 
 use super::{provider_incident_key, runtime_incident_key};
+use crate::message;
 use crate::store::{SantiStore, db::Database, execution_budget_incident_key};
-use crate::{StrandMessage, Turn, now, tag};
+use crate::{now, tag, turn::Turn};
 
 pub struct Completion<'a> {
     pub turn: &'a str,
@@ -21,8 +22,8 @@ impl SantiStore {
     pub(crate) fn complete(
         &self,
         completion: Completion<'_>,
-        message: Option<&StrandMessage>,
-    ) -> Result<(Turn, Option<crate::TurnEvent>), String> {
+        message: Option<&message::Placed>,
+    ) -> Result<(Turn, Option<crate::event::Event>), String> {
         let mut conn = self.conn.lock().unwrap();
         let now = now();
         let state = completion.response.as_ref().map(|response| {
@@ -108,7 +109,7 @@ impl SantiStore {
             label.as_deref(),
             message.filter(|message| !message.text.trim().is_empty()),
         ) {
-            let event = crate::TurnEvent {
+            let event = crate::event::Event {
                 id: tag("tev"),
                 strand: strand.clone(),
                 turn: completion.turn.to_string(),

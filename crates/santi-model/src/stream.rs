@@ -1,77 +1,60 @@
 use serde::{Deserialize, Serialize};
+
+use crate::Timestamp;
 use utoipa::ToSchema;
 
-use super::{
-    ActorType, Compact, MaterialUpdated, MessageEvent, Strand, StrandEffect, StrandMessage,
-    ThinkingSpan, Timestamp, ToolCall, ToolResult, Turn,
-};
 use santi_error::{Fault, Incident, Transition};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SantiStreamEvent {
+#[schema(as = stream::Event)]
+pub struct Event {
     pub id: String,
     pub strand: String,
     pub created: Timestamp,
-    pub payload: SantiStreamPayload,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TurnActivityState {
-    Requesting,
-    Thinking,
-    Generating,
-    CallingTool,
-    RunningTool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct TurnActivity {
-    pub turn: String,
-    pub state: TurnActivityState,
-    pub response: Option<String>,
+    pub payload: Payload,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum SantiStreamPayload {
+#[schema(as = stream::Payload)]
+pub enum Payload {
     StreamOpen,
     MessageCreated {
-        message: StrandMessage,
+        message: crate::message::Placed,
     },
     MessageDelta {
         message: String,
         turn: String,
-        role: ActorType,
+        role: crate::message::Role,
         text: String,
     },
     MessageCompleted {
         turn: String,
-        message: StrandMessage,
+        message: crate::message::Placed,
     },
     ToolCallCreated {
-        tool_call: ToolCall,
+        tool_call: crate::tool::Call,
     },
     ToolResultCreated {
-        tool_result: ToolResult,
+        tool_result: crate::tool::Reply,
     },
     ThinkingCreated {
-        thinking: ThinkingSpan,
+        thinking: crate::thinking::Span,
     },
     ThinkingUpdated {
-        thinking: ThinkingSpan,
+        thinking: crate::thinking::Span,
     },
     ThinkingCompleted {
-        thinking: ThinkingSpan,
+        thinking: crate::thinking::Span,
     },
     MaterialUpdated {
-        material: MaterialUpdated,
+        material: crate::material::Updated,
     },
     TurnStarted {
-        turn: Turn,
+        turn: crate::turn::Turn,
     },
     TurnActivity {
-        activity: TurnActivity,
+        activity: crate::turn::Activity,
     },
     TurnCompleted {
         turn: String,
@@ -90,15 +73,16 @@ pub enum SantiStreamPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct StrandRuntimeSnapshot {
-    pub strand: Strand,
-    pub messages: Vec<StrandMessage>,
-    pub events: Vec<MessageEvent>,
-    pub turns: Vec<Turn>,
-    pub thinking: Vec<ThinkingSpan>,
-    pub calls: Vec<ToolCall>,
-    pub results: Vec<ToolResult>,
-    pub compacts: Vec<Compact>,
-    pub effects: Vec<StrandEffect>,
+#[schema(as = stream::Snapshot)]
+pub struct Snapshot {
+    pub strand: crate::strand::Strand,
+    pub messages: Vec<crate::message::Placed>,
+    pub events: Vec<crate::message::Event>,
+    pub turns: Vec<crate::turn::Turn>,
+    pub thinking: Vec<crate::thinking::Span>,
+    pub calls: Vec<crate::tool::Call>,
+    pub results: Vec<crate::tool::Reply>,
+    pub compacts: Vec<crate::compact::Compact>,
+    pub effects: Vec<crate::effect::Effect>,
     pub errors: Vec<Incident>,
 }

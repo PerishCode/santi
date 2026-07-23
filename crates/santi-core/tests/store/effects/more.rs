@@ -1,4 +1,5 @@
 use super::*;
+use santi_core::{effect, tool};
 
 #[test]
 fn restart_ambiguity() {
@@ -15,7 +16,7 @@ fn restart_ambiguity() {
                 call: "call_still_prepared",
                 name: "shell",
                 arguments: &json!({"command": "printf prepared"}),
-                provenance: &ToolCallProvenance::default(),
+                provenance: &tool::Provenance::default(),
             },
             Some("shell"),
         )
@@ -27,7 +28,7 @@ fn restart_ambiguity() {
         .effect_status(&started.effect_id)
         .expect("query effect")
         .expect("effect");
-    assert_eq!(status.effect.state, EffectState::Unknown);
+    assert_eq!(status.effect.state, effect::State::Unknown);
     assert_eq!(
         status
             .transitions
@@ -35,23 +36,23 @@ fn restart_ambiguity() {
             .map(|transition| transition.reason.clone())
             .collect::<Vec<_>>(),
         vec![
-            EffectTransitionReason::IntentPersisted,
-            EffectTransitionReason::DispatchWindowOpened,
-            EffectTransitionReason::RestartDuringDispatch,
+            effect::Reason::IntentPersisted,
+            effect::Reason::DispatchWindowOpened,
+            effect::Reason::RestartDuringDispatch,
         ]
     );
     let prepared = store
         .effect_status(&prepared_id)
         .expect("query prepared effect")
         .expect("prepared effect");
-    assert_eq!(prepared.effect.state, EffectState::NotDispatched);
+    assert_eq!(prepared.effect.state, effect::State::NotDispatched);
     assert_eq!(
         prepared
             .transitions
             .last()
             .expect("restart transition")
             .reason,
-        EffectTransitionReason::RestartBeforeDispatch
+        effect::Reason::RestartBeforeDispatch
     );
     assert!(
         store
@@ -63,15 +64,15 @@ fn restart_ambiguity() {
     let resolved = store
         .resolve_effect(
             &started.effect_id,
-            EffectResolutionOutcome::NotApplied,
+            effect::Outcome::NotApplied,
             "operator checked the target system",
         )
         .expect("resolve")
         .expect("resolved effect");
-    assert_eq!(resolved.effect.state, EffectState::ResolvedNotApplied);
+    assert_eq!(resolved.effect.state, effect::State::ResolvedNotApplied);
     assert_eq!(
         resolved.transitions.last().expect("resolution").reason,
-        EffectTransitionReason::OperatorResolvedNotApplied
+        effect::Reason::OperatorResolvedNotApplied
     );
     assert_eq!(
         resolved
@@ -91,11 +92,7 @@ fn restart_ambiguity() {
     );
     assert!(
         store
-            .resolve_effect(
-                &started.effect_id,
-                EffectResolutionOutcome::Applied,
-                "second guess",
-            )
+            .resolve_effect(&started.effect_id, effect::Outcome::Applied, "second guess",)
             .is_err(),
         "a settled operator resolution is immutable"
     );

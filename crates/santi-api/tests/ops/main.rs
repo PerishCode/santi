@@ -92,7 +92,7 @@ fn seed_drains_on_boot() {
     assert_eq!(started.drained_messages[0].text, "come look");
     assert_eq!(
         started.drained_messages[0].message.kind,
-        santi_core::MessageKind::SantiSystem
+        santi_core::message::Kind::SantiSystem
     );
 }
 

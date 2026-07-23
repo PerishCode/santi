@@ -1,4 +1,5 @@
 use super::*;
+use santi_core::{message, receipt, turn};
 
 #[tokio::test]
 async fn preserves_aborted_output() {
@@ -16,8 +17,8 @@ async fn preserves_aborted_output() {
         .messages
         .iter()
         .find(|message| {
-            message.message.role == ActorType::Soul
-                && message.message.state == MessageState::Aborted
+            message.message.role == message::Role::Soul
+                && message.message.state == message::State::Aborted
         })
         .expect("aborted partial assistant message");
     assert_eq!(partial_message.text, "partial runtime output");
@@ -27,7 +28,7 @@ async fn preserves_aborted_output() {
     assert_eq!(runtime.errors[0].first.context["stage"], "stream");
 
     let retry = send_text(&service, &strand.id, "continue with preserved partial").await;
-    wait_for_turn(&service, &strand.id, &turn(&retry).id, TurnStatus::Failed).await;
+    wait_for_turn(&service, &strand.id, &turn(&retry).id, turn::Status::Failed).await;
 
     let requests = provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
@@ -56,7 +57,7 @@ async fn classifies_response_failure() {
         &service,
         &strand.id,
         &turn(&response).id,
-        TurnStatus::Failed,
+        turn::Status::Failed,
     )
     .await;
     assert_no_failure_projection(&runtime);
@@ -76,7 +77,13 @@ async fn success_resolves_incident() {
     let service = open_service(&temp, provider.clone());
     let strand = service.create_strand().expect("create strand").strand;
     let failed = send_text(&service, &strand.id, "first attempt").await;
-    let before = wait_for_turn(&service, &strand.id, &turn(&failed).id, TurnStatus::Failed).await;
+    let before = wait_for_turn(
+        &service,
+        &strand.id,
+        &turn(&failed).id,
+        turn::Status::Failed,
+    )
+    .await;
     let held = before.errors[0].id.clone();
 
     let recovered = send_text(&service, &strand.id, "retry after recovery").await;
@@ -84,7 +91,7 @@ async fn success_resolves_incident() {
         &service,
         &strand.id,
         &turn(&recovered).id,
-        TurnStatus::Completed,
+        turn::Status::Completed,
     )
     .await;
 
@@ -132,7 +139,13 @@ async fn runtime_receipt_recovers() {
     .expect("install trigger");
 
     let failed = send_text(&service, &strand.id, "first obligation").await;
-    let runtime = wait_for_turn(&service, &strand.id, &turn(&failed).id, TurnStatus::Failed).await;
+    let runtime = wait_for_turn(
+        &service,
+        &strand.id,
+        &turn(&failed).id,
+        turn::Status::Failed,
+    )
+    .await;
     assert_eq!(runtime.errors.len(), 1);
     let incident = &runtime.errors[0];
     assert_eq!(incident.code, "runtime.turn.failed");
@@ -160,7 +173,7 @@ async fn runtime_receipt_recovers() {
         .receipt_status(&failed.receipt.inbox)
         .expect("receipt query")
         .expect("receipt");
-    assert_eq!(failed_receipt.state, ReceiptState::TurnFailed);
+    assert_eq!(failed_receipt.state, receipt::State::Failed);
     assert_eq!(
         failed_receipt
             .transitions
@@ -176,7 +189,7 @@ async fn runtime_receipt_recovers() {
         &service,
         &strand.id,
         &turn(&successor).id,
-        TurnStatus::Completed,
+        turn::Status::Completed,
     )
     .await;
     assert_eq!(runtime.errors[0].status, santi_core::Status::Resolved);
@@ -188,7 +201,7 @@ async fn runtime_receipt_recovers() {
         .receipt_status(&failed.receipt.inbox)
         .expect("receipt query")
         .expect("receipt");
-    assert_eq!(recovered_receipt.state, ReceiptState::Completed);
+    assert_eq!(recovered_receipt.state, receipt::State::Completed);
     assert_eq!(
         recovered_receipt
             .transitions
@@ -196,11 +209,11 @@ async fn runtime_receipt_recovers() {
             .map(|event| event.state.clone())
             .collect::<Vec<_>>(),
         vec![
-            ReceiptState::Accepted,
-            ReceiptState::Driving,
-            ReceiptState::TurnFailed,
-            ReceiptState::Driving,
-            ReceiptState::Completed,
+            receipt::State::Accepted,
+            receipt::State::Driving,
+            receipt::State::Failed,
+            receipt::State::Driving,
+            receipt::State::Completed,
         ]
     );
     assert_eq!(provider.requests.lock().unwrap().len(), 2);

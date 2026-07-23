@@ -1,4 +1,5 @@
 use super::*;
+use santi_core::{message, strand};
 
 #[tokio::test]
 async fn drive_failure_recovers() {
@@ -31,8 +32,8 @@ async fn drive_failure_recovers() {
     let accepted = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "accepted before drive failure".to_string(),
                 }],
             },
@@ -50,7 +51,7 @@ async fn drive_failure_recovers() {
         .receipt_status(&receipt_id)
         .expect("receipt status")
         .expect("receipt");
-    assert_eq!(receipt.state, santi_core::ReceiptState::Accepted);
+    assert_eq!(receipt.state, santi_core::receipt::State::Accepted);
     assert!(service.is_drive_degraded());
 
     let runtime = service
@@ -68,8 +69,8 @@ async fn drive_failure_recovers() {
     let rejected = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "must not enter inbox".to_string(),
                 }],
             },
@@ -84,7 +85,7 @@ async fn drive_failure_recovers() {
     conn.execute_batch("DROP TRIGGER force_turn_insert_failure;")
         .expect("remove failure trigger");
     let driven = service.drive_strand(&strand.id).expect("operator redrive");
-    assert_eq!(driven.state, santi_core::DriveStrandState::Started);
+    assert_eq!(driven.state, santi_core::drive::State::Started);
     let turn = driven.turn.expect("redrive turn");
     let runtime = Probe::new(&service)
         .completed_turn(&strand.id, &turn.id)
@@ -110,7 +111,7 @@ async fn drive_failure_recovers() {
         .receipt_status(&receipt_id)
         .expect("receipt status")
         .expect("receipt");
-    assert_eq!(receipt.state, santi_core::ReceiptState::Completed);
+    assert_eq!(receipt.state, santi_core::receipt::State::Completed);
     assert_eq!(
         receipt
             .transitions
@@ -118,10 +119,10 @@ async fn drive_failure_recovers() {
             .map(|transition| transition.state.clone())
             .collect::<Vec<_>>(),
         vec![
-            santi_core::ReceiptState::Accepted,
-            santi_core::ReceiptState::MechanicallyRecovered,
-            santi_core::ReceiptState::Driving,
-            santi_core::ReceiptState::Completed,
+            santi_core::receipt::State::Accepted,
+            santi_core::receipt::State::Recovered,
+            santi_core::receipt::State::Driving,
+            santi_core::receipt::State::Completed,
         ]
     );
     assert_eq!(

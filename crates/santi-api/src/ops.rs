@@ -55,17 +55,17 @@ fn inbox_seed_existing_strand(
 ) -> Result<SeedReport, String> {
     let outcome = store.enqueue_inbox_with_source(
         strand,
-        santi_core::MessageKind::SantiSystem,
-        santi_core::MessageContent::text(text),
-        Some(santi_core::InboxSource::new("offline_inbox_seed")),
+        santi_core::message::Kind::SantiSystem,
+        santi_core::message::Content::text(text),
+        Some(santi_core::ingest::Source::new("offline_inbox_seed")),
     )?;
     Ok(match outcome {
-        santi_core::IngestOutcome::Accepted { receipt } => SeedReport {
+        santi_core::ingest::Outcome::Accepted { receipt } => SeedReport {
             strand: receipt.strand,
             accepted: true,
             error: receipt.warning.map(|warning| *warning),
         },
-        santi_core::IngestOutcome::Rejected { error } => SeedReport {
+        santi_core::ingest::Outcome::Rejected { error } => SeedReport {
             strand: strand.to_string(),
             accepted: false,
             error: Some(*error),

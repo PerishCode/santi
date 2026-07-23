@@ -1,14 +1,14 @@
 use axum::http::HeaderMap;
 use santi_core::service::Admission;
-use santi_core::{IngestOutcome, IngestReceipt};
 
 use super::*;
+use santi_core::ingest;
 
 #[utoipa::path(
     post,
     path = "/api/v1/downstreams",
     responses(
-        (status = 200, body = DownstreamCredential),
+        (status = 200, body = downstream::Credential),
         (status = 400, body = Fault),
         (status = 409, body = Fault),
         (status = 500, body = Fault)
@@ -16,8 +16,8 @@ use super::*;
 )]
 pub(super) async fn create_downstream(
     State(service): State<Service>,
-    Json(request): Json<CreateDownstreamRequest>,
-) -> Result<Json<DownstreamCredential>, ApiError> {
+    Json(request): Json<downstream::Draft>,
+) -> Result<Json<downstream::Credential>, ApiError> {
     service
         .create_downstream(request)
         .map(Json)
@@ -28,13 +28,13 @@ pub(super) async fn create_downstream(
     get,
     path = "/api/v1/downstreams",
     responses(
-        (status = 200, body = Vec<DownstreamCredential>),
+        (status = 200, body = Vec<downstream::Credential>),
         (status = 500, body = Fault)
     )
 )]
 pub(super) async fn list_downstreams(
     State(service): State<Service>,
-) -> Result<Json<Vec<DownstreamCredential>>, ApiError> {
+) -> Result<Json<Vec<downstream::Credential>>, ApiError> {
     service
         .list_downstreams()
         .map(Json)
@@ -45,9 +45,9 @@ pub(super) async fn list_downstreams(
     post,
     path = "/api/v1/ingest",
     security(("downstream_bearer" = [])),
-    request_body = IngestRequest,
+    request_body = ingest::Request,
     responses(
-        (status = 202, body = IngestReceipt),
+        (status = 202, body = ingest::Receipt),
         (status = 400, body = Fault),
         (status = 401, body = Fault),
         (status = 403, body = Fault),
@@ -58,15 +58,17 @@ pub(super) async fn list_downstreams(
 pub(super) async fn ingest(
     State(service): State<Service>,
     headers: HeaderMap,
-    Json(request): Json<IngestRequest>,
-) -> Result<Json<IngestReceipt>, ApiError> {
+    Json(request): Json<ingest::Request>,
+) -> Result<Json<ingest::Receipt>, ApiError> {
     let token = bearer(&headers);
     match service
         .ingest_downstream(token, request)
         .map_err(ApiError::from_service)?
     {
-        Admission::Accepted(IngestOutcome::Accepted { receipt }) => Ok(Json(receipt)),
-        Admission::Accepted(IngestOutcome::Rejected { error }) => Err(ApiError::from_santi(*error)),
+        Admission::Accepted(ingest::Outcome::Accepted { receipt }) => Ok(Json(receipt)),
+        Admission::Accepted(ingest::Outcome::Rejected { error }) => {
+            Err(ApiError::from_santi(*error))
+        }
         Admission::Denied => Err(ApiError::unauthorized("invalid or missing credential")),
         Admission::Forbidden => Err(ApiError::forbidden(
             "label outside the credential's authorized prefix",

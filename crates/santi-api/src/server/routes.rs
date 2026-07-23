@@ -7,12 +7,8 @@ use axum::{
 };
 use santi_core::service::Service;
 use santi_core::{
-    CompactExecRequest, CompactExecResponse, CompactQueryResponse, CreateDownstreamRequest,
-    CreateSoulRequest, CreateStrandResponse, CreateWebhookRequest, DownstreamCredential,
-    DriveStrandResponse, Fault, ForkStrandResponse, HealthResponse, IngestRequest, MaterialRequest,
-    ReceiptStatus, SendStrandAcceptedResponse, SendStrandRequest, Soul, Strand,
-    StrandBudgetSnapshot, StrandDetail, StrandMaterial, StrandRuntimeSnapshot, TurnEventBatch,
-    WebhookSubscription,
+    Fault, Health, downstream::Credential, downstream::Draft, drive::Response, soul::Soul,
+    strand::Strand,
 };
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -94,8 +90,8 @@ async fn missing() -> impl IntoResponse {
     get,
     path = "/api/v1/health",
     responses(
-        (status = 200, body = HealthResponse),
-        (status = 503, body = HealthResponse)
+        (status = 200, body = Health),
+        (status = 503, body = Health)
     )
 )]
 pub async fn health(State(service): State<Service>) -> impl IntoResponse {
@@ -108,7 +104,7 @@ pub async fn health(State(service): State<Service>) -> impl IntoResponse {
     };
     (
         status,
-        Json(HealthResponse {
+        Json(Health {
             ok: !degraded,
             degraded,
             service: "santi-api".to_string(),

@@ -1,11 +1,11 @@
 use santi_provider::{ProviderItem, ProviderRequest, ProviderTool};
 use serde_json::{Value, json};
 
-use crate::ContextEstimate;
+use crate::budget;
 
 const ESTIMATOR: &str = "provider_json_bytes_v1";
 
-pub(crate) fn estimate_provider_request(request: &ProviderRequest) -> ContextEstimate {
+pub(crate) fn estimate_provider_request(request: &ProviderRequest) -> budget::Estimate {
     estimate_provider_parts(
         &request.input,
         request.instructions.as_deref(),
@@ -17,7 +17,7 @@ pub(crate) fn estimate_provider_parts(
     input: &[ProviderItem],
     instructions: Option<&str>,
     tools: Option<&[ProviderTool]>,
-) -> ContextEstimate {
+) -> budget::Estimate {
     let held = input
         .iter()
         .map(provider_item_value)
@@ -31,7 +31,7 @@ pub(crate) fn estimate_provider_parts(
                 .unwrap_or(0)
         })
         .unwrap_or(0);
-    ContextEstimate {
+    budget::Estimate {
         estimator: ESTIMATOR.to_string(),
         items: input.len() as i64,
         input: held as i64,
@@ -42,16 +42,16 @@ pub(crate) fn estimate_provider_parts(
 }
 
 pub(crate) fn inbound_provider_item(
-    kind: &crate::MessageKind,
-    content: &crate::MessageContent,
+    kind: &crate::message::Kind,
+    content: &crate::message::Content,
 ) -> Option<ProviderItem> {
     let text = content.rendered();
     if text.trim().is_empty() {
         return None;
     }
     let role = match kind {
-        crate::MessageKind::Text => "user",
-        crate::MessageKind::SantiSystem => "system",
+        crate::message::Kind::Text => "user",
+        crate::message::Kind::SantiSystem => "system",
     };
     Some(ProviderItem::Message {
         role: role.to_string(),

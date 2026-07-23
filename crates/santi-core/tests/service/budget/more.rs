@@ -1,4 +1,5 @@
 use super::*;
+use santi_core::{ingest, message, strand};
 
 #[tokio::test]
 async fn resume_holds_pending() {
@@ -11,11 +12,11 @@ async fn resume_holds_pending() {
     let service = service_with_budget(&temp, provider.clone());
     let strand = service.create_strand().expect("create strand").strand;
     let store = SantiStore::open(&db).expect("open store directly");
-    let santi_core::IngestOutcome::Accepted { .. } = store
+    let santi_core::ingest::Outcome::Accepted { .. } = store
         .enqueue_inbox(
             &strand.id,
-            MessageKind::Text,
-            MessageContent::text("stranded pending that exceeds budget"),
+            message::Kind::Text,
+            message::Content::text("stranded pending that exceeds budget"),
         )
         .expect("offline enqueue")
     else {
@@ -55,7 +56,7 @@ async fn rejected_payload_is_ephemeral() {
     });
     let service = service_with_budget(&temp, provider);
     let soul = service.list_souls().expect("souls")[0].id.clone();
-    let source = InboxSource::new("test").with_metadata(json!({
+    let source = ingest::Source::new("test").with_metadata(json!({
         "raw": "SOURCE_SECRET_MARKER".repeat(600),
     }));
     let outcome = service
@@ -66,7 +67,7 @@ async fn rejected_payload_is_ephemeral() {
             Some(source),
         )
         .expect("ingest");
-    let santi_core::IngestOutcome::Rejected { .. } = outcome else {
+    let santi_core::ingest::Outcome::Rejected { .. } = outcome else {
         panic!("expected over-budget rejection");
     };
 
@@ -100,8 +101,8 @@ async fn compact_resolves_incident() {
     let response = service
         .send_strand(
             &strand.id,
-            SendStrandRequest {
-                content: vec![MessagePart::Text {
+            strand::Post {
+                content: vec![message::Part::Text {
                     text: "please run the large tool".to_string(),
                 }],
             },
@@ -123,7 +124,7 @@ async fn compact_resolves_incident() {
         runtime
             .messages
             .iter()
-            .all(|message| message.message.kind != MessageKind::SantiSystem),
+            .all(|message| message.message.kind != message::Kind::SantiSystem),
         "budget preflight must not project a model-visible notice"
     );
 
@@ -146,7 +147,7 @@ async fn compact_resolves_incident() {
         rusqlite::params![
             "inbox_before_incident",
             strand.id,
-            serde_json::to_string(&MessageContent::text("deliver after recovery"))
+            serde_json::to_string(&message::Content::text("deliver after recovery"))
                 .expect("serialize inbox content"),
             "2026-07-10T00:00:00Z",
         ],
@@ -157,11 +158,11 @@ async fn compact_resolves_incident() {
     let boundary = store
         .append_message(Draft {
             strand: &strand.id,
-            actor: ActorType::Soul,
+            actor: message::Role::Soul,
             id: store.default_soul_id(),
-            content: MessageContent::text("manual compact boundary"),
-            state: MessageState::Fixed,
-            intake: MessageIntake::Record,
+            content: message::Content::text("manual compact boundary"),
+            state: message::State::Fixed,
+            intake: message::Intake::Record,
         })
         .expect("append manual boundary")
         .strand_message;
@@ -169,7 +170,7 @@ async fn compact_resolves_incident() {
     let compact = service
         .compact_exec(
             &strand.id,
-            santi_core::CompactExecRequest {
+            santi_core::compact::Exec {
                 first: Some(first),
                 last: Some(boundary.message.id),
                 from: None,
@@ -226,7 +227,7 @@ async fn budget_raise_clears_hold_on_ingest() {
             "over budget".to_string(),
         )
         .expect("external ingest");
-    let santi_core::IngestOutcome::Rejected { error } = rejected else {
+    let santi_core::ingest::Outcome::Rejected { error } = rejected else {
         panic!("first send should open the hold");
     };
     assert_eq!(error.code, "context.budget.exceeded");
@@ -237,7 +238,7 @@ async fn budget_raise_clears_hold_on_ingest() {
             "still held".to_string(),
         )
         .expect("external ingest repeat");
-    let santi_core::IngestOutcome::Rejected {
+    let santi_core::ingest::Outcome::Rejected {
         error: repeat_error,
     } = repeat
     else {
@@ -260,7 +261,7 @@ async fn budget_raise_clears_hold_on_ingest() {
             "after the raise".to_string(),
         )
         .expect("external ingest after raise");
-    let santi_core::IngestOutcome::Accepted { receipt } = outcome else {
+    let santi_core::ingest::Outcome::Accepted { receipt } = outcome else {
         panic!("under-budget hold must auto-clear on ingest remeasure");
     };
     let runtime = raised

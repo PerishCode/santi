@@ -2,16 +2,16 @@ use std::sync::Arc;
 
 use santi_provider::{Provider, chat::completions, openai};
 
-use crate::config::{ChatCompletionsConfig, OpenAiResponsesConfig, ProviderConfig};
+use crate::config::{ChatCompletions, OpenAiResponses, Resolved};
 
-pub fn from_config(config: ProviderConfig) -> Arc<dyn Provider> {
+pub fn build(config: Resolved) -> Arc<dyn Provider> {
     match config {
-        ProviderConfig::OpenAiResponses(config) => openai_provider(config),
-        ProviderConfig::ChatCompletions(config) => chat_completions_provider(config),
+        Resolved::OpenAiResponses(config) => responses(config),
+        Resolved::ChatCompletions(config) => completions(config),
     }
 }
 
-fn openai_provider(config: OpenAiResponsesConfig) -> Arc<dyn Provider> {
+fn responses(config: OpenAiResponses) -> Arc<dyn Provider> {
     Arc::new(openai::OpenAI::new(openai::Config {
         key: config.api_key,
         model: config.model,
@@ -23,7 +23,7 @@ fn openai_provider(config: OpenAiResponsesConfig) -> Arc<dyn Provider> {
     }))
 }
 
-fn chat_completions_provider(config: ChatCompletionsConfig) -> Arc<dyn Provider> {
+fn completions(config: ChatCompletions) -> Arc<dyn Provider> {
     Arc::new(completions::Chat::new(completions::Config {
         provider: config.provider,
         key: config.api_key,

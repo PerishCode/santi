@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use santi_api::config::RuntimePaths;
+use santi_api::config::Layout;
 
-fn paths_under(root: &Path) -> RuntimePaths {
-    RuntimePaths {
+fn paths_under(root: &Path) -> Layout {
+    Layout {
         database: root.join("runtime").join("db"),
         runtime: root.join("runtime"),
         execution: root.join("execution"),
@@ -51,7 +51,7 @@ fn doctor_handles_absence() {
     assert!(report.ok, "absent memory should be fine: {report:?}");
     assert!(!report.memory_present);
 
-    let missing = RuntimePaths {
+    let missing = Layout {
         database: temp.path().join("void").join("db"),
         ..paths
     };

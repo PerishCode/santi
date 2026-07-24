@@ -3,30 +3,40 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use crate::config::{Profile, ProviderConfig, RuntimePaths, resolve_provider_config};
+use crate::config::{Layout, Profile, Resolved};
 
 #[derive(Debug)]
 pub struct Runtime {
     pub bind: String,
-    pub listen_port: u16,
+    pub port: u16,
     pub provider: String,
     pub providers: BTreeMap<String, Profile>,
-    pub paths: RuntimePaths,
-    pub shutdown_grace: Duration,
-    pub github_login: Option<String>,
-    pub github_allow: Option<String>,
-    pub feishu_key: Option<String>,
-    pub feishu_allow: Option<String>,
+    pub paths: Layout,
+    pub grace: Duration,
+    pub github: Github,
+    pub feishu: Feishu,
     pub constitution: Option<PathBuf>,
 }
 
+#[derive(Debug, Default)]
+pub struct Github {
+    pub login: Option<String>,
+    pub allow: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct Feishu {
+    pub secret: Option<String>,
+    pub allow: Option<String>,
+}
+
 impl Runtime {
-    pub fn provider_config(&self) -> Result<ProviderConfig, String> {
+    pub fn resolved(&self) -> Result<Resolved, String> {
         let profile = self
             .providers
             .get(&self.provider)
             .ok_or_else(|| format!("provider {} is not defined in the config", self.provider))?;
-        resolve_provider_config(&self.provider, profile)
+        profile.resolve(&self.provider)
     }
 }
 

@@ -1,2 +1,10 @@
 [compound]
 OpenAI = "the provider's brand name. Not a compound this codebase composed and not one it can decompose: OpenAI is a proper noun owned by the vendor; the struct that speaks its wire binds the name rather than choosing it. One atom, spelled as the vendor spells it."
+OpenAiResponses = "the OpenAI Responses API — a product name, not a phrase this codebase composed. It names one of the two provider protocols the config selects; the enum binds the vendor's name rather than inventing one."
+ChatCompletions = "the Chat Completions API — the industry-standard OpenAI-compatible protocol, a fixed product name shared across vendors. The config binds it rather than paraphrasing it."
+api_key = "the credential key for an LLM provider, spelled the way every provider SDK and every operator's config already spells it. A fixed convention of the provider-API domain the config surface mirrors, not a compound santi coined."
+base_url = "the provider endpoint base, the settled name across OpenAI-compatible SDKs and tooling. A domain-fixed config key the operator already knows; santi binds it rather than renaming it."
+reasoning_effort = "OpenAI's own request parameter name for reasoning depth. A vendor-fixed term; the profile key mirrors the API it configures."
+max_output_tokens = "OpenAI Responses API's own parameter name for the output token ceiling. Vendor-fixed; the profile key mirrors the API."
+max_tokens = "the Chat Completions API's own parameter name for the output ceiling. An industry-fixed term shared across OpenAI-compatible providers; the profile key mirrors it."
+encrypt_key = "Feishu's own field name for the webhook payload encryption key. A vendor-fixed term; the webhook config binds the name Feishu chose."

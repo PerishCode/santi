@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
-use santi_api::config::{Profile, RuntimePaths};
+use santi_api::config::{Layout, Profile};
 use santi_api::runtime::Runtime;
 
 #[test]
@@ -12,7 +12,7 @@ fn reports_budget() {
     santi_core::Store::open(&paths.database).expect("open store");
     let held = runtime_under(temp.path(), Some(120000));
 
-    let report = paths.doctor_configured(&held).expect("doctor");
+    let report = paths.configured(&held).expect("doctor");
     assert!(report.ok, "expected healthy: {report:?}");
     let provider = report.provider.expect("provider report");
     assert_eq!(provider.profile.as_deref(), Some("openai"));
@@ -29,7 +29,7 @@ fn rejects_missing_budget() {
     santi_core::Store::open(&paths.database).expect("open store");
     let held = runtime_under(temp.path(), None);
 
-    let report = paths.doctor_configured(&held).expect("doctor");
+    let report = paths.configured(&held).expect("doctor");
     assert!(!report.ok);
     let provider = report.provider.expect("provider report");
     assert!(!provider.ok);
@@ -40,8 +40,8 @@ fn rejects_missing_budget() {
     );
 }
 
-fn paths_under(root: &Path) -> RuntimePaths {
-    RuntimePaths {
+fn paths_under(root: &Path) -> Layout {
+    Layout {
         database: root.join("runtime").join("db"),
         runtime: root.join("runtime"),
         execution: root.join("execution"),
@@ -68,15 +68,13 @@ fn runtime_under(root: &Path, budget: Option<usize>) -> Runtime {
     .expect("parse providers");
     Runtime {
         bind: "127.0.0.1:0".to_string(),
-        listen_port: 0,
+        port: 0,
         provider: "openai".to_string(),
         providers: file.providers,
         paths: paths_under(root),
-        shutdown_grace: Duration::from_secs(600),
-        github_login: None,
-        github_allow: None,
-        feishu_key: None,
-        feishu_allow: None,
+        grace: Duration::from_secs(600),
+        github: Default::default(),
+        feishu: Default::default(),
         constitution: None,
     }
 }

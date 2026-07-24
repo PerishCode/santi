@@ -76,17 +76,17 @@ fn run_inbox(command: InboxCommand, default_strand: Option<String>) -> Result<()
 
 async fn run_service(args: Vec<String>) -> Result<()> {
     let argv = std::iter::once("santi".to_string()).chain(args);
-    let cli = config::ServiceCli::try_parse_from(argv)
+    let cli = config::Service::try_parse_from(argv)
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-    match cli.command.unwrap_or(config::ServiceCommand::Serve) {
-        config::ServiceCommand::Serve => {
+    match cli.command.unwrap_or(config::Mode::Serve) {
+        config::Mode::Serve => {
             config::boot(cli.config.as_deref(), cli.over.partial())
                 .map_err(|error| anyhow::anyhow!(error))?;
             santi_api::serve()
                 .await
                 .map_err(|error| anyhow::anyhow!(error))
         }
-        config::ServiceCommand::ExportOpenApi => {
+        config::Mode::Export => {
             let document =
                 santi_api::export_openapi_json().map_err(|error| anyhow::anyhow!(error))?;
             println!("{document}");

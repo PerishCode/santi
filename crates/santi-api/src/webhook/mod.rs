@@ -50,15 +50,15 @@ pub(crate) fn adaptor_for(adaptor: &str) -> Option<Box<dyn WebhookAdaptor>> {
         "github" => {
             let held = crate::runtime::held();
             Some(Box::new(GithubAdaptor::configured(
-                held.github_login.as_deref(),
-                held.github_allow.as_deref(),
+                held.github.login.as_deref(),
+                held.github.allow.as_deref(),
             )))
         }
         "feishu" => {
             let held = crate::runtime::held();
             Some(Box::new(FeishuAdaptor::configured(
-                held.feishu_key.as_deref(),
-                held.feishu_allow.as_deref(),
+                held.feishu.secret.as_deref(),
+                held.feishu.allow.as_deref(),
             )))
         }
         _ => None,

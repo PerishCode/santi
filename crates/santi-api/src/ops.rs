@@ -2,7 +2,7 @@ use std::fs;
 
 use serde::Serialize;
 
-use crate::config::RuntimePaths;
+use crate::config::Layout;
 use crate::runtime::{self, Runtime};
 
 #[derive(Debug, Clone, Serialize)]
@@ -34,7 +34,7 @@ pub struct ProviderDoctorReport {
 
 pub fn doctor() -> Result<DoctorReport, String> {
     let held = runtime::held();
-    held.paths.doctor_configured(held)
+    held.paths.configured(held)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -73,14 +73,14 @@ fn inbox_seed_existing_strand(
     })
 }
 
-impl RuntimePaths {
+impl Layout {
     pub fn doctor(&self) -> Result<DoctorReport, String> {
         self.doctor_report(None)
     }
 
-    pub fn doctor_configured(&self, held: &Runtime) -> Result<DoctorReport, String> {
+    pub fn configured(&self, held: &Runtime) -> Result<DoctorReport, String> {
         let profile = Some(held.provider.clone());
-        let provider = match held.provider_config() {
+        let provider = match held.resolved() {
             Ok(provider) => ProviderDoctorReport {
                 profile,
                 kind: Some(provider.kind().to_string()),

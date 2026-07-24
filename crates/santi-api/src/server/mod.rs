@@ -21,7 +21,7 @@ pub fn export_openapi_json() -> Result<String, String> {
 
 pub async fn serve() -> Result<(), String> {
     let held = crate::runtime::held();
-    let provider = provider::from_config(held.provider_config()?);
+    let provider = provider::build(held.resolved()?);
     let bind = held.bind.clone();
     let paths = held.paths.clone();
     if let Some(parent) = paths.database.parent() {
@@ -63,7 +63,7 @@ pub async fn serve() -> Result<(), String> {
         .with_graceful_shutdown(shutdown_signal)
         .await
         .map_err(|error| error.to_string())?;
-    drainer.drain(held.shutdown_grace).await;
+    drainer.drain(held.grace).await;
     println!("santi-api: drained; exiting");
     Ok(())
 }

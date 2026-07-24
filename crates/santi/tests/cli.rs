@@ -86,55 +86,9 @@ fn parses_drive() {
 }
 
 #[test]
-fn parses_upgrade_rollback() {
-    let parsed = Cli::try_parse_from([
-        "santi",
-        "upgrade",
-        "/tmp/santi-new.deb",
-        "--previous-deb",
-        "/tmp/santi-old.deb",
-    ])
-    .unwrap();
-    let Command::Upgrade {
-        deb,
-        previous_deb,
-        run,
-        finalize,
-    } = parsed.command
-    else {
-        panic!("expected upgrade command");
-    };
-    assert_eq!(deb.as_deref(), Some("/tmp/santi-new.deb"));
-    assert_eq!(previous_deb.as_deref(), Some("/tmp/santi-old.deb"));
-    assert!(!run);
-    assert!(!finalize);
-}
-
-#[test]
-fn parses_durable_upgrade() {
-    let parsed = Cli::try_parse_from(["santi", "upgrade", "/tmp/santi-new.deb"]).unwrap();
-    let Command::Upgrade {
-        deb,
-        previous_deb,
-        run,
-        finalize,
-    } = parsed.command
-    else {
-        panic!("expected upgrade command");
-    };
-    assert_eq!(deb.as_deref(), Some("/tmp/santi-new.deb"));
-    assert_eq!(previous_deb, None);
-    assert!(!run);
-    assert!(!finalize);
-}
-
-#[test]
-fn parses_internal_storage_doctor() {
-    let parsed = Cli::try_parse_from(["santi", "doctor", "--storage-only"]).unwrap();
-    let Command::Doctor { storage_only } = parsed.command else {
-        panic!("expected doctor command");
-    };
-    assert!(storage_only);
+fn parses_doctor() {
+    let parsed = Cli::try_parse_from(["santi", "doctor"]).unwrap();
+    assert!(matches!(parsed.command, Command::Doctor));
 }
 
 #[path = "cli/parse.rs"]

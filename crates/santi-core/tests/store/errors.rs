@@ -5,14 +5,14 @@ fn generic_ports_are_transactional() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let scope = santi_core::Scope::new("runtime", "default");
-    let key = "runtime.upgrade.failed:runtime:default";
+    let key = "runtime.internal:runtime:default";
     let draft = || santi_core::error::Draft {
         key: key.to_string(),
-        descriptor: catalog::UPGRADE_FAILED,
+        descriptor: catalog::INTERNAL,
         scope: scope.clone(),
-        source: santi_core::Source::new("santi-api", "upgrade.install"),
-        message: "upgrade install failed".to_string(),
-        context: serde_json::json!({"attempt_id": "upgrade_1"}),
+        source: santi_core::Source::new("santi-core", "runtime.boot"),
+        message: "runtime boot failed".to_string(),
+        context: serde_json::json!({"phase": "one"}),
     };
 
     let opened = store.raise(draft()).expect("open incident");
@@ -28,8 +28,8 @@ fn generic_ports_are_transactional() {
         store
             .resolve(
                 key,
-                "upgrade.succeeded",
-                serde_json::json!({"attempt_id": "upgrade_2"}),
+                "runtime.recovered",
+                serde_json::json!({"phase": "two"}),
             )
             .expect("resolve incident")
     );

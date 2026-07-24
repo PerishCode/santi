@@ -32,22 +32,6 @@ pub const SOUL_MEMORY_INTERVENTION_REQUIRED: Descriptor = Descriptor {
     exposure: Exposure::OPERATOR_ONLY,
 };
 
-pub const UPGRADE_FAILED: Descriptor = Descriptor {
-    code: "runtime.upgrade.failed",
-    category: Category::Internal,
-    severity: Severity::Error,
-    retry: Retry::Changed,
-    exposure: Exposure::OPERATOR_ONLY,
-};
-
-pub const UPGRADE_HANDOVER_FAILED: Descriptor = Descriptor {
-    code: "runtime.upgrade.handover_failed",
-    category: Category::Internal,
-    severity: Severity::Error,
-    retry: Retry::Changed,
-    exposure: Exposure::OPERATOR_ONLY,
-};
-
 pub const ERROR_ENGINE_PERSISTENCE_FAILED: Descriptor = Descriptor {
     code: "runtime.error_engine.persistence_failed",
     category: Category::Internal,

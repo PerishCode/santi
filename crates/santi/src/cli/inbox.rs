@@ -3,7 +3,7 @@ use clap::Subcommand;
 #[derive(Subcommand)]
 pub enum InboxCommand {
     #[command(
-        about = "Enqueue one `santi_system` record into a strand's durable inbox WITHOUT a running service (a direct MQ producer). The strand comes from --strand/SANTI_STRAND_ID and must already exist. Used by the self-upgrade flow to seed the \"come look\" record before starting the final version"
+        about = "Enqueue one `santi_system` record into a strand's durable inbox WITHOUT a running service (a direct MQ producer). The strand comes from --strand/SANTI_STRAND_ID and must already exist"
     )]
     Seed {
         #[arg(

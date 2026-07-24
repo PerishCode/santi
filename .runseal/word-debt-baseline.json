@@ -1,19 +1,19 @@
 {
   "schema": "santi.word_debt.v1",
   "note": "C4 2026-07-14 (strand ss_0d11cd5a): core gate is zero, no core entry; internal no-rise; wire/test observed",
-  "total": 740,
+  "total": 538,
   "tracks": {
     "wire": {
-      "occurrences": 225,
-      "unique": 197
+      "occurrences": 149,
+      "unique": 134
     },
     "test": {
-      "occurrences": 337,
-      "unique": 318
+      "occurrences": 275,
+      "unique": 261
     },
     "internal": {
-      "occurrences": 178,
-      "unique": 157
+      "occurrences": 114,
+      "unique": 105
     }
   }
 }

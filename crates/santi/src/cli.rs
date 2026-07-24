@@ -73,44 +73,12 @@ pub enum Command {
         args: Vec<String>,
     },
     #[command(
-        about = "Offline pre-check of the store, default soul memory, and provider budget. A local ops command (NOT an HTTP client): exits non-zero when unhealthy, so the upgrade flow can gate on it. See PHASE-07"
+        about = "Offline pre-check of the store, default soul memory, and provider budget. A local ops command (NOT an HTTP client): exits non-zero when unhealthy"
     )]
-    Doctor {
-        #[arg(
-            help = "Internal storage-only check used by the installed final-version binary during a self-upgrade trial",
-            long,
-            hide = true
-        )]
-        storage_only: bool,
-    },
+    Doctor,
     #[command(about = "Offline store-level ops (act directly on the DB, no running service)")]
     #[command(subcommand)]
     Inbox(InboxCommand),
-    #[command(
-        about = "Self-upgrade (PHASE-07). Without `--run`: launch the detached upgrade unit and return fast with a signal. With `--run`: the orchestration itself (what the shipped `santi-upgrade.service` oneshot unit invokes). Local ops"
-    )]
-    Upgrade {
-        #[arg(help = "The `.deb` to install (path or, later, a downloaded artifact)")]
-        deb: Option<String>,
-        #[arg(
-            help = "Bootstrap artifact for the currently installed package. Required only until the runtime has retained a verified installed manifest",
-            long,
-            env = "SANTI_PREVIOUS_DEB"
-        )]
-        previous_deb: Option<String>,
-        #[arg(
-            help = "Run the orchestration in-process instead of launching the unit",
-            long
-        )]
-        run: bool,
-        #[arg(
-            help = "Internal final-version handover invoked by the upgrade runner",
-            long,
-            hide = true,
-            conflicts_with = "run"
-        )]
-        finalize: bool,
-    },
     #[command(about = "GET /api/v1/health")]
     Health,
     #[command(about = "Query canonical incidents by error scope")]

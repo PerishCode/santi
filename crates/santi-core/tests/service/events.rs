@@ -179,12 +179,12 @@ async fn runtime_outbox_reaches_bus() {
     let store = Store::open(&database).expect("open store");
     store
         .raise(santi_core::error::Draft {
-            key: "runtime.upgrade.failed:runtime:default".to_string(),
-            descriptor: santi_core::catalog::UPGRADE_FAILED,
+            key: "runtime.internal:runtime:default".to_string(),
+            descriptor: santi_core::catalog::INTERNAL,
             scope: santi_core::Scope::new("runtime", "default"),
-            source: santi_core::Source::new("santi-api", "upgrade.install"),
-            message: "upgrade failed".to_string(),
-            context: serde_json::json!({"attempt_id": "upgrade_test"}),
+            source: santi_core::Source::new("santi-core", "runtime.boot"),
+            message: "runtime failed".to_string(),
+            context: serde_json::json!({"phase": "test"}),
         })
         .expect("open incident");
     assert_eq!(
@@ -200,7 +200,7 @@ async fn runtime_outbox_reaches_bus() {
         .expect("transition timeout")
         .expect("transition");
     assert_eq!(transition.held.scope.kind, "runtime");
-    assert_eq!(transition.held.code, "runtime.upgrade.failed");
+    assert_eq!(transition.held.code, "runtime.internal");
     assert!(
         santi_core::Outbox::pending(&store, 10)
             .expect("pending transitions")

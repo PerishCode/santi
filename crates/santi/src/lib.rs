@@ -18,14 +18,8 @@ pub async fn run() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Service { args } => run_service(args).await,
-        Command::Doctor { storage_only } => run_doctor(storage_only),
+        Command::Doctor => run_doctor(),
         Command::Inbox(inbox) => run_inbox(inbox, cli.strand),
-        Command::Upgrade {
-            deb,
-            previous_deb,
-            run,
-            finalize,
-        } => run_upgrade(deb, previous_deb, run, finalize),
         other => {
             let defaults = ClientDefaults {
                 strand: cli.strand,
@@ -44,14 +38,9 @@ pub async fn run() -> Result<()> {
     }
 }
 
-fn run_doctor(storage_only: bool) -> Result<()> {
+fn run_doctor() -> Result<()> {
     config::boot(None, Default::default()).map_err(|error| anyhow::anyhow!(error))?;
-    let report = if storage_only {
-        santi_api::runtime::held().paths.doctor()
-    } else {
-        santi_api::ops::doctor()
-    }
-    .map_err(|error| anyhow::anyhow!(error))?;
+    let report = santi_api::ops::doctor().map_err(|error| anyhow::anyhow!(error))?;
     println!("{}", serde_json::to_string_pretty(&report)?);
     if !report.ok {
         anyhow::bail!("doctor: unhealthy (see report above)");
@@ -82,55 +71,6 @@ fn run_inbox(command: InboxCommand, default_strand: Option<String>) -> Result<()
             }
             Ok(())
         }
-    }
-}
-
-fn run_upgrade(
-    deb: Option<String>,
-    previous_deb: Option<String>,
-    run: bool,
-    finalize: bool,
-) -> Result<()> {
-    config::boot(None, Default::default()).map_err(|error| anyhow::anyhow!(error))?;
-    if finalize {
-        let request = serde_json::from_reader(std::io::stdin().lock())?;
-        let report = santi_api::upgrade::finalize(request).map_err(|error| {
-            eprintln!(
-                "{}",
-                serde_json::to_string(&error).unwrap_or_else(|_| error.to_string())
-            );
-            anyhow::anyhow!(error)
-        })?;
-        println!("{}", serde_json::to_string(&report)?);
-        Ok(())
-    } else if run {
-        let report = santi_api::upgrade::run(deb, previous_deb).map_err(|error| {
-            eprintln!(
-                "{}",
-                serde_json::to_string(&error).unwrap_or_else(|_| error.to_string())
-            );
-            anyhow::anyhow!(error)
-        })?;
-        let terminal_error = report.errors.first().cloned();
-        println!("{}", serde_json::to_string_pretty(&report)?);
-        match terminal_error {
-            Some(error) => Err(anyhow::anyhow!(error)),
-            None => Ok(()),
-        }
-    } else {
-        let deb = deb.ok_or_else(|| {
-            anyhow::anyhow!("usage: santi upgrade <deb> [--previous-deb <current.deb>] [--run]")
-        })?;
-        let started =
-            santi_api::upgrade::launch(&deb, previous_deb.as_deref()).map_err(|error| {
-                eprintln!(
-                    "{}",
-                    serde_json::to_string(&error).unwrap_or_else(|_| error.to_string())
-                );
-                anyhow::anyhow!(error)
-            })?;
-        println!("{}", serde_json::to_string_pretty(&started)?);
-        Ok(())
     }
 }
 

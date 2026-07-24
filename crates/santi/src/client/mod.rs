@@ -43,9 +43,8 @@ pub(crate) async fn run_client(
     let base = base_url.trim_end_matches('/').to_string();
     match command {
         Command::Service { .. } => unreachable!("service is handled before the client path"),
-        Command::Doctor { .. } => unreachable!("doctor is handled before the client path"),
+        Command::Doctor => unreachable!("doctor is handled before the client path"),
         Command::Inbox(_) => unreachable!("inbox is handled before the client path"),
-        Command::Upgrade { .. } => unreachable!("upgrade is handled before the client path"),
         Command::Health => http.get(&format!("{base}/api/v1/health")).await,
         Command::Errors {
             scope_kind,

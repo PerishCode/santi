@@ -15,8 +15,6 @@ pub struct SantiConfig {
     #[cascade(section)]
     pub server: Server,
     #[cascade(section)]
-    pub upgrade: Upgrade,
-    #[cascade(section)]
     pub paths: Paths,
     #[cascade(section)]
     pub webhooks: Webhooks,
@@ -33,7 +31,6 @@ impl Default for SantiConfig {
                 prefix: String::new(),
             },
             server: Server::default(),
-            upgrade: Upgrade::default(),
             paths: Paths::default(),
             webhooks: Webhooks::default(),
             providers: BTreeMap::new(),
@@ -51,26 +48,6 @@ impl Default for Server {
     fn default() -> Self {
         Server {
             shutdown_grace_secs: 600,
-        }
-    }
-}
-
-#[derive(Debug, Cascade)]
-#[cascade(section)]
-pub struct Upgrade {
-    pub timeout_secs: u64,
-    pub finalizer_bin: PathBuf,
-    pub soul: Option<String>,
-    pub strand: Option<String>,
-}
-
-impl Default for Upgrade {
-    fn default() -> Self {
-        Upgrade {
-            timeout_secs: 600,
-            finalizer_bin: PathBuf::from("/usr/bin/santi"),
-            soul: None,
-            strand: None,
         }
     }
 }
@@ -142,10 +119,6 @@ fn runtime(held: SantiConfig) -> Runtime {
                 .unwrap_or_else(|| home.join("execution")),
         },
         shutdown_grace: Duration::from_secs(held.server.shutdown_grace_secs),
-        upgrade_timeout: Duration::from_secs(held.upgrade.timeout_secs),
-        finalizer_bin: held.upgrade.finalizer_bin,
-        handover_soul: held.upgrade.soul,
-        handover_strand: held.upgrade.strand,
         github_login: held.webhooks.github.self_login,
         github_allow: held.webhooks.github.allow,
         feishu_key: held.webhooks.feishu.encrypt_key,

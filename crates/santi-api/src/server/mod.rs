@@ -42,7 +42,6 @@ pub async fn serve() -> Result<(), String> {
         },
         provider,
     )?;
-    crate::upgrade::register_attempt_handover_budgets(&service)?;
     let address: SocketAddr = bind
         .parse()
         .map_err(|_| "listen host/port did not form a valid socket address".to_string())?;

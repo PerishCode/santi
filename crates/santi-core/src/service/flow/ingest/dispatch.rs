@@ -179,13 +179,16 @@ impl Service {
             Ok(Opened::Started(started)) => {
                 self.refreshed();
                 for message in started.drained.iter().cloned() {
-                    self.publish(&strand.id, stream::Payload::MessageCreated { message });
+                    self.publish(
+                        &strand.id,
+                        stream::Payload::Message(crate::message::Beat::Created { message }),
+                    );
                 }
                 self.publish(
                     &strand.id,
-                    stream::Payload::TurnStarted {
+                    stream::Payload::Turn(crate::turn::Beat::Started {
                         turn: started.turn.clone(),
-                    },
+                    }),
                 );
                 let background = self.clone();
                 let strand = strand.id.clone();

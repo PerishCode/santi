@@ -3,52 +3,52 @@ use santi::watch::{json_field, next_sse_frame, parse_sse_frame, render_watch_eve
 #[test]
 fn renders_events() {
     assert_eq!(
-        render_watch_event("stream_open", r#"{"payload":{"type":"stream_open"}}"#),
+        render_watch_event("open", r#"{"payload":{"type":"open"}}"#),
         None
     );
     assert_eq!(
         render_watch_event(
-            "message_delta",
-            r#"{"payload":{"type":"message_delta","text":"chunk"}}"#,
+            "message",
+            r#"{"payload":{"type":"message","beat":"delta","text":"chunk"}}"#,
         ),
         None
     );
     assert_eq!(
         render_watch_event(
-            "turn_started",
-            r#"{"payload":{"type":"turn_started","turn":{"id":"turn_1","trigger":"strand_send"}}}"#,
+            "turn",
+            r#"{"payload":{"type":"turn","beat":"started","turn":{"id":"turn_1","trigger":"strand_send"}}}"#,
         )
         .as_deref(),
         Some("turn started turn_1 (strand_send)")
     );
     assert_eq!(
         render_watch_event(
-            "turn_activity",
-            r#"{"payload":{"type":"turn_activity","activity":{"turn":"turn_1","state":"running_tool"}}}"#,
+            "turn",
+            r#"{"payload":{"type":"turn","beat":"active","activity":{"turn":"turn_1","state":"running_tool"}}}"#,
         )
         .as_deref(),
         Some("turn turn_1: running_tool")
     );
     assert_eq!(
         render_watch_event(
-            "message_completed",
-            r#"{"payload":{"type":"message_completed","turn":"turn_1","message":{"text":"hello\nworld"}}}"#,
+            "message",
+            r#"{"payload":{"type":"message","beat":"completed","turn":"turn_1","message":{"text":"hello\nworld"}}}"#,
         )
         .as_deref(),
         Some("assistant completed turn_1: hello world")
     );
     assert_eq!(
         render_watch_event(
-            "tool_result_created",
-            r#"{"payload":{"type":"tool_result_created","result":{"call":"call_1","error":null}}}"#,
+            "tool",
+            r#"{"payload":{"type":"tool","beat":"replied","result":{"call":"call_1","error":null}}}"#,
         )
         .as_deref(),
         Some("tool result call_1: ok")
     );
     assert_eq!(
         render_watch_event(
-            "turn_failed",
-            r#"{"payload":{"type":"turn_failed","turn":"turn_1","error":{"code":"provider.turn.failed","message":"provider request failed","incident":"inc_1"}}}"#,
+            "turn",
+            r#"{"payload":{"type":"turn","beat":"failed","turn":"turn_1","error":{"code":"provider.turn.failed","message":"provider request failed","incident":"inc_1"}}}"#,
         )
         .as_deref(),
         Some(
@@ -57,8 +57,8 @@ fn renders_events() {
     );
     assert_eq!(
         render_watch_event(
-            "error_transition",
-            r#"{"payload":{"type":"error_transition","transition":{"kind":"opened","held":{"id":"inc_1","code":"provider.turn.failed","context":{"detail":"secret"}}}}}"#,
+            "transition",
+            r#"{"payload":{"type":"transition","transition":{"kind":"opened","held":{"id":"inc_1","code":"provider.turn.failed","context":{"detail":"secret"}}}}}"#,
         )
         .as_deref(),
         Some("error opened provider.turn.failed (inc_1)")
@@ -73,10 +73,14 @@ fn snippets_text() {
 
 #[test]
 fn parses_sse_frame() {
-    let frame = "id: e1\nevent: turn_completed\ndata: {\"payload\":{\"turn\":\"t1\"}}\n";
+    let frame =
+        "id: e1\nevent: turn\ndata: {\"payload\":{\"beat\":\"completed\",\"turn\":\"t1\"}}\n";
     let (event, data) = parse_sse_frame(frame).expect("frame");
-    assert_eq!(event, "turn_completed");
-    assert_eq!(data, "{\"payload\":{\"turn\":\"t1\"}}");
+    assert_eq!(event, "turn");
+    assert_eq!(
+        data,
+        "{\"payload\":{\"beat\":\"completed\",\"turn\":\"t1\"}}"
+    );
     assert!(parse_sse_frame(": keep-alive\n").is_none());
 }
 
@@ -95,7 +99,7 @@ async fn frames_across_chunks() {
     use futures_util::stream;
 
     let chunks: Vec<reqwest::Result<Vec<u8>>> = vec![
-        Ok(b"event: turn_started\ndata: {\"payl".to_vec()),
+        Ok(b"event: turn\ndata: {\"payl".to_vec()),
         Ok(b"oad\":{\"turn\":{\"id\":\"t1\"}}}\n\n: ka\n\n".to_vec()),
     ];
     let mut stream = stream::iter(chunks);
@@ -104,7 +108,7 @@ async fn frames_across_chunks() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(event, "turn_started");
+    assert_eq!(event, "turn");
     assert_eq!(
         json_field(&data, &["payload", "turn", "id"]).as_deref(),
         Some("t1")

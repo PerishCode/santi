@@ -34,10 +34,10 @@ impl Service {
         if let Some(message) = last.as_ref() {
             self.publish(
                 strand,
-                stream::Payload::MessageCompleted {
+                stream::Payload::Message(crate::message::Beat::Completed {
                     turn: turn.to_string(),
                     message: message.clone(),
-                },
+                }),
             );
         }
         let metadata = self.provider.metadata();
@@ -59,11 +59,11 @@ impl Service {
                 };
                 self.publish(
                     strand,
-                    stream::Payload::TurnCompleted {
+                    stream::Payload::Turn(crate::turn::Beat::Completed {
                         turn: turn.to_string(),
                         label,
                         text,
-                    },
+                    }),
                 );
             }
             Err(error) => self.bury(

@@ -123,3 +123,22 @@ pub struct Event {
     pub payload: Value,
     pub created: Timestamp,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "beat", rename_all = "snake_case")]
+#[schema(as = message::Beat)]
+pub enum Beat {
+    Created {
+        message: Placed,
+    },
+    Delta {
+        message: String,
+        turn: String,
+        role: Role,
+        text: String,
+    },
+    Completed {
+        turn: String,
+        message: Placed,
+    },
+}

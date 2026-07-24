@@ -180,9 +180,9 @@ impl Service {
                 .inscribe(&event.address.strand, content, message::Intake::Record)?;
         self.publish(
             &event.address.strand,
-            stream::Payload::MessageCreated {
+            stream::Payload::Message(crate::message::Beat::Created {
                 message: message.message,
-            },
+            }),
         );
         Ok(())
     }

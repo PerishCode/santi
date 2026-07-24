@@ -116,11 +116,10 @@ async fn aggregates_provider_failures() {
 
     let failed_event = std::iter::from_fn(|| events.try_recv().ok())
         .find_map(|event| match event.payload {
-            santi_core::stream::Payload::TurnFailed { turn: held, error }
-                if held == turn(&first).id =>
-            {
-                Some(error)
-            }
+            santi_core::stream::Payload::Turn(santi_core::turn::Beat::Failed {
+                turn: held,
+                error,
+            }) if held == turn(&first).id => Some(error),
             _ => None,
         })
         .expect("turn_failed event");

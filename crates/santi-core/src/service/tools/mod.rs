@@ -73,7 +73,7 @@ impl Service {
         )?;
         self.publish(
             strand,
-            stream::Payload::ToolCallCreated { call: held.clone() },
+            stream::Payload::Tool(crate::tool::Beat::Called { call: held.clone() }),
         );
         let result = if let Some(effect) = effect {
             self.shelled(Shell {
@@ -93,7 +93,10 @@ impl Service {
                 )),
             )?
         };
-        self.publish(strand, stream::Payload::ToolResultCreated { result });
+        self.publish(
+            strand,
+            stream::Payload::Tool(crate::tool::Beat::Replied { result }),
+        );
         Ok(())
     }
 

@@ -36,7 +36,12 @@ async fn emits_turn_completed() {
     let completed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events.recv().await.expect("stream event").payload {
-                santi_core::stream::Payload::TurnCompleted { turn, .. } => break turn,
+                santi_core::stream::Payload::Turn(santi_core::turn::Beat::Completed {
+                    turn,
+                    ..
+                }) => {
+                    break turn;
+                }
                 _ => continue,
             }
         }
@@ -74,8 +79,11 @@ async fn labeled_turn_emits_envelope_and_records_outbox() {
 
     let (label_seen, text_seen) = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if let santi_core::stream::Payload::TurnCompleted { label, text, .. } =
-                events.recv().await.expect("stream event").payload
+            if let santi_core::stream::Payload::Turn(santi_core::turn::Beat::Completed {
+                label,
+                text,
+                ..
+            }) = events.recv().await.expect("stream event").payload
             {
                 break (label, text);
             }
@@ -116,9 +124,10 @@ async fn downstream_batch_isolates_zone_and_advances_over_other_zones() {
         .expect("ingest github");
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if let santi_core::stream::Payload::TurnCompleted {
-                label: Some(label), ..
-            } = stream.recv().await.expect("stream event").payload
+            if let santi_core::stream::Payload::Turn(santi_core::turn::Beat::Completed {
+                label: Some(label),
+                ..
+            }) = stream.recv().await.expect("stream event").payload
                 && label == "github:issue:1"
             {
                 break;
@@ -137,9 +146,10 @@ async fn downstream_batch_isolates_zone_and_advances_over_other_zones() {
         .expect("ingest stim");
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if let santi_core::stream::Payload::TurnCompleted {
-                label: Some(label), ..
-            } = stream.recv().await.expect("stream event").payload
+            if let santi_core::stream::Payload::Turn(santi_core::turn::Beat::Completed {
+                label: Some(label),
+                ..
+            }) = stream.recv().await.expect("stream event").payload
                 && label == "stim:alice"
             {
                 break;

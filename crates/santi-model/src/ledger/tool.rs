@@ -31,3 +31,11 @@ pub struct Reply {
     pub error: Option<String>,
     pub created: Timestamp,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "beat", rename_all = "snake_case")]
+#[schema(as = tool::Beat)]
+pub enum Beat {
+    Called { call: Call },
+    Replied { result: Reply },
+}

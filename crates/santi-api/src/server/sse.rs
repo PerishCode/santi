@@ -34,7 +34,7 @@ pub(super) async fn strand_events(
             id: tag("stream"),
             strand: opened,
             created: now(),
-            payload: stream::Payload::StreamOpen,
+            payload: stream::Payload::Open,
         }));
 
         while let Some(event) = receive_strand(&mut receiver, &strand).await {
@@ -104,9 +104,9 @@ async fn receive_turn(receiver: &mut broadcast::Receiver<stream::Event>, prefix:
         let Some(event) = receive(receiver).await else {
             return false;
         };
-        if let stream::Payload::TurnCompleted {
+        if let stream::Payload::Turn(santi_core::turn::Beat::Completed {
             label: Some(label), ..
-        } = event.payload
+        }) = event.payload
             && label.starts_with(prefix)
         {
             return true;
@@ -140,20 +140,12 @@ fn sse_event(event: stream::Event) -> Event {
 
 fn sse_event_name(payload: &stream::Payload) -> &'static str {
     match payload {
-        stream::Payload::StreamOpen => "stream_open",
-        stream::Payload::MessageCreated { .. } => "message_created",
-        stream::Payload::MessageDelta { .. } => "message_delta",
-        stream::Payload::MessageCompleted { .. } => "message_completed",
-        stream::Payload::ToolCallCreated { .. } => "tool_call_created",
-        stream::Payload::ToolResultCreated { .. } => "tool_result_created",
-        stream::Payload::ThinkingCreated { .. } => "thinking_created",
-        stream::Payload::ThinkingUpdated { .. } => "thinking_updated",
-        stream::Payload::ThinkingCompleted { .. } => "thinking_completed",
-        stream::Payload::MaterialUpdated { .. } => "material_updated",
-        stream::Payload::TurnStarted { .. } => "turn_started",
-        stream::Payload::TurnActivity { .. } => "turn_activity",
-        stream::Payload::TurnCompleted { .. } => "turn_completed",
-        stream::Payload::TurnFailed { .. } => "turn_failed",
-        stream::Payload::Transition { .. } => "error_transition",
+        stream::Payload::Open => "open",
+        stream::Payload::Message(_) => "message",
+        stream::Payload::Tool(_) => "tool",
+        stream::Payload::Thinking(_) => "thinking",
+        stream::Payload::Turn(_) => "turn",
+        stream::Payload::Material(_) => "material",
+        stream::Payload::Transition { .. } => "transition",
     }
 }

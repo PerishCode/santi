@@ -2,9 +2,15 @@ use super::*;
 
 pub fn render_watch_event(event: &str, data: &str) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(data).ok()?;
-    match event {
-        "stream_open" | "message_delta" | "thinking_updated" => None,
-        "turn_started" => {
+    let beat = value
+        .get("payload")
+        .and_then(|payload| payload.get("beat"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    match (event, beat.as_str()) {
+        ("open", _) | ("message", "delta") | ("thinking", "updated") => None,
+        ("turn", "started") => {
             let turn = value.get("payload")?.get("turn")?;
             let id = turn.get("id").and_then(serde_json::Value::as_str)?;
             let trigger = turn
@@ -13,7 +19,7 @@ pub fn render_watch_event(event: &str, data: &str) -> Option<String> {
                 .unwrap_or("unknown");
             Some(format!("turn started {id} ({trigger})"))
         }
-        "turn_activity" => {
+        ("turn", "active") => {
             let activity = value.get("payload")?.get("activity")?;
             let id = activity.get("turn").and_then(serde_json::Value::as_str)?;
             let state = activity
@@ -22,7 +28,7 @@ pub fn render_watch_event(event: &str, data: &str) -> Option<String> {
                 .unwrap_or("unknown");
             Some(format!("turn {id}: {state}"))
         }
-        "message_created" => {
+        ("message", "created") => {
             let message = value.get("payload")?.get("message")?;
             Some(format!(
                 "message {} {}: {}",
@@ -37,7 +43,7 @@ pub fn render_watch_event(event: &str, data: &str) -> Option<String> {
                 )
             ))
         }
-        "message_completed" => {
+        ("message", "completed") => {
             let payload = value.get("payload")?;
             let turn = payload
                 .get("turn")
@@ -53,7 +59,7 @@ pub fn render_watch_event(event: &str, data: &str) -> Option<String> {
                 snippet(text, 500)
             ))
         }
-        "tool_call_created" => {
+        ("tool", "called") => {
             let call = value.get("payload")?.get("call")?;
             let id = call
                 .get("id")
@@ -65,7 +71,7 @@ pub fn render_watch_event(event: &str, data: &str) -> Option<String> {
                 .unwrap_or("tool");
             Some(format!("tool call {name} ({id})"))
         }
-        "tool_result_created" => {
+        ("tool", "replied") => {
             let result = value.get("payload")?.get("result")?;
             let call_id = result
                 .get("call")
@@ -78,9 +84,9 @@ pub fn render_watch_event(event: &str, data: &str) -> Option<String> {
             };
             Some(format!("tool result {call_id}: {status}"))
         }
-        "thinking_created" => thinking_line(&value, "thinking started"),
-        "thinking_completed" => thinking_line(&value, "thinking completed"),
-        "material_updated" => {
+        ("thinking", "created") => thinking_line(&value, "thinking started"),
+        ("thinking", "completed") => thinking_line(&value, "thinking completed"),
+        ("material", "updated") => {
             let material = value.get("payload")?.get("material")?;
             let kind = material
                 .get("kind")
@@ -88,11 +94,11 @@ pub fn render_watch_event(event: &str, data: &str) -> Option<String> {
                 .unwrap_or("material");
             Some(format!("material updated {kind}"))
         }
-        "turn_completed" => {
+        ("turn", "completed") => {
             json_field(data, &["payload", "turn"]).map(|id| format!("turn completed {id}"))
         }
-        "turn_failed" => render_turn_failure(value.get("payload")?),
-        "error_transition" => render_error_transition(value.get("payload")?),
+        ("turn", "failed") => render_turn_failure(value.get("payload")?),
+        ("transition", _) => render_error_transition(value.get("payload")?),
         _ => Some(format!("{event}: {}", snippet(data, 240))),
     }
 }

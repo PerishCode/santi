@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::Timestamp;
 use utoipa::ToSchema;
 
-use santi_error::{Fault, Incident, Transition};
+use santi_error::{Incident, Transition};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[schema(as = stream::Event)]
@@ -18,58 +18,13 @@ pub struct Event {
 #[serde(tag = "type", rename_all = "snake_case")]
 #[schema(as = stream::Payload)]
 pub enum Payload {
-    StreamOpen,
-    MessageCreated {
-        message: crate::message::Placed,
-    },
-    MessageDelta {
-        message: String,
-        turn: String,
-        role: crate::message::Role,
-        text: String,
-    },
-    MessageCompleted {
-        turn: String,
-        message: crate::message::Placed,
-    },
-    ToolCallCreated {
-        call: crate::tool::Call,
-    },
-    ToolResultCreated {
-        result: crate::tool::Reply,
-    },
-    ThinkingCreated {
-        thinking: crate::thinking::Span,
-    },
-    ThinkingUpdated {
-        thinking: crate::thinking::Span,
-    },
-    ThinkingCompleted {
-        thinking: crate::thinking::Span,
-    },
-    MaterialUpdated {
-        material: crate::material::Updated,
-    },
-    TurnStarted {
-        turn: crate::turn::Turn,
-    },
-    TurnActivity {
-        activity: crate::turn::Activity,
-    },
-    TurnCompleted {
-        turn: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        label: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        text: Option<String>,
-    },
-    TurnFailed {
-        turn: String,
-        error: Box<Fault>,
-    },
-    Transition {
-        transition: Box<Transition>,
-    },
+    Open,
+    Message(crate::message::Beat),
+    Tool(crate::tool::Beat),
+    Thinking(crate::thinking::Beat),
+    Turn(crate::turn::Beat),
+    Material(crate::material::Beat),
+    Transition { transition: Box<Transition> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

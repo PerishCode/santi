@@ -78,7 +78,7 @@ async fn handle_request(
                     &mut stream,
                     "200 OK",
                     "text/event-stream",
-                    "event: turn_completed\ndata: {\"payload\":{\"type\":\"turn_completed\",\"turn\":\"turn_seed\"}}\n\n",
+                    "event: turn\ndata: {\"payload\":{\"type\":\"turn\",\"beat\":\"completed\",\"turn\":\"turn_seed\"}}\n\n",
                 )
                 .await;
             }

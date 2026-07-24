@@ -33,3 +33,10 @@ pub struct Updated {
     pub kind: Kind,
     pub updated: Timestamp,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "beat", rename_all = "snake_case")]
+#[schema(as = material::Beat)]
+pub enum Beat {
+    Updated { material: Updated },
+}

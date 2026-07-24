@@ -31,12 +31,12 @@ impl Service {
         update.speech.push_str(&delta);
         self.publish(
             update.address.strand,
-            stream::Payload::MessageDelta {
+            stream::Payload::Message(crate::message::Beat::Delta {
                 message: format!("stream_{}", update.address.turn),
                 turn: update.address.turn.to_string(),
                 role: message::Role::Soul,
                 text: delta,
-            },
+            }),
         );
         Ok(())
     }

@@ -35,3 +35,12 @@ pub struct Span {
     pub updated: Timestamp,
     pub finished: Option<Timestamp>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "beat", rename_all = "snake_case")]
+#[schema(as = thinking::Beat)]
+pub enum Beat {
+    Created { thinking: Span },
+    Updated { thinking: Span },
+    Completed { thinking: Span },
+}

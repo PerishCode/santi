@@ -20,7 +20,7 @@ impl Service {
                 *progress.summary = Some(updated.clone());
                 self.publish(
                     progress.strand,
-                    stream::Payload::ThinkingUpdated { thinking: updated },
+                    stream::Payload::Thinking(crate::thinking::Beat::Updated { thinking: updated }),
                 );
             }
             return Ok(());
@@ -29,9 +29,9 @@ impl Service {
         let thinking = self.store.muse(progress.turn, progress.response)?;
         self.publish(
             progress.strand,
-            stream::Payload::ThinkingCreated {
+            stream::Payload::Thinking(crate::thinking::Beat::Created {
                 thinking: thinking.clone(),
-            },
+            }),
         );
         *progress.summary = Some(thinking.clone());
         *progress.current = Some(thinking);
@@ -54,7 +54,7 @@ impl Service {
             *thinking = updated.clone();
             self.publish(
                 strand,
-                stream::Payload::ThinkingUpdated { thinking: updated },
+                stream::Payload::Thinking(crate::thinking::Beat::Updated { thinking: updated }),
             );
         }
         Ok(())
@@ -72,9 +72,9 @@ impl Service {
         if let Some(completed) = self.store.conclude(&thinking.id, completion_reason)? {
             self.publish(
                 strand,
-                stream::Payload::ThinkingCompleted {
+                stream::Payload::Thinking(crate::thinking::Beat::Completed {
                     thinking: completed,
-                },
+                }),
             );
         }
         Ok(())
@@ -92,7 +92,7 @@ impl Service {
         if let Some(failed) = self.store.abandon(&thinking.id, error)? {
             self.publish(
                 strand,
-                stream::Payload::ThinkingCompleted { thinking: failed },
+                stream::Payload::Thinking(crate::thinking::Beat::Completed { thinking: failed }),
             );
         }
         Ok(())
@@ -107,13 +107,13 @@ impl Service {
     ) {
         self.publish(
             strand,
-            stream::Payload::TurnActivity {
+            stream::Payload::Turn(crate::turn::Beat::Active {
                 activity: turn::Activity {
                     turn: turn.to_string(),
                     state,
                     response,
                 },
-            },
+            }),
         );
     }
 }

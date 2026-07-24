@@ -65,13 +65,13 @@ impl Service {
 
         self.publish(
             id,
-            stream::Payload::MaterialUpdated {
+            stream::Payload::Material(crate::material::Beat::Updated {
                 material: material::Updated {
                     strand: id.to_string(),
                     kind: material::Kind::SystemPrompt,
                     updated,
                 },
-            },
+            }),
         );
         Ok(material)
     }

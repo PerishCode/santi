@@ -60,7 +60,7 @@ pub(crate) async fn watch_until_idle(watch: Watch<'_>) -> Result<()> {
 
 fn write_frame(stdout: &mut impl Write, format: WatchFormat, event: &str, data: &str) {
     let line = match format {
-        WatchFormat::Raw if event != "stream_open" => Some(data.to_string()),
+        WatchFormat::Raw if event != "open" => Some(data.to_string()),
         WatchFormat::Filtered => render_watch_event(event, data),
         _ => None,
     };
@@ -71,14 +71,17 @@ fn write_frame(stdout: &mut impl Write, format: WatchFormat, event: &str, data: 
 }
 
 fn track_frame(event: &str, data: &str, inflight: &mut HashSet<String>, seeded: &mut bool) {
-    match event {
-        "turn_started" => {
+    if event != "turn" {
+        return;
+    }
+    match json_field(data, &["payload", "beat"]).as_deref() {
+        Some("started") => {
             if let Some(id) = json_field(data, &["payload", "turn", "id"]) {
                 inflight.insert(id);
                 *seeded = true;
             }
         }
-        "turn_completed" | "turn_failed" => {
+        Some("completed") | Some("failed") => {
             if let Some(id) = json_field(data, &["payload", "turn"]) {
                 inflight.remove(&id);
             }

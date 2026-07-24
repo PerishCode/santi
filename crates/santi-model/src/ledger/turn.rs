@@ -54,3 +54,26 @@ pub struct Activity {
     pub state: Motion,
     pub response: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "beat", rename_all = "snake_case")]
+#[schema(as = turn::Beat)]
+pub enum Beat {
+    Started {
+        turn: Turn,
+    },
+    Active {
+        activity: Activity,
+    },
+    Completed {
+        turn: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+    },
+    Failed {
+        turn: String,
+        error: Box<santi_error::Fault>,
+    },
+}

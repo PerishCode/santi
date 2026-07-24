@@ -157,10 +157,10 @@ impl Service {
         self.dispatched();
         self.publish(
             strand,
-            stream::Payload::TurnFailed {
+            stream::Payload::Turn(crate::turn::Beat::Failed {
                 turn: turn.to_string(),
                 error: Box::new(canonical_error),
-            },
+            }),
         );
     }
 
@@ -235,9 +235,9 @@ impl Service {
                 let seq = message.message.relation.seq;
                 self.publish(
                     strand,
-                    stream::Payload::MessageCreated {
+                    stream::Payload::Message(crate::message::Beat::Created {
                         message: message.message,
-                    },
+                    }),
                 );
                 if let Err(error) = self.store.seal(turn, seq) {
                     eprintln!("santi: failed to finalize partial output for {turn}: {error}");

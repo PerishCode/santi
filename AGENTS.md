@@ -62,7 +62,7 @@ jq:
 
 ```sh
 … strand send '…' --watch --watch-format raw \
-  | jq -rc 'select(.payload.type=="message_completed")
+  | jq -rc 'select(.payload.type=="message" and .payload.beat=="completed")
             | .payload.message.content_text'
 ```
 

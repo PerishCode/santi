@@ -190,9 +190,15 @@ impl Service {
                 let background = self.clone();
                 let strand = strand.id.clone();
                 let turn = started.turn.id.clone();
-                tokio::spawn(async move {
+                let context = {
+                    let _entered = background.context.enter();
+                    background.context.with(plumb::trace::Span::open("turn"))
+                };
+                tokio::spawn(context.carry(async move {
+                    plumb::trace::Span::note("turn", &turn);
+                    plumb::trace::Span::note("strand", &strand);
                     background.conduct(strand, turn).await;
-                });
+                }));
                 drive::Outcome::Started(started.turn, started.drained)
             }
             Ok(Opened::Running(turn)) => drive::Outcome::Running(turn),

@@ -12,7 +12,7 @@ mod descriptions;
 use descriptions::COMPONENT_DESCRIPTIONS;
 use santi_core::{material, soul, strand, stream};
 
-const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 12] = [
+const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 11] = [
     (
         "downstream::Draft",
         "digest",
@@ -64,11 +64,6 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 12] = [
         "Absent only for an imported legacy row whose old schema had no neutral\ntool-call locator.",
     ),
     (
-        "effect::Transition",
-        "evidence",
-        "Human- or runtime-supplied evidence. This is never interpreted as proof\nof idempotency by core.",
-    ),
-    (
         "effect::Status",
         "receipts",
         "Obligation roots whose attempts include this effect's turn.",
@@ -101,6 +96,7 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 12] = [
         super::errors::errors,
         super::routes::receipt,
         super::effects::effect,
+        super::effects::trail,
         super::effects::settle,
         super::sse::transitions,
         super::sse::turn_event_stream,
@@ -134,10 +130,10 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 12] = [
         santi_core::receipt::Status,
         santi_core::receipt::Transition,
         santi_core::effect::State,
-        santi_core::effect::Reason,
-        santi_core::effect::Transition,
         santi_core::effect::Status,
         santi_core::effect::Outcome,
+        santi_core::trace::Record,
+        santi_core::trace::Tag,
         super::effects::ResolveEffectRequest,
         strand::Detail,
         material::Material,

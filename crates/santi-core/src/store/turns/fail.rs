@@ -4,7 +4,6 @@ use rusqlite::params;
 use serde_json::json;
 
 use super::*;
-use crate::effect;
 
 impl Store {
     pub(crate) fn misfire(
@@ -50,8 +49,8 @@ impl Store {
         })?;
         Database::new(&tx).reconcile(
             turn,
-            effect::Reason::TurnFailedBeforeDispatch,
-            effect::Reason::TurnFailedDuringDispatch,
+            "turn_failed_before_dispatch",
+            "turn_failed_during_dispatch",
             &now,
         )?;
         Database::new(&tx).fail(turn, error.incident.as_deref(), &now)?;
@@ -90,8 +89,8 @@ impl Store {
         let error = indict(&tx, &strand, turn, failure)?;
         Database::new(&tx).reconcile(
             turn,
-            effect::Reason::TurnFailedBeforeDispatch,
-            effect::Reason::TurnFailedDuringDispatch,
+            "turn_failed_before_dispatch",
+            "turn_failed_during_dispatch",
             &now,
         )?;
         Database::new(&tx).fail(turn, error.incident.as_deref(), &now)?;
@@ -126,8 +125,8 @@ impl Store {
         .map_err(|error| error.to_string())?;
         Database::new(&tx).reconcile(
             turn,
-            effect::Reason::TurnFailedBeforeDispatch,
-            effect::Reason::TurnFailedDuringDispatch,
+            "turn_failed_before_dispatch",
+            "turn_failed_during_dispatch",
             &now,
         )?;
         Database::new(&tx).fail(turn, incident, &now)?;

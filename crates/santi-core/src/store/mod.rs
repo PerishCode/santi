@@ -4,6 +4,7 @@ use rusqlite::{Connection, params};
 
 use crate::{Fault, now, strand::Strand, tag, turn::Turn};
 
+mod archive;
 mod assembly;
 pub(crate) mod budget;
 mod compact;
@@ -85,6 +86,15 @@ pub(crate) struct Stumble<'a> {
 }
 
 impl Store {
+    pub fn sink(&self) -> plumb::trace::Sink {
+        plumb::trace::Sink::from(Arc::new(archive::Archive::open(self.conn.clone())))
+    }
+
+    pub fn trail(&self, key: &str, value: &str) -> Result<Vec<crate::trace::Record>, String> {
+        let conn = self.conn.lock().unwrap();
+        Database::new(&conn).traced(key, value)
+    }
+
     pub fn genesis(&self) -> &'static str {
         GENESIS
     }

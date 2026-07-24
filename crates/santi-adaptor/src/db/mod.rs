@@ -2,7 +2,7 @@ mod budget;
 mod downstream;
 pub use downstream::Stowed;
 mod event;
-pub use event::{Prepared, Transition};
+pub use event::{Prepared, Recorded, shift};
 mod inbox;
 mod lifecycle;
 mod query;

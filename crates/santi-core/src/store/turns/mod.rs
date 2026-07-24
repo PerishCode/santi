@@ -12,7 +12,7 @@ pub use completion::Completion;
 
 const BREADTH: usize = 4096;
 mod fail;
-use crate::{effect, thinking, tool};
+use crate::{thinking, tool};
 use fail::indict;
 
 impl Store {
@@ -96,8 +96,8 @@ impl Store {
         for (turn, strand) in &rows {
             Database::new(&tx).reconcile(
                 turn,
-                effect::Reason::RestartBeforeDispatch,
-                effect::Reason::RestartDuringDispatch,
+                "restart_before_dispatch",
+                "restart_during_dispatch",
                 &now,
             )?;
             tx.execute(

@@ -6,7 +6,7 @@ use santi_core::Fault;
 use santi_core::service::Service;
 
 use super::ApiError;
-use santi_core::effect;
+use santi_core::{effect, trace};
 
 #[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
 pub struct ResolveEffectRequest {
@@ -33,6 +33,25 @@ pub async fn effect(
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("effect not found"))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/effects/{effect}/trace",
+    params(("effect_id" = String, Path)),
+    responses(
+        (status = 200, body = Vec<trace::Record>),
+        (status = 500, body = Fault)
+    )
+)]
+pub async fn trail(
+    State(service): State<Service>,
+    Path(effect): Path<String>,
+) -> Result<Json<Vec<trace::Record>>, ApiError> {
+    service
+        .trail(&effect)
+        .map(Json)
+        .map_err(ApiError::from_service)
 }
 
 #[utoipa::path(

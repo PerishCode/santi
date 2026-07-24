@@ -110,7 +110,8 @@ fn openapi_lists_error_surfaces() {
     assert!(document.contains("/api/v1/receipts/{inbox}"));
     assert!(document.contains("/api/v1/effects/{effect}"));
     assert!(document.contains("/api/v1/effects/{effect}/resolve"));
-    assert!(document.contains("effect.Reason"));
+    assert!(document.contains("/api/v1/effects/{effect}/trace"));
+    assert!(document.contains("trace.Record"));
     assert!(document.contains("ingest.Receipt"));
     assert!(document.contains("/api/v1/turn-events/stream"));
     assert!(document.contains("event.Batch"));
@@ -211,7 +212,10 @@ async fn effect_http_roundtrip() {
             error.message()
         ),
     };
-    assert_eq!(resolved.effect.state, effect::State::ResolvedApplied);
+    assert_eq!(
+        resolved.effect.state,
+        effect::State::Settled(effect::Outcome::Applied)
+    );
 }
 
 mod recovery;

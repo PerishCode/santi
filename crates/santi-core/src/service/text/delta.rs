@@ -19,11 +19,7 @@ impl Service {
     ) -> Result<(), String> {
         if update.prose.is_empty() {
             update.timing.uttered(update.round);
-            self.conclude(
-                update.address.strand,
-                update.span,
-                thinking::Reason::FirstTextDelta,
-            )?;
+            self.conclude(update.address.strand, update.span, thinking::Reason::Spoke)?;
             self.stirred(
                 update.address.strand,
                 update.address.turn,

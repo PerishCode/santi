@@ -1144,11 +1144,12 @@ checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
 name = "plumb"
-version = "0.2.1"
+version = "0.4.0"
 source = "sparse+https://git.perish.top/api/packages/PerishLab/cargo/"
-checksum = "13c9ef9076b8bba6ab43894baed8ce5d7cc022205f0e9005b33a39c9622d2b35"
+checksum = "b42c19cf29ee094dd67c6c183f8a26bb64a9792c7d94af75a97505469740fb00"
 dependencies = [
  "clap",
+ "pin-project-lite",
  "plumb-macro",
  "serde",
  "toml 0.9.12+spec-1.1.0",
@@ -1156,9 +1157,9 @@ dependencies = [
 
 [[package]]
 name = "plumb-macro"
-version = "0.2.1"
+version = "0.4.0"
 source = "sparse+https://git.perish.top/api/packages/PerishLab/cargo/"
-checksum = "22500893bac280f460954b2adc571129d667afaf81c288122e81a5ed25e104b3"
+checksum = "c352fddd25143d3d7aeb0d9cbc23fc6f04f531ed8bd3d9933a485debbd450d87"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1589,6 +1590,7 @@ dependencies = [
 name = "santi-adaptor"
 version = "0.1.0"
 dependencies = [
+ "plumb",
  "rusqlite",
  "santi-error",
  "santi-model",
@@ -1638,6 +1640,7 @@ dependencies = [
  "futures-util",
  "hex",
  "jiff",
+ "plumb",
  "rusqlite",
  "santi-adaptor",
  "santi-error",

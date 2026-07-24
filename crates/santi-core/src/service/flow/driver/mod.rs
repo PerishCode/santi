@@ -148,7 +148,7 @@ impl Driver<'_, '_> {
         let result = self.service.conclude(
             self.address.strand,
             &mut self.span,
-            thinking::Reason::ToolCallRequested,
+            thinking::Reason::Called,
         );
         self.runtime(Operation::Persistence(Persistence::Thinking), result)?;
         self.service.stirred(
@@ -167,7 +167,7 @@ impl Driver<'_, '_> {
         let result = self.service.conclude(
             self.address.strand,
             &mut self.span,
-            thinking::Reason::ProviderCompleted,
+            thinking::Reason::Finished,
         );
         self.runtime(Operation::Persistence(Persistence::Thinking), result)?;
         self.completed = response;

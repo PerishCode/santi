@@ -137,7 +137,12 @@ impl Service {
         outcome: effect::Outcome,
         evidence: &str,
     ) -> Result<Option<effect::Status>, String> {
+        let _entered = self.context.enter();
         self.store.settle(effect, outcome, evidence)
+    }
+
+    pub fn trail(&self, effect: &str) -> Result<Vec<crate::trace::Record>, String> {
+        self.store.trail("effect", effect)
     }
 
     pub(crate) fn publish(&self, strand: &str, payload: stream::Payload) {

@@ -1,7 +1,31 @@
 use super::support::*;
+use plumb::context::Context;
+use plumb::trace::{Ledger, Sink};
 use santi_core::{effect, ingest, message, receipt, tool};
+use std::sync::Arc;
 
 mod more;
+
+fn observed() -> (Arc<Ledger>, Context) {
+    let ledger = Arc::new(Ledger::default());
+    let context = Context::root().with(Sink::from(ledger.clone()));
+    (ledger, context)
+}
+
+fn reasons(ledger: &Ledger, effect: &str) -> Vec<String> {
+    ledger
+        .query(|record| record.name == "effect.shift" && record.says("effect", effect))
+        .iter()
+        .map(|record| {
+            record
+                .tags
+                .iter()
+                .find(|(key, _)| key == "reason")
+                .map(|(_, value)| value.clone())
+                .expect("shift carries a reason tag")
+        })
+        .collect()
+}
 
 struct StartedEffect {
     turn: String,
@@ -52,6 +76,8 @@ fn start_effect(store: &Store) -> StartedEffect {
 fn prepared_failure() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
+    let (ledger, context) = observed();
+    let _entered = context.enter();
     let started = start_effect(&store);
 
     store
@@ -62,17 +88,13 @@ fn prepared_failure() {
         .effect(&started.effect)
         .expect("query effect")
         .expect("effect");
-    assert_eq!(status.effect.state, effect::State::NotDispatched);
     assert_eq!(
-        status
-            .transitions
-            .iter()
-            .map(|transition| transition.reason.clone())
-            .collect::<Vec<_>>(),
-        vec![
-            effect::Reason::IntentPersisted,
-            effect::Reason::TurnFailedBeforeDispatch,
-        ]
+        status.effect.state,
+        effect::State::Settled(effect::Outcome::NotApplied)
+    );
+    assert_eq!(
+        reasons(&ledger, &started.effect),
+        vec!["intent_persisted", "turn_failed_before_dispatch"]
     );
     let receipt = store
         .receipt(&started.inbox)
@@ -80,7 +102,10 @@ fn prepared_failure() {
         .expect("receipt");
     assert_eq!(receipt.state, receipt::State::Failed);
     assert_eq!(receipt.effects.len(), 1);
-    assert_eq!(receipt.effects[0].state, effect::State::NotDispatched);
+    assert_eq!(
+        receipt.effects[0].state,
+        effect::State::Settled(effect::Outcome::NotApplied)
+    );
 }
 
 #[test]

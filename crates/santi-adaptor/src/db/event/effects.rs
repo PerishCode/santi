@@ -1,3 +1,5 @@
+use plumb::context::Context;
+use plumb::trace::Span;
 use rusqlite::{OptionalExtension, params};
 
 use super::Database;
@@ -18,11 +20,15 @@ pub struct Prepared<'a> {
     pub time: &'a str,
 }
 
-pub struct Transition<'a> {
-    pub state: effect::State,
-    pub reason: effect::Reason,
-    pub evidence: Option<&'a str>,
-    pub time: &'a str,
+pub fn shift(effect: &str, state: &effect::State, reason: &str, evidence: Option<&str>) {
+    let context = Context::current().with(Span::open("effect.shift"));
+    let _entered = context.enter();
+    Span::note("effect", effect);
+    Span::note("state", state.encode());
+    Span::note("reason", reason);
+    if let Some(evidence) = evidence {
+        Span::note("evidence", evidence);
+    }
 }
 
 impl Database<'_> {
@@ -48,39 +54,8 @@ impl Database<'_> {
                 ],
             )
             .map_err(|error| error.to_string())?;
-        self.shifted(
-            &effect,
-            Transition {
-                state: effect::State::Prepared,
-                reason: effect::Reason::IntentPersisted,
-                evidence: None,
-                time: prepared.time,
-            },
-        )?;
+        shift(&effect, &effect::State::Prepared, "intent_persisted", None);
         Ok(effect)
-    }
-
-    pub fn shifted(&self, effect: &str, transition: Transition<'_>) -> Result<(), String> {
-        self.conn
-            .execute(
-                r#"
-        INSERT INTO effect_transitions (
-          id, effect_id, sequence, state, reason, evidence, occurred_at
-        )
-        SELECT ?1, ?2, COALESCE(MAX(sequence), 0) + 1, ?3, ?4, ?5, ?6
-        FROM effect_transitions WHERE effect_id = ?2
-        "#,
-                params![
-                    tag("efx"),
-                    effect,
-                    transition.state.encode(),
-                    transition.reason.encode(),
-                    transition.evidence,
-                    transition.time,
-                ],
-            )
-            .map_err(|error| error.to_string())?;
-        Ok(())
     }
 
     pub fn effect(&self, effect: &str) -> Result<Option<effect::Effect>, String> {
@@ -116,33 +91,6 @@ impl Database<'_> {
         collected(rows)
     }
 
-    pub fn shifts(&self, effect: &str) -> Result<Vec<effect::Transition>, String> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                r#"
-            SELECT id, sequence, state, reason, evidence, occurred_at
-            FROM effect_transitions
-            WHERE effect_id = ?1
-            ORDER BY sequence
-            "#,
-            )
-            .map_err(|error| error.to_string())?;
-        let rows = stmt
-            .query_map(params![effect], |row| {
-                Ok(effect::Transition {
-                    id: row.get(0)?,
-                    sequence: row.get(1)?,
-                    state: effect::State::decode(&row.get::<_, String>(2)?),
-                    reason: effect::Reason::decode(&row.get::<_, String>(3)?),
-                    evidence: row.get(4)?,
-                    occurred: row.get(5)?,
-                })
-            })
-            .map_err(|error| error.to_string())?;
-        collected(rows)
-    }
-
     pub fn receipts(&self, effect: &str) -> Result<Vec<String>, String> {
         let mut stmt = self
             .conn
@@ -166,8 +114,8 @@ impl Database<'_> {
     pub fn reconcile(
         &self,
         turn: &str,
-        prepared_reason: effect::Reason,
-        dispatching_reason: effect::Reason,
+        prepared_reason: &str,
+        dispatching_reason: &str,
         occurred: &str,
     ) -> Result<(), String> {
         let mut stmt = self
@@ -191,9 +139,13 @@ impl Database<'_> {
 
         for (effect, state) in rows {
             let (next, reason, settled) = if state == "prepared" {
-                (effect::State::NotDispatched, prepared_reason.clone(), true)
+                (
+                    effect::State::Settled(effect::Outcome::NotApplied),
+                    prepared_reason,
+                    true,
+                )
             } else {
-                (effect::State::Unknown, dispatching_reason.clone(), false)
+                (effect::State::Unknown, dispatching_reason, false)
             };
             self.conn
                 .execute(
@@ -206,15 +158,7 @@ impl Database<'_> {
                     params![effect, next.encode(), occurred, settled],
                 )
                 .map_err(|error| error.to_string())?;
-            self.shifted(
-                &effect,
-                Transition {
-                    state: next,
-                    reason,
-                    evidence: None,
-                    time: occurred,
-                },
-            )?;
+            shift(&effect, &next, reason, None);
         }
         Ok(())
     }

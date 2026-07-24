@@ -43,6 +43,7 @@ pub(super) fn router(service: Service) -> Router {
         .route("/api/v1/errors/{scope_kind}/{scope_id}", get(errors))
         .route("/api/v1/receipts/{inbox}", get(receipt))
         .route("/api/v1/effects/{effect}", get(super::effects::effect))
+        .route("/api/v1/effects/{effect}/trace", get(super::effects::trail))
         .route(
             "/api/v1/effects/{effect}/resolve",
             post(super::effects::settle),

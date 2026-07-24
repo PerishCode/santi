@@ -23,6 +23,7 @@ use crate::{budget, material, stream};
 #[derive(Clone)]
 pub struct Service {
     pub(crate) store: Store,
+    pub(crate) context: plumb::context::Context,
     provider: Arc<dyn Provider>,
     pub(crate) config: Config,
     materials: Arc<Mutex<HashMap<materials::Key, material::Material>>>,
@@ -47,10 +48,15 @@ pub struct Config {
 impl Service {
     pub fn open(config: Config, provider: Arc<dyn Provider>) -> Result<Self, String> {
         let store = Store::open(&config.database)?;
-        store.reconciled()?;
+        let context = plumb::context::Context::root().with(store.sink());
+        {
+            let _entered = context.enter();
+            store.reconciled()?;
+        }
         let degraded = store.strained()? > 0;
         Ok(Self {
             store,
+            context,
             provider,
             config,
             materials: Arc::new(Mutex::new(HashMap::new())),

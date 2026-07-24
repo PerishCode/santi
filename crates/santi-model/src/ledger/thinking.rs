@@ -16,9 +16,9 @@ pub enum State {
 #[serde(rename_all = "snake_case")]
 #[schema(as = thinking::Reason)]
 pub enum Reason {
-    FirstTextDelta,
-    ToolCallRequested,
-    ProviderCompleted,
+    Spoke,
+    Called,
+    Finished,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

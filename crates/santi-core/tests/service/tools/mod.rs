@@ -214,7 +214,10 @@ async fn dispatches_tools() {
     let effect = &runtime.effects[0];
     assert_eq!(effect.call.as_deref(), Some("call_shell"));
     assert_eq!(effect.kind, "shell");
-    assert_eq!(effect.state, effect::State::Confirmed);
+    assert_eq!(
+        effect.state,
+        effect::State::Settled(effect::Outcome::Applied)
+    );
     assert_eq!(
         effect.result.as_deref(),
         Some(runtime.results[0].id.as_str())
@@ -223,19 +226,34 @@ async fn dispatches_tools() {
         .effect(&effect.id)
         .expect("query effect")
         .expect("shell effect");
+    let mut trail = Vec::new();
+    for _ in 0..100 {
+        trail = service.trail(&effect.effect.id).expect("query trail");
+        if trail.len() >= 3 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let shifts = trail
+        .iter()
+        .map(|record| {
+            let held = |key: &str| {
+                record
+                    .tags
+                    .iter()
+                    .find(|tag| tag.key == key)
+                    .map(|tag| tag.value.as_str())
+                    .expect("shift tag")
+            };
+            (held("state"), held("reason"))
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
-        effect
-            .transitions
-            .iter()
-            .map(|transition| (&transition.state, &transition.reason))
-            .collect::<Vec<_>>(),
+        shifts,
         vec![
-            (&effect::State::Prepared, &effect::Reason::IntentPersisted),
-            (
-                &effect::State::Dispatching,
-                &effect::Reason::DispatchWindowOpened,
-            ),
-            (&effect::State::Confirmed, &effect::Reason::ResultPersisted),
+            ("prepared", "intent_persisted"),
+            ("dispatching", "dispatch_window_opened"),
+            ("settled_applied", "result_persisted"),
         ]
     );
     assert_eq!(effect.receipts, vec![response.receipt.inbox.clone()]);
@@ -245,7 +263,10 @@ async fn dispatches_tools() {
         .expect("receipt");
     assert_eq!(receipt.effects.len(), 1);
     assert_eq!(receipt.effects[0].id, effect.effect.id);
-    assert_eq!(receipt.effects[0].state, effect::State::Confirmed);
+    assert_eq!(
+        receipt.effects[0].state,
+        effect::State::Settled(effect::Outcome::Applied)
+    );
 
     let requests = provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);

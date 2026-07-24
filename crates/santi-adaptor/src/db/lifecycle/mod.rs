@@ -35,6 +35,7 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
                 DROP TABLE IF EXISTS receipt_transitions;
                 DROP TABLE IF EXISTS inbox_receipts;
                 DROP TABLE IF EXISTS effect_transitions;
+                DROP TABLE IF EXISTS trace_records;
                 DROP TABLE IF EXISTS downstream_ingest;
                 DROP TABLE IF EXISTS downstreams;
                 DROP TABLE IF EXISTS turn_outbox;

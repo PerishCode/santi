@@ -17,7 +17,7 @@ fn schema_matches_runtime() {
         "messages",
         "message_events",
         "strand_effects",
-        "effect_transitions",
+        "trace_records",
         "strands",
         "strand_inbox",
         "inbox_receipts",

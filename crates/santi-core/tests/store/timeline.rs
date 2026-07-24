@@ -77,7 +77,7 @@ fn thinking_becomes_reasoning() {
         .expect("update thinking summary")
         .expect("thinking exists");
     let thinking = store
-        .conclude(&thinking.id, thinking::Reason::FirstTextDelta)
+        .conclude(&thinking.id, thinking::Reason::Spoke)
         .expect("complete thinking")
         .expect("thinking exists");
 
@@ -94,7 +94,7 @@ fn thinking_becomes_reasoning() {
     );
     assert_eq!(
         snapshot.thinking[0].completion_reason,
-        Some(thinking::Reason::FirstTextDelta)
+        Some(thinking::Reason::Spoke)
     );
 
     let input = store.assembly(&strand.id).expect("assembly input");

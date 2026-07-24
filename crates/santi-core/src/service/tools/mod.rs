@@ -117,7 +117,7 @@ impl Service {
                         call: &call.call,
                         output: None,
                         error: Some(curbed(error, output_limit)),
-                        state: effect::State::NotDispatched,
+                        state: effect::State::Settled(effect::Outcome::NotApplied),
                     },
                 );
             }
@@ -130,7 +130,7 @@ impl Service {
                     call: &call.call,
                     output: Some(output),
                     error: None,
-                    state: effect::State::Confirmed,
+                    state: effect::State::Settled(effect::Outcome::Applied),
                 },
             ),
             shell::Outcome::Failed(error) => self.store.redeem(
@@ -139,12 +139,11 @@ impl Service {
                     call: &call.call,
                     output: None,
                     error: Some(curbed(error, output_limit)),
-                    state: effect::State::NotDispatched,
+                    state: effect::State::Settled(effect::Outcome::NotApplied),
                 },
             ),
             shell::Outcome::Unknown(error) => {
-                self.store
-                    .unmark(effect, effect::Reason::ResultCaptureFailed, &error)?;
+                self.store.unmark(effect, &error)?;
                 Err(format!(
                     "shell effect {effect} outcome is unknown; automatic replay is forbidden: {error}"
                 ))

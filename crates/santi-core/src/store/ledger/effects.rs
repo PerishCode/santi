@@ -7,7 +7,7 @@ pub(crate) struct Settlement<'a> {
 }
 
 use crate::store::Store;
-use crate::store::db::{Database, Transition};
+use crate::store::db::{Database, shift};
 use crate::{effect, strand, tool};
 use crate::{now, tag};
 use rusqlite::params;
@@ -20,7 +20,6 @@ impl Store {
             return Ok(None);
         };
         Ok(Some(effect::Status {
-            transitions: database.shifts(effect)?,
             receipts: database.receipts(effect)?,
             effect: held,
         }))
@@ -43,16 +42,13 @@ impl Store {
         if changed != 1 {
             return Err("effect is not prepared for dispatch".to_string());
         }
-        Database::new(&tx).shifted(
-            effect,
-            Transition {
-                state: effect::State::Dispatching,
-                reason: effect::Reason::DispatchWindowOpened,
-                evidence: None,
-                time: &now,
-            },
-        )?;
         tx.commit().map_err(|error| error.to_string())?;
+        shift(
+            effect,
+            &effect::State::Dispatching,
+            "dispatch_window_opened",
+            None,
+        );
         Database::new(&conn)
             .effect(effect)?
             .ok_or_else(|| "dispatching effect missing".to_string())
@@ -70,9 +66,9 @@ impl Store {
             state,
         } = settlement;
         let (allowed_source, reason) = match state {
-            effect::State::Confirmed => ("dispatching", effect::Reason::ResultPersisted),
-            effect::State::NotDispatched => {
-                ("prepared_or_dispatching", effect::Reason::DispatchRejected)
+            effect::State::Settled(effect::Outcome::Applied) => ("dispatching", "result_persisted"),
+            effect::State::Settled(effect::Outcome::NotApplied) => {
+                ("prepared_or_dispatching", "dispatch_rejected")
             }
             _ => return Err("invalid terminal effect state for a tool result".to_string()),
         };
@@ -120,30 +116,19 @@ impl Store {
             params![effect, state.encode(), reply, error, now,],
         )
         .map_err(|error| error.to_string())?;
-        database.shifted(
-            effect,
-            Transition {
-                state,
-                reason,
-                evidence: Some(&format!("tool_result:{reply}")),
-                time: &now,
-            },
-        )?;
         tx.commit().map_err(|error| error.to_string())?;
+        shift(
+            effect,
+            &state,
+            reason,
+            Some(&format!("tool_result:{reply}")),
+        );
         Database::new(&conn)
             .reply(&reply)?
             .ok_or_else(|| "created effect tool_result missing".to_string())
     }
 
-    pub fn unmark(
-        &self,
-        effect: &str,
-        reason: effect::Reason,
-        evidence: &str,
-    ) -> Result<effect::Effect, String> {
-        if !matches!(reason, effect::Reason::ResultCaptureFailed) {
-            return Err("invalid live unknown-effect reason".to_string());
-        }
+    pub fn unmark(&self, effect: &str, evidence: &str) -> Result<effect::Effect, String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let now = now();
@@ -160,16 +145,13 @@ impl Store {
         if changed != 1 {
             return Err("effect is not dispatching".to_string());
         }
-        Database::new(&tx).shifted(
-            effect,
-            Transition {
-                state: effect::State::Unknown,
-                reason,
-                evidence: Some(evidence),
-                time: &now,
-            },
-        )?;
         tx.commit().map_err(|error| error.to_string())?;
+        shift(
+            effect,
+            &effect::State::Unknown,
+            "result_capture_failed",
+            Some(evidence),
+        );
         Database::new(&conn)
             .effect(effect)?
             .ok_or_else(|| "unknown effect missing".to_string())
@@ -185,16 +167,7 @@ impl Store {
         if evidence.is_empty() {
             return Err("effect resolution evidence must not be empty".to_string());
         }
-        let (state, reason) = match outcome {
-            effect::Outcome::Applied => (
-                effect::State::ResolvedApplied,
-                effect::Reason::OperatorResolvedApplied,
-            ),
-            effect::Outcome::NotApplied => (
-                effect::State::ResolvedNotApplied,
-                effect::Reason::OperatorResolvedNotApplied,
-            ),
-        };
+        let state = effect::State::Settled(outcome);
         let mut conn = self.conn.lock().unwrap();
         if Database::new(&conn).effect(effect)?.is_none() {
             return Ok(None);
@@ -214,16 +187,8 @@ impl Store {
         if changed != 1 {
             return Err("only an unknown effect can be resolved".to_string());
         }
-        Database::new(&tx).shifted(
-            effect,
-            Transition {
-                state,
-                reason,
-                evidence: Some(evidence),
-                time: &now,
-            },
-        )?;
         tx.commit().map_err(|error| error.to_string())?;
+        shift(effect, &state, "operator_resolved", Some(evidence));
         drop(conn);
         self.effect(effect)
     }

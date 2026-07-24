@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+plumb.workspace = true
 rusqlite.workspace = true
 santi-error.workspace = true
 santi-model.workspace = true

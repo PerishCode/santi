@@ -4,10 +4,8 @@ impl crate::effect::State {
             Self::Prepared => "prepared",
             Self::Dispatching => "dispatching",
             Self::Unknown => "unknown",
-            Self::Confirmed => "confirmed",
-            Self::NotDispatched => "not_dispatched",
-            Self::ResolvedApplied => "resolved_applied",
-            Self::ResolvedNotApplied => "resolved_not_applied",
+            Self::Settled(crate::effect::Outcome::Applied) => "settled_applied",
+            Self::Settled(crate::effect::Outcome::NotApplied) => "settled_not_applied",
         }
     }
 
@@ -15,47 +13,9 @@ impl crate::effect::State {
         match value {
             "prepared" => Self::Prepared,
             "dispatching" => Self::Dispatching,
-            "confirmed" => Self::Confirmed,
-            "not_dispatched" => Self::NotDispatched,
-            "resolved_applied" => Self::ResolvedApplied,
-            "resolved_not_applied" => Self::ResolvedNotApplied,
+            "settled_applied" => Self::Settled(crate::effect::Outcome::Applied),
+            "settled_not_applied" => Self::Settled(crate::effect::Outcome::NotApplied),
             _ => Self::Unknown,
-        }
-    }
-}
-
-impl crate::effect::Reason {
-    pub fn encode(&self) -> &'static str {
-        match self {
-            Self::IntentPersisted => "intent_persisted",
-            Self::DispatchWindowOpened => "dispatch_window_opened",
-            Self::ResultPersisted => "result_persisted",
-            Self::DispatchRejected => "dispatch_rejected",
-            Self::RestartBeforeDispatch => "restart_before_dispatch",
-            Self::RestartDuringDispatch => "restart_during_dispatch",
-            Self::TurnFailedBeforeDispatch => "turn_failed_before_dispatch",
-            Self::TurnFailedDuringDispatch => "turn_failed_during_dispatch",
-            Self::ResultCaptureFailed => "result_capture_failed",
-            Self::OperatorResolvedApplied => "operator_resolved_applied",
-            Self::OperatorResolvedNotApplied => "operator_resolved_not_applied",
-            Self::LegacyImport => "legacy_import",
-        }
-    }
-
-    pub fn decode(value: &str) -> Self {
-        match value {
-            "intent_persisted" => Self::IntentPersisted,
-            "dispatch_window_opened" => Self::DispatchWindowOpened,
-            "result_persisted" => Self::ResultPersisted,
-            "dispatch_rejected" => Self::DispatchRejected,
-            "restart_before_dispatch" => Self::RestartBeforeDispatch,
-            "restart_during_dispatch" => Self::RestartDuringDispatch,
-            "turn_failed_before_dispatch" => Self::TurnFailedBeforeDispatch,
-            "turn_failed_during_dispatch" => Self::TurnFailedDuringDispatch,
-            "result_capture_failed" => Self::ResultCaptureFailed,
-            "operator_resolved_applied" => Self::OperatorResolvedApplied,
-            "operator_resolved_not_applied" => Self::OperatorResolvedNotApplied,
-            _ => Self::LegacyImport,
         }
     }
 }
@@ -155,18 +115,18 @@ impl crate::thinking::State {
 impl crate::thinking::Reason {
     pub fn encode(&self) -> &'static str {
         match self {
-            Self::FirstTextDelta => "first_text_delta",
-            Self::ToolCallRequested => "tool_call_requested",
-            Self::ProviderCompleted => "provider_completed",
+            Self::Spoke => "spoke",
+            Self::Called => "called",
+            Self::Finished => "finished",
         }
     }
 
     pub fn decode(value: &str) -> Self {
         match value {
-            "first_text_delta" => Self::FirstTextDelta,
-            "tool_call_requested" => Self::ToolCallRequested,
-            "provider_completed" => Self::ProviderCompleted,
-            _ => Self::ProviderCompleted,
+            "spoke" => Self::Spoke,
+            "called" => Self::Called,
+            "finished" => Self::Finished,
+            _ => Self::Finished,
         }
     }
 }

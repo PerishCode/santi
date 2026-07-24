@@ -72,7 +72,10 @@ async fn compact_redrives_receipt() {
     let runtime = Probe::new(&service).any_completed(&strand.id).await;
     assert_eq!(provider.requests.lock().unwrap().len(), 2);
     assert_eq!(runtime.effects.len(), 1, "effect must not replay");
-    assert_eq!(runtime.effects[0].state, effect::State::Confirmed);
+    assert_eq!(
+        runtime.effects[0].state,
+        effect::State::Settled(effect::Outcome::Applied)
+    );
     assert_eq!(runtime.errors[0].status, santi_core::Status::Resolved);
     let receipt = service
         .receipt(&response.receipt.inbox)

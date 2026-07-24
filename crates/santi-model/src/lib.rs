@@ -7,7 +7,7 @@ mod edge;
 mod ledger;
 pub mod stream;
 
-pub use edge::{downstream, drive, effect, event, ingest, receipt, webhook};
+pub use edge::{downstream, drive, effect, event, ingest, receipt, trace, webhook};
 pub use ledger::{compact, material, message, soul, strand, thinking, tool, turn};
 
 pub type Timestamp = String;

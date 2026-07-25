@@ -121,7 +121,7 @@ impl Service {
         for strand in pending {
             let outcome = self.poke(&strand, "strand_send", None, "cold_start_resume");
             if let drive::Outcome::Failed(error) = outcome
-                && error.code == crate::catalog::ERROR_ENGINE_PERSISTENCE_FAILED.code
+                && error.code == crate::catalog::UNSAVED.code
             {
                 return Err(format!(
                     "cold-start recovery could not persist driver truth for strand {strand}: {}",

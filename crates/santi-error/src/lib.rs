@@ -75,6 +75,10 @@ impl Descriptor {
     }
 }
 
+pub trait Ruled {
+    fn descriptor(&self) -> Descriptor;
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[schema(as = error::Scope)]
 pub struct Scope {

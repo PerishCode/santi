@@ -77,3 +77,31 @@ pub enum Beat {
         error: Box<santi_error::Fault>,
     },
 }
+
+#[derive(Debug, Clone, Copy)]
+pub enum Error {
+    Provider,
+    Runtime,
+}
+
+impl santi_error::Ruled for Error {
+    fn descriptor(&self) -> santi_error::Descriptor {
+        use santi_error::{Category, Exposure, Retry, Severity};
+        match self {
+            Self::Provider => santi_error::Descriptor {
+                code: "provider.turn.failed",
+                category: Category::Unavailable,
+                severity: Severity::Error,
+                retry: Retry::Later,
+                exposure: Exposure::CALLER_AND_OPERATOR,
+            },
+            Self::Runtime => santi_error::Descriptor {
+                code: "runtime.turn.failed",
+                category: Category::Internal,
+                severity: Severity::Error,
+                retry: Retry::Later,
+                exposure: Exposure::CALLER_AND_OPERATOR,
+            },
+        }
+    }
+}

@@ -68,3 +68,39 @@ pub struct Usage {
     pub calls: usize,
     pub output: usize,
 }
+
+#[derive(Debug, Clone, Copy)]
+pub enum Error {
+    Context,
+    Execution,
+    Inbox,
+}
+
+impl santi_error::Ruled for Error {
+    fn descriptor(&self) -> santi_error::Descriptor {
+        use santi_error::{Category, Exposure, Retry, Severity};
+        match self {
+            Self::Context => santi_error::Descriptor {
+                code: "context.budget.exceeded",
+                category: Category::Exhausted,
+                severity: Severity::Error,
+                retry: Retry::Resolved,
+                exposure: Exposure::CALLER_AND_OPERATOR,
+            },
+            Self::Execution => santi_error::Descriptor {
+                code: "runtime.execution_budget.exceeded",
+                category: Category::Exhausted,
+                severity: Severity::Error,
+                retry: Retry::Changed,
+                exposure: Exposure::CALLER_AND_OPERATOR,
+            },
+            Self::Inbox => santi_error::Descriptor {
+                code: "runtime.inbox.capacity_exceeded",
+                category: Category::Exhausted,
+                severity: Severity::Error,
+                retry: Retry::Later,
+                exposure: Exposure::CALLER_AND_OPERATOR,
+            },
+        }
+    }
+}

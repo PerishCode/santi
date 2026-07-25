@@ -1,9 +1,10 @@
+use crate::Ruled;
 use serde_json::json;
 
+use crate::Fault;
 use crate::context::budget::estimated;
 use crate::service::tools::tools;
 use crate::store::budget::{Admission, Pressure};
-use crate::{Fault, catalog};
 
 use super::super::Service;
 use crate::budget;
@@ -207,8 +208,10 @@ impl Service {
             request,
         } = breach;
         let error = self.store.raise(santi_error::Draft {
-            key: catalog::EXECUTION_BUDGET_EXCEEDED.key("strand", strand),
-            descriptor: catalog::EXECUTION_BUDGET_EXCEEDED,
+            key: crate::budget::Error::Execution
+                .descriptor()
+                .key("strand", strand),
+            descriptor: crate::budget::Error::Execution.descriptor(),
             scope: santi_error::Scope::new("strand", strand),
             source: santi_error::Source::new("santi-core", "turn.execution_budget"),
             message: format!("strand execution budget exceeded: {reason}"),

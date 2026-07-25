@@ -1,4 +1,5 @@
 use super::*;
+use crate::Ruled;
 use crate::ingest;
 
 impl Store {
@@ -60,7 +61,11 @@ impl Store {
 
         if enforce_active_holds
             && Database::new(&tx)
-                .incident(&catalog::CONTEXT_BUDGET_EXCEEDED.key("strand", strand))?
+                .incident(
+                    &crate::budget::Error::Context
+                        .descriptor()
+                        .key("strand", strand),
+                )?
                 .is_some()
         {
             let error = super::state::repress(&Database::new(&tx), strand, "ingest_active_guard")?;
@@ -125,7 +130,7 @@ impl Store {
         if pending >= GATE {
             let message = format!("strand inbox is full ({pending} pending, gate {GATE})");
             let error = engine().transient(crate::Signal {
-                descriptor: catalog::INBOX_CAPACITY_EXCEEDED,
+                descriptor: crate::budget::Error::Inbox.descriptor(),
                 source: santi_error::Source::new("santi-core", "ingest_admission"),
                 scope: Some(santi_error::Scope::new("strand", strand)),
                 message,

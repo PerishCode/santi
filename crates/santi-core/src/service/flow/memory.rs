@@ -1,3 +1,4 @@
+use crate::Ruled;
 use std::fs;
 
 use santi_provider::Item;
@@ -5,7 +6,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use crate::store::Ingress;
-use crate::{catalog, soulward, strand::Strand};
+use crate::{soulward, strand::Strand};
 
 use super::super::{Service, drive};
 use crate::{ingest, message};
@@ -157,7 +158,9 @@ impl Service {
     }
 
     fn reconcile(&self, soul: &str, snapshot: &Snapshot, policy: Policy) -> Result<(), String> {
-        let key = catalog::SOUL_MEMORY_INTERVENTION_REQUIRED.key("soul", soul);
+        let key = crate::soul::Error::Intervention
+            .descriptor()
+            .key("soul", soul);
         let active = self.store.incident(&key)?;
         let mutated = if snapshot.weight > policy.threshold {
             if active.is_some() {
@@ -165,7 +168,7 @@ impl Service {
             } else {
                 self.store.raise(santi_error::Draft {
                     key,
-                    descriptor: catalog::SOUL_MEMORY_INTERVENTION_REQUIRED,
+                    descriptor: crate::soul::Error::Intervention.descriptor(),
                     scope: santi_error::Scope::new("soul", soul),
                     source: santi_error::Source::new("santi-core", "soul_memory_pressure"),
                     message: "soul memory exceeds the human-intervention threshold".to_string(),

@@ -1,5 +1,5 @@
 use axum::{Json, http::StatusCode, response::IntoResponse};
-use santi_core::{Category, Fault, Signal, catalog, engine};
+use santi_core::{Category, Fault, Ruled, Signal, budget, catalog, engine};
 
 use crate::webhook::WebhookError;
 
@@ -75,12 +75,8 @@ impl ApiError {
     }
 
     pub fn from_santi(error: Fault) -> Self {
-        let status = if error.code == catalog::CONTEXT_BUDGET_EXCEEDED.code {
+        let status = if error.code == budget::Error::Context.descriptor().code {
             StatusCode::LOCKED
-        } else if error.code == catalog::WINDOW_MESSAGE_CONFLICT.code {
-            StatusCode::CONFLICT
-        } else if error.code == catalog::WINDOW_CONTENT_OVERSIZE.code {
-            StatusCode::PAYLOAD_TOO_LARGE
         } else {
             match error.category {
                 Category::Internal => StatusCode::INTERNAL_SERVER_ERROR,

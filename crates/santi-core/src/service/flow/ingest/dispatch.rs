@@ -224,7 +224,7 @@ impl Service {
         ) {
             Ok(error) => error,
             Err(persistence_error) => engine().transient(crate::Signal {
-                descriptor: catalog::ERROR_ENGINE_PERSISTENCE_FAILED,
+                descriptor: catalog::UNSAVED,
                 source: santi_error::Source::new("santi-core", "strand_drive_failure"),
                 scope: Some(santi_error::Scope::new("strand", strand)),
                 message: "failed to persist strand driver incident".to_string(),

@@ -1,5 +1,6 @@
+use crate::Ruled;
 use crate::store::{Misfire, Store, Stumble, db::Database};
-use crate::{Fault, catalog, now, turn::Turn};
+use crate::{Fault, now, turn::Turn};
 use rusqlite::params;
 use serde_json::json;
 
@@ -32,8 +33,10 @@ impl Store {
         )
         .map_err(|error| error.to_string())?;
         let error = Database::new(&tx).open(santi_error::Draft {
-            key: catalog::PROVIDER_TURN_FAILED.key("strand", &strand),
-            descriptor: catalog::PROVIDER_TURN_FAILED,
+            key: crate::turn::Error::Provider
+                .descriptor()
+                .key("strand", &strand),
+            descriptor: crate::turn::Error::Provider.descriptor(),
             scope: santi_error::Scope::new("strand", &strand),
             source: santi_error::Source::new("santi-provider", failure.operation),
             message: format!("provider {} failed", failure.stage),
@@ -177,8 +180,10 @@ pub(super) fn indict(
     failure: Stumble<'_>,
 ) -> Result<Fault, String> {
     Database::new(conn).open(santi_error::Draft {
-        key: catalog::RUNTIME_TURN_FAILED.key("strand", strand),
-        descriptor: catalog::RUNTIME_TURN_FAILED,
+        key: crate::turn::Error::Runtime
+            .descriptor()
+            .key("strand", strand),
+        descriptor: crate::turn::Error::Runtime.descriptor(),
         scope: santi_error::Scope::new("strand", strand),
         source: santi_error::Source::new("santi-core", failure.operation),
         message: "turn failed inside the runtime".to_string(),

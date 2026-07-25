@@ -1,4 +1,5 @@
 use super::*;
+use crate::Ruled;
 use crate::budget;
 
 impl Store {
@@ -45,7 +46,11 @@ impl Store {
         }
 
         if database
-            .incident(&catalog::CONTEXT_BUDGET_EXCEEDED.key("strand", strand))?
+            .incident(
+                &crate::budget::Error::Context
+                    .descriptor()
+                    .key("strand", strand),
+            )?
             .is_some()
         {
             let error = super::state::repress(&database, strand, "pending_active_guard")?;

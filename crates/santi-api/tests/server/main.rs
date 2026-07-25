@@ -15,7 +15,7 @@ use santi_api::{
     receipt_status_handler, resolve_effect_handler, send_strand_handler,
 };
 use santi_core::service::{self, Service};
-use santi_core::{Invocation, Store, catalog, engine};
+use santi_core::{Invocation, Ruled, Store, budget, drive, engine};
 use santi_core::{effect, ingest, message, tool};
 use santi_provider::{Cap, Event, Metadata, Provider, Request, Streaming};
 
@@ -77,7 +77,7 @@ fn classifies_errors() {
         StatusCode::FORBIDDEN
     );
     let budget = engine().transient(santi_core::Signal {
-        descriptor: catalog::CONTEXT_BUDGET_EXCEEDED,
+        descriptor: budget::Error::Context.descriptor(),
         source: santi_core::Source::new("test", "admission"),
         scope: Some(santi_core::Scope::new("strand", "ss_x")),
         message: "over budget".to_string(),
@@ -85,7 +85,7 @@ fn classifies_errors() {
     });
     assert_eq!(ApiError::from_santi(budget).status(), StatusCode::LOCKED);
     let unavailable = engine().transient(santi_core::Signal {
-        descriptor: catalog::STRAND_DRIVE_FAILED,
+        descriptor: drive::Error::Failed.descriptor(),
         source: santi_core::Source::new("test", "driver"),
         scope: Some(santi_core::Scope::new("strand", "ss_x")),
         message: "driver unavailable".to_string(),

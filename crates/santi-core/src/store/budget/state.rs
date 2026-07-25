@@ -1,8 +1,8 @@
+use crate::Ruled;
 use crate::store::db::Database;
 use santi_provider::Item;
 
 use crate::Fault;
-use crate::catalog;
 
 use super::Pressure;
 use crate::message;
@@ -25,13 +25,15 @@ pub(super) fn press(db: &Database<'_>, strand: &str, input: Pressure<'_>) -> Res
 }
 
 pub(super) fn repress(db: &Database<'_>, strand: &str, operation: &str) -> Result<Fault, String> {
-    let key = catalog::CONTEXT_BUDGET_EXCEEDED.key("strand", strand);
+    let key = crate::budget::Error::Context
+        .descriptor()
+        .key("strand", strand);
     let existing = db
         .incident(&key)?
         .ok_or_else(|| "active context-budget incident missing".to_string())?;
     db.open(santi_error::Draft {
         key,
-        descriptor: santi_error::catalog::CONTEXT_BUDGET_EXCEEDED,
+        descriptor: crate::budget::Error::Context.descriptor(),
         scope: existing.scope,
         source: santi_error::Source::new("santi-core", operation),
         message: existing.latest.message,

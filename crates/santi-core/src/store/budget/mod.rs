@@ -2,8 +2,9 @@ mod inbox;
 mod state;
 mod turn;
 
+use crate::Ruled;
 use rusqlite::{OptionalExtension, params};
-use santi_error::{Fault, Incident, catalog, engine};
+use santi_error::{Fault, Incident, engine};
 use santi_provider::{Item, Tool};
 use serde_json::{Value, json};
 
@@ -34,8 +35,10 @@ pub(crate) struct Pressure<'a> {
 impl Pressure<'_> {
     fn drafted(self, strand: &str) -> santi_error::Draft {
         santi_error::Draft {
-            key: catalog::CONTEXT_BUDGET_EXCEEDED.key("strand", strand),
-            descriptor: catalog::CONTEXT_BUDGET_EXCEEDED,
+            key: crate::budget::Error::Context
+                .descriptor()
+                .key("strand", strand),
+            descriptor: crate::budget::Error::Context.descriptor(),
             scope: santi_error::Scope::new("strand", strand),
             source: santi_error::Source::new("santi-core", self.operation),
             message: self.text.to_string(),
@@ -111,7 +114,11 @@ impl Store {
     }
 
     pub(crate) fn pressure(&self, strand: &str) -> Result<Option<Incident>, String> {
-        self.incident(&catalog::CONTEXT_BUDGET_EXCEEDED.key("strand", strand))
+        self.incident(
+            &crate::budget::Error::Context
+                .descriptor()
+                .key("strand", strand),
+        )
     }
 
     pub(crate) fn vent(
@@ -125,7 +132,9 @@ impl Store {
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
         let resolved = Database::new(&tx).resolve(
-            &catalog::CONTEXT_BUDGET_EXCEEDED.key("strand", strand),
+            &crate::budget::Error::Context
+                .descriptor()
+                .key("strand", strand),
             resolved_by,
             json!({
                 "schema": "santi.error.context_budget.resolution.v1",

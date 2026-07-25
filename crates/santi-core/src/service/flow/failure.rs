@@ -252,7 +252,7 @@ impl Service {
 
 fn unrecorded(strand: &str, turn: &str, detail: String) -> Fault {
     engine().transient(crate::Signal {
-        descriptor: catalog::ERROR_ENGINE_PERSISTENCE_FAILED,
+        descriptor: catalog::UNSAVED,
         source: santi_error::Source::new("santi-core", "provider_turn_failure"),
         scope: Some(santi_error::Scope::new("strand", strand)),
         message: "failed to persist provider failure incident".to_string(),

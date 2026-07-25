@@ -1,7 +1,7 @@
+use crate::Ruled;
 use rusqlite::params;
 use serde_json::json;
 
-use crate::catalog;
 use crate::message;
 use crate::store::{Store, db::Database};
 use crate::{now, tag, turn::Turn};
@@ -78,7 +78,9 @@ impl Store {
         .map_err(|error| error.to_string())?;
         Database::new(&tx).complete(completion.turn, &now)?;
         Database::new(&tx).resolve(
-            &catalog::PROVIDER_TURN_FAILED.key("strand", &strand),
+            &crate::turn::Error::Provider
+                .descriptor()
+                .key("strand", &strand),
             "provider.turn_succeeded",
             json!({
                 "turn": completion.turn,
@@ -88,7 +90,9 @@ impl Store {
             }),
         )?;
         Database::new(&tx).resolve(
-            &catalog::RUNTIME_TURN_FAILED.key("strand", &strand),
+            &crate::turn::Error::Runtime
+                .descriptor()
+                .key("strand", &strand),
             "runtime.turn_succeeded",
             json!({
                 "turn": completion.turn,
@@ -97,7 +101,9 @@ impl Store {
             }),
         )?;
         Database::new(&tx).resolve(
-            &catalog::EXECUTION_BUDGET_EXCEEDED.key("strand", &strand),
+            &crate::budget::Error::Execution
+                .descriptor()
+                .key("strand", &strand),
             "execution_budget.turn_succeeded",
             json!({
                 "turn": completion.turn,

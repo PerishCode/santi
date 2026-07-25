@@ -3,8 +3,8 @@ use serde_json::json;
 
 fn draft(operation: &str) -> Draft {
     Draft {
-        key: "context.budget.exceeded:strand:ss_1".to_string(),
-        descriptor: catalog::CONTEXT_BUDGET_EXCEEDED,
+        key: "runtime.internal:strand:ss_1".to_string(),
+        descriptor: catalog::INTERNAL,
         scope: Scope::new("strand", "ss_1"),
         source: Source::new("santi-core", operation),
         message: "over budget".to_string(),

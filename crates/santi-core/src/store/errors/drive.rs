@@ -1,8 +1,9 @@
+use crate::Ruled;
 use rusqlite::{Connection, params};
 use serde_json::json;
 
+use crate::Fault;
 use crate::store::{Store, db::Database};
-use crate::{Fault, catalog};
 
 const DETAIL: usize = 4096;
 
@@ -20,7 +21,11 @@ pub(in crate::store) fn stalled(
 ) -> Result<Option<Fault>, String> {
     let database = Database::new(conn);
     if database
-        .incident(&catalog::STRAND_DRIVE_FAILED.key("strand", strand))?
+        .incident(
+            &crate::drive::Error::Failed
+                .descriptor()
+                .key("strand", strand),
+        )?
         .is_none()
     {
         return Ok(None);
@@ -48,10 +53,16 @@ pub(in crate::store) fn revive(
 ) -> Result<Option<String>, String> {
     let database = Database::new(conn);
     let incident = database
-        .incident(&catalog::STRAND_DRIVE_FAILED.key("strand", strand))?
+        .incident(
+            &crate::drive::Error::Failed
+                .descriptor()
+                .key("strand", strand),
+        )?
         .map(|incident| incident.id);
     database.resolve(
-        &catalog::STRAND_DRIVE_FAILED.key("strand", strand),
+        &crate::drive::Error::Failed
+            .descriptor()
+            .key("strand", strand),
         "strand.drive_started",
         json!({
             "schema": "santi.error.strand_drive.resolution.v1",
@@ -86,7 +97,7 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
             "SELECT COUNT(*) FROM error_incidents WHERE code = ?1 AND status = 'active'",
-            params![catalog::STRAND_DRIVE_FAILED.code],
+            params![crate::drive::Error::Failed.descriptor().code],
             |row| row.get(0),
         )
         .map_err(|error| error.to_string())
@@ -95,8 +106,10 @@ impl Store {
 
 fn draft(strand: &str, input: Input<'_>, pending: i64) -> santi_error::Draft {
     santi_error::Draft {
-        key: catalog::STRAND_DRIVE_FAILED.key("strand", strand),
-        descriptor: catalog::STRAND_DRIVE_FAILED,
+        key: crate::drive::Error::Failed
+            .descriptor()
+            .key("strand", strand),
+        descriptor: crate::drive::Error::Failed.descriptor(),
         scope: santi_error::Scope::new("strand", strand),
         source: santi_error::Source::new("santi-core", input.operation),
         message: "strand driver could not start pending work".to_string(),

@@ -4,8 +4,7 @@
 
 [deno]
 config = ".runseal/deno.json"
-# No lock: the wrappers carry zero remote dependencies, so a frozen lock would
-# add friction with no benefit. Add one here if remote imports are introduced.
+lock = ".runseal/deno.lock"
 permissions = [
   "--allow-run",
   "--allow-read",

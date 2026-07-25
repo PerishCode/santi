@@ -29,3 +29,11 @@ syntax = "test"
 paths = [
   "crates/*/tests/**/*.rs",
 ]
+
+[[grant]]
+syntax = "environment"
+paths = [
+  "crates/santi-api/src/config/profile.rs",
+  "crates/santi/src/config.rs",
+  "crates/*/tests/**/*.rs",
+]

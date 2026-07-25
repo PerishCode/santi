@@ -146,3 +146,9 @@ pub enum Mode {
     #[command(name = "export-openapi")]
     Export,
 }
+
+pub fn shelter() -> PathBuf {
+    env("HOME")
+        .map(|home| PathBuf::from(home).join(".cache/santi"))
+        .unwrap_or_else(std::env::temp_dir)
+}

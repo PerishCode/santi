@@ -108,9 +108,7 @@ fn edge_token_cache_path(
     username: &str,
 ) -> Option<std::path::PathBuf> {
     use std::hash::{Hash, Hasher};
-    if let Ok(explicit) = std::env::var("SANTI_TOKEN_CACHE")
-        && !explicit.trim().is_empty()
-    {
+    if let Some(explicit) = santi_api::config::env("SANTI_TOKEN_CACHE") {
         return Some(std::path::PathBuf::from(explicit));
     }
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -118,10 +116,7 @@ fn edge_token_cache_path(
     client_id.hash(&mut hasher);
     username.hash(&mut hasher);
     let key = format!("{:016x}", hasher.finish());
-    let dir = std::env::var("HOME")
-        .ok()
-        .map(|home| std::path::PathBuf::from(home).join(".cache/santi"))
-        .unwrap_or_else(std::env::temp_dir);
+    let dir = crate::config::shelter();
     Some(dir.join(format!("edge-jwt-{key}.json")))
 }
 

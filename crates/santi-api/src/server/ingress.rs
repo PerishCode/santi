@@ -1,5 +1,3 @@
-use std::env;
-
 use axum::{
     Json,
     body::Bytes,
@@ -44,16 +42,12 @@ pub(super) async fn ingest_webhook(
         .ok_or_else(|| ApiError::not_found("webhook not found"))?;
     let adaptor = adaptor_for(&subscription.adaptor)
         .ok_or_else(|| ApiError::internal(format!("unknown adaptor {}", subscription.adaptor)))?;
-    let secret = env::var(&subscription.credential)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            ApiError::unauthorized(format!(
-                "webhook secret env {} is not set",
-                subscription.credential
-            ))
-        })?;
+    let secret = crate::config::env(&subscription.credential).ok_or_else(|| {
+        ApiError::unauthorized(format!(
+            "webhook secret env {} is not set",
+            subscription.credential
+        ))
+    })?;
     adaptor
         .verify(&headers, &body, &secret)
         .map_err(ApiError::from_webhook)?;

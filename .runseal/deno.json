@@ -1,6 +1,7 @@
 {
   "imports": {
-    "@/lib/": "./lib/"
+    "@/lib/": "./lib/",
+    "@perish/sealkit": "jsr:@perish/sealkit"
   },
   "compilerOptions": {
     "strict": true
@@ -8,6 +9,8 @@
   "fmt": {
     "lineWidth": 100,
     "semiColons": true,
-    "exclude": ["ops/edge/resources/index.html"]
+    "exclude": [
+      "ops/edge/resources/index.html"
+    ]
   }
 }

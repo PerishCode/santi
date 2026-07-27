@@ -14,6 +14,16 @@ fn upgrades() {
         );
         INSERT INTO souls (id, created_at, updated_at)
         VALUES ('soul_existing', '2026-07-27T00:00:00.000Z', '2026-07-27T00:00:00.000Z');
+        CREATE TABLE strand_inbox (
+            id TEXT PRIMARY KEY,
+            strand_id TEXT NOT NULL,
+            message_kind TEXT NOT NULL,
+            content TEXT NOT NULL,
+            source_type TEXT,
+            source_ref TEXT,
+            source_metadata TEXT,
+            created_at TEXT NOT NULL
+        );
         PRAGMA user_version = 36;
         "#,
     )
@@ -38,6 +48,14 @@ fn upgrades() {
             .expect("table lookup");
         assert_eq!(exists, 1, "missing table {table}");
     }
+    let key: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('strand_inbox') WHERE name = 'coalesce_key'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("coalesce key");
+    assert_eq!(key, 1);
 }
 
 #[test]

@@ -16,7 +16,7 @@ fn sources(dir: &Path, held: &mut Vec<PathBuf>) {
 }
 
 #[test]
-fn codes_are_unique_and_lawful() {
+fn lawful() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let crates = root.join("crates");
     let mut files = Vec::new();

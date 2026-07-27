@@ -13,198 +13,207 @@ const SECRET: &str = "test-secret";
 const FEISHU_TOKEN: &str = "verification-token-1";
 const FEISHU_KEY: &str = "encrypt-key-1";
 
-#[test]
-fn github_verifies_signature() {
-    let body = github_body();
-    let signature = sign(SECRET, body);
-    let adaptor = GithubAdaptor::configured(None, None);
-    assert!(
-        adaptor
-            .verify(
-                &github_headers("issue_comment", Some(&signature)),
+mod github {
+    use super::*;
+
+    #[test]
+    fn signature() {
+        let body = github_body();
+        let signature = sign(SECRET, body);
+        let adaptor = GithubAdaptor::configured(None, None);
+        assert!(
+            adaptor
+                .verify(
+                    &github_headers("issue_comment", Some(&signature)),
+                    body,
+                    SECRET
+                )
+                .is_ok()
+        );
+        assert!(matches!(
+            adaptor.verify(
+                &github_headers("issue_comment", Some(&sign("wrong", body))),
                 body,
                 SECRET
-            )
-            .is_ok()
-    );
-    assert!(matches!(
-        adaptor.verify(
-            &github_headers("issue_comment", Some(&sign("wrong", body))),
+            ),
+            Err(WebhookError::Unauthorized(_))
+        ));
+        assert!(matches!(
+            adaptor.verify(&github_headers("issue_comment", None), body, SECRET),
+            Err(WebhookError::Unauthorized(_))
+        ));
+    }
+
+    #[test]
+    fn normalizes() {
+        let event = expect_event(
+            GithubAdaptor::configured(None, None)
+                .normalize(
+                    &github_headers("issue_comment", None),
+                    github_body(),
+                    SECRET,
+                    "ops",
+                )
+                .expect("normalize"),
+        );
+        assert!(event.in_scope);
+        assert_eq!(event.label, "github:ops:issue:PerishCode/santi#42");
+        assert!(event.santi_system_text.contains("issue_comment.created"));
+        assert!(event.santi_system_text.contains("issuecomment-1"));
+        assert!(!event.santi_system_text.contains("top secret"));
+    }
+
+    #[test]
+    fn senders() {
+        let headers = github_headers("issue_comment", None);
+        let allowed = expect_event(
+            GithubAdaptor::configured(None, Some("SomeHuman"))
+                .normalize(&headers, github_body(), SECRET, "ops")
+                .expect("normalize"),
+        );
+        assert!(allowed.in_scope);
+        let rejected = expect_event(
+            GithubAdaptor::configured(None, Some("someone-else"))
+                .normalize(&headers, github_body(), SECRET, "ops")
+                .expect("normalize"),
+        );
+        assert!(!rejected.in_scope);
+        let own = expect_event(
+            GithubAdaptor::configured(Some("somehuman"), None)
+                .normalize(&headers, github_body(), SECRET, "ops")
+                .expect("normalize"),
+        );
+        assert!(own.self_authored);
+    }
+
+    #[test]
+    fn ping() {
+        let event = expect_event(
+            GithubAdaptor::configured(None, None)
+                .normalize(
+                    &github_headers("ping", None),
+                    br#"{"zen":"ok"}"#,
+                    SECRET,
+                    "ops",
+                )
+                .expect("normalize"),
+        );
+        assert!(!event.in_scope);
+    }
+}
+
+mod feishu {
+    use super::*;
+
+    #[test]
+    fn challenge() {
+        let body = format!(
+            r#"{{"challenge":"ch-42","token":"{FEISHU_TOKEN}","type":"url_verification"}}"#
+        );
+        let outcome = FeishuAdaptor::configured(None, None)
+            .normalize(&HeaderMap::new(), body.as_bytes(), FEISHU_TOKEN, "chat")
+            .expect("normalize");
+        assert!(
+            matches!(outcome, WebhookOutcome::Reply(value) if value == json!({"challenge":"ch-42"}))
+        );
+    }
+
+    #[test]
+    fn token() {
+        let body = br#"{"challenge":"ch","token":"wrong","type":"url_verification"}"#;
+        let result = FeishuAdaptor::configured(None, None).normalize(
+            &HeaderMap::new(),
             body,
-            SECRET
-        ),
-        Err(WebhookError::Unauthorized(_))
-    ));
-    assert!(matches!(
-        adaptor.verify(&github_headers("issue_comment", None), body, SECRET),
-        Err(WebhookError::Unauthorized(_))
-    ));
-}
+            FEISHU_TOKEN,
+            "chat",
+        );
+        assert!(matches!(result, Err(WebhookError::Unauthorized(_))));
+    }
 
-#[test]
-fn github_normalizes_event() {
-    let event = expect_event(
-        GithubAdaptor::configured(None, None)
-            .normalize(
-                &github_headers("issue_comment", None),
-                github_body(),
-                SECRET,
-                "ops",
-            )
-            .expect("normalize"),
-    );
-    assert!(event.in_scope);
-    assert_eq!(event.label, "github:ops:issue:PerishCode/santi#42");
-    assert!(event.santi_system_text.contains("issue_comment.created"));
-    assert!(event.santi_system_text.contains("issuecomment-1"));
-    assert!(!event.santi_system_text.contains("top secret"));
-}
+    #[test]
+    fn encrypted() {
+        let plain = feishu_payload("user", "ou_alice", "im.message.receive_v1");
+        let body = format!(r#"{{"encrypt":"{}"}}"#, encrypt(&plain));
+        let event = expect_event(
+            FeishuAdaptor::configured(Some(FEISHU_KEY), Some("ou_alice"))
+                .normalize(&HeaderMap::new(), body.as_bytes(), FEISHU_TOKEN, "chat")
+                .expect("normalize"),
+        );
+        assert!(event.in_scope);
+        assert_eq!(event.label, "feishu:chat:chat:oc_chat1");
+        assert!(event.santi_system_text.contains("message: om_msg1"));
+        assert!(!event.santi_system_text.contains("top secret"));
 
-#[test]
-fn github_gates_senders() {
-    let headers = github_headers("issue_comment", None);
-    let allowed = expect_event(
-        GithubAdaptor::configured(None, Some("SomeHuman"))
-            .normalize(&headers, github_body(), SECRET, "ops")
-            .expect("normalize"),
-    );
-    assert!(allowed.in_scope);
-    let rejected = expect_event(
-        GithubAdaptor::configured(None, Some("someone-else"))
-            .normalize(&headers, github_body(), SECRET, "ops")
-            .expect("normalize"),
-    );
-    assert!(!rejected.in_scope);
-    let own = expect_event(
-        GithubAdaptor::configured(Some("somehuman"), None)
-            .normalize(&headers, github_body(), SECRET, "ops")
-            .expect("normalize"),
-    );
-    assert!(own.self_authored);
-}
+        let result = FeishuAdaptor::configured(None, None).normalize(
+            &HeaderMap::new(),
+            body.as_bytes(),
+            FEISHU_TOKEN,
+            "chat",
+        );
+        assert!(matches!(result, Err(WebhookError::Unauthorized(_))));
+    }
 
-#[test]
-fn github_ignores_ping() {
-    let event = expect_event(
-        GithubAdaptor::configured(None, None)
-            .normalize(
-                &github_headers("ping", None),
-                br#"{"zen":"ok"}"#,
-                SECRET,
-                "ops",
-            )
-            .expect("normalize"),
-    );
-    assert!(!event.in_scope);
-}
+    #[test]
+    fn gates() {
+        let bot = feishu_payload("app", "ou_bot", "im.message.receive_v1");
+        let event = expect_event(
+            FeishuAdaptor::configured(None, None)
+                .normalize(&HeaderMap::new(), bot.as_bytes(), FEISHU_TOKEN, "chat")
+                .expect("normalize"),
+        );
+        assert!(!event.in_scope);
 
-#[test]
-fn feishu_answers_challenge() {
-    let body =
-        format!(r#"{{"challenge":"ch-42","token":"{FEISHU_TOKEN}","type":"url_verification"}}"#);
-    let outcome = FeishuAdaptor::configured(None, None)
-        .normalize(&HeaderMap::new(), body.as_bytes(), FEISHU_TOKEN, "chat")
-        .expect("normalize");
-    assert!(
-        matches!(outcome, WebhookOutcome::Reply(value) if value == json!({"challenge":"ch-42"}))
-    );
-}
+        let human = feishu_payload("user", "ou_stranger", "im.message.receive_v1");
+        let event = expect_event(
+            FeishuAdaptor::configured(None, Some("ou_operator"))
+                .normalize(&HeaderMap::new(), human.as_bytes(), FEISHU_TOKEN, "chat")
+                .expect("normalize"),
+        );
+        assert!(!event.in_scope);
+    }
 
-#[test]
-fn feishu_rejects_token() {
-    let body = br#"{"challenge":"ch","token":"wrong","type":"url_verification"}"#;
-    let result = FeishuAdaptor::configured(None, None).normalize(
-        &HeaderMap::new(),
-        body,
-        FEISHU_TOKEN,
-        "chat",
-    );
-    assert!(matches!(result, Err(WebhookError::Unauthorized(_))));
-}
+    #[test]
+    fn verifies() {
+        let body = b"{}";
+        let timestamp = "1700000000";
+        let nonce = "nonce-1";
+        let mut hasher = Sha256::new();
+        hasher.update(timestamp.as_bytes());
+        hasher.update(nonce.as_bytes());
+        hasher.update(FEISHU_KEY.as_bytes());
+        hasher.update(body);
+        let signature = hex::encode(hasher.finalize());
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-lark-request-timestamp",
+            HeaderValue::from_static(timestamp),
+        );
+        headers.insert("x-lark-request-nonce", HeaderValue::from_static(nonce));
+        headers.insert(
+            "x-lark-signature",
+            HeaderValue::from_str(&signature).unwrap(),
+        );
+        assert!(
+            FeishuAdaptor::configured(Some(FEISHU_KEY), None)
+                .verify(&headers, body, FEISHU_TOKEN)
+                .is_ok()
+        );
+        assert!(matches!(
+            FeishuAdaptor::configured(None, None).verify(&headers, body, FEISHU_TOKEN),
+            Err(WebhookError::Unauthorized(_))
+        ));
+    }
 
-#[test]
-fn feishu_normalizes_encrypted() {
-    let plain = feishu_payload("user", "ou_alice", "im.message.receive_v1");
-    let body = format!(r#"{{"encrypt":"{}"}}"#, encrypt(&plain));
-    let event = expect_event(
-        FeishuAdaptor::configured(Some(FEISHU_KEY), Some("ou_alice"))
-            .normalize(&HeaderMap::new(), body.as_bytes(), FEISHU_TOKEN, "chat")
-            .expect("normalize"),
-    );
-    assert!(event.in_scope);
-    assert_eq!(event.label, "feishu:chat:chat:oc_chat1");
-    assert!(event.santi_system_text.contains("message: om_msg1"));
-    assert!(!event.santi_system_text.contains("top secret"));
-
-    let result = FeishuAdaptor::configured(None, None).normalize(
-        &HeaderMap::new(),
-        body.as_bytes(),
-        FEISHU_TOKEN,
-        "chat",
-    );
-    assert!(matches!(result, Err(WebhookError::Unauthorized(_))));
-}
-
-#[test]
-fn feishu_gates_senders() {
-    let bot = feishu_payload("app", "ou_bot", "im.message.receive_v1");
-    let event = expect_event(
-        FeishuAdaptor::configured(None, None)
-            .normalize(&HeaderMap::new(), bot.as_bytes(), FEISHU_TOKEN, "chat")
-            .expect("normalize"),
-    );
-    assert!(!event.in_scope);
-
-    let human = feishu_payload("user", "ou_stranger", "im.message.receive_v1");
-    let event = expect_event(
-        FeishuAdaptor::configured(None, Some("ou_operator"))
-            .normalize(&HeaderMap::new(), human.as_bytes(), FEISHU_TOKEN, "chat")
-            .expect("normalize"),
-    );
-    assert!(!event.in_scope);
-}
-
-#[test]
-fn feishu_verifies_signature() {
-    let body = b"{}";
-    let timestamp = "1700000000";
-    let nonce = "nonce-1";
-    let mut hasher = Sha256::new();
-    hasher.update(timestamp.as_bytes());
-    hasher.update(nonce.as_bytes());
-    hasher.update(FEISHU_KEY.as_bytes());
-    hasher.update(body);
-    let signature = hex::encode(hasher.finalize());
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        "x-lark-request-timestamp",
-        HeaderValue::from_static(timestamp),
-    );
-    headers.insert("x-lark-request-nonce", HeaderValue::from_static(nonce));
-    headers.insert(
-        "x-lark-signature",
-        HeaderValue::from_str(&signature).unwrap(),
-    );
-    assert!(
-        FeishuAdaptor::configured(Some(FEISHU_KEY), None)
-            .verify(&headers, body, FEISHU_TOKEN)
-            .is_ok()
-    );
-    assert!(matches!(
-        FeishuAdaptor::configured(None, None).verify(&headers, body, FEISHU_TOKEN),
-        Err(WebhookError::Unauthorized(_))
-    ));
-}
-
-#[test]
-fn feishu_ignores_event() {
-    let body = feishu_payload("user", "ou_alice", "im.chat.updated_v1");
-    let event = expect_event(
-        FeishuAdaptor::configured(None, None)
-            .normalize(&HeaderMap::new(), body.as_bytes(), FEISHU_TOKEN, "chat")
-            .expect("normalize"),
-    );
-    assert!(!event.in_scope);
+    #[test]
+    fn ignores() {
+        let body = feishu_payload("user", "ou_alice", "im.chat.updated_v1");
+        let event = expect_event(
+            FeishuAdaptor::configured(None, None)
+                .normalize(&HeaderMap::new(), body.as_bytes(), FEISHU_TOKEN, "chat")
+                .expect("normalize"),
+        );
+        assert!(!event.in_scope);
+    }
 }
 
 fn expect_event(outcome: WebhookOutcome) -> NormalizedEvent {

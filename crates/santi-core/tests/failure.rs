@@ -77,7 +77,7 @@ impl Provider for FailureProvider {
 }
 
 #[tokio::test]
-async fn aggregates_provider_failures() {
+async fn aggregates() {
     let temp = tempfile::tempdir().expect("temp dir");
     let raw_error = "openai responses request failed: 401 Unauthorized secret detail".to_string();
     let provider = Arc::new(FailureProvider {

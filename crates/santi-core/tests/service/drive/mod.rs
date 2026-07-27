@@ -7,7 +7,7 @@ use santi_core::service::{self, Service};
 use santi_core::{message, strand};
 
 #[tokio::test]
-async fn reminder_no_repoke() {
+async fn reminder() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FakeProvider::default());
     let service = Service::open(
@@ -80,7 +80,7 @@ async fn reminder_no_repoke() {
 }
 
 #[tokio::test]
-async fn concurrent_request_follows() {
+async fn follows() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(GatedFirstProvider::new());
     let service = Service::open(

@@ -13,7 +13,7 @@ fn draft(operation: &str) -> Draft {
 }
 
 #[test]
-fn repeat_is_idempotent() {
+fn idempotent() {
     let opened = engine().open(None, draft("ingest_admission"), "t1");
     let repeated = engine().open(Some(&opened.incident), draft("active_guard"), "t2");
 
@@ -26,7 +26,7 @@ fn repeat_is_idempotent() {
 }
 
 #[test]
-fn resolve_advances_revision() {
+fn advances() {
     let opened = engine().open(None, draft("provider_preflight"), "t1");
     let resolved = engine().resolve(
         &opened.incident,

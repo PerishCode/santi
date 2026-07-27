@@ -3,7 +3,7 @@ use santi_core::object;
 use santi_core::service::{self, Service};
 
 #[tokio::test]
-async fn bucket_objects_are_scoped() {
+async fn scopes() {
     let temp = tempfile::tempdir().expect("temp dir");
     let service = Service::open(
         service::Config {
@@ -59,7 +59,7 @@ async fn bucket_objects_are_scoped() {
 }
 
 #[tokio::test]
-async fn bucket_rejects_unsafe_keys() {
+async fn rejects() {
     let temp = tempfile::tempdir().expect("temp dir");
     let service = Service::open(
         service::Config {

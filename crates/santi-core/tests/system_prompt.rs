@@ -26,7 +26,7 @@ impl Provider for FakeProvider {
 }
 
 #[test]
-fn renders_material_shape() {
+fn renders() {
     let harness = PromptHarness::open();
     harness.write_soul("---\nplain: value\n---\n# Soul");
     harness.write_strand("# Strand");
@@ -72,7 +72,7 @@ fn renders_material_shape() {
 }
 
 #[test]
-fn leaves_frontmatter_plain() {
+fn leaves() {
     let harness = PromptHarness::open();
     harness.write_soul("---\nplain: value\n---\n# Soul");
 
@@ -83,7 +83,7 @@ fn leaves_frontmatter_plain() {
 }
 
 #[test]
-fn constitution_override() {
+fn overrides() {
     let harness = PromptHarness::open();
     harness.write_constitution("my own physics, hot-edited");
 
@@ -94,7 +94,7 @@ fn constitution_override() {
 }
 
 #[test]
-fn default_memory_fallback() {
+fn fallback() {
     let harness = PromptHarness::open();
 
     let text = harness.system_prompt().text;
@@ -104,7 +104,7 @@ fn default_memory_fallback() {
 }
 
 #[test]
-fn projects_utf8_safely() {
+fn projects() {
     let harness = PromptHarness::open();
     let memory = format!("# Memory\n{}\nSOURCE_TAIL", "界".repeat(90_000));
     harness.write_soul(&memory);
@@ -123,7 +123,7 @@ fn projects_utf8_safely() {
 }
 
 #[tokio::test]
-async fn external_labels_stay_out_of_prompt() {
+async fn excludes() {
     let harness = PromptHarness::open();
     let first = harness
         .service

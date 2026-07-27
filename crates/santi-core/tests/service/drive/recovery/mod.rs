@@ -6,7 +6,7 @@ use santi_core::{message, strand};
 mod more;
 
 #[tokio::test]
-async fn failed_receipt_redrives() {
+async fn redrives() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FakeProvider {
         fail_for_requests: Some(1),
@@ -72,7 +72,7 @@ async fn failed_receipt_redrives() {
 }
 
 #[tokio::test]
-async fn cold_start_recovers() {
+async fn recovers() {
     let temp = tempfile::tempdir().expect("temp dir");
     let database = temp.path().join("santi.sqlite");
     let config = service::Config {

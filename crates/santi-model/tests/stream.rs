@@ -1,7 +1,7 @@
 use santi_model::{message, stream, turn};
 
 #[test]
-fn nested_payload_wire_shape() {
+fn nested() {
     let payload = stream::Payload::Message(message::Beat::Delta {
         message: "m1".to_string(),
         turn: "t1".to_string(),

@@ -2,7 +2,7 @@ use super::*;
 use santi_core::{message, receipt, turn};
 
 #[tokio::test]
-async fn preserves_aborted_output() {
+async fn preserves() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FailureProvider {
         stream_error_after_text: Some("provider stream aborted".to_string()),
@@ -43,7 +43,7 @@ async fn preserves_aborted_output() {
 }
 
 #[tokio::test]
-async fn classifies_response_failure() {
+async fn classifies() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FailureProvider {
         response_failure: Some("provider rejected response".to_string()),
@@ -67,7 +67,7 @@ async fn classifies_response_failure() {
 }
 
 #[tokio::test]
-async fn success_resolves_incident() {
+async fn resolves() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FailureProvider {
         fail_with: Some("temporary provider outage".to_string()),
@@ -118,7 +118,7 @@ async fn success_resolves_incident() {
 }
 
 #[tokio::test]
-async fn runtime_receipt_recovers() {
+async fn recovers() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FailureProvider {
         started: true,

@@ -2,7 +2,7 @@ use super::*;
 use santi_core::{ingest, message, strand};
 
 #[tokio::test]
-async fn resume_holds_pending() {
+async fn holds() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     let provider = Arc::new(FakeProvider {
@@ -49,7 +49,7 @@ async fn resume_holds_pending() {
 }
 
 #[tokio::test]
-async fn rejected_payload_is_ephemeral() {
+async fn ephemeral() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FakeProvider {
         bytes: Some(1),
@@ -90,7 +90,7 @@ async fn rejected_payload_is_ephemeral() {
 }
 
 #[tokio::test]
-async fn compact_resolves_incident() {
+async fn resolves() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     let provider = Arc::new(LargeToolCallProvider {
@@ -212,7 +212,7 @@ async fn compact_resolves_incident() {
 }
 
 #[tokio::test]
-async fn budget_raise_clears_hold_on_ingest() {
+async fn clears() {
     let temp = tempfile::tempdir().expect("temp dir");
     let held = service_with_budget(
         &temp,

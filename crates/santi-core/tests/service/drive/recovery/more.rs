@@ -2,7 +2,7 @@ use super::*;
 use santi_core::{message, strand};
 
 #[tokio::test]
-async fn drive_failure_recovers() {
+async fn recovers() {
     let temp = tempfile::tempdir().expect("temp dir");
     let database = temp.path().join("santi.sqlite");
     let service = Service::open(

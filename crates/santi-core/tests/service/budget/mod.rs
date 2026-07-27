@@ -24,7 +24,7 @@ fn service_with_budget(temp: &tempfile::TempDir, provider: Arc<dyn Provider>) ->
 }
 
 #[tokio::test]
-async fn admission_opens_incident() {
+async fn opens() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     let provider = Arc::new(FakeProvider {
@@ -91,7 +91,7 @@ async fn admission_opens_incident() {
 }
 
 #[tokio::test]
-async fn remeasures_hot_memory() {
+async fn remeasures() {
     let temp = tempfile::tempdir().expect("temp dir");
     let runtime = temp.path().join("runtime");
     let memory_path = runtime.join("souls/soul_default/memory/MEMORY.md");
@@ -163,7 +163,7 @@ async fn remeasures_hot_memory() {
 }
 
 #[tokio::test]
-async fn repeats_are_idempotent() {
+async fn idempotent() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     let provider = Arc::new(FakeProvider {
@@ -241,7 +241,7 @@ async fn repeats_are_idempotent() {
 }
 
 #[tokio::test]
-async fn store_cannot_bypass() {
+async fn guards() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     let provider = Arc::new(FakeProvider {

@@ -2,7 +2,7 @@ use super::*;
 use santi_core::{message, soul, strand};
 
 #[tokio::test]
-async fn shutdown_pauses_consumption() {
+async fn pauses() {
     let temp = tempfile::tempdir().expect("temp dir");
     let config = service::Config {
         database: temp.path().join("santi.sqlite").display().to_string(),
@@ -54,7 +54,7 @@ async fn shutdown_pauses_consumption() {
 }
 
 #[tokio::test]
-async fn send_targets_soul() {
+async fn targets() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FakeProvider::default());
     let service = Service::open(

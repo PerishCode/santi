@@ -133,7 +133,7 @@ async fn write_response(stream: &mut TcpStream, status: &str, content_type: &str
 }
 
 #[tokio::test]
-async fn posts_once_on_complete() {
+async fn completes() {
     let server = spawn_server(FakeEventsResponse::CompletesSeedTurn).await;
     let client = reqwest::Client::new();
 
@@ -153,7 +153,7 @@ async fn posts_once_on_complete() {
 }
 
 #[tokio::test]
-async fn posts_once_stream_close() {
+async fn closes() {
     let server = spawn_server(FakeEventsResponse::ClosesImmediately).await;
     let client = reqwest::Client::new();
 
@@ -173,7 +173,7 @@ async fn posts_once_stream_close() {
 }
 
 #[tokio::test]
-async fn posts_once_watch_error() {
+async fn errors() {
     let server = spawn_server(FakeEventsResponse::Status500).await;
     let client = reqwest::Client::new();
 
@@ -194,7 +194,7 @@ async fn posts_once_watch_error() {
 }
 
 #[tokio::test]
-async fn warning_stops_watch() {
+async fn warns() {
     let server = spawn_server(FakeEventsResponse::AcceptedWarning).await;
     let client = reqwest::Client::new();
 

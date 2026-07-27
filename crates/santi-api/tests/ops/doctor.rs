@@ -6,7 +6,7 @@ use santi_api::config::{Layout, Profile};
 use santi_api::runtime::Runtime;
 
 #[test]
-fn reports_budget() {
+fn reports() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
     santi_core::Store::open(&paths.database).expect("open store");
@@ -23,7 +23,7 @@ fn reports_budget() {
 }
 
 #[test]
-fn rejects_missing_budget() {
+fn rejects() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
     santi_core::Store::open(&paths.database).expect("open store");

@@ -8,6 +8,7 @@
 import { run } from "@/lib/std/cmd.ts";
 import { join } from "@/lib/std/fs.ts";
 import { repoRoot } from "@/lib/std/repo.ts";
+import { scanLeaves } from "@/lib/word/leaves.ts";
 import {
   classifiedScan,
   formatReport,
@@ -35,6 +36,25 @@ export async function guard(argv: string[]): Promise<number> {
   const repo = repoRoot();
   const wrappers = wrapperFiles(repo);
   const config = ".runseal/deno.json";
+
+  console.log("==> test leaves");
+  try {
+    const faults = await scanLeaves(repo);
+    if (faults.length > 0) {
+      for (const fault of faults) {
+        console.error(
+          `${fault.path}:${fault.line}: attributed test leaf "${fault.name}" must be one lowercase word`,
+        );
+      }
+      console.error(`:guard: test-leaf gate failed (${faults.length} fault(s))`);
+      return 1;
+    }
+    console.log("test-leaf gate: ok");
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    console.error(":guard: test-leaf scan failed");
+    return 1;
+  }
 
   console.log("==> negentropy");
   try {

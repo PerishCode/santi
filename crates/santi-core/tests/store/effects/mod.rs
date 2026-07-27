@@ -73,7 +73,7 @@ fn start_effect(store: &Store) -> StartedEffect {
 }
 
 #[test]
-fn prepared_failure() {
+fn fails() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let (ledger, context) = observed();
@@ -109,7 +109,7 @@ fn prepared_failure() {
 }
 
 #[test]
-fn intent_atomicity() {
+fn atomic() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     let store = Store::open(&db).expect("open store");

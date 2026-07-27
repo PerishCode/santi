@@ -2,7 +2,7 @@ use super::support::*;
 use santi_core::{message, tool};
 
 #[test]
-fn fork_copies_prefix() {
+fn copies() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let parent = store.weave().expect("create parent");
@@ -63,7 +63,7 @@ fn fork_copies_prefix() {
 }
 
 #[test]
-fn fork_copies_inner_compacts() {
+fn compacts() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let parent = store.weave().expect("create parent");
@@ -131,7 +131,7 @@ fn fork_copies_inner_compacts() {
 }
 
 #[test]
-fn fork_reuses_tools() {
+fn reuses() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let parent = store.weave().expect("create parent");
@@ -204,7 +204,7 @@ fn fork_reuses_tools() {
 }
 
 #[test]
-fn fork_drops_external_state() {
+fn drops() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let parent = store

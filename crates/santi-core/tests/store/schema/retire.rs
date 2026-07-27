@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn schema_retires_integrated_im_without_touching_sidecar() {
+fn retires() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     drop(Store::open(&db).expect("open current store"));

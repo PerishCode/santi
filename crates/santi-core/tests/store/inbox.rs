@@ -2,7 +2,7 @@ use super::support::*;
 use santi_core::{ingest, message};
 
 #[test]
-fn drive_coalesces_redrives() {
+fn coalesces() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let strand = store.weave().expect("create strand");
@@ -63,7 +63,7 @@ fn drive_coalesces_redrives() {
 }
 
 #[test]
-fn drain_commits_pending() {
+fn commits() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let strand = store.weave().expect("create strand");
@@ -99,7 +99,7 @@ fn drain_commits_pending() {
 }
 
 #[test]
-fn drain_records_provenance() {
+fn records() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     let store = Store::open(&db).expect("open store");
@@ -163,7 +163,7 @@ fn drain_records_provenance() {
 }
 
 #[test]
-fn inbox_gate_rejects() {
+fn rejects() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     let store = Store::open(&db).expect("open store");
@@ -229,7 +229,7 @@ fn inbox_gate_rejects() {
 }
 
 #[test]
-fn records_do_not_drive() {
+fn passive() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let strand = store.weave().expect("create strand");
@@ -252,7 +252,7 @@ fn records_do_not_drive() {
 }
 
 #[test]
-fn boot_reconciles_once() {
+fn reconciles() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let strand = store.weave().expect("create strand");

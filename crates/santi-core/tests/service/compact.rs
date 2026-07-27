@@ -3,7 +3,7 @@ use santi_core::service::{self, Service};
 use santi_core::{message, tool};
 
 #[test]
-fn capsule_dry_run_header() {
+fn header() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     let service = Service::open(
@@ -120,7 +120,7 @@ fn capsule_dry_run_header() {
 }
 
 #[test]
-fn system_boundary_compacts() {
+fn compacts() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     let service = Service::open(
@@ -174,7 +174,7 @@ fn system_boundary_compacts() {
 }
 
 #[test]
-fn capsule_seq_boundary() {
+fn boundary() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     let service = Service::open(

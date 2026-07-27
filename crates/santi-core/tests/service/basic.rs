@@ -3,7 +3,7 @@ use santi_core::service::{self, Service};
 use santi_core::{message, strand};
 
 #[tokio::test]
-async fn sends_with_runtime() {
+async fn sends() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FakeProvider::default());
     let service = Service::open(

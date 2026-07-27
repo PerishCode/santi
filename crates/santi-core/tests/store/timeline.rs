@@ -2,7 +2,7 @@ use super::support::*;
 use santi_core::{message, thinking, tool};
 
 #[test]
-fn appends_relations_in_order() {
+fn appends() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let strand = store.weave().expect("create strand");
@@ -25,7 +25,7 @@ fn appends_relations_in_order() {
 }
 
 #[test]
-fn maps_santi_system_input() {
+fn maps() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let strand = store.weave().expect("create strand");
@@ -50,7 +50,7 @@ fn maps_santi_system_input() {
 }
 
 #[test]
-fn thinking_becomes_reasoning() {
+fn reasons() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let strand = store.weave().expect("create strand");
@@ -110,7 +110,7 @@ fn thinking_becomes_reasoning() {
 }
 
 #[test]
-fn timeline_interleaves() {
+fn interleaves() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let strand = store.weave().expect("create strand");

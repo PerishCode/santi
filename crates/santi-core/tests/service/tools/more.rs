@@ -2,7 +2,7 @@ use super::*;
 use santi_core::{message, strand};
 
 #[tokio::test]
-async fn rejects_tool_batch() {
+async fn rejects() {
     let temp = tempfile::tempdir().expect("temp dir");
     let (service, provider) = budget_service(
         &temp,
@@ -43,7 +43,7 @@ async fn rejects_tool_batch() {
 }
 
 #[tokio::test]
-async fn reserves_followup_round() {
+async fn reserves() {
     let temp = tempfile::tempdir().expect("temp dir");
     let (service, provider) = budget_service(
         &temp,
@@ -90,7 +90,7 @@ async fn reserves_followup_round() {
 }
 
 #[tokio::test]
-async fn bounds_shell_capture() {
+async fn bounds() {
     let temp = tempfile::tempdir().expect("temp dir");
     let (service, provider) = budget_service(
         &temp,
@@ -149,7 +149,7 @@ async fn bounds_shell_capture() {
 }
 
 #[tokio::test]
-async fn preserves_retry_usage() {
+async fn preserves() {
     let temp = tempfile::tempdir().expect("temp dir");
     let (service, provider) = budget_service(
         &temp,

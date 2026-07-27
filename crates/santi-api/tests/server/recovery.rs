@@ -2,7 +2,7 @@ use super::*;
 use santi_core::{message, strand};
 
 #[tokio::test]
-async fn send_rejection_locks() {
+async fn locks() {
     let temp = tempfile::tempdir().expect("temp dir");
     let service = Service::open(
         service::Config {
@@ -47,7 +47,7 @@ async fn send_rejection_locks() {
 }
 
 #[tokio::test]
-async fn drive_failure_http_recovery() {
+async fn recovers() {
     let temp = tempfile::tempdir().expect("temp dir");
     let database = temp.path().join("santi.sqlite");
     let service = Service::open(

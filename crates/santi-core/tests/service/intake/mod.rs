@@ -6,7 +6,7 @@ mod downstream;
 mod more;
 
 #[tokio::test]
-async fn external_ingest_turn() {
+async fn ingests() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FakeProvider::default());
     let service = Service::open(
@@ -75,7 +75,7 @@ async fn external_ingest_turn() {
 }
 
 #[tokio::test]
-async fn boot_drains_inbox() {
+async fn drains() {
     let temp = tempfile::tempdir().expect("temp dir");
     let config = service::Config {
         database: temp.path().join("santi.sqlite").display().to_string(),

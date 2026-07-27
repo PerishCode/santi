@@ -3,7 +3,7 @@ use super::service_with_budget;
 use santi_core::{effect, message, strand};
 
 #[tokio::test]
-async fn compact_redrives_receipt() {
+async fn redrives() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     let provider = Arc::new(LargeToolCallProvider {

@@ -2,7 +2,7 @@ use super::*;
 use santi_core::{effect, tool};
 
 #[test]
-fn restart_ambiguity() {
+fn ambiguous() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let (ledger, context) = observed();
@@ -100,7 +100,7 @@ fn restart_ambiguity() {
 }
 
 #[test]
-fn archived_trail() {
+fn archives() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let context = plumb::context::Context::root().with(store.sink());

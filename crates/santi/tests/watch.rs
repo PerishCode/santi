@@ -1,7 +1,7 @@
 use santi::watch::{json_field, next_sse_frame, parse_sse_frame, render_watch_event, snippet};
 
 #[test]
-fn renders_events() {
+fn renders() {
     assert_eq!(
         render_watch_event("open", r#"{"payload":{"type":"open"}}"#),
         None
@@ -66,13 +66,13 @@ fn renders_events() {
 }
 
 #[test]
-fn snippets_text() {
+fn snippets() {
     assert_eq!(snippet("a\n  b\t c", 20), "a b c");
     assert_eq!(snippet("abcdef", 3), "abc…");
 }
 
 #[test]
-fn parses_sse_frame() {
+fn parses() {
     let frame =
         "id: e1\nevent: turn\ndata: {\"payload\":{\"beat\":\"completed\",\"turn\":\"t1\"}}\n";
     let (event, data) = parse_sse_frame(frame).expect("frame");
@@ -85,7 +85,7 @@ fn parses_sse_frame() {
 }
 
 #[test]
-fn reads_json_field() {
+fn reads() {
     let data = "{\"payload\":{\"turn\":{\"id\":\"t9\"}}}";
     assert_eq!(
         json_field(data, &["payload", "turn", "id"]).as_deref(),
@@ -95,7 +95,7 @@ fn reads_json_field() {
 }
 
 #[tokio::test]
-async fn frames_across_chunks() {
+async fn chunks() {
     use futures_util::stream;
 
     let chunks: Vec<reqwest::Result<Vec<u8>>> = vec![

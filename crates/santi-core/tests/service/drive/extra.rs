@@ -2,7 +2,7 @@ use super::*;
 use santi_core::{message, strand};
 
 #[tokio::test]
-async fn drain_preserves_provenance() {
+async fn preserves() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(GatedFirstProvider::new());
     let service = Service::open(

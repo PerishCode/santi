@@ -134,7 +134,7 @@ fn budget_service(
 }
 
 #[tokio::test]
-async fn dispatches_tools() {
+async fn dispatches() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FakeProvider {
         request_tool: true,

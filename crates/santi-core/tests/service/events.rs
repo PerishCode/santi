@@ -3,7 +3,7 @@ use santi_core::service::{self, Service};
 use santi_core::{message, strand};
 
 #[tokio::test]
-async fn emits_turn_completed() {
+async fn completes() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FakeProvider::default());
     let service = Service::open(
@@ -52,7 +52,7 @@ async fn emits_turn_completed() {
 }
 
 #[tokio::test]
-async fn labeled_turn_emits_envelope_and_records_outbox() {
+async fn records() {
     let temp = tempfile::tempdir().expect("temp dir");
     let provider = Arc::new(FakeProvider::default());
     let service = Service::open(
@@ -104,7 +104,7 @@ async fn labeled_turn_emits_envelope_and_records_outbox() {
 }
 
 #[tokio::test]
-async fn downstream_batch_isolates_zone_and_advances_over_other_zones() {
+async fn isolates() {
     let temp = tempfile::tempdir().expect("temp dir");
     let service = Service::open(
         service::Config {
@@ -172,7 +172,7 @@ async fn downstream_batch_isolates_zone_and_advances_over_other_zones() {
 }
 
 #[tokio::test]
-async fn runtime_outbox_reaches_bus() {
+async fn publishes() {
     let temp = tempfile::tempdir().expect("temp dir");
     let database = temp.path().join("santi.sqlite");
     let service = Service::open(
@@ -219,7 +219,7 @@ async fn runtime_outbox_reaches_bus() {
 }
 
 #[tokio::test]
-async fn global_bus_sees_strands() {
+async fn observes() {
     let temp = tempfile::tempdir().expect("temp dir");
     let database = temp.path().join("santi.sqlite");
     let service = Service::open(

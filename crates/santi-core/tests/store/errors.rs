@@ -1,7 +1,7 @@
 use santi_core::{Store, catalog};
 
 #[test]
-fn generic_ports_are_transactional() {
+fn transactional() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
     let scope = santi_core::Scope::new("runtime", "default");

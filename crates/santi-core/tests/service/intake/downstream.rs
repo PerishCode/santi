@@ -36,7 +36,7 @@ fn receipt(admission: service::Admission) -> santi_core::ingest::Receipt {
 }
 
 #[tokio::test]
-async fn credential_and_zone_gate_ingest() {
+async fn gates() {
     let (_temp, service) = open();
     register(&service, "stim", "stim:", "s3cret");
     let soul = service.souls().expect("list souls")[0].id.clone();
@@ -75,7 +75,7 @@ async fn credential_and_zone_gate_ingest() {
 }
 
 #[tokio::test]
-async fn request_key_replays_receipt_and_rejects_changed_payload() {
+async fn replays() {
     let (_temp, service) = open();
     register(&service, "stim", "stim:", "s3cret");
     let soul = service.souls().expect("list souls")[0].id.clone();
@@ -115,7 +115,7 @@ async fn request_key_replays_receipt_and_rejects_changed_payload() {
 }
 
 #[test]
-fn registration_is_unique_idempotent_and_secret_free() {
+fn registers() {
     let (_temp, service) = open();
     let digest = hex::encode(Sha256::digest(b"s3cret"));
     let request = santi_core::downstream::Draft {

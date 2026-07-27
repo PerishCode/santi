@@ -5,7 +5,7 @@ mod more;
 mod retire;
 
 #[test]
-fn schema_matches_runtime() {
+fn matches() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     let store = Store::open(&db).expect("open store");
@@ -64,7 +64,7 @@ fn schema_matches_runtime() {
 }
 
 #[test]
-fn soul_label_anchoring() {
+fn anchors() {
     let temp = tempfile::tempdir().expect("temp dir");
     let store = Store::open(temp.path().join("santi.sqlite")).expect("open store");
 
@@ -100,14 +100,14 @@ fn soul_label_anchoring() {
 }
 
 #[test]
-fn absent_schema_is_none() {
+fn absent() {
     let temp = tempfile::tempdir().expect("temp dir");
     let missing = temp.path().join("nope.sqlite");
     assert_eq!(santi_core::version(&missing).expect("read"), None);
 }
 
 #[test]
-fn schema_read_matches_open() {
+fn opens() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
 
@@ -136,7 +136,7 @@ fn schema_read_matches_open() {
 }
 
 #[test]
-fn memory_path_composes() {
+fn composes() {
     let path = santi_core::memoir("/srv/santi/runtime", "soul_default");
     assert!(path.ends_with("souls/soul_default/memory/MEMORY.md"));
     assert!(path.starts_with("/srv/santi/runtime"));

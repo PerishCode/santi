@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use santi_core::{SOULSPACE, STRANDSPACE, housed, parsed, soulward, strandward};
 
 #[test]
-fn builds_memory_uris() {
+fn builds() {
     assert_eq!(soulward(), "soul://MEMORY.md");
     assert_eq!(strandward(), "strand://MEMORY.md");
     assert_eq!(housed(SOULSPACE, "notes/today.md"), "soul://notes/today.md");
@@ -11,7 +11,7 @@ fn builds_memory_uris() {
 }
 
 #[test]
-fn parses_workspace_roots() {
+fn parses() {
     let soul = parsed(SOULSPACE).expect("soul root");
     assert_eq!(soul.root, santi_core::workspace::Root::Soul);
     assert_eq!(soul.path, PathBuf::new());
@@ -22,7 +22,7 @@ fn parses_workspace_roots() {
 }
 
 #[test]
-fn rejects_old_aliases() {
+fn aliases() {
     assert_eq!(
         parsed("@soul").expect_err("old soul alias"),
         "unsupported workspace alias: @soul; use soul:// or strand://"
@@ -34,7 +34,7 @@ fn rejects_old_aliases() {
 }
 
 #[test]
-fn rejects_invalid_uris() {
+fn invalid() {
     assert_eq!(
         parsed("file://tmp").expect_err("unknown scheme"),
         "unsupported workspace uri: file://tmp"

@@ -75,7 +75,7 @@ impl Provider for MemoryOrganizingProvider {
 }
 
 #[tokio::test]
-async fn pressure_lifecycle() {
+async fn lifecycle() {
     let temp = tempfile::tempdir().expect("temp dir");
     let runtime = temp.path().join("runtime");
     let memory_path = runtime

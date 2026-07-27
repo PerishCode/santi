@@ -3,7 +3,7 @@ use santi_core::service::{self, Service};
 use santi_core::{material, message};
 
 #[test]
-fn fork_syncs_workspace() {
+fn syncs() {
     let temp = tempfile::tempdir().expect("temp dir");
     let runtime = temp.path().join("runtime");
     let service = Service::open(
@@ -43,7 +43,7 @@ fn fork_syncs_workspace() {
 
 #[cfg(unix)]
 #[test]
-fn fork_rejects_symlink() {
+fn rejects() {
     let temp = tempfile::tempdir().expect("temp dir");
     let db = temp.path().join("santi.sqlite");
     let runtime = temp.path().join("runtime");
@@ -150,7 +150,7 @@ fn fork_rejects_symlink() {
 }
 
 #[test]
-fn fork_prompt_topology() {
+fn prompts() {
     let temp = tempfile::tempdir().expect("temp dir");
     let service = Service::open(
         service::Config {

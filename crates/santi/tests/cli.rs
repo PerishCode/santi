@@ -10,7 +10,7 @@ fn defaults(strand: Option<&str>, soul: Option<&str>) -> ClientDefaults {
 }
 
 #[test]
-fn defaults_resolve_strand() {
+fn resolves() {
     let defaults = defaults(Some("sess_default"), None);
     assert_eq!(
         defaults.resolve_strand(Some("sess_x".into())).unwrap(),
@@ -20,20 +20,20 @@ fn defaults_resolve_strand() {
 }
 
 #[test]
-fn defaults_require_strand() {
+fn requires() {
     assert!(defaults(None, None).resolve_strand(None).is_err());
     assert!(defaults(Some("  "), None).resolve_strand(None).is_err());
 }
 
 #[test]
-fn defaults_trim_soul() {
+fn trims() {
     assert_eq!(defaults(None, Some("soul_x")).soul(), Some("soul_x"));
     assert_eq!(defaults(None, Some("   ")).soul(), None);
     assert_eq!(defaults(None, None).soul(), None);
 }
 
 #[test]
-fn form_encodes() {
+fn encodes() {
     assert_eq!(
         form_urlencode(&[("grant_type", "client_credentials"), ("scope", "openid")]),
         "grant_type=client_credentials&scope=openid"
@@ -43,7 +43,7 @@ fn form_encodes() {
 }
 
 #[test]
-fn send_args_split() {
+fn splits() {
     let config = defaults(Some("sess_default"), None);
     let (id, text) = split_send_args(vec!["sess_x".into(), "hi".into()], &config).unwrap();
     assert_eq!((id.as_str(), text.as_str()), ("sess_x", "hi"));
@@ -54,7 +54,7 @@ fn send_args_split() {
 }
 
 #[test]
-fn parses_fork() {
+fn fork() {
     let parsed = Cli::try_parse_from(["santi", "strand", "fork", "ss_parent"]).unwrap();
     let Command::Strand(StrandCommand::Fork { id }) = parsed.command else {
         panic!("expected strand fork command");
@@ -69,7 +69,7 @@ fn parses_fork() {
 }
 
 #[test]
-fn parses_drive() {
+fn drive() {
     let parsed = Cli::try_parse_from(["santi", "strand", "drive", "ss_blocked"]).unwrap();
     let Command::Strand(StrandCommand::Drive { id }) = parsed.command else {
         panic!("expected strand drive command");

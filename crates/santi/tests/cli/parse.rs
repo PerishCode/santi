@@ -4,7 +4,7 @@ use santi::cli::{
 };
 
 #[test]
-fn errors_replaces_rejections() {
+fn errors() {
     let parsed = Cli::try_parse_from([
         "santi",
         "errors",
@@ -39,7 +39,7 @@ fn errors_replaces_rejections() {
 }
 
 #[test]
-fn parses_receipt_query() {
+fn receipt() {
     let parsed = Cli::try_parse_from(["santi", "receipt", "inbox_123"]).unwrap();
     let Command::Receipt { inbox } = parsed.command else {
         panic!("expected receipt command");
@@ -48,7 +48,7 @@ fn parses_receipt_query() {
 }
 
 #[test]
-fn parses_effect_commands() {
+fn effects() {
     let parsed = Cli::try_parse_from(["santi", "effect", "query", "effect_123"]).unwrap();
     let Command::Effect(EffectCommand::Query { effect }) = parsed.command else {
         panic!("expected effect query");
@@ -80,7 +80,7 @@ fn parses_effect_commands() {
 }
 
 #[test]
-fn parses_watch_flags() {
+fn watch() {
     let parsed = Cli::try_parse_from(["santi", "strand", "send", "--watch", "hello"]).unwrap();
     let Command::Strand(StrandCommand::Send {
         args,
@@ -129,7 +129,7 @@ fn parses_watch_flags() {
 }
 
 #[test]
-fn parses_capsule() {
+fn capsule() {
     let parsed = Cli::try_parse_from([
         "santi",
         "compact",

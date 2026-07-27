@@ -32,7 +32,7 @@ impl Service {
             job::Stream::Stdout => "stdout.log",
             job::Stream::Stderr => "stderr.log",
         };
-        let path = self.jobhome(&record.job.id).join(filename);
+        let path = self.jobhome(&record).join(filename);
         let mut file = match File::open(&path) {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {

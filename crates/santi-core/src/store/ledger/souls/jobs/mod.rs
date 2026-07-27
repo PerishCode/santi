@@ -33,8 +33,8 @@ pub(crate) struct Entry {
 #[derive(Debug, Clone)]
 pub(crate) struct Record {
     pub job: job::Job,
-    pub generation: String,
-    pub supervisor: String,
+    pub stamp: String,
+    pub sidecar: String,
     pub started: Option<i64>,
     pub revision: u64,
     pub runtime: bool,
@@ -155,8 +155,8 @@ impl Store {
         }
 
         let id = tag("job");
-        let generation = tag("generation");
-        let supervisor = format!("santi-{}.service", id.replace('_', "-"));
+        let stamp = tag("stamp");
+        let sidecar = format!("santi-{}.service", stamp.replace('_', "-"));
         let timestamp = now();
         let timeout =
             i64::try_from(draft.timeout).map_err(|_| "job timeout is out of range".to_string())?;
@@ -200,8 +200,8 @@ impl Store {
                 remind,
                 draft.digest,
                 proof,
-                generation,
-                supervisor,
+                stamp,
+                sidecar,
                 timestamp
             ],
         )

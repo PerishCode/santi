@@ -71,7 +71,7 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 13] = [
     (
         "job::Accepted",
         "job",
-        "The accepted resource. Its current state may advance quickly, but create\nsuccess promises only durable supervisor acceptance.",
+        "The accepted resource. Its current state may advance quickly, but create\nsuccess promises that the detached sidecar durably claimed execution responsibility.",
     ),
     (
         "job::Log",

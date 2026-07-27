@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use serde::Serialize;
 
 use super::Service;
@@ -9,6 +7,7 @@ use crate::store::{JobEntry, JobGrant, JobPrepared, JobRecord};
 mod attention;
 mod draft;
 mod logs;
+mod paths;
 
 pub use logs::Read;
 
@@ -25,8 +24,8 @@ pub struct Draft {
 #[derive(Debug, Clone)]
 pub struct Launch {
     pub job: job::Job,
-    pub generation: String,
-    pub supervisor: String,
+    pub stamp: String,
+    pub sidecar: String,
     pub cwd: String,
     pub directory: String,
 }
@@ -40,15 +39,16 @@ pub struct Terminal {
 
 #[derive(Debug, Clone)]
 pub enum Observation {
-    Accepted,
+    Claimed,
     Running,
     Terminal(Terminal),
+    Aborted,
     Missing,
 }
 
 pub trait Supervisor: Send + Sync {
-    fn ensure(&self, launch: &Launch) -> Result<(), String>;
-    fn inspect(&self, launch: &Launch) -> Result<Observation, String>;
+    fn detach(&self, launch: &Launch) -> Result<(), String>;
+    fn observe(&self, launch: &Launch) -> Result<Observation, String>;
     fn stop(&self, launch: &Launch) -> Result<(), String>;
     fn acknowledge(&self, launch: &Launch) -> Result<(), String>;
 }
@@ -56,11 +56,11 @@ pub trait Supervisor: Send + Sync {
 pub(super) struct Unavailable;
 
 impl Supervisor for Unavailable {
-    fn ensure(&self, _launch: &Launch) -> Result<(), String> {
+    fn detach(&self, _launch: &Launch) -> Result<(), String> {
         Err("job supervisor is unavailable".to_string())
     }
 
-    fn inspect(&self, _launch: &Launch) -> Result<Observation, String> {
+    fn observe(&self, _launch: &Launch) -> Result<Observation, String> {
         Err("job supervisor is unavailable".to_string())
     }
 
@@ -109,7 +109,7 @@ impl Service {
             JobPrepared::New(record) | JobPrepared::Existing(record) => record,
         };
         if record.job.state == job::State::Submitting {
-            self.supervisor.ensure(&self.launch(&record)?)?;
+            self.detach(&record)?;
         }
         let record = if record.job.state == job::State::Submitting {
             self.store.accept(&record.job.id)?
@@ -131,11 +131,23 @@ impl Service {
     }
 
     pub fn jobs(&self, soul: &str) -> Result<Vec<job::Job>, String> {
-        self.store
+        Ok(self
+            .store
             .owned(soul)?
             .into_iter()
-            .map(|record| self.refresh(record).map(|record| record.job))
-            .collect()
+            .map(|record| {
+                let fallback = record.clone();
+                self.refresh(record)
+                    .map(|record| record.job)
+                    .unwrap_or_else(|error| {
+                        eprintln!(
+                            "santi: job observation failed job={} detail={error}",
+                            fallback.job.id
+                        );
+                        fallback.job
+                    })
+            })
+            .collect())
     }
 
     pub fn cancel(&self, soul: &str, id: &str) -> Result<Option<job::Job>, String> {
@@ -173,13 +185,6 @@ impl Service {
         self.store.acknowledge(id).map(|record| Some(record.job))
     }
 
-    pub(crate) fn recover(&self) -> Result<(), String> {
-        for record in self.store.records()? {
-            self.refresh(record)?;
-        }
-        Ok(())
-    }
-
     fn sweep(&self) -> Result<(), String> {
         for record in self.store.active()? {
             let id = record.job.id.clone();
@@ -212,10 +217,10 @@ impl Service {
         std::fs::create_dir_all(&cwd).map_err(|error| error.to_string())?;
         Ok(Launch {
             job: record.job.clone(),
-            generation: record.generation.clone(),
-            supervisor: record.supervisor.clone(),
+            stamp: record.stamp.clone(),
+            sidecar: record.sidecar.clone(),
             cwd: cwd.display().to_string(),
-            directory: self.jobhome(&record.job.id).display().to_string(),
+            directory: self.jobhome(record).display().to_string(),
         })
     }
 
@@ -223,20 +228,42 @@ impl Service {
         if record.job.acknowledged.is_some() {
             return Ok(record);
         }
-        let observation = self.supervisor.inspect(&self.launch(&record)?)?;
+        let observation = self.supervisor.observe(&self.launch(&record)?)?;
+        let claimed = matches!(
+            &observation,
+            Observation::Claimed | Observation::Running | Observation::Terminal(_)
+        );
+        let record = if claimed && record.job.state == job::State::Submitting {
+            self.store.accept(&record.job.id)?
+        } else {
+            record
+        };
         let transition = match observation {
-            Observation::Accepted if record.job.state == job::State::Submitting => {
-                return self.store.accept(&record.job.id);
-            }
-            Observation::Accepted => None,
+            Observation::Claimed => None,
             Observation::Running => Some((job::State::Running, None, None)),
             Observation::Terminal(terminal) => {
                 Some((terminal.state, terminal.reason, terminal.exit))
             }
+            Observation::Aborted => Some((
+                job::State::Failed,
+                Some("submission_aborted".to_string()),
+                None,
+            )),
             Observation::Missing if record.job.state.terminal() => None,
+            Observation::Missing
+                if record.job.state == job::State::Submitting
+                    && self.handoffs.lock().unwrap().contains(&record.stamp) =>
+            {
+                None
+            }
+            Observation::Missing if record.job.state == job::State::Submitting => Some((
+                job::State::Failed,
+                Some("submission_aborted".to_string()),
+                None,
+            )),
             Observation::Missing => Some((
                 job::State::Unknown,
-                Some("supervisor_evidence_missing".to_string()),
+                Some("sidecar_evidence_missing".to_string()),
                 None,
             )),
         };
@@ -255,7 +282,12 @@ impl Service {
             .transition(&record.job.id, state, reason.as_deref(), exit)
     }
 
-    fn jobhome(&self, id: &str) -> PathBuf {
-        self.runtime().join("jobs").join(id)
+    fn detach(&self, record: &JobRecord) -> Result<(), String> {
+        self.handoffs.lock().unwrap().insert(record.stamp.clone());
+        let result = self
+            .launch(record)
+            .and_then(|launch| self.supervisor.detach(&launch));
+        self.handoffs.lock().unwrap().remove(&record.stamp);
+        result
     }
 }

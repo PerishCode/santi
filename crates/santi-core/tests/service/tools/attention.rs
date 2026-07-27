@@ -15,11 +15,11 @@ use crate::support::{FakeProvider, GatedFirstProvider, Probe};
 struct Running;
 
 impl JobSupervisor for Running {
-    fn ensure(&self, _launch: &JobLaunch) -> Result<(), String> {
+    fn detach(&self, _launch: &JobLaunch) -> Result<(), String> {
         Ok(())
     }
 
-    fn inspect(&self, _launch: &JobLaunch) -> Result<JobObservation, String> {
+    fn observe(&self, _launch: &JobLaunch) -> Result<JobObservation, String> {
         Ok(JobObservation::Running)
     }
 
@@ -103,7 +103,7 @@ async fn coalesces() {
         async move { service.watch().await }
     });
     provider.wait_for_first_request().await;
-    write(&temp, &job.id, 90);
+    write(&temp, &database, &job.id, 90);
     wait(&database, &job.id, 2).await;
     age(&database, &[&job.id], 250_000);
     wait(&database, &job.id, 3).await;
@@ -210,8 +210,14 @@ fn age(database: &std::path::Path, jobs: &[&str], millis: i64) {
     }
 }
 
-fn write(temp: &tempfile::TempDir, job: &str, bytes: usize) {
-    let directory = temp.path().join("runtime").join("jobs").join(job);
+fn write(temp: &tempfile::TempDir, database: &std::path::Path, job: &str, bytes: usize) {
+    let stamp: String = Connection::open(database)
+        .expect("open sqlite")
+        .query_row("SELECT generation FROM jobs WHERE id = ?1", [job], |row| {
+            row.get(0)
+        })
+        .expect("job stamp");
+    let directory = temp.path().join("runtime").join("jobs").join(stamp);
     std::fs::create_dir_all(&directory).expect("create job directory");
     std::fs::write(directory.join("stdout.log"), vec![b'x'; bytes]).expect("write job output");
 }

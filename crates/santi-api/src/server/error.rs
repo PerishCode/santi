@@ -113,6 +113,8 @@ impl ApiError {
             Self::unauthorized(message)
         } else if text.starts_with("job supervisor is unavailable")
             || text.starts_with("systemd did not accept job")
+            || text.contains("sidecar did not claim")
+            || text.contains("sidecar failed before claimed")
         {
             Self::unavailable(message)
         } else if text == "strand not found"
@@ -126,7 +128,7 @@ impl ApiError {
             || text.starts_with("webhook ") && text.contains(" conflicts ")
             || text.starts_with("job capability conflicts")
             || text.starts_with("job execution spec conflicts")
-            || text.contains("supervisor generation conflicts")
+            || text.contains("sidecar stamp conflicts")
             || text.contains("overlaps an existing registration")
             || text.ends_with("is already registered")
         {

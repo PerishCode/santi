@@ -13,7 +13,7 @@ mod tools;
 
 use santi_provider::Provider;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -41,6 +41,7 @@ pub struct Service {
     closing: Arc<AtomicBool>,
     degraded: Arc<AtomicBool>,
     supervisor: Arc<dyn jobs::Supervisor>,
+    handoffs: Arc<Mutex<HashSet<String>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -97,6 +98,7 @@ impl Service {
             closing: Arc::new(AtomicBool::new(false)),
             degraded: Arc::new(AtomicBool::new(degraded)),
             supervisor,
+            handoffs: Arc::new(Mutex::new(HashSet::new())),
         })
     }
 
@@ -146,7 +148,6 @@ impl Service {
     }
 
     pub fn resume(&self) -> Result<(), String> {
-        self.recover()?;
         self.dispatched();
         let pending = self.store.awaiting()?;
         for strand in pending {

@@ -1,5 +1,8 @@
 use std::{
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -12,38 +15,58 @@ use sha2::{Digest, Sha256};
 
 use crate::support::FakeProvider;
 
+mod cold;
+
 struct Probe {
     observation: Mutex<JobObservation>,
     launches: Mutex<Vec<JobLaunch>>,
     acknowledgements: Mutex<usize>,
+    failure: Mutex<Option<String>>,
+    fault: Mutex<Option<String>>,
+    observations: AtomicUsize,
 }
 
 impl Probe {
     fn new() -> Self {
         Self {
-            observation: Mutex::new(JobObservation::Accepted),
+            observation: Mutex::new(JobObservation::Claimed),
             launches: Mutex::new(Vec::new()),
             acknowledgements: Mutex::new(0),
+            failure: Mutex::new(None),
+            fault: Mutex::new(None),
+            observations: AtomicUsize::new(0),
         }
     }
 
-    fn observe(&self, observation: JobObservation) {
+    fn set(&self, observation: JobObservation) {
         *self.observation.lock().unwrap() = observation;
+    }
+
+    fn refuse(&self, error: &str) {
+        *self.failure.lock().unwrap() = Some(error.to_string());
+    }
+
+    fn fault(&self, error: &str) {
+        *self.fault.lock().unwrap() = Some(error.to_string());
     }
 }
 
 impl JobSupervisor for Probe {
-    fn ensure(&self, launch: &JobLaunch) -> Result<(), String> {
+    fn detach(&self, launch: &JobLaunch) -> Result<(), String> {
         self.launches.lock().unwrap().push(launch.clone());
-        Ok(())
+        self.failure.lock().unwrap().clone().map_or(Ok(()), Err)
     }
 
-    fn inspect(&self, _launch: &JobLaunch) -> Result<JobObservation, String> {
+    fn observe(&self, _launch: &JobLaunch) -> Result<JobObservation, String> {
+        self.observations.fetch_add(1, Ordering::SeqCst);
+        if let Some(error) = self.fault.lock().unwrap().clone() {
+            return Err(error);
+        }
         Ok(self.observation.lock().unwrap().clone())
     }
 
     fn stop(&self, _launch: &JobLaunch) -> Result<(), String> {
-        self.observe(JobObservation::Terminal(JobTerminal {
+        self.set(JobObservation::Terminal(JobTerminal {
             state: job::State::Cancelled,
             reason: Some("cancel_requested".to_string()),
             exit: None,
@@ -108,7 +131,7 @@ fn accepts() {
         .expect_err("zero reminder must be rejected");
     assert!(error.contains("reminder interval must be greater than zero"));
 
-    supervisor.observe(JobObservation::Running);
+    supervisor.set(JobObservation::Running);
     let running = service
         .job(&strand.soul, &accepted.job.id)
         .expect("get job")
@@ -152,17 +175,14 @@ fn abstains() {
             },
         )
         .expect("accept job");
-    supervisor.observe(JobObservation::Missing);
+    supervisor.set(JobObservation::Missing);
 
     let unknown = service
         .job(&strand.soul, &accepted.job.id)
         .expect("get")
         .expect("job");
     assert_eq!(unknown.state, job::State::Unknown);
-    assert_eq!(
-        unknown.reason.as_deref(),
-        Some("supervisor_evidence_missing")
-    );
+    assert_eq!(unknown.reason.as_deref(), Some("sidecar_evidence_missing"));
     assert_eq!(
         supervisor.launches.lock().unwrap().len(),
         1,
@@ -170,7 +190,11 @@ fn abstains() {
     );
 }
 
-fn open(temp: &tempfile::TempDir, database: &std::path::Path, supervisor: Arc<Probe>) -> Service {
+fn open(
+    temp: &tempfile::TempDir,
+    database: &std::path::Path,
+    supervisor: Arc<dyn JobSupervisor>,
+) -> Service {
     Service::supervised(
         service::Config {
             database: database.display().to_string(),

@@ -31,7 +31,7 @@ pub enum Job {
         #[arg(long, default_value_t = 64 * 1024)]
         limit: usize,
     },
-    #[command(about = "Acknowledge a terminal job and release retained supervisor state")]
+    #[command(about = "Acknowledge a terminal job and release retained sidecar state")]
     Ack { id: String },
 }
 

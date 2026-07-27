@@ -5,7 +5,7 @@ use santi_core::{
     service::{self, JobDraft, JobRead, Service},
 };
 
-use super::support::{Silent, Unit, available, seed, service};
+use super::support::{Silent, Unit, available, seed, service, stamp};
 
 #[test]
 fn vertical() {
@@ -45,10 +45,38 @@ fn vertical() {
             },
         )
         .expect("accept job");
+    let stamp = stamp(&database, &accepted.job.id);
     let guard = Unit {
-        unit: format!("santi-{}.service", accepted.job.id.replace('_', "-")),
+        unit: format!("santi-{}.service", stamp.replace('_', "-")),
     };
     assert_eq!(accepted.job.state, job::State::Accepted);
+    let state: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            temp.path()
+                .join("runtime")
+                .join("jobs")
+                .join(&stamp)
+                .join("state.json"),
+        )
+        .expect("claimed state"),
+    )
+    .expect("decode state");
+    assert_eq!(state["schema"], "santi.job.state.v1");
+    assert!(
+        matches!(
+            state["phase"].as_str(),
+            Some("claimed" | "running" | "terminal")
+        ),
+        "{state}"
+    );
+    assert!(
+        !temp
+            .path()
+            .join("runtime")
+            .join("jobs")
+            .join(&accepted.job.id)
+            .exists()
+    );
     let completed = (0..100)
         .find_map(|_| {
             let current = service
@@ -108,8 +136,9 @@ fn restarts() {
             },
         )
         .expect("accept job");
+    let stamp = stamp(&database, &accepted.job.id);
     let guard = Unit {
-        unit: format!("santi-{}.service", accepted.job.id.replace('_', "-")),
+        unit: format!("santi-{}.service", stamp.replace('_', "-")),
     };
     drop(runtime);
     thread::sleep(Duration::from_millis(400));

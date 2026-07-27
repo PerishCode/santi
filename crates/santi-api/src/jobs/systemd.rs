@@ -2,6 +2,8 @@ use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
     process::Command,
+    thread,
+    time::{Duration, Instant},
 };
 
 use santi_core::{
@@ -9,10 +11,17 @@ use santi_core::{
     service::{JobLaunch, JobObservation, JobSupervisor, JobTerminal},
 };
 
-use super::{files, model::Spec};
+use super::{
+    files,
+    model::{Phase, Spec},
+};
 
 pub(super) const DIRECTORY: &str = "SANTI_JOB_DIRECTORY";
 pub(super) const GENERATION: &str = "SANTI_JOB_GENERATION";
+pub(super) const STAMP: &str = "SANTI_JOB_STAMP";
+
+const HANDOFF: Duration = Duration::from_secs(5);
+const POLL: Duration = Duration::from_millis(20);
 
 pub struct Systemd {
     executable: PathBuf,
@@ -32,23 +41,53 @@ impl Systemd {
     }
 
     fn matching(&self, launch: &JobLaunch) -> Result<bool, String> {
-        let held = properties(&launch.supervisor)?;
+        let held = properties(&launch.sidecar)?;
         if held.get("LoadState").map(String::as_str) == Some("not-found") {
             return Ok(false);
         }
         Ok(held.get("Environment").is_some_and(|environment| {
-            environment.contains(&format!("{GENERATION}={}", launch.generation))
+            environment.contains(&format!("{STAMP}={}", launch.stamp))
+                || environment.contains(&format!("{GENERATION}={}", launch.stamp))
         }))
+    }
+
+    fn handoff(&self, launch: &JobLaunch) -> Result<(), String> {
+        let directory = Path::new(&launch.directory);
+        let start = Instant::now();
+        loop {
+            if files::state(directory)?.is_some() {
+                return Ok(());
+            }
+            if files::terminal(directory)?.is_some() {
+                return Err(format!(
+                    "job {} sidecar failed before claimed handoff",
+                    launch.job.id
+                ));
+            }
+            if start.elapsed() >= HANDOFF {
+                return Err(format!(
+                    "job {} sidecar did not claim the detached handoff",
+                    launch.job.id
+                ));
+            }
+            thread::sleep(POLL);
+        }
     }
 }
 
 impl JobSupervisor for Systemd {
-    fn ensure(&self, launch: &JobLaunch) -> Result<(), String> {
+    fn detach(&self, launch: &JobLaunch) -> Result<(), String> {
         let directory = Path::new(&launch.directory);
         files::prepare(directory)?;
-        files::specify(directory, &Spec::from(launch))?;
+        let requested = Spec::from(launch);
+        files::specify(directory, &requested)?;
+        let retained = files::spec(directory)?;
         if self.matching(launch)? {
-            return Ok(());
+            return if retained.legacy() {
+                Ok(())
+            } else {
+                self.handoff(launch)
+            };
         }
 
         let stop = format!(
@@ -57,7 +96,7 @@ impl JobSupervisor for Systemd {
         );
         let output = Command::new("systemd-run")
             .args(["--user", "--no-block"])
-            .arg(format!("--unit={}", launch.supervisor))
+            .arg(format!("--unit={}", launch.sidecar))
             .arg("--property=Type=oneshot")
             .arg("--property=RemainAfterExit=yes")
             .arg("--property=KillMode=control-group")
@@ -68,13 +107,13 @@ impl JobSupervisor for Systemd {
             ))
             .arg(format!("--property=ExecStopPost={stop}"))
             .arg(format!("--setenv={DIRECTORY}={}", launch.directory))
-            .arg(format!("--setenv={GENERATION}={}", launch.generation))
+            .arg(format!("--setenv={STAMP}={}", launch.stamp))
             .arg(&self.executable)
             .args(["__job", "run"])
             .output()
             .map_err(|error| format!("failed to invoke systemd-run: {error}"))?;
         if output.status.success() || self.matching(launch)? {
-            return Ok(());
+            return self.handoff(launch);
         }
         Err(format!(
             "systemd did not accept job {}: {}",
@@ -83,21 +122,29 @@ impl JobSupervisor for Systemd {
         ))
     }
 
-    fn inspect(&self, launch: &JobLaunch) -> Result<JobObservation, String> {
+    fn observe(&self, launch: &JobLaunch) -> Result<JobObservation, String> {
         let directory = Path::new(&launch.directory);
+        let state = files::state(directory)?;
         if let Some(terminal) = files::terminal(directory)? {
+            if state.is_none()
+                && launch.stamp.starts_with("stamp_")
+                && launch.job.state == job::State::Submitting
+            {
+                return Ok(JobObservation::Aborted);
+            }
             return Ok(JobObservation::Terminal(terminal.into()));
         }
-        let held = properties(&launch.supervisor)?;
+        let held = properties(&launch.sidecar)?;
         if held.get("LoadState").map(String::as_str) == Some("not-found") {
             return Ok(JobObservation::Missing);
         }
         if !held.get("Environment").is_some_and(|environment| {
-            environment.contains(&format!("{GENERATION}={}", launch.generation))
+            environment.contains(&format!("{STAMP}={}", launch.stamp))
+                || environment.contains(&format!("{GENERATION}={}", launch.stamp))
         }) {
             return Err(format!(
-                "job {} supervisor generation conflicts with retained unit {}",
-                launch.job.id, launch.supervisor
+                "job {} sidecar stamp conflicts with retained unit {}",
+                launch.job.id, launch.sidecar
             ));
         }
         let active = held.get("ActiveState").map(String::as_str).unwrap_or("");
@@ -109,6 +156,13 @@ impl JobSupervisor for Systemd {
         let limited = directory.join(files::LIMIT).is_file();
         let cancelled = directory.join(files::CANCEL).is_file();
         match (active, sub, result) {
+            ("activating", _, _) | ("active", "running", _)
+                if state
+                    .as_ref()
+                    .is_some_and(|state| state.phase == Phase::Claimed) =>
+            {
+                Ok(JobObservation::Claimed)
+            }
             ("activating", _, _) | ("active", "running", _) => Ok(JobObservation::Running),
             ("active", "exited", "success") => Ok(JobObservation::Terminal(JobTerminal {
                 state: job::State::Succeeded,
@@ -140,18 +194,18 @@ impl JobSupervisor for Systemd {
                 exit: status,
             })),
             ("deactivating", _, _) => Ok(JobObservation::Running),
-            _ => Ok(JobObservation::Accepted),
+            _ => Ok(JobObservation::Claimed),
         }
     }
 
     fn stop(&self, launch: &JobLaunch) -> Result<(), String> {
         files::mark(Path::new(&launch.directory), files::CANCEL)?;
-        control(&["stop", &launch.supervisor], true)
+        control(&["stop", &launch.sidecar], true)
     }
 
     fn acknowledge(&self, launch: &JobLaunch) -> Result<(), String> {
-        control(&["stop", &launch.supervisor], false)?;
-        control(&["reset-failed", &launch.supervisor], false)
+        control(&["stop", &launch.sidecar], false)?;
+        control(&["reset-failed", &launch.sidecar], false)
     }
 }
 

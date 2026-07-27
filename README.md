@@ -110,14 +110,16 @@ santi job ack <job_id>
 
 `job create` is available from a Santi runtime shell invocation, which supplies
 a short-lived, single-use capability bound to that soul/strand/turn/tool
-origin. Success means the job specification and supervisor acceptance are
-durable; it does not mean the command is running or complete. The job then has
-an independent lifecycle and may outlive the creating turn or an API restart.
+origin. Success means the job specification is durable and the detached
+sidecar has published its initial `claimed` state; it does not mean the payload
+is running or complete. The creating shell may then end while the sidecar and
+payload continue independently through the job's stateless unique stamp
+convention.
 `--remind-every-seconds` is optional; when present it must be greater than zero
 and wakes the owning strand with a coalesced current job snapshot.
-Cold start reconciles retained evidence and never automatically replays an
-uncertain job. The launched process receives origin locators but never inherits
-the create capability.
+Cold start reconciles each active stamp independently and never automatically
+replays an uncertain job. The launched process receives origin locators but
+never inherits the create capability.
 
 Export the OpenAPI document:
 

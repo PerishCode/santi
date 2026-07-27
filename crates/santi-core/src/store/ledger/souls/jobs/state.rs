@@ -31,10 +31,6 @@ impl Store {
         rows::record(&conn, id)
     }
 
-    pub(crate) fn records(&self) -> Result<Vec<Record>, String> {
-        self.gathered(None)
-    }
-
     pub(crate) fn active(&self) -> Result<Vec<Record>, String> {
         let conn = self.conn.lock().unwrap();
         let sql = format!(

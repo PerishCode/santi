@@ -18,13 +18,13 @@ struct FakeSupervisor {
 }
 
 impl JobSupervisor for FakeSupervisor {
-    fn ensure(&self, _launch: &JobLaunch) -> Result<(), String> {
+    fn detach(&self, _launch: &JobLaunch) -> Result<(), String> {
         *self.launches.lock().unwrap() += 1;
         Ok(())
     }
 
-    fn inspect(&self, _launch: &JobLaunch) -> Result<JobObservation, String> {
-        Ok(JobObservation::Accepted)
+    fn observe(&self, _launch: &JobLaunch) -> Result<JobObservation, String> {
+        Ok(JobObservation::Claimed)
     }
 
     fn stop(&self, _launch: &JobLaunch) -> Result<(), String> {

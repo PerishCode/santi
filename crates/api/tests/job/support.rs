@@ -68,7 +68,8 @@ pub fn launch(
     output: u64,
 ) -> (santi_api::jobs::Systemd, JobLaunch) {
     let id = format!("job_{}", uuid::Uuid::new_v4().simple());
-    let supervisor = format!("santi-{}.service", id.replace('_', "-"));
+    let stamp = format!("stamp_{}", uuid::Uuid::new_v4().simple());
+    let supervisor = format!("santi-{}.service", stamp.replace('_', "-"));
     (
         santi_api::jobs::Systemd::new(env!("CARGO_BIN_EXE_santi-api")),
         JobLaunch {
@@ -99,8 +100,8 @@ pub fn launch(
                 finished: None,
                 acknowledged: None,
             },
-            generation: format!("generation_{}", uuid::Uuid::new_v4().simple()),
-            supervisor,
+            stamp,
+            sidecar: supervisor,
             cwd: temp.path().display().to_string(),
             directory: temp.path().join("job").display().to_string(),
         },
@@ -110,7 +111,7 @@ pub fn launch(
 pub fn terminal(supervisor: &santi_api::jobs::Systemd, launch: &JobLaunch) -> JobTerminal {
     (0..100)
         .find_map(|_| {
-            let observed = supervisor.inspect(launch).expect("inspect job");
+            let observed = supervisor.observe(launch).expect("observe job");
             if let JobObservation::Terminal(terminal) = observed {
                 Some(terminal)
             } else {
@@ -167,6 +168,15 @@ pub fn seed(database: &std::path::Path, token: &str, soul: &str, strand: &str) {
         rusqlite::params![digest, soul, strand, expiry],
     )
     .expect("seed capability");
+}
+
+pub fn stamp(database: &std::path::Path, job: &str) -> String {
+    Connection::open(database)
+        .expect("open sqlite")
+        .query_row("SELECT generation FROM jobs WHERE id = ?1", [job], |row| {
+            row.get(0)
+        })
+        .expect("job stamp")
 }
 
 pub fn service(temp: &tempfile::TempDir, database: &std::path::Path) -> Service {

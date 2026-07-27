@@ -33,7 +33,7 @@ pub const COMPONENT_DESCRIPTIONS: [(&str, &str); 10] = [
     ),
     (
         "job::State",
-        "`accepted` is the durable create success boundary, not proof that the\ncommand started. `unknown` means retained evidence cannot prove either a live\nmatching supervisor generation or a terminal outcome; Santi never replays it\nautomatically.",
+        "`accepted` means the detached sidecar durably published its initial\n`claimed` state, not that the payload started. `unknown` means retained evidence\ncannot prove either a live matching stamp or a terminal outcome; Santi never\nreplays it automatically.",
     ),
     (
         "message::Role",

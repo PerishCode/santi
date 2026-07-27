@@ -15,7 +15,8 @@ fn retains() {
     }
     let temp = tempfile::tempdir().expect("temp dir");
     let id = format!("job_{}", uuid::Uuid::new_v4().simple());
-    let supervisor_ref = format!("santi-{}.service", id.replace('_', "-"));
+    let stamp = format!("stamp_{}", uuid::Uuid::new_v4().simple());
+    let supervisor_ref = format!("santi-{}.service", stamp.replace('_', "-"));
     let supervisor = santi_api::jobs::Systemd::new(env!("CARGO_BIN_EXE_santi-api"));
     let launch = JobLaunch {
         job: job::Job {
@@ -45,8 +46,8 @@ fn retains() {
             finished: None,
             acknowledged: None,
         },
-        generation: format!("generation_{}", uuid::Uuid::new_v4().simple()),
-        supervisor: supervisor_ref.clone(),
+        stamp,
+        sidecar: supervisor_ref.clone(),
         cwd: temp.path().display().to_string(),
         directory: temp.path().join("job").display().to_string(),
     };
@@ -55,7 +56,7 @@ fn retains() {
         launch: &launch,
     };
 
-    supervisor.ensure(&launch).expect("ensure transient job");
+    supervisor.detach(&launch).expect("detach transient job");
     let terminal = terminal(&supervisor, &launch);
     assert_eq!(terminal.state, job::State::Failed);
     assert_eq!(terminal.exit, Some(7));
@@ -91,7 +92,7 @@ fn bounds() {
         launch: &launch,
     };
 
-    supervisor.ensure(&launch).expect("ensure transient job");
+    supervisor.detach(&launch).expect("detach transient job");
     let terminal = terminal(&supervisor, &launch);
     assert_eq!(terminal.state, job::State::Failed);
     assert_eq!(terminal.reason.as_deref(), Some("output_limit"));
@@ -101,7 +102,7 @@ fn bounds() {
     assert_eq!(length, 1024);
 
     supervisor.acknowledge(&launch).expect("acknowledge job");
-    assert_eq!(state(&launch.supervisor), "not-found");
+    assert_eq!(state(&launch.sidecar), "not-found");
     std::mem::forget(guard);
 }
 
@@ -119,13 +120,13 @@ fn times() {
         launch: &launch,
     };
 
-    supervisor.ensure(&launch).expect("ensure transient job");
+    supervisor.detach(&launch).expect("detach transient job");
     let terminal = terminal(&supervisor, &launch);
     assert_eq!(terminal.state, job::State::TimedOut);
     assert_eq!(terminal.reason.as_deref(), Some("runtime_limit"));
 
     supervisor.acknowledge(&launch).expect("acknowledge job");
-    assert_eq!(state(&launch.supervisor), "not-found");
+    assert_eq!(state(&launch.sidecar), "not-found");
     std::mem::forget(guard);
 }
 
@@ -142,7 +143,7 @@ fn cancels() {
         supervisor: &supervisor,
         launch: &launch,
     };
-    supervisor.ensure(&launch).expect("ensure transient job");
+    supervisor.detach(&launch).expect("detach transient job");
     let cwd = std::path::PathBuf::from(&launch.cwd);
     for _ in 0..100 {
         if cwd.join("grandchild.pid").is_file() {
@@ -165,6 +166,6 @@ fn cancels() {
     }
 
     supervisor.acknowledge(&launch).expect("acknowledge job");
-    assert_eq!(state(&launch.supervisor), "not-found");
+    assert_eq!(state(&launch.sidecar), "not-found");
     std::mem::forget(guard);
 }

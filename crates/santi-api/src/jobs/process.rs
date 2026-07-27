@@ -13,8 +13,8 @@ use santi_core::job;
 
 use super::{
     files,
-    model::{Record, Spec},
-    systemd::{DIRECTORY, GENERATION, control},
+    model::{Phase, Record, Spec},
+    systemd::{DIRECTORY, GENERATION, STAMP, control},
 };
 
 pub(super) fn run() -> Result<(), String> {
@@ -25,6 +25,7 @@ pub(super) fn run() -> Result<(), String> {
     let errlog = files::log(&directory, "stderr.log")?;
     let remaining = Arc::new(AtomicU64::new(spec.output));
     let exceeded = Arc::new(AtomicBool::new(false));
+    files::advance(&directory, Phase::Claimed)?;
 
     let mut command = Command::new("/bin/bash");
     command
@@ -44,6 +45,11 @@ pub(super) fn run() -> Result<(), String> {
     let mut child = command
         .spawn()
         .map_err(|error| format!("failed to spawn job command: {error}"))?;
+    if let Err(error) = files::advance(&directory, Phase::Running) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
+    }
     let stdout = child
         .stdout
         .take()
@@ -58,7 +64,7 @@ pub(super) fn run() -> Result<(), String> {
         remaining: remaining.clone(),
         exceeded: exceeded.clone(),
         directory: directory.clone(),
-        unit: spec.unit.clone(),
+        sidecar: spec.sidecar.clone(),
     });
     let err = copy(Sink {
         reader: stderr,
@@ -66,7 +72,7 @@ pub(super) fn run() -> Result<(), String> {
         remaining,
         exceeded: exceeded.clone(),
         directory: directory.clone(),
-        unit: spec.unit,
+        sidecar: spec.sidecar,
     });
     let status = child.wait().map_err(|error| error.to_string())?;
     join(out)?;
@@ -90,7 +96,7 @@ pub(super) fn run() -> Result<(), String> {
             exit: status.code(),
         }
     };
-    files::finish(&directory, &terminal)?;
+    finish(&directory, &terminal)?;
     if status.success() {
         Ok(())
     } else {
@@ -100,7 +106,7 @@ pub(super) fn run() -> Result<(), String> {
 
 pub(super) fn finalize() -> Result<(), String> {
     let directory = directory()?;
-    if directory.join(files::TERMINAL).is_file() {
+    if files::terminal(&directory)?.is_some() {
         return Ok(());
     }
     let code = std::env::var("EXIT_CODE").unwrap_or_else(|_| "unknown".to_string());
@@ -144,7 +150,7 @@ pub(super) fn finalize() -> Result<(), String> {
             },
         }
     };
-    files::finish(&directory, &terminal)
+    finish(&directory, &terminal)
 }
 
 struct Sink<R> {
@@ -153,7 +159,7 @@ struct Sink<R> {
     remaining: Arc<AtomicU64>,
     exceeded: Arc<AtomicBool>,
     directory: PathBuf,
-    unit: String,
+    sidecar: String,
 }
 
 fn copy<R: Read + Send + 'static>(
@@ -178,7 +184,7 @@ fn copy<R: Read + Send + 'static>(
             }
             if keep < read && !sink.exceeded.swap(true, Ordering::AcqRel) {
                 files::mark(&sink.directory, files::LIMIT)?;
-                let _ = control(&["stop", "--no-block", &sink.unit], false);
+                let _ = control(&["stop", "--no-block", &sink.sidecar], false);
             }
         }
     })
@@ -213,12 +219,22 @@ fn directory() -> Result<PathBuf, String> {
 }
 
 fn verify(spec: &Spec) -> Result<(), String> {
-    let generation = std::env::var(GENERATION).map_err(|_| format!("{GENERATION} is missing"))?;
-    if generation == spec.generation {
+    let stamp = std::env::var(STAMP)
+        .or_else(|_| std::env::var(GENERATION))
+        .map_err(|_| format!("{STAMP} is missing"))?;
+    if stamp == spec.stamp {
         Ok(())
     } else {
-        Err("job generation does not match its accepted spec".to_string())
+        Err("job stamp does not match its accepted spec".to_string())
     }
+}
+
+fn finish(directory: &std::path::Path, terminal: &Record) -> Result<(), String> {
+    files::finish(directory, terminal)?;
+    if files::state(directory)?.is_some() {
+        files::advance(directory, Phase::Terminal)?;
+    }
+    Ok(())
 }
 
 fn allow(command: &mut Command) {

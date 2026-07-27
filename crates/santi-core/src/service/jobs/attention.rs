@@ -19,7 +19,7 @@ pub(super) fn capture(service: &Service, record: JobRecord) -> Result<(), String
     };
     let current = epoch()?;
     let elapsed = current.saturating_sub(started) as u64;
-    let (stdout, stderr) = output(service, &record.job.id)?;
+    let (stdout, stderr) = output(service, &record)?;
     let combined = stdout.saturating_add(stderr);
     let runtime =
         !record.runtime && threshold(elapsed, record.job.timeout_seconds.saturating_mul(1000));
@@ -45,12 +45,12 @@ pub(super) fn capture(service: &Service, record: JobRecord) -> Result<(), String
     });
     let encoded = serde_json::to_vec(&content).map_err(|error| error.to_string())?;
     let digest = format!("{:x}", Sha256::digest(encoded));
-    let key = format!("job/{}/{}", record.job.id, record.generation);
+    let key = format!("job/{}/{}", record.job.id, record.stamp);
     let source = ingest::Source::new("job")
         .with_ref(record.job.id.clone())
         .with_metadata(json!({
             "schema": "santi.job.attention.v1",
-            "generation": record.generation,
+            "stamp": record.stamp,
             "revision": revision,
             "observed_at": observed,
         }));
@@ -92,7 +92,7 @@ fn fragment(input: Fragment<'_>) -> message::Content {
         [
             "item_kind: job_attention".to_string(),
             format!("job_id: {}", job.id),
-            format!("generation: {}", input.record.generation),
+            format!("stamp: {}", input.record.stamp),
             format!("description: {:?}", job.description),
             format!("state: {}", job.state.encode()),
             format!("observed_at: {}", input.observed),
@@ -151,8 +151,8 @@ fn threshold(value: u64, limit: u64) -> bool {
     u128::from(value) * DENOMINATOR >= u128::from(limit) * NUMERATOR
 }
 
-fn output(service: &Service, id: &str) -> Result<(u64, u64), String> {
-    let directory = service.jobhome(id);
+fn output(service: &Service, record: &JobRecord) -> Result<(u64, u64), String> {
+    let directory = service.jobhome(record);
     Ok((
         size(&directory.join("stdout.log"))?,
         size(&directory.join("stderr.log"))?,

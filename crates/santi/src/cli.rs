@@ -7,7 +7,7 @@ const DEFAULT_BASE_URL: &str = "http://127.0.0.1:43307";
 #[command(
     name = "santi",
     version,
-    about = "santi runtime: server (`service`) and HTTP client"
+    about = "HTTP client for a running santi runtime"
 )]
 pub struct Cli {
     #[arg(
@@ -63,22 +63,6 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    #[command(about = "Run the runtime server in-process (`serve`, `export-openapi`)")]
-    Service {
-        #[arg(
-            help = "Arguments forwarded to the server (e.g. `serve`, `export-openapi`, `--config`, `--provider`)",
-            trailing_var_arg = true,
-            allow_hyphen_values = true
-        )]
-        args: Vec<String>,
-    },
-    #[command(
-        about = "Offline pre-check of the store, default soul memory, and provider budget. A local ops command (NOT an HTTP client): exits non-zero when unhealthy"
-    )]
-    Doctor,
-    #[command(about = "Offline store-level ops (act directly on the DB, no running service)")]
-    #[command(subcommand)]
-    Inbox(InboxCommand),
     #[command(about = "GET /api/v1/health")]
     Health,
     #[command(about = "Query canonical incidents by error scope")]
@@ -187,8 +171,6 @@ pub fn split_send_args(
 }
 
 mod compact;
-mod inbox;
 mod strand;
 pub use compact::*;
-pub use inbox::*;
 pub use strand::*;

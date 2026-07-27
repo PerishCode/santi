@@ -1,45 +1,5 @@
 use anyhow::{Context, Result};
 
-struct Source {
-    command: &'static str,
-    label: &'static str,
-    text: Option<String>,
-    file: Option<String>,
-    stdin: bool,
-}
-
-pub fn read_inbox_seed_text(
-    text: Option<String>,
-    file: Option<String>,
-    stdin: bool,
-) -> Result<String> {
-    read_text_source(Source {
-        command: "inbox seed",
-        label: "seed",
-        text,
-        file,
-        stdin,
-    })
-}
-
-fn read_text_source(source: Source) -> Result<String> {
-    match (source.text, source.file, source.stdin) {
-        (Some(text), None, false) => Ok(text),
-        (None, Some(path), false) => read_text_file(&path, source.label),
-        (None, None, true) => read_text_file("-", source.label),
-        (None, None, false) => {
-            anyhow::bail!(
-                "{} requires <text>, --file <path>, or --stdin",
-                source.command
-            )
-        }
-        _ => anyhow::bail!(
-            "{} accepts exactly one of <text>, --file <path>, or --stdin",
-            source.command
-        ),
-    }
-}
-
 fn read_text_file(path: &str, label: &str) -> Result<String> {
     if path == "-" {
         let mut buf = String::new();

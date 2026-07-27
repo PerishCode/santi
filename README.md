@@ -6,10 +6,11 @@ It keeps the architecture deliberately small:
 
 ```text
 crates/
+  api/             # the `santi-api` server binary: config, bootstrap, and local ops
   santi-core/      # soul runtime: sessions, turns, context assembly, store, objects, workspace
   santi-provider/  # provider-agnostic ProviderClient boundary (OpenAI Responses, chat-completions)
   santi-api/       # HTTP/SSE + OpenAPI server library over santi-core
-  santi/           # the `santi` binary: `service` runs the server; other commands are an HTTP client
+  santi/           # the `santi` transport-only HTTP client binary
 ```
 
 The runtime owns soul identity, per-session runtime state, turn execution with
@@ -27,9 +28,10 @@ workspace/memory. The only way into the runtime is HTTP.
   behind this boundary.
 - `santi-api` — Axum HTTP server, SSE streaming, and OpenAPI export as a
   library. Owns the HTTP boundary and links `santi-core`.
-- `santi` — the single binary. `santi service ...` runs the server in-process
-  (via `santi-api`); every other command is a transport-only HTTP client that
-  reaches the runtime only over HTTP.
+- `api` — the `santi-api` server executable. Owns config, bootstrap, serving,
+  OpenAPI export, and local runtime operations.
+- `santi` — the transport-only HTTP client. It reaches the runtime only over
+  HTTP and does not link the runtime crates.
 
 ## Running locally
 
@@ -37,10 +39,10 @@ workspace/memory. The only way into the runtime is HTTP.
 cp santi.example.toml santi.toml   # fill in a provider api_key + model
 cp .env.example .env               # SANTI_PATHS_DATABASE / SANTI_LISTEN_HOST / SANTI_LISTEN_PORT
 
-cargo run -p santi -- service serve
+cargo run -p api -- serve
 ```
 
-With no `.env`/config at all, santi runs zero-config from its home directory
+With no `.env`/config at all, santi-api runs zero-config from its home directory
 (`SANTI_HOME`, default `~/.santi`): it reads `~/.santi/santi.toml` and creates
 `~/.santi/{runtime,execution}` automatically.
 
@@ -48,9 +50,9 @@ Then, against a running server:
 
 ```sh
 cargo run -p santi -- health
-cargo run -p santi -- session create
-cargo run -p santi -- session send <session_id> "hello"
-cargo run -p santi -- session events <session_id>
+cargo run -p santi -- strand create
+cargo run -p santi -- strand send <strand_id> "hello"
+cargo run -p santi -- strand events <strand_id>
 ```
 
 Every accepted send returns a durable `receipt.inbox_id`. Query its obligation
@@ -94,7 +96,14 @@ changing its turn/receipt state.
 Export the OpenAPI document:
 
 ```sh
-cargo run -p santi -- service export-openapi
+cargo run -p api -- export-openapi
+```
+
+Local runtime operations stay on the server entry:
+
+```sh
+santi-api doctor
+SANTI_STRAND_ID=<strand_id> santi-api inbox seed "come look"
 ```
 
 ## Cross-host downstreams

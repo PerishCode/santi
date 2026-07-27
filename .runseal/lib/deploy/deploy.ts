@@ -101,7 +101,7 @@ export async function deploy(argv: string[]): Promise<number> {
     "set -a",
     ". /etc/santi/santi.env",
     "set +a",
-    `env SANTI_HOME=${SANTI_HOME} /usr/bin/santi doctor`,
+    `env SANTI_HOME=${SANTI_HOME} /usr/bin/santi-api doctor`,
     `AFTER=$(md5sum ${MEMORY} 2>/dev/null | awk '{print $1}')`,
     '[ -n "$BEFORE" ] && [ "$BEFORE" = "$AFTER" ] || { echo "soul-memory md5: CHANGED before=$BEFORE after=$AFTER"; exit 1; }',
     'echo "soul-memory md5: UNCHANGED ($AFTER)"',

@@ -79,6 +79,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
+name = "api"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dotenvy",
+ "plumb",
+ "santi-api",
+ "serde_json",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
 name = "async-stream"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1576,10 +1590,7 @@ dependencies = [
  "clap",
  "dotenvy",
  "futures-util",
- "plumb",
  "reqwest",
- "santi-api",
- "santi-core",
  "serde_json",
  "sha2",
  "tempfile",

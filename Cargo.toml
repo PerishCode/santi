@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/api",
   "crates/santi",
   "crates/santi-adaptor",
   "crates/santi-api",

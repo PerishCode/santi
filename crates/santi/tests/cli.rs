@@ -86,9 +86,14 @@ fn parses_drive() {
 }
 
 #[test]
-fn parses_doctor() {
-    let parsed = Cli::try_parse_from(["santi", "doctor"]).unwrap();
-    assert!(matches!(parsed.command, Command::Doctor));
+fn remote() {
+    for args in [
+        vec!["santi", "service"],
+        vec!["santi", "doctor"],
+        vec!["santi", "inbox"],
+    ] {
+        assert!(Cli::try_parse_from(args).is_err());
+    }
 }
 
 #[path = "cli/parse.rs"]

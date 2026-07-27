@@ -16,10 +16,10 @@ fn render(mut command: clap::Command, path: &str, text: &mut String) {
 #[test]
 fn cli() {
     let mut text = String::new();
-    render(santi::cli::Cli::command(), "santi", &mut text);
+    render(api::cli::Cli::command(), "santi-api", &mut text);
     let hash = format!("{:x}", Sha256::digest(text.as_bytes()));
     assert_eq!(
         hash,
-        "dc7b1825fe4bef9a44e3c3e3837c6529f1ba6f833c3fada3024e75e9b89a9b1a"
+        "41b2543ce441f3354682f77c97168217e14805c2496392bc66771b3617c3ca93"
     );
 }

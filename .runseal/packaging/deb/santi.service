@@ -14,7 +14,7 @@ Group=santi
 # fails cleanly on unresolved provider config instead.
 EnvironmentFile=-/etc/santi/santi.env
 Environment=SANTI_HOME=/home/santi/.santi
-ExecStart=/usr/bin/santi service serve
+ExecStart=/usr/bin/santi-api serve
 Restart=on-failure
 RestartSec=2
 # Graceful shutdown: santi pauses inbox consumption on SIGTERM and drains its

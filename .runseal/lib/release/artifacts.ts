@@ -1,4 +1,4 @@
-//! Build, archive, checksum, and validate the Linux x86_64 `santi` release.
+//! Build, archive, checksum, and validate the Linux x86_64 santi release.
 
 import { capture, run } from "@/lib/std/cmd.ts";
 import { exists, join } from "@/lib/std/fs.ts";
@@ -7,7 +7,7 @@ import { fail, required } from "@/lib/release/env.ts";
 export interface Artifact {
   target: string;
   archive: string;
-  member: string;
+  members: string[];
   metadataKey: string;
   contentType: string;
   /** "archive" = tar.gz of the bare binary; "deb" = a Debian package. */
@@ -18,17 +18,17 @@ export const ARTIFACTS: Artifact[] = [
   {
     target: "x86_64-unknown-linux-gnu",
     archive: "santi-x86_64-unknown-linux-gnu.tar.gz",
-    member: "santi",
+    members: ["santi", "santi-api"],
     metadataKey: "linuxX64",
     contentType: "application/gzip",
   },
   {
-    // Server-only Debian package built alongside the linux-gnu tarball (same
-    // build job). The low-friction entry for Liberte-driven self-upgrade
-    // (PHASE-07): ships the binary + systemd units + maintainer scripts.
+    // Debian package built alongside the linux-gnu tarball (same build job).
+    // The low-friction entry for Liberte-driven self-upgrade (PHASE-07): ships
+    // both binaries + systemd units + maintainer scripts.
     target: "x86_64-unknown-linux-gnu",
     archive: "santi-x86_64-unknown-linux-gnu.deb",
-    member: "usr/bin/santi",
+    members: ["usr/bin/santi", "usr/bin/santi-api"],
     metadataKey: "debX64",
     contentType: "application/vnd.debian.binary-package",
     kind: "deb",
@@ -39,7 +39,7 @@ export function artifactDir(repo: string, version: string): string {
   return join(repo, "dist", version);
 }
 
-/** Build `santi` for $TARGET (or the host) and produce every artifact bound to
+/** Build both executables for $TARGET (or the host) and produce every artifact bound to
  * that target into dist/<version>/ — the linux-gnu target yields BOTH the tarball
  * and the `.deb`. */
 export async function pkg(repo: string): Promise<void> {
@@ -52,37 +52,43 @@ export async function pkg(repo: string): Promise<void> {
   Deno.mkdirSync(dir, { recursive: true });
 
   if (
-    await run("cargo", ["build", "--release", "--locked", "-p", "santi", "--target", target], {
-      cwd: repo,
-    }) !== 0
+    await run(
+      "cargo",
+      ["build", "--release", "--locked", "-p", "santi", "-p", "api", "--target", target],
+      { cwd: repo },
+    ) !== 0
   ) {
     fail(`cargo build failed for ${target}`);
   }
 
-  const binMember = specs.find((s) => (s.kind ?? "archive") === "archive")?.member ?? "santi";
-  const bin = join(repo, "target", target, "release", binMember);
+  const bins: Record<string, string> = {
+    santi: join(repo, "target", target, "release", "santi"),
+    "santi-api": join(repo, "target", target, "release", "santi-api"),
+  };
 
   for (const spec of specs) {
     const out = join(dir, spec.archive);
     if ((spec.kind ?? "archive") === "deb") {
-      await buildDeb(repo, version, bin, out);
+      await buildDeb(repo, version, bins, out);
     } else {
       const stage = await Deno.makeTempDir();
-      await Deno.copyFile(bin, join(stage, spec.member));
-      Deno.chmodSync(join(stage, spec.member), 0o755);
-      const code = await run("tar", ["-C", stage, "-czf", out, spec.member]);
+      for (const member of spec.members) {
+        await Deno.copyFile(bins[member], join(stage, member));
+        Deno.chmodSync(join(stage, member), 0o755);
+      }
+      const code = await run("tar", ["-C", stage, "-czf", out, ...spec.members]);
       if (code !== 0) fail(`archiving ${spec.archive} failed`);
     }
     console.log(out);
   }
 }
 
-/** Stage the .deb tree from `.runseal/packaging/deb/` + the built binary and
+/** Stage the .deb tree from `.runseal/packaging/deb/` + the built binaries and
  * `dpkg-deb --build` it. Requires `dpkg-deb` on the Linux runner image. */
 async function buildDeb(
   repo: string,
   version: string,
-  binPath: string,
+  bins: Record<string, string>,
   outPath: string,
 ): Promise<void> {
   // Debian version: drop the leading `v` (`v0.1.0-beta.11` → `0.1.0-beta.11`).
@@ -95,8 +101,10 @@ async function buildDeb(
   mkdir("etc/santi");
   mkdir("DEBIAN");
 
-  await Deno.copyFile(binPath, join(stage, "usr/bin/santi"));
-  Deno.chmodSync(join(stage, "usr/bin/santi"), 0o755);
+  for (const name of ["santi", "santi-api"]) {
+    await Deno.copyFile(bins[name], join(stage, "usr/bin", name));
+    Deno.chmodSync(join(stage, "usr/bin", name), 0o755);
+  }
   await Deno.copyFile(join(src, "santi.service"), join(stage, "lib/systemd/system/santi.service"));
   await Deno.copyFile(
     join(src, "santi-upgrade.service"),
@@ -152,24 +160,26 @@ export function accept(repo: string): void {
   }
 }
 
-/** Confirm each archive actually contains the expected binary member. */
+/** Confirm each archive actually contains the expected binary members. */
 export async function verifyMembers(repo: string): Promise<void> {
   const version = required("RELEASE_VERSION");
   const dir = artifactDir(repo, version);
   for (const spec of ARTIFACTS) {
     const path = join(dir, spec.archive);
     if ((spec.kind ?? "archive") === "deb") {
-      // A .deb is an `ar` archive; list its payload with dpkg-deb (paths are
-      // `./usr/bin/santi`), and confirm the maintainer scripts are executable.
       const contents = (await capture("dpkg-deb", ["--contents", path])).stdout;
-      if (!contents.includes(`/${spec.member}`)) {
-        fail(`missing ${spec.member} in ${spec.archive}`);
+      for (const member of spec.members) {
+        if (!contents.includes(`/${member}`)) {
+          fail(`missing ${member} in ${spec.archive}`);
+        }
       }
       continue;
     }
     const names = (await capture("tar", ["-tzf", path])).stdout;
-    if (!names.split("\n").map((n) => n.trim()).includes(spec.member)) {
-      fail(`missing ${spec.member} in ${spec.archive}`);
+    for (const member of spec.members) {
+      if (!names.split("\n").map((name) => name.trim()).includes(member)) {
+        fail(`missing ${member} in ${spec.archive}`);
+      }
     }
   }
 }

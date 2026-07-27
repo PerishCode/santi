@@ -1,22 +1,21 @@
 [package]
-name = "santi"
+name = "api"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
 
 [[bin]]
-name = "santi"
+name = "santi-api"
 path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
 dotenvy.workspace = true
-futures-util.workspace = true
-reqwest.workspace = true
+plumb.workspace = true
+santi-api.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
 sha2.workspace = true
-tempfile = "3.27.0"

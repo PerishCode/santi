@@ -4,7 +4,7 @@
 //! Process tree:
 //!   runseal :dev start                      (short-lived operator)
 //!     └─ deno dev.ts __run --santi-stamp=…   (stamped launcher, persistent)
-//!          └─ target/debug/santi service serve   (the actual server)
+//!          └─ target/debug/santi-api serve   (the actual server)
 //!
 //! The launcher carries the arg-stamp, so `ps` discovery is the single source
 //! of truth for liveness and identity. The JSON cache holds only convenience
@@ -20,7 +20,7 @@ import {
 } from "@/lib/dev/stamp.ts";
 import { killHard, psList, term } from "@/lib/std/proc.ts";
 
-const BIN_REL = "target/debug/santi";
+const BIN_REL = "target/debug/santi-api";
 const HEALTH_TIMEOUT_MS = 15_000;
 const STOP_TIMEOUT_MS = 15_000;
 
@@ -85,9 +85,9 @@ async function start(): Promise<number> {
   }
   Deno.mkdirSync(paths.runDir, { recursive: true });
 
-  console.log("building santi ...");
+  console.log("building santi-api ...");
   const build = await new Deno.Command("cargo", {
-    args: ["build", "-p", "santi"],
+    args: ["build", "-p", "api"],
     cwd: paths.repo,
     stdout: "inherit",
     stderr: "inherit",
@@ -249,7 +249,7 @@ async function launcherRun(): Promise<number> {
   const logFile = Deno.openSync(paths.log, { create: true, write: true, truncate: true });
 
   const server = new Deno.Command(paths.bin, {
-    args: ["service", "serve"],
+    args: ["serve"],
     cwd: paths.repo,
     stdin: "null",
     stdout: "piped",

@@ -108,7 +108,7 @@ fn edge_token_cache_path(
     username: &str,
 ) -> Option<std::path::PathBuf> {
     use std::hash::{Hash, Hasher};
-    if let Some(explicit) = santi_api::config::env("SANTI_TOKEN_CACHE") {
+    if let Some(explicit) = crate::config::env("SANTI_TOKEN_CACHE") {
         return Some(std::path::PathBuf::from(explicit));
     }
     let mut hasher = std::collections::hash_map::DefaultHasher::new();

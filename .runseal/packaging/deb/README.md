@@ -14,7 +14,7 @@ version-slots on the server. The release pipeline currently supports Linux x86_6
 | `control`                       | `DEBIAN/control`       | package metadata; `__VERSION__` substituted at build                                  |
 | `postinst` / `prerm` / `postrm` | `DEBIAN/`              | user + dirs + systemd enable; stop-on-remove; never touch runtime data                |
 
-The binary is installed to `/usr/bin/santi`.
+The binaries are installed to `/usr/bin/{santi,santi-api}`.
 
 ## Design notes
 
@@ -45,8 +45,8 @@ Building and publishing the `.deb` lives in the Forgejo release pipeline
 (`.runseal/wrappers/release-ci.ts` + `.forgejo/workflows/release-beta.yml`) and shares the
 outward-facing R2 path with the Linux tarball:
 
-1. In the `x86_64-unknown-linux-gnu` build, after producing the binary, stage a tree:
-   `usr/bin/santi`, `lib/systemd/system/{santi,santi-upgrade}.service`,
+1. In the `x86_64-unknown-linux-gnu` build, after producing both binaries, stage a tree:
+   `usr/bin/{santi,santi-api}`, `lib/systemd/system/{santi,santi-upgrade}.service`,
    `etc/santi/santi.env.example`, `DEBIAN/{control,postinst,prerm,postrm}` (control's `__VERSION__`
    ← the release version; scripts `chmod 0755`).
 2. `dpkg-deb --build` produces `santi-x86_64-unknown-linux-gnu.deb`.

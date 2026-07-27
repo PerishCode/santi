@@ -1,6 +1,6 @@
 //! Strict release smoke: install the published build from the public URL via
-//! the distribution manager, then verify `santi --help` and a live
-//! `santi service` /health, then uninstall.
+//! the distribution manager, then verify both binaries and a live
+//! `santi-api` /health, then uninstall.
 
 import { run } from "@/lib/std/cmd.ts";
 import { exists, join } from "@/lib/std/fs.ts";
@@ -36,17 +36,20 @@ export async function smoke(repo: string): Promise<void> {
   ], managerEnv);
 
   const bin = join(binDir, "santi");
+  const api = join(binDir, "santi-api");
   if (!exists(bin)) fail(`install did not place ${bin}`);
+  if (!exists(api)) fail(`install did not place ${api}`);
   if (await run(bin, ["--help"]) !== 0) fail("santi --help failed");
+  if (await run(api, ["--help"]) !== 0) fail("santi-api --help failed");
 
-  await serviceHealth(tmp, bin);
+  await serviceHealth(tmp, api);
 
   await manage(repo, ["uninstall", "--version", version], managerEnv);
   if (exists(join(installRoot, normalizeVersion(version)))) {
     fail(`uninstall left ${join(installRoot, version)}`);
   }
   console.log(
-    `[release] smoke ok: ${version} installed, --help + service health passed, uninstalled`,
+    `[release] smoke ok: ${version} installed, both helps + service health passed, uninstalled`,
   );
 }
 
@@ -81,7 +84,7 @@ async function serviceHealth(tmp: string, bin: string): Promise<void> {
   );
 
   const child = new Deno.Command(bin, {
-    args: ["service", "serve"],
+    args: ["serve"],
     cwd: tmp, // avoid picking up the repo's gitignored .env
     env: {
       SANTI_CONFIG: config,
@@ -99,7 +102,7 @@ async function serviceHealth(tmp: string, bin: string): Promise<void> {
 
   try {
     if (!(await waitHealth(`http://127.0.0.1:${HEALTH_PORT}/api/v1/health`, HEALTH_TIMEOUT_MS))) {
-      fail("santi service /health did not become ready");
+      fail("santi-api /health did not become ready");
     }
     console.log("[release] service health ok");
   } finally {

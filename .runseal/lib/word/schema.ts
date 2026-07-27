@@ -30,7 +30,7 @@ export interface Contract {
 export async function exportContract(root: string): Promise<Contract> {
   const result = await capture(
     "cargo",
-    ["run", "-q", "-p", "santi", "--", "service", "export-openapi"],
+    ["run", "-q", "-p", "api", "--", "export-openapi"],
     { cwd: root },
   );
   if (result.code !== 0) {

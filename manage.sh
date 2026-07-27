@@ -176,12 +176,13 @@ install_santi() {
   rm -rf "$INSTALL_ROOT/$VERSION"
   mkdir -p "$INSTALL_ROOT/$VERSION" "$LOCAL_BIN_DIR"
   tar -xzf "$tmpdir/$archive" -C "$INSTALL_ROOT/$VERSION"
-  chmod +x "$INSTALL_ROOT/$VERSION/santi"
-
-  link="$LOCAL_BIN_DIR/santi"
-  rm -f "$link"
-  ln -s "$INSTALL_ROOT/$VERSION/santi" "$link"
-  "$link" --version
+  for name in santi santi-api; do
+    chmod +x "$INSTALL_ROOT/$VERSION/$name"
+    link="$LOCAL_BIN_DIR/$name"
+    rm -f "$link"
+    ln -s "$INSTALL_ROOT/$VERSION/$name" "$link"
+    "$link" --version
+  done
 
   if [ "$retain" = false ]; then
     printf '%s\n' "$old" | while IFS= read -r old_version; do
@@ -191,7 +192,7 @@ install_santi() {
     done
   fi
 
-  printf 'installed santi to %s\n' "$link"
+  printf 'installed santi and santi-api to %s\n' "$LOCAL_BIN_DIR"
 }
 
 remove_empty_dir() {
@@ -202,27 +203,29 @@ remove_empty_dir() {
 }
 
 uninstall_santi() {
-  bin_path="$LOCAL_BIN_DIR/santi"
   if [ -n "$VERSION" ]; then
     VERSION=$(normalize_version "$VERSION")
-    target="$INSTALL_ROOT/$VERSION/santi"
-    if [ -L "$bin_path" ]; then
-      link_target=$(readlink "$bin_path" || true)
-      if [ "$link_target" = "$target" ]; then
-        rm -f "$bin_path"
-        printf 'removed %s\n' "$bin_path"
+    for name in santi santi-api; do
+      bin_path="$LOCAL_BIN_DIR/$name"
+      target="$INSTALL_ROOT/$VERSION/$name"
+      if [ -L "$bin_path" ]; then
+        link_target=$(readlink "$bin_path" || true)
+        if [ "$link_target" = "$target" ]; then
+          rm -f "$bin_path"
+          printf 'removed %s\n' "$bin_path"
+        fi
       fi
-    fi
+    done
     rm -rf "$INSTALL_ROOT/$VERSION"
     remove_empty_dir "$INSTALL_ROOT"
     printf 'removed santi %s from %s\n' "$VERSION" "$INSTALL_ROOT"
     return
   fi
 
-  rm -f "$bin_path"
+  rm -f "$LOCAL_BIN_DIR/santi" "$LOCAL_BIN_DIR/santi-api"
   rm -rf "$INSTALL_ROOT"
   remove_empty_dir "$LOCAL_BIN_DIR"
-  printf 'removed santi from %s and %s\n' "$INSTALL_ROOT" "$bin_path"
+  printf 'removed santi from %s and %s\n' "$INSTALL_ROOT" "$LOCAL_BIN_DIR"
 }
 
 case "$COMMAND" in

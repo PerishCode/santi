@@ -8,6 +8,7 @@ use axum::{
 use santi_core::Fault;
 use santi_core::service::Service;
 use serde_json::json;
+use sha2::{Digest as _, Sha256};
 
 use crate::webhook::{WebhookOutcome, adaptor_for};
 
@@ -76,18 +77,53 @@ pub(super) async fn ingest_webhook(
             "materialized_label": label,
             "event": event.metadata,
         }));
-    match service
-        .sourced(
+    let outcome = match event.delivery.as_deref() {
+        Some(delivery) => {
+            let digest = digest(&subscription.adaptor, &headers, &body);
+            service.deliver(
+                santi_core::service::Envelope {
+                    soul: &subscription.soul,
+                    label: &label,
+                    text: event.santi_system_text,
+                    source: Some(source),
+                },
+                santi_core::service::Delivery {
+                    subscription: &subscription.name,
+                    id: delivery,
+                    digest: &digest,
+                },
+            )
+        }
+        None if subscription.adaptor == "github" => {
+            return Err(ApiError::bad_request("missing X-GitHub-Delivery header"));
+        }
+        None => service.sourced(
             &subscription.soul,
             &label,
             event.santi_system_text,
             Some(source),
-        )
-        .map_err(ApiError::from_service)?
-    {
+        ),
+    }
+    .map_err(ApiError::from_service)?;
+    match outcome {
         ingest::Outcome::Accepted { receipt } => {
             Ok((StatusCode::ACCEPTED, Json(receipt)).into_response())
         }
         ingest::Outcome::Rejected { error } => Err(ApiError::from_santi(*error)),
     }
+}
+
+fn digest(adaptor: &str, headers: &HeaderMap, body: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(adaptor.as_bytes());
+    hasher.update([0]);
+    if let Some(event) = headers
+        .get("X-GitHub-Event")
+        .and_then(|value| value.to_str().ok())
+    {
+        hasher.update(event.as_bytes());
+    }
+    hasher.update([0]);
+    hasher.update(body);
+    hex::encode(hasher.finalize())
 }

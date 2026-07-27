@@ -58,6 +58,7 @@ mod github {
         );
         assert!(event.in_scope);
         assert_eq!(event.label, "github:ops:issue:PerishCode/santi#42");
+        assert_eq!(event.delivery.as_deref(), Some("issuecomment-1"));
         assert!(event.santi_system_text.contains("issue_comment.created"));
         assert!(event.santi_system_text.contains("issuecomment-1"));
         assert!(!event.santi_system_text.contains("top secret"));
@@ -232,6 +233,10 @@ fn sign(secret: &str, body: &[u8]) -> String {
 fn github_headers(event: &str, signature: Option<&str>) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert("x-github-event", HeaderValue::from_str(event).unwrap());
+    headers.insert(
+        "x-github-delivery",
+        HeaderValue::from_static("issuecomment-1"),
+    );
     if let Some(signature) = signature {
         headers.insert(
             "x-hub-signature-256",

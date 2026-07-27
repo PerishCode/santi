@@ -66,6 +66,7 @@ impl WebhookAdaptor for GithubAdaptor {
                 santi_system_text: String::new(),
                 label: format!("github:{webhook_name}:{event_type}"),
                 metadata: None,
+                delivery: None,
                 in_scope: false,
                 self_authored: false,
             }));
@@ -92,6 +93,7 @@ impl WebhookAdaptor for GithubAdaptor {
             .and_then(|value| value.to_str().ok())
             .unwrap_or("")
             .to_string();
+        let replay = (!delivery.is_empty()).then(|| delivery.clone());
         let sender = string_at(&payload, &["sender", "login"]).unwrap_or_default();
         let self_authored = self
             .self_login
@@ -118,6 +120,7 @@ impl WebhookAdaptor for GithubAdaptor {
             santi_system_text,
             label,
             metadata: Some(metadata),
+            delivery: replay,
             in_scope,
             self_authored,
         }))

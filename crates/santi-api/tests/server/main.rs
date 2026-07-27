@@ -76,6 +76,14 @@ mod errors {
             StatusCode::CONFLICT
         );
         assert_eq!(
+            status("webhook secretary conflicts with an existing subscription"),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            status("webhook delivery conflicts with an accepted payload"),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
             ApiError::forbidden("outside zone").status(),
             StatusCode::FORBIDDEN
         );

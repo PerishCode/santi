@@ -10,9 +10,10 @@
 # kube-system) — no per-route certificate.
 #
 # Three routes on the same host:
-#   - /api/v1/webhooks/* → the window, WITHOUT forward-auth. External callers
-#     (GitHub/feishu) can't SSO; santi authenticates them by per-subscription
-#     signature.
+#   - /api/v1/webhooks/<name> → the window, WITHOUT forward-auth. The trailing
+#     slash is load-bearing: the exact /api/v1/webhooks management collection
+#     stays behind forward-auth. External callers (GitHub/feishu) can't SSO;
+#     santi authenticates event requests by per-subscription signature.
 #   - the exact downstream ingest/event paths → the window, WITHOUT forward-auth.
 #     Cross-host downstreams authenticate and authorize their registered zone with
 #     santi's own Bearer contract. The management /api/v1/downstreams path is not
@@ -57,7 +58,7 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: Host(`santi.liberte.top`) && PathPrefix(`/api/v1/webhooks`)
+    - match: Host(`santi.liberte.top`) && PathPrefix(`/api/v1/webhooks/`)
       kind: Rule
       priority: 20 # beat the catch-all; no forward-auth middleware here
       services:

@@ -17,6 +17,18 @@ CREATE TABLE IF NOT EXISTS webhooks (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+    subscription_name TEXT NOT NULL,
+    delivery_id TEXT NOT NULL,
+    request_sha256 TEXT NOT NULL,
+    strand_id TEXT NOT NULL,
+    inbox_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (subscription_name, delivery_id)
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_receipt
+ON webhook_deliveries(inbox_id);
+
 CREATE TABLE IF NOT EXISTS messages (
     id TEXT PRIMARY KEY,
     actor_type TEXT NOT NULL CHECK (actor_type IN ('soul', 'system')),

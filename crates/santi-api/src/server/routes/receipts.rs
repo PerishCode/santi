@@ -91,7 +91,13 @@ pub(super) async fn get_soul(
     post,
     path = "/api/v1/webhooks",
     request_body = webhook::Draft,
-    responses((status = 200, body = webhook::Subscription), (status = 500, body = Fault))
+    responses(
+        (status = 200, body = webhook::Subscription),
+        (status = 400, body = Fault),
+        (status = 404, body = Fault),
+        (status = 409, body = Fault),
+        (status = 500, body = Fault)
+    )
 )]
 pub(super) async fn subscribe(
     State(service): State<Service>,

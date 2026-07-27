@@ -1,4 +1,4 @@
-pub const COMPONENT_DESCRIPTIONS: [(&str, &str); 7] = [
+pub const COMPONENT_DESCRIPTIONS: [(&str, &str); 8] = [
     (
         "Soul",
         "A soul is a cyber-individual, keyed by id alone. It has no name/avatar/desc\ncolumn: identity is the mutable self, and it lives entirely in the soul's\nmemory (rendered live into `[santi-soul]`), not in a profile row. The\ntimestamps are pure provenance.",
@@ -10,6 +10,10 @@ pub const COMPONENT_DESCRIPTIONS: [(&str, &str); 7] = [
     (
         "webhook::Subscription",
         "An API-managed webhook subscription: how an external source reaches a soul.\n`adaptor` selects the boundary normalizer (integration knowledge); `soul`\nis who receives the resulting turn; `strategy` picks where the thread\nlives (`per_thread` = one strand per adaptor-derived label, `single` = one\nstrand per subscription); `credential` names the env var holding the signing\nsecret (the secret itself is never stored). The `name` is the URL path segment.",
+    ),
+    (
+        "webhook::Draft",
+        "The complete desired webhook subscription. POSTing it is an idempotent\nensure: an absent name is created, an identical subscription is returned\nunchanged, and drift under an existing name is rejected with 409.",
     ),
     (
         "receipt::State",

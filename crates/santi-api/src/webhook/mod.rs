@@ -12,6 +12,7 @@ pub struct NormalizedEvent {
     pub santi_system_text: String,
     pub label: String,
     pub metadata: Option<Value>,
+    pub delivery: Option<String>,
     pub in_scope: bool,
     pub self_authored: bool,
 }

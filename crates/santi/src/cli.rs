@@ -85,6 +85,9 @@ pub enum Command {
     #[command(about = "Compact a strand's own timeline, or query a compact's detail")]
     #[command(subcommand)]
     Compact(CompactCommand),
+    #[command(about = "Inspect or idempotently ensure webhook subscriptions")]
+    #[command(subcommand)]
+    Webhook(Webhook),
 }
 
 #[derive(Subcommand)]
@@ -101,6 +104,43 @@ pub enum EffectCommand {
         #[arg(long)]
         evidence: String,
     },
+}
+
+#[derive(Subcommand)]
+pub enum Webhook {
+    #[command(about = "GET /api/v1/webhooks")]
+    List,
+    #[command(about = "Create the named subscription, confirm an identical one, or fail on drift")]
+    Ensure {
+        name: String,
+        #[arg(long)]
+        adaptor: String,
+        #[arg(long)]
+        soul: String,
+        #[arg(long, value_enum, default_value_t = Strategy::Thread)]
+        strategy: Strategy,
+        #[arg(
+            long,
+            help = "Name of the server environment variable holding the signing secret"
+        )]
+        credential: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+pub enum Strategy {
+    #[value(name = "per-thread")]
+    Thread,
+    Single,
+}
+
+impl Strategy {
+    pub fn encode(self) -> &'static str {
+        match self {
+            Self::Thread => "per_thread",
+            Self::Single => "single",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]

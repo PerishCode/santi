@@ -1,4 +1,5 @@
 mod budget;
+mod deliveries;
 mod downstream;
 pub use downstream::Stowed;
 mod event;
@@ -7,6 +8,7 @@ mod inbox;
 mod lifecycle;
 mod query;
 mod turn;
+pub use deliveries::Stowed as Delivered;
 pub use turn::Queued;
 
 use rusqlite::{Connection, OptionalExtension, params};

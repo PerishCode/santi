@@ -103,6 +103,8 @@ impl ApiError {
             Self::not_found(message)
         } else if text.starts_with("downstream request conflicts")
             || text.starts_with("downstream id conflicts")
+            || text.starts_with("webhook delivery conflicts")
+            || text.starts_with("webhook ") && text.contains(" conflicts ")
             || text.contains("overlaps an existing registration")
             || text.ends_with("is already registered")
         {

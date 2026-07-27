@@ -84,7 +84,7 @@ impl Service {
             label: &request.label,
             text: request.text,
             source,
-            replay: Some(crate::store::Replay {
+            replay: Some(crate::store::Replay::Downstream {
                 owner: &downstream.id,
                 request: &request.request,
                 digest: &digest,

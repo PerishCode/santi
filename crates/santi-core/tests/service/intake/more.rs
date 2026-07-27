@@ -1,5 +1,5 @@
 use super::*;
-use santi_core::{message, soul, strand};
+use santi_core::{ingest, message, soul, strand};
 
 #[tokio::test]
 async fn pauses() {
@@ -130,4 +130,81 @@ async fn targets() {
         .await
         .expect_err("unknown strand should error");
     assert!(error.message.contains("strand not found"), "got: {error}");
+}
+
+#[tokio::test]
+async fn deduplicates() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let provider = Arc::new(FakeProvider::default());
+    let service = Service::open(
+        service::Config {
+            database: temp.path().join("santi.sqlite").display().to_string(),
+            runtime: temp.path().join("runtime").display().to_string(),
+            execution: temp.path().join("execution").display().to_string(),
+            bind: Some("127.0.0.1:0".to_string()),
+            constitution: None,
+        },
+        provider.clone(),
+    )
+    .expect("open service");
+    let source = || {
+        Some(
+            ingest::Source::new("webhook")
+                .with_ref("github:secretary")
+                .with_metadata(json!({"delivery": "delivery-1"})),
+        )
+    };
+    let delivery = |digest| santi_core::service::Delivery {
+        subscription: "secretary",
+        id: "delivery-1",
+        digest,
+    };
+
+    let ingest::Outcome::Accepted { receipt } = service
+        .deliver(
+            santi_core::service::Envelope {
+                soul: "soul_default",
+                label: "github:secretary:issue:PerishCode/santi#42",
+                text: "first delivery".to_string(),
+                source: source(),
+            },
+            delivery("digest-1"),
+        )
+        .expect("accept first delivery")
+    else {
+        panic!("expected accepted delivery");
+    };
+    Probe::new(&service).any_completed(&receipt.strand).await;
+
+    let ingest::Outcome::Accepted { receipt: replay } = service
+        .deliver(
+            santi_core::service::Envelope {
+                soul: "soul_default",
+                label: "github:secretary:issue:PerishCode/santi#42",
+                text: "first delivery".to_string(),
+                source: source(),
+            },
+            delivery("digest-1"),
+        )
+        .expect("replay delivery")
+    else {
+        panic!("expected accepted replay");
+    };
+    assert_eq!(replay.inbox, receipt.inbox);
+    assert_eq!(replay.strand, receipt.strand);
+    assert_eq!(provider.requests.lock().unwrap().len(), 1);
+
+    let error = service
+        .deliver(
+            santi_core::service::Envelope {
+                soul: "soul_default",
+                label: "github:secretary:issue:PerishCode/santi#43",
+                text: "changed delivery".to_string(),
+                source: source(),
+            },
+            delivery("digest-2"),
+        )
+        .expect_err("changed replay must conflict");
+    assert!(error.contains("webhook delivery conflicts"));
+    assert_eq!(provider.requests.lock().unwrap().len(), 1);
 }

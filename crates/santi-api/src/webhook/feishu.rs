@@ -84,6 +84,7 @@ impl WebhookAdaptor for FeishuAdaptor {
                 santi_system_text: String::new(),
                 label: format!("feishu:{webhook_name}:{event_type}"),
                 metadata: None,
+                delivery: None,
                 in_scope: false,
                 self_authored: false,
             }));
@@ -122,6 +123,7 @@ impl WebhookAdaptor for FeishuAdaptor {
             santi_system_text,
             label,
             metadata: Some(metadata),
+            delivery: None,
             in_scope,
             self_authored: false,
         }))

@@ -84,3 +84,21 @@ reconstruct it from the still-retained artifacts.
 Runtime release and upgrade remain `runseal :release` and `runseal :deploy` respectively. Apply the
 edge configuration separately; retired `/panel` routes intentionally stay absent so a runtime
 rollback cannot resurrect the old embedded chat surface.
+
+## Webhook subscriptions
+
+Subscription topology is API-managed; signing values stay in the host's mode-600
+`/etc/santi/santi.env`. Reconcile the non-secret desired state through the deployed HTTP client:
+
+```sh
+runseal :santi webhook ensure secretary \
+  --adaptor github \
+  --soul soul_default \
+  --strategy per-thread \
+  --credential SANTI_WEBHOOK_GITHUB_SECRET
+runseal :santi webhook list
+```
+
+`ensure` creates an absent subscription, returns an identical one unchanged, and fails on drift. The
+exact `/api/v1/webhooks` management collection remains behind Authentik; only event paths below
+`/api/v1/webhooks/` bypass forward-auth and authenticate by provider signature.

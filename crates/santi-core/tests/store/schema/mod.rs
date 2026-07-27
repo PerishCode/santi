@@ -3,6 +3,8 @@ use super::support::*;
 mod downstream;
 mod more;
 mod retire;
+mod shape;
+mod webhook;
 
 #[test]
 fn matches() {
@@ -14,6 +16,8 @@ fn matches() {
     let conn = Connection::open(db).expect("open sqlite");
     for table in [
         "souls",
+        "webhooks",
+        "webhook_deliveries",
         "messages",
         "message_events",
         "strand_effects",
@@ -127,11 +131,15 @@ fn opens() {
         "a second probe still sees the stale version — the first was read-only"
     );
 
-    let store = Store::open(&db).expect("open store");
-    drop(store);
+    let error = match Store::open(&db) {
+        Ok(_) => panic!("unsupported schema must not open"),
+        Err(error) => error,
+    };
+    assert!(error.contains("unsupported schema version 5"), "{error}");
     assert_eq!(
         santi_core::version(&db).expect("read post-open"),
-        Some(santi_core::VERSION)
+        Some(5),
+        "unsupported databases must remain unchanged"
     );
 }
 

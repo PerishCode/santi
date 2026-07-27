@@ -27,12 +27,11 @@ impl Store {
             .map_err(|error| error.to_string())?;
 
         if let Some(replay) = &replay
-            && let Some((digest, strand, inbox)) =
-                Database::new(&tx).replay(replay.owner, replay.request)?
+            && let Some((accepted, strand, inbox)) = replayed(&Database::new(&tx), replay)?
         {
             tx.commit().map_err(|error| error.to_string())?;
-            if digest != replay.digest {
-                return Err("downstream request conflicts with an accepted payload".to_string());
+            if accepted != digest(replay) {
+                return Err(conflict(replay).to_string());
             }
             return Ok(Intake {
                 outcome: ingest::Outcome::Accepted {
@@ -175,14 +174,15 @@ impl Store {
         .map_err(|error| error.to_string())?;
         Database::new(&tx).accept(&inbox, strand, &now)?;
         if let Some(replay) = replay {
-            Database::new(&tx).stow(crate::store::db::Stowed {
-                owner: replay.owner,
-                request: replay.request,
-                digest: replay.digest,
-                strand,
-                inbox: &inbox,
-                created: &now,
-            })?;
+            stow(
+                &Database::new(&tx),
+                replay,
+                Accepted {
+                    strand,
+                    inbox: &inbox,
+                    created: &now,
+                },
+            )?;
         }
         tx.commit().map_err(|error| error.to_string())?;
         Ok(Intake {
@@ -195,5 +195,67 @@ impl Store {
             },
             inserted: true,
         })
+    }
+}
+
+fn replayed(
+    database: &Database<'_>,
+    replay: &Replay<'_>,
+) -> Result<Option<(String, String, String)>, String> {
+    match replay {
+        Replay::Downstream { owner, request, .. } => database.replay(owner, request),
+        Replay::Webhook {
+            subscription,
+            delivery,
+            ..
+        } => database.delivery(subscription, delivery),
+    }
+}
+
+fn digest<'a>(replay: &'a Replay<'_>) -> &'a str {
+    match replay {
+        Replay::Downstream { digest, .. } | Replay::Webhook { digest, .. } => digest,
+    }
+}
+
+fn conflict(replay: &Replay<'_>) -> &'static str {
+    match replay {
+        Replay::Downstream { .. } => "downstream request conflicts with an accepted payload",
+        Replay::Webhook { .. } => "webhook delivery conflicts with an accepted payload",
+    }
+}
+
+struct Accepted<'a> {
+    strand: &'a str,
+    inbox: &'a str,
+    created: &'a str,
+}
+
+fn stow(database: &Database<'_>, replay: Replay<'_>, accepted: Accepted<'_>) -> Result<(), String> {
+    match replay {
+        Replay::Downstream {
+            owner,
+            request,
+            digest,
+        } => database.stow(crate::store::db::Stowed {
+            owner,
+            request,
+            digest,
+            strand: accepted.strand,
+            inbox: accepted.inbox,
+            created: accepted.created,
+        }),
+        Replay::Webhook {
+            subscription,
+            delivery,
+            digest,
+        } => database.deliver(crate::store::db::Delivered {
+            subscription,
+            delivery,
+            digest,
+            strand: accepted.strand,
+            inbox: accepted.inbox,
+            created: accepted.created,
+        }),
     }
 }

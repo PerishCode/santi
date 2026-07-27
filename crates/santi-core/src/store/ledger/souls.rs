@@ -70,10 +70,27 @@ impl Store {
         &self,
         request: webhook::Draft,
     ) -> Result<crate::webhook::Subscription, String> {
-        let conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
         let now = now();
         let strategy = request.strategy.as_deref().unwrap_or("per_thread");
-        conn.execute(
+        if let Some(existing) = Database::new(&tx).webhook(&request.name)? {
+            if existing.adaptor == request.adaptor
+                && existing.soul == request.soul
+                && existing.strategy == strategy
+                && existing.credential == request.credential
+            {
+                tx.commit().map_err(|error| error.to_string())?;
+                return Ok(existing);
+            }
+            return Err(format!(
+                "webhook {} conflicts with an existing subscription",
+                request.name
+            ));
+        }
+        tx.execute(
             r#"
             INSERT INTO webhooks (
               name, adaptor, soul_id, strand_strategy, secret_env, created_at, updated_at
@@ -90,9 +107,11 @@ impl Store {
             ],
         )
         .map_err(|error| error.to_string())?;
-        Database::new(&conn)
+        let subscription = Database::new(&tx)
             .webhook(&request.name)?
-            .ok_or_else(|| "created webhook missing".to_string())
+            .ok_or_else(|| "created webhook missing".to_string())?;
+        tx.commit().map_err(|error| error.to_string())?;
+        Ok(subscription)
     }
 
     pub fn webhooks(&self) -> Result<Vec<crate::webhook::Subscription>, String> {
@@ -114,6 +133,28 @@ impl Store {
     pub fn webhook(&self, name: &str) -> Result<Option<crate::webhook::Subscription>, String> {
         let conn = self.conn.lock().unwrap();
         Database::new(&conn).webhook(name)
+    }
+
+    pub(crate) fn delivered(
+        &self,
+        subscription: &str,
+        delivery: &str,
+        digest: &str,
+    ) -> Result<Option<ingest::Receipt>, String> {
+        let conn = self.conn.lock().unwrap();
+        let Some((accepted, strand, inbox)) =
+            Database::new(&conn).delivery(subscription, delivery)?
+        else {
+            return Ok(None);
+        };
+        if accepted != digest {
+            return Err("webhook delivery conflicts with an accepted payload".to_string());
+        }
+        Ok(Some(ingest::Receipt {
+            strand,
+            inbox,
+            warning: None,
+        }))
     }
 
     pub fn awaken(&self) -> Result<crate::soul::Soul, String> {

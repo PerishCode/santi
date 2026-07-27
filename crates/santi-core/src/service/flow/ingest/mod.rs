@@ -186,6 +186,30 @@ impl Service {
         })
     }
 
+    pub fn deliver(
+        &self,
+        input: crate::service::Envelope<'_>,
+        delivery: crate::service::Delivery<'_>,
+    ) -> Result<ingest::Outcome, String> {
+        if let Some(receipt) =
+            self.store
+                .delivered(delivery.subscription, delivery.id, delivery.digest)?
+        {
+            return Ok(ingest::Outcome::Accepted { receipt });
+        }
+        self.external(External {
+            soul: input.soul,
+            label: input.label,
+            text: input.text,
+            source: input.source,
+            replay: Some(crate::store::Replay::Webhook {
+                subscription: delivery.subscription,
+                delivery: delivery.id,
+                digest: delivery.digest,
+            }),
+        })
+    }
+
     pub(in crate::service) fn external(
         &self,
         input: External<'_>,

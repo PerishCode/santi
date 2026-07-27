@@ -78,10 +78,17 @@ pub(crate) struct Ingress<'a> {
     pub replay: Option<Replay<'a>>,
 }
 
-pub(crate) struct Replay<'a> {
-    pub owner: &'a str,
-    pub request: &'a str,
-    pub digest: &'a str,
+pub(crate) enum Replay<'a> {
+    Downstream {
+        owner: &'a str,
+        request: &'a str,
+        digest: &'a str,
+    },
+    Webhook {
+        subscription: &'a str,
+        delivery: &'a str,
+        digest: &'a str,
+    },
 }
 
 pub(crate) struct Intake {

@@ -1,6 +1,7 @@
 use clap::Parser;
 use santi::cli::{
-    Cli, Command, CompactCommand, EffectCommand, EffectOutcomeArg, StrandCommand, WatchFormat,
+    Cli, Command, CompactCommand, EffectCommand, EffectOutcomeArg, StrandCommand, Strategy,
+    WatchFormat, Webhook,
 };
 
 #[test]
@@ -45,6 +46,41 @@ fn receipt() {
         panic!("expected receipt command");
     };
     assert_eq!(inbox, "inbox_123");
+}
+
+#[test]
+fn webhooks() {
+    let parsed = Cli::try_parse_from(["santi", "webhook", "list"]).unwrap();
+    assert!(matches!(parsed.command, Command::Webhook(Webhook::List)));
+
+    let parsed = Cli::try_parse_from([
+        "santi",
+        "webhook",
+        "ensure",
+        "secretary",
+        "--adaptor",
+        "github",
+        "--soul",
+        "soul_default",
+        "--credential",
+        "SANTI_WEBHOOK_GITHUB_SECRET",
+    ])
+    .unwrap();
+    let Command::Webhook(Webhook::Ensure {
+        name,
+        adaptor,
+        soul,
+        strategy,
+        credential,
+    }) = parsed.command
+    else {
+        panic!("expected webhook ensure command");
+    };
+    assert_eq!(name, "secretary");
+    assert_eq!(adaptor, "github");
+    assert_eq!(soul, "soul_default");
+    assert_eq!(strategy, Strategy::Thread);
+    assert_eq!(credential, "SANTI_WEBHOOK_GITHUB_SECRET");
 }
 
 #[test]

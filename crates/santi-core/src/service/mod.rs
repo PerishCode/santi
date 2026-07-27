@@ -45,6 +45,19 @@ pub struct Config {
     pub constitution: Option<String>,
 }
 
+pub struct Delivery<'a> {
+    pub subscription: &'a str,
+    pub id: &'a str,
+    pub digest: &'a str,
+}
+
+pub struct Envelope<'a> {
+    pub soul: &'a str,
+    pub label: &'a str,
+    pub text: String,
+    pub source: Option<crate::ingest::Source>,
+}
+
 impl Service {
     pub fn open(config: Config, provider: Arc<dyn Provider>) -> Result<Self, String> {
         let store = Store::open(&config.database)?;

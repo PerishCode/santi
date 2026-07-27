@@ -59,11 +59,13 @@ k3s kubectl rollout restart deployment/window -n santi'
 
 ## Deploy recovery capsule
 
-`runseal :deploy` first refuses to proceed while an earlier capsule is armed. After the normal
-upgrade and readiness checks pass, it copies the upgrader's raw pre-deploy runtime snapshot and the
-source/candidate Debian packages into `/home/santi/.santi/recovery/`, validates their identities and
-hashes, then atomically arms the capsule. An upgrade is not reported as complete until this
-succeeds.
+`runseal :deploy` first refuses to proceed while an earlier capsule is armed. Its streamed host
+program verifies the installed source package, stops the service, snapshots the runtime, installs
+the candidate, retains its package, and checks doctor, health, and memory continuity. Failures after
+the stop boundary automatically restore the source package and runtime. After readiness passes, the
+recovery program copies the raw snapshot and source/candidate packages into
+`/home/santi/.santi/recovery/`, validates their identities and hashes, then atomically arms the
+capsule. A deployment is not reported as complete until this succeeds.
 
 ```sh
 runseal :rollback status

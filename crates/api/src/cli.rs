@@ -27,7 +27,14 @@ pub enum Command {
     #[command(
         about = "Check the store, default soul memory, and provider budget without a running server"
     )]
-    Doctor,
+    Doctor {
+        #[arg(
+            help = "Internal storage-only check used by deployment and recovery",
+            long,
+            hide = true
+        )]
+        storage_only: bool,
+    },
     #[command(about = "Operate directly on local runtime state")]
     #[command(subcommand)]
     Inbox(InboxCommand),

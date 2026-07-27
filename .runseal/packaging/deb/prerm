@@ -1,6 +1,6 @@
 #!/bin/sh
 # santi prerm: stop the service only on a real removal — NOT on `upgrade`, where
-# the `santi upgrade` orchestrator already stopped it and owns the restart.
+# the streamed deploy program already stopped it and owns the restart.
 set -e
 
 case "$1" in

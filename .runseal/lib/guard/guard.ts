@@ -82,6 +82,11 @@ export async function guard(argv: string[]): Promise<number> {
       args: [".runseal/ops/host/30-santi-recovery.test.sh"],
     },
     {
+      title: "deploy transaction",
+      command: "bash",
+      args: [".runseal/ops/host/40-santi-deploy.test.sh"],
+    },
+    {
       title: "deno fmt",
       command: "deno",
       args: ["fmt", "--config", config, "--check", ".runseal"],

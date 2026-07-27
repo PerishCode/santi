@@ -8,7 +8,7 @@ IFS=$'\n\t'
 
 ACTION=${1:-}
 SANTI_RECOVERY_HOME=${SANTI_RECOVERY_HOME:-/home/santi/.santi}
-SANTI_RECOVERY_BIN=${SANTI_RECOVERY_BIN:-/usr/bin/santi}
+SANTI_RECOVERY_BIN=${SANTI_RECOVERY_BIN:-}
 SANTI_RECOVERY_SERVICE=${SANTI_RECOVERY_SERVICE:-santi.service}
 SANTI_RECOVERY_HEALTH=${SANTI_RECOVERY_HEALTH:-http://127.0.0.1:43307/api/v1/health}
 RUNTIME_ROOT="$SANTI_RECOVERY_HOME/runtime"
@@ -138,12 +138,19 @@ find_single_deb() {
 }
 
 schema_for_runtime() {
-  local runtime=$1 output
+  local runtime=$1 output binary=$SANTI_RECOVERY_BIN
+  if [[ -z $binary ]]; then
+    if [[ -x /usr/bin/santi-api ]]; then
+      binary=/usr/bin/santi-api
+    else
+      binary=/usr/bin/santi
+    fi
+  fi
   output=$(env \
     SANTI_HOME="$(dirname "$runtime")" \
     SANTI_PATHS_DATABASE="$runtime/db" \
     SANTI_PATHS_RUNTIME_ROOT="$runtime" \
-    "$SANTI_RECOVERY_BIN" doctor --storage-only 2>/dev/null || true)
+    "$binary" doctor --storage-only 2>/dev/null || true)
   json_number_field_from_text schema_version "$output"
 }
 

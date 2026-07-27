@@ -158,7 +158,8 @@ curl -N -H "Authorization: Bearer $TOKEN" \
 
 Everything anchors on the santi home — `SANTI_HOME`, default `~/.santi` — so the
 runtime works with zero explicit configuration. Each path can be overridden by
-its own variable (and the provider config follows `--flag` > config file > env):
+its own variable (configuration precedence is `--flag` > environment > config
+file > defaults):
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -178,7 +179,8 @@ environment (via `dotenvy::dotenv_override`).
 ## Distribution
 
 The current release gate supports Linux x86_64 only. R2 publishes both a
-standalone tarball and the Debian package used by the self-upgrade path:
+standalone tarball and the Debian package used by the streamed host deployment
+path:
 
 ```sh
 curl -fsSL https://releases.santi.perish.uk/manage.sh | sh -s -- install --channel beta

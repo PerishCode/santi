@@ -23,9 +23,8 @@ export const ARTIFACTS: Artifact[] = [
     contentType: "application/gzip",
   },
   {
-    // Debian package built alongside the linux-gnu tarball (same build job).
-    // The low-friction entry for Liberte-driven self-upgrade (PHASE-07): ships
-    // both binaries + systemd units + maintainer scripts.
+    // Debian package built alongside the linux-gnu tarball (same build job):
+    // both binaries, the runtime unit, and maintainer scripts.
     target: "x86_64-unknown-linux-gnu",
     archive: "santi-x86_64-unknown-linux-gnu.deb",
     members: ["usr/bin/santi", "usr/bin/santi-api"],
@@ -106,10 +105,6 @@ async function buildDeb(
     Deno.chmodSync(join(stage, "usr/bin", name), 0o755);
   }
   await Deno.copyFile(join(src, "santi.service"), join(stage, "lib/systemd/system/santi.service"));
-  await Deno.copyFile(
-    join(src, "santi-upgrade.service"),
-    join(stage, "lib/systemd/system/santi-upgrade.service"),
-  );
   await Deno.copyFile(
     join(src, "santi.env.example"),
     join(stage, "etc/santi/santi.env.example"),

@@ -10,7 +10,17 @@ fn defaults() {
 #[test]
 fn local() {
     let parsed = Cli::try_parse_from(["santi-api", "doctor"]).unwrap();
-    assert!(matches!(parsed.command, Some(Command::Doctor)));
+    assert!(matches!(
+        parsed.command,
+        Some(Command::Doctor {
+            storage_only: false
+        })
+    ));
+    let parsed = Cli::try_parse_from(["santi-api", "doctor", "--storage-only"]).unwrap();
+    assert!(matches!(
+        parsed.command,
+        Some(Command::Doctor { storage_only: true })
+    ));
 }
 
 #[test]

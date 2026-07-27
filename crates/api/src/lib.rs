@@ -25,9 +25,14 @@ pub async fn run() -> Result<()> {
             println!("{document}");
             Ok(())
         }
-        Command::Doctor => {
+        Command::Doctor { storage_only } => {
             config::boot(config.as_deref(), over.partial()).map_err(anyhow::Error::msg)?;
-            let report = santi_api::ops::doctor().map_err(anyhow::Error::msg)?;
+            let report = if storage_only {
+                santi_api::runtime::held().paths.doctor()
+            } else {
+                santi_api::ops::doctor()
+            }
+            .map_err(anyhow::Error::msg)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
             if !report.ok {
                 anyhow::bail!("doctor: unhealthy (see report above)");

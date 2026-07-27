@@ -1,57 +1,30 @@
-# santi `.deb` packaging (PHASE-07 STEP 5)
+# Santi Debian package
 
-Static packaging artifacts for the minimal server `.deb`. The `.deb` is the low-friction entry that
-lets Liberte take over upgrades (`santi upgrade`); it replaces the hand-rolled `manage.sh`
-version-slots on the server. The release pipeline currently supports Linux x86_64 only.
+The Linux release job builds one package containing the `santi` HTTP client, the `santi-api` runtime
+entry, and `santi.service`. Host deployment belongs to the streamed operator program at
+`.runseal/ops/host/40-santi-deploy.sh`, not to either executable.
 
-## Files here
+## Package files
 
-| File                            | Installs to            | Purpose                                                                               |
-| ------------------------------- | ---------------------- | ------------------------------------------------------------------------------------- |
-| `santi.service`                 | `/lib/systemd/system/` | the runtime unit (User=santi, drain-aware `TimeoutStopSec`)                           |
-| `santi-upgrade.service`         | `/lib/systemd/system/` | the detached oneshot unit `santi upgrade` kicks (runs OUTSIDE santi.service's cgroup) |
-| `santi.env.example`             | `/etc/santi/`          | example EnvironmentFile; the real `santi.env` is operator-managed and never clobbered |
-| `control`                       | `DEBIAN/control`       | package metadata; `__VERSION__` substituted at build                                  |
-| `postinst` / `prerm` / `postrm` | `DEBIAN/`              | user + dirs + systemd enable; stop-on-remove; never touch runtime data                |
+| File                          | Installs to            | Purpose                                      |
+| ----------------------------- | ---------------------- | -------------------------------------------- |
+| `santi.service`               | `/lib/systemd/system/` | Runtime service using `santi-api serve`      |
+| `santi.env.example`           | `/etc/santi/`          | Seed for operator-managed environment values |
+| `control`                     | `DEBIAN/`              | Package identity and version                 |
+| `postinst`, `prerm`, `postrm` | `DEBIAN/`              | User, directory, and systemd lifecycle       |
 
-The binaries are installed to `/usr/bin/{santi,santi-api}`.
+Both binaries install under `/usr/bin`. Maintainer scripts never delete `/home/santi/.santi`.
 
-## Design notes
+## Deployment boundary
 
-- **Enable, don't auto-start.** `postinst` installs + enables but does NOT start: starting needs
-  operator secrets in `/etc/santi/santi.env`, and during a self-upgrade the `santi upgrade`
-  orchestrator owns the stop/start around dpkg.
-- **`TimeoutStopSec` (620) > `SANTI_SERVER_SHUTDOWN_GRACE_SECS` (600)** so systemd never SIGKILLs
-  santi mid-drain (STEP 3). `santi-upgrade.service` `TimeoutStartSec` (900) likewise exceeds
-  `SANTI_UPGRADE_TIMEOUT_SECS` (600).
-- **Runtime data is sacred.** No maintainer script ever deletes `/home/santi/.santi` — the soul's
-  memory is the one thing that must survive.
-- **Rollback artifacts are runtime-owned.** Upgrade launch copies packages into a content-addressed
-  store, checks Debian package/version identity plus SHA-256, and atomically records the package
-  currently installed. `--previous-deb` is required once to bootstrap that manifest; later upgrades
-  resolve the durable artifact and reject a conflicting caller file. A successful trial promotes its
-  retained candidate before finalization, while rollback restores both runtime data and the previous
-  installed-package manifest.
-- **Post-success recovery is ops-owned.** `runseal :deploy` copies the upgrader's raw snapshot plus
-  both verified packages into a capsule outside `runtime/`. This provides an explicit rollback
-  window after a successful schema upgrade without adding a candidate-service or core-runtime
-  dependency.
-- **Upgrade unit runs as santi + sudo**, so every file it writes stays santi-owned; the privileged
-  dpkg/systemctl calls use santi's passwordless sudo (a SystemHost detail tuned on-box in STEP 6).
+`runseal :deploy` streams a root-side transaction over the repository-local SSH boundary. It
+verifies the durable source package, downloads and verifies the selected beta, gracefully stops
+`santi.service`, snapshots `runtime/`, installs the candidate, retains its package, and starts the
+new `santi-api` service. Doctor, HTTP readiness, and soul-memory continuity must all pass.
 
-## Build assembly
+After the destructive boundary, any failed check restores the source runtime and package and keeps
+the candidate runtime for diagnosis. A successful candidate is not complete until
+`30-santi-recovery.sh` validates and arms the post-deploy recovery capsule.
 
-Building and publishing the `.deb` lives in the Forgejo release pipeline
-(`.runseal/wrappers/release-ci.ts` + `.forgejo/workflows/release-beta.yml`) and shares the
-outward-facing R2 path with the Linux tarball:
-
-1. In the `x86_64-unknown-linux-gnu` build, after producing both binaries, stage a tree:
-   `usr/bin/{santi,santi-api}`, `lib/systemd/system/{santi,santi-upgrade}.service`,
-   `etc/santi/santi.env.example`, `DEBIAN/{control,postinst,prerm,postrm}` (control's `__VERSION__`
-   ← the release version; scripts `chmod 0755`).
-2. `dpkg-deb --build` produces `santi-x86_64-unknown-linux-gnu.deb`.
-3. `publish` puts it on R2 next to the tarballs and records it in `metadata.json`.
-4. Server upgrade path becomes `curl <r2>/…/santi_<v>_amd64.deb -o … && santi upgrade …`.
-
-The Forgejo release job validates the package member, publishes it, then performs a public install
-and live service-health smoke on Linux.
+The service has `TimeoutStopSec=620`, greater than the default `SANTI_SERVER_GRACE=600`, so systemd
+allows an in-flight turn to drain.

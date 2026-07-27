@@ -1,8 +1,8 @@
 #!/bin/sh
 # santi postinst: provision the service user, config dir, and systemd units.
 # Deliberately does NOT auto-START the service — starting needs operator-provided
-# secrets in /etc/santi/santi.env, and during a self-upgrade the `santi upgrade`
-# orchestrator owns the stop/start around dpkg. We only install + enable; the
+# secrets in /etc/santi/santi.env, and the streamed deploy program owns the
+# stop/start around dpkg. We only install + enable; the
 # estate bootstrap (or the orchestrator) starts it once config is present.
 set -e
 
@@ -25,7 +25,7 @@ configure)
     mkdir -p /home/santi/.santi
     chown -R santi:santi /home/santi/.santi
 
-    # systemd: reload + enable both units. daemon-reload/enable are best-effort
+    # systemd: reload + enable the runtime unit. daemon-reload/enable are best-effort
     # so the package configures cleanly in containers without a live systemd.
     if command -v systemctl >/dev/null 2>&1; then
         systemctl daemon-reload || true

@@ -97,9 +97,42 @@ pub fn path(over: Option<&str>) -> PathBuf {
 pub fn boot(config: Option<&str>, over: ConfigPartial) -> Result<(), String> {
     let file = path(config);
     let file = file.is_file().then_some(file.as_path());
-    let held = Config::resolve_with(file, over).map_err(|error| error.to_string())?;
+    let held = resolved(file, over).map_err(|error| error.to_string())?;
     runtime::hold(runtime(held));
     Ok(())
+}
+
+fn resolved(
+    file: Option<&std::path::Path>,
+    over: ConfigPartial,
+) -> Result<Config, plumb::config::Error> {
+    let mut held = Config::default();
+    if let Some(path) = file {
+        held = held.merge(plumb::config::load::<ConfigPartial>(path)?);
+    }
+    held = held.merge(Config::lookup("SANTI", &legacy)?);
+    held = held.merge(Config::env("SANTI")?);
+    Ok(held.merge(over))
+}
+
+fn legacy(key: &str) -> Option<String> {
+    let names: &[&str] = match key {
+        "SANTI_LISTEN_HOST" => &["SANTI_HOST"],
+        "SANTI_LISTEN_PORT" => &["SANTI_PORT"],
+        "SANTI_PATHS_DATABASE" => &["SANTI_DB"],
+        "SANTI_PATHS_RUNTIME" => &["SANTI_PATHS_RUNTIME_ROOT", "SANTI_RUNTIME_ROOT"],
+        "SANTI_PATHS_EXECUTION" => &["SANTI_PATHS_EXECUTION_ROOT", "SANTI_EXECUTION_ROOT"],
+        "SANTI_SERVER_GRACE" => &[
+            "SANTI_SERVER_SHUTDOWN_GRACE_SECS",
+            "SANTI_SHUTDOWN_GRACE_SECS",
+        ],
+        "SANTI_WEBHOOKS_GITHUB_LOGIN" => &["SANTI_WEBHOOK_GITHUB_LOGIN"],
+        "SANTI_WEBHOOKS_GITHUB_ALLOW" => &["SANTI_WEBHOOK_GITHUB_ALLOW"],
+        "SANTI_WEBHOOKS_FEISHU_ENCRYPT_KEY" => &["SANTI_WEBHOOK_FEISHU_ENCRYPT_KEY"],
+        "SANTI_WEBHOOKS_FEISHU_ALLOW" => &["SANTI_WEBHOOK_FEISHU_ALLOW"],
+        _ => &[],
+    };
+    names.iter().find_map(|name| env(name))
 }
 
 fn runtime(held: Config) -> Runtime {

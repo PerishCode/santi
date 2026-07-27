@@ -53,7 +53,7 @@ pub struct ChatCompletions {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Profile {
     #[serde(rename = "openai_responses")]
     OpenAiResponses {
@@ -65,11 +65,11 @@ pub enum Profile {
         base_url: Option<String>,
         #[serde(default)]
         reasoning_effort: Option<String>,
-        #[serde(default)]
+        #[serde(default, alias = "reasoning_summary")]
         summary: Option<String>,
         #[serde(default)]
         max_output_tokens: Option<u32>,
-        #[serde(default)]
+        #[serde(default, alias = "input_budget_bytes")]
         bytes: Option<usize>,
     },
     ChatCompletions {
@@ -85,7 +85,7 @@ pub enum Profile {
         reasoning_effort: Option<String>,
         #[serde(default)]
         max_tokens: Option<u32>,
-        #[serde(default)]
+        #[serde(default, alias = "input_budget_bytes")]
         bytes: Option<usize>,
     },
 }

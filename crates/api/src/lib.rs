@@ -5,7 +5,7 @@ pub mod text;
 use anyhow::Result;
 use clap::Parser;
 
-use cli::{Cli, Command, InboxCommand};
+use cli::{Cli, Command, InboxCommand, Job};
 
 pub async fn run() -> Result<()> {
     config::load();
@@ -59,5 +59,7 @@ pub async fn run() -> Result<()> {
             }
             Ok(())
         }
+        Command::Job(Job::Run) => santi_api::jobs::run().map_err(anyhow::Error::msg),
+        Command::Job(Job::Finalize) => santi_api::jobs::finalize().map_err(anyhow::Error::msg),
     }
 }

@@ -1,7 +1,8 @@
 {
   "schema": "santi.wire_schema.v2",
-  "digest": "185cd9986899ebff9df57d3fe5cd316624050089574c990231196dccdbd5c286",
+  "digest": "ce9829d39dd8cd072c24fb7ef5be91d6b1eb56e5f6be21a7f442b153c499c9f6",
   "components": [
+    "CreateJobRequest",
     "Health",
     "ResolveEffectRequest",
     "String",
@@ -39,6 +40,12 @@
     "event.Event",
     "ingest.Receipt",
     "ingest.Request",
+    "job.Accepted",
+    "job.Job",
+    "job.Log",
+    "job.Origin",
+    "job.State",
+    "job.Stream",
     "material.Kind",
     "material.Material",
     "material.Request",
@@ -81,6 +88,13 @@
     "webhook.Subscription"
   ],
   "properties": {
+    "CreateJobRequest": [
+      "command",
+      "cwd",
+      "description",
+      "output_limit_bytes",
+      "timeout_seconds"
+    ],
     "Health": [
       "degraded",
       "incidents",
@@ -291,6 +305,44 @@
       "source",
       "text"
     ],
+    "job.Accepted": [
+      "job"
+    ],
+    "job.Job": [
+      "accepted",
+      "acknowledged",
+      "command",
+      "created",
+      "cwd",
+      "description",
+      "exit_code",
+      "finished",
+      "id",
+      "origin",
+      "output_limit_bytes",
+      "reason",
+      "started",
+      "state",
+      "timeout_seconds",
+      "updated"
+    ],
+    "job.Log": [
+      "cursor",
+      "data",
+      "eof",
+      "job",
+      "next",
+      "stream"
+    ],
+    "job.Origin": [
+      "call",
+      "effect",
+      "soul",
+      "strand",
+      "turn"
+    ],
+    "job.State": [],
+    "job.Stream": [],
     "material.Kind": [],
     "material.Material": [
       "content_type",

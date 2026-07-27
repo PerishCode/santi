@@ -32,6 +32,14 @@ pub const UNAUTHORIZED: Descriptor = Descriptor {
     exposure: Exposure::CALLER_AND_OPERATOR,
 };
 
+pub const UNAVAILABLE: Descriptor = Descriptor {
+    code: "runtime.unavailable",
+    category: Category::Unavailable,
+    severity: Severity::Error,
+    retry: Retry::Later,
+    exposure: Exposure::CALLER_AND_OPERATOR,
+};
+
 pub const INTERNAL: Descriptor = Descriptor {
     code: "runtime.internal",
     category: Category::Internal,

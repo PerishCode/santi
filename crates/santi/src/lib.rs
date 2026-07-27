@@ -10,8 +10,6 @@ use clap::Parser;
 
 use auth::{Credentials, resolve_edge_bearer};
 use cli::{Cli, ClientDefaults};
-use client::run_client;
-
 pub async fn run() -> Result<()> {
     config::load();
     let cli = Cli::parse();
@@ -27,5 +25,5 @@ pub async fn run() -> Result<()> {
         key: cli.api_key.as_deref(),
     })
     .await?;
-    run_client(&cli.base_url, bearer.as_deref(), &defaults, cli.command).await
+    client::run(&cli.base_url, bearer.as_deref(), &defaults, cli.command).await
 }

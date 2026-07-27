@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 
-const DEFAULT_BASE_URL: &str = "http://127.0.0.1:43307";
+const BASE: &str = "http://127.0.0.1:43307";
 
 #[derive(Parser)]
 #[command(
@@ -15,7 +15,7 @@ pub struct Cli {
         long,
         global = true,
         env = "SANTI_API_URL",
-        default_value = DEFAULT_BASE_URL
+        default_value = BASE
     )]
     pub base_url: String,
 
@@ -50,7 +50,7 @@ pub struct Cli {
     pub strand: Option<String>,
 
     #[arg(
-        help = "Default soul addressed by `strand send`. Falls back to SANTI_SOUL_ID. Empty/absent → the runtime's default soul (the pre-multi-soul path)",
+        help = "Default soul addressed by `strand send` and soul-owned job commands. Falls back to SANTI_SOUL_ID. Empty/absent → strand send uses the runtime default; job reads and controls require one",
         long,
         global = true,
         env = "SANTI_SOUL_ID"
@@ -85,6 +85,9 @@ pub enum Command {
     #[command(about = "Compact a strand's own timeline, or query a compact's detail")]
     #[command(subcommand)]
     Compact(CompactCommand),
+    #[command(about = "Soul-owned detached jobs under /api/v1/jobs")]
+    #[command(subcommand)]
+    Job(Job),
     #[command(about = "Inspect or idempotently ensure webhook subscriptions")]
     #[command(subcommand)]
     Webhook(Webhook),
@@ -190,6 +193,11 @@ impl ClientDefaults {
             .map(str::trim)
             .filter(|s| !s.is_empty())
     }
+
+    pub fn require(&self) -> Result<&str> {
+        self.soul()
+            .ok_or_else(|| anyhow::anyhow!("no soul id: pass --soul or set SANTI_SOUL_ID"))
+    }
 }
 
 pub fn split_send_args(
@@ -211,6 +219,8 @@ pub fn split_send_args(
 }
 
 mod compact;
+mod job;
 mod strand;
 pub use compact::*;
+pub use job::*;
 pub use strand::*;

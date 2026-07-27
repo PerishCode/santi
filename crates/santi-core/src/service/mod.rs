@@ -3,6 +3,11 @@ use engine::{address, drive, error, materials, notice, thinking, timing};
 mod face;
 pub use face::Admission;
 mod flow;
+mod jobs;
+pub use jobs::{
+    Draft as JobDraft, Launch as JobLaunch, Observation as JobObservation, Read as JobRead,
+    Supervisor as JobSupervisor, Terminal as JobTerminal,
+};
 mod text;
 mod tools;
 
@@ -34,6 +39,7 @@ pub struct Service {
     pressure: Arc<Mutex<()>>,
     closing: Arc<AtomicBool>,
     degraded: Arc<AtomicBool>,
+    supervisor: Arc<dyn jobs::Supervisor>,
 }
 
 #[derive(Debug, Clone)]
@@ -60,6 +66,14 @@ pub struct Envelope<'a> {
 
 impl Service {
     pub fn open(config: Config, provider: Arc<dyn Provider>) -> Result<Self, String> {
+        Self::supervised(config, provider, Arc::new(jobs::Unavailable))
+    }
+
+    pub fn supervised(
+        config: Config,
+        provider: Arc<dyn Provider>,
+        supervisor: Arc<dyn jobs::Supervisor>,
+    ) -> Result<Self, String> {
         let store = Store::open(&config.database)?;
         let context = plumb::context::Context::root().with(store.sink());
         {
@@ -80,6 +94,7 @@ impl Service {
             pressure: Arc::new(Mutex::new(())),
             closing: Arc::new(AtomicBool::new(false)),
             degraded: Arc::new(AtomicBool::new(degraded)),
+            supervisor,
         })
     }
 
@@ -129,6 +144,7 @@ impl Service {
     }
 
     pub fn resume(&self) -> Result<(), String> {
+        self.recover()?;
         self.dispatched();
         let pending = self.store.awaiting()?;
         for strand in pending {

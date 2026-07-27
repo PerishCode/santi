@@ -1,7 +1,7 @@
 use clap::Parser;
 use santi::cli::{
-    Cli, Command, CompactCommand, EffectCommand, EffectOutcomeArg, StrandCommand, Strategy,
-    WatchFormat, Webhook,
+    Cli, Command, CompactCommand, EffectCommand, EffectOutcomeArg, Job, StrandCommand, Strategy,
+    Stream, WatchFormat, Webhook,
 };
 
 #[test]
@@ -46,6 +46,57 @@ fn receipt() {
         panic!("expected receipt command");
     };
     assert_eq!(inbox, "inbox_123");
+}
+
+#[test]
+fn jobs() {
+    let parsed = Cli::try_parse_from([
+        "santi",
+        "job",
+        "create",
+        "compile release",
+        "cargo build --release",
+        "--cwd",
+        "strand://repo",
+        "--timeout-seconds",
+        "90",
+        "--output-limit-bytes",
+        "4096",
+    ])
+    .unwrap();
+    let Command::Job(Job::Create {
+        description,
+        command,
+        cwd,
+        timeout_seconds,
+        output_limit_bytes,
+    }) = parsed.command
+    else {
+        panic!("expected job create");
+    };
+    assert_eq!(description, "compile release");
+    assert_eq!(command, "cargo build --release");
+    assert_eq!(cwd.as_deref(), Some("strand://repo"));
+    assert_eq!(timeout_seconds, Some(90));
+    assert_eq!(output_limit_bytes, Some(4096));
+
+    let parsed = Cli::try_parse_from([
+        "santi", "job", "logs", "job_1", "--stream", "stderr", "--cursor", "12", "--limit", "80",
+    ])
+    .unwrap();
+    let Command::Job(Job::Logs {
+        id,
+        stream,
+        cursor,
+        limit,
+    }) = parsed.command
+    else {
+        panic!("expected job logs");
+    };
+    assert_eq!(id, "job_1");
+    assert!(matches!(stream, Stream::Stderr));
+    assert_eq!(cursor, "12");
+    assert_eq!(limit, 80);
 }
 
 #[test]

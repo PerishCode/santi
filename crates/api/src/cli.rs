@@ -38,6 +38,15 @@ pub enum Command {
     #[command(about = "Operate directly on local runtime state")]
     #[command(subcommand)]
     Inbox(InboxCommand),
+    #[command(name = "__job", hide = true)]
+    #[command(subcommand)]
+    Job(Job),
+}
+
+#[derive(Subcommand)]
+pub enum Job {
+    Run,
+    Finalize,
 }
 
 #[derive(Subcommand)]

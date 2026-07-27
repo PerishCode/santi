@@ -29,6 +29,14 @@ pub(super) fn router(service: Service) -> Router {
         .route("/api/v1/souls", post(awaken).get(souls))
         .route("/api/v1/souls/{soul}", get(get_soul))
         .route("/api/v1/webhooks", post(subscribe).get(webhooks))
+        .route(
+            "/api/v1/jobs",
+            post(super::jobs::create).get(super::jobs::list),
+        )
+        .route("/api/v1/jobs/{job}", get(super::jobs::get))
+        .route("/api/v1/jobs/{job}/cancel", post(super::jobs::cancel))
+        .route("/api/v1/jobs/{job}/logs", get(super::jobs::logs))
+        .route("/api/v1/jobs/{job}/ack", post(super::jobs::acknowledge))
         .route("/api/v1/strands/{strand}", get(get_strand))
         .route("/api/v1/strands/{strand}/messages", get(list_messages))
         .route("/api/v1/strands/{strand}/materials", post(material))

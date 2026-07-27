@@ -1,4 +1,4 @@
-pub const COMPONENT_DESCRIPTIONS: [(&str, &str); 8] = [
+pub const COMPONENT_DESCRIPTIONS: [(&str, &str); 10] = [
     (
         "Soul",
         "A soul is a cyber-individual, keyed by id alone. It has no name/avatar/desc\ncolumn: identity is the mutable self, and it lives entirely in the soul's\nmemory (rendered live into `[santi-soul]`), not in a profile row. The\ntimestamps are pure provenance.",
@@ -26,6 +26,14 @@ pub const COMPONENT_DESCRIPTIONS: [(&str, &str); 8] = [
     (
         "effect::State",
         "Durable truth for one concrete external-effect attempt. It is deliberately\nnot turn state: one turn may contain several independently settled or\nambiguous effects.",
+    ),
+    (
+        "job::Job",
+        "A soul-owned detached command with an execution lifecycle independent of\nits creating shell invocation, tool call, effect, turn, and receipt. Origin\nfields are immutable provenance and never imply cascading state.",
+    ),
+    (
+        "job::State",
+        "`accepted` is the durable create success boundary, not proof that the\ncommand started. `unknown` means retained evidence cannot prove either a live\nmatching supervisor generation or a terminal outcome; Santi never replays it\nautomatically.",
     ),
     (
         "message::Role",

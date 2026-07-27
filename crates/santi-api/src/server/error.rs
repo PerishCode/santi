@@ -68,6 +68,16 @@ impl ApiError {
         error
     }
 
+    pub fn unavailable(message: impl Into<String>) -> Self {
+        Self::from_santi(engine().transient(Signal {
+            descriptor: catalog::UNAVAILABLE,
+            source: santi_core::Source::new("santi-api", "http_boundary"),
+            scope: None,
+            message: message.into(),
+            context: serde_json::Value::Null,
+        }))
+    }
+
     pub fn conflict(message: impl Into<String>) -> Self {
         let mut error = Self::bad_request(message);
         error.status = StatusCode::CONFLICT;
@@ -99,12 +109,24 @@ impl ApiError {
 
     pub fn from_service(message: String) -> Self {
         let text = message.as_str();
-        if text == "strand not found" || text == "soul not found" || text.ends_with("not found") {
+        if text == "invalid job capability" || text == "job capability expired" {
+            Self::unauthorized(message)
+        } else if text.starts_with("job supervisor is unavailable")
+            || text.starts_with("systemd did not accept job")
+        {
+            Self::unavailable(message)
+        } else if text == "strand not found"
+            || text == "soul not found"
+            || text.ends_with("not found")
+        {
             Self::not_found(message)
         } else if text.starts_with("downstream request conflicts")
             || text.starts_with("downstream id conflicts")
             || text.starts_with("webhook delivery conflicts")
             || text.starts_with("webhook ") && text.contains(" conflicts ")
+            || text.starts_with("job capability conflicts")
+            || text.starts_with("job execution spec conflicts")
+            || text.contains("supervisor generation conflicts")
             || text.contains("overlaps an existing registration")
             || text.ends_with("is already registered")
         {
@@ -122,6 +144,8 @@ impl ApiError {
             || text.contains("path separators")
             || text.starts_with("only an unknown effect")
             || text.starts_with("effect resolution evidence")
+            || text.starts_with("job ") && text.contains(" must ")
+            || text.starts_with("only a terminal job")
         {
             Self::bad_request(message)
         } else {

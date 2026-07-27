@@ -33,8 +33,9 @@ paths = [
 [[grant]]
 syntax = "environment"
 paths = [
-  "crates/api/src/config.rs",
-  "crates/santi-api/src/config/profile.rs",
+    "crates/api/src/config.rs",
+    "crates/santi-api/src/jobs/**/*.rs",
+    "crates/santi-api/src/config/profile.rs",
   "crates/santi/src/config.rs",
   "crates/*/tests/**/*.rs",
 ]

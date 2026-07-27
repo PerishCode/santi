@@ -219,8 +219,8 @@ impl Provider for GatedFirstProvider {
 
 fn probe_command() -> &'static str {
     if cfg!(windows) {
-        "[Console]::Out.WriteLine((Get-Location).Path); [Console]::Out.WriteLine($env:SANTI_STRAND_MEMORY_DIR); [Console]::Out.WriteLine($env:SANTI_SOUL_ID); [Console]::Out.WriteLine($env:SANTI_STRAND_ID); [Console]::Out.WriteLine($env:SANTI_TURN_ID)"
+        "[Console]::Out.WriteLine((Get-Location).Path); [Console]::Out.WriteLine($env:SANTI_STRAND_MEMORY_DIR); [Console]::Out.WriteLine($env:SANTI_SOUL_ID); [Console]::Out.WriteLine($env:SANTI_STRAND_ID); [Console]::Out.WriteLine($env:SANTI_TURN_ID); [Console]::Out.WriteLine($env:SANTI_TOOL_CALL_ID); [Console]::Out.WriteLine($env:SANTI_EFFECT_ID); if ($env:SANTI_JOB_CREATE_CAPABILITY) { [Console]::Out.WriteLine('job_capability_present') }"
     } else {
-        "pwd && printf \"\\n$SANTI_STRAND_MEMORY_DIR\\n$SANTI_SOUL_ID\\n$SANTI_STRAND_ID\\n$SANTI_TURN_ID\""
+        "pwd && printf \"\\n$SANTI_STRAND_MEMORY_DIR\\n$SANTI_SOUL_ID\\n$SANTI_STRAND_ID\\n$SANTI_TURN_ID\\n$SANTI_TOOL_CALL_ID\\n$SANTI_EFFECT_ID\" && test -n \"$SANTI_JOB_CREATE_CAPABILITY\" && printf '\\njob_capability_present'"
     }
 }

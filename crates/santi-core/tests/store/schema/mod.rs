@@ -1,6 +1,7 @@
 use super::support::*;
 
 mod downstream;
+mod jobs;
 mod more;
 mod retire;
 mod shape;
@@ -18,6 +19,8 @@ fn matches() {
         "souls",
         "webhooks",
         "webhook_deliveries",
+        "job_capabilities",
+        "jobs",
         "messages",
         "message_events",
         "strand_effects",

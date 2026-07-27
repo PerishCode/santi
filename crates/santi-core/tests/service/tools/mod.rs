@@ -2,6 +2,7 @@ use super::support::*;
 use santi_core::service::{self, Service};
 use santi_core::{effect, message, strand};
 
+mod jobs;
 mod more;
 
 #[derive(Clone)]
@@ -203,6 +204,18 @@ async fn dispatches() {
     assert!(
         stdout.contains(&accepted_turn(&response).id),
         "SANTI_TURN_ID in shell env: {stdout}"
+    );
+    assert!(
+        stdout.contains("call_shell"),
+        "SANTI_TOOL_CALL_ID in shell env: {stdout}"
+    );
+    assert!(
+        stdout.contains("effect_"),
+        "SANTI_EFFECT_ID in shell env: {stdout}"
+    );
+    assert!(
+        stdout.contains("job_capability_present"),
+        "job create capability in shell env: {stdout}"
     );
     let cwd = output
         .get("cwd")

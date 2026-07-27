@@ -1,4 +1,4 @@
-use santi_core::{Fault, Health, soul::Soul, strand::Strand, webhook};
+use santi_core::{Fault, Health, job, soul::Soul, strand::Strand, webhook};
 use utoipa::{
     Modify, OpenApi,
     openapi::{
@@ -12,7 +12,7 @@ mod descriptions;
 use descriptions::COMPONENT_DESCRIPTIONS;
 use santi_core::{material, soul, strand, stream};
 
-const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 11] = [
+const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 13] = [
     (
         "downstream::Draft",
         "digest",
@@ -68,6 +68,16 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 11] = [
         "receipts",
         "Obligation roots whose attempts include this effect's turn.",
     ),
+    (
+        "job::Accepted",
+        "job",
+        "The accepted resource. Its current state may advance quickly, but create\nsuccess promises only durable supervisor acceptance.",
+    ),
+    (
+        "job::Log",
+        "next",
+        "Opaque monotonic byte cursor for the next read of this stream.",
+    ),
 ];
 
 #[derive(OpenApi)]
@@ -82,6 +92,12 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 11] = [
         super::routes::get_soul,
         super::routes::subscribe,
         super::routes::webhooks,
+        super::jobs::create,
+        super::jobs::list,
+        super::jobs::get,
+        super::jobs::cancel,
+        super::jobs::logs,
+        super::jobs::acknowledge,
         super::ingress::ingest_webhook,
         super::routes::get_strand,
         super::routes::list_messages,
@@ -118,6 +134,13 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 11] = [
         soul::Draft,
         webhook::Draft,
         webhook::Subscription,
+        super::jobs::CreateJobRequest,
+        job::Accepted,
+        job::Job,
+        job::Origin,
+        job::State,
+        job::Stream,
+        job::Log,
         Fault,
         Health,
         material::Request,

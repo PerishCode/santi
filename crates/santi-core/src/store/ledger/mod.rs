@@ -9,3 +9,5 @@ pub(in crate::store) mod span;
 pub(in crate::store) mod turn;
 
 use super::Store;
+
+pub(crate) use souls::{Entry, Grant, Prepared, Record};

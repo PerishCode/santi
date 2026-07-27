@@ -2,6 +2,7 @@ mod effects;
 mod error;
 mod errors;
 mod ingress;
+mod jobs;
 mod openapi;
 mod routes;
 mod sse;
@@ -13,6 +14,10 @@ use crate::provider;
 
 pub use effects::{ResolveEffectRequest, effect, settle};
 pub use error::ApiError;
+pub use jobs::{
+    CreateJobRequest, acknowledge as acknowledge_job, cancel as cancel_job, create as create_job,
+    get as get_job, list as list_jobs, logs as job_logs,
+};
 pub use routes::{drive, health, receipt, send};
 
 pub fn export_openapi_json() -> Result<String, String> {
@@ -29,7 +34,8 @@ pub async fn serve() -> Result<(), String> {
     }
     fs::create_dir_all(&paths.runtime).map_err(|error| error.to_string())?;
     fs::create_dir_all(&paths.execution).map_err(|error| error.to_string())?;
-    let service = Service::open(
+    let supervisor = std::sync::Arc::new(crate::jobs::Systemd::current()?);
+    let service = Service::supervised(
         service::Config {
             database: paths.database.display().to_string(),
             runtime: paths.runtime.display().to_string(),
@@ -41,6 +47,7 @@ pub async fn serve() -> Result<(), String> {
                 .map(|path| path.display().to_string()),
         },
         provider,
+        supervisor,
     )?;
     let address: SocketAddr = bind
         .parse()

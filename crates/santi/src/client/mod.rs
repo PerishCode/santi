@@ -5,8 +5,8 @@ use anyhow::{Context, Result};
 use futures_util::StreamExt;
 
 use crate::cli::{
-    ClientDefaults, Command, CompactCommand, EffectCommand, StrandCommand, WatchFormat, Webhook,
-    split_send_args,
+    ClientDefaults, Command, CompactCommand, EffectCommand, Job, StrandCommand, WatchFormat,
+    Webhook, split_send_args,
 };
 use crate::text::source::read_summary_file;
 use crate::watch::{next_sse_frame, render_watch_event};
@@ -15,7 +15,7 @@ mod send;
 
 pub use send::{Request, send};
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const TIMEOUT: Duration = Duration::from_secs(30);
 
 struct Capsule<'a> {
     first: Option<String>,
@@ -32,7 +32,7 @@ struct Capsule<'a> {
     soul: Option<&'a str>,
 }
 
-pub(crate) async fn run_client(
+pub(crate) async fn run(
     base_url: &str,
     bearer: Option<&str>,
     defaults: &ClientDefaults,
@@ -203,6 +203,66 @@ pub(crate) async fn run_client(
                 url.push_str(&format!("&keyword={}", urlencoding_encode(&keyword)));
             }
             http.get(&url).await
+        }
+        Command::Job(Job::Create {
+            description,
+            command,
+            cwd,
+            timeout_seconds,
+            output_limit_bytes,
+        }) => {
+            let capability = crate::config::env("SANTI_JOB_CREATE_CAPABILITY").ok_or_else(|| {
+                anyhow::anyhow!(
+                    "no job create capability: run this command from a Santi runtime shell invocation"
+                )
+            })?;
+            http.spawn(
+                &format!("{base}/api/v1/jobs"),
+                &capability,
+                serde_json::json!({
+                    "description": description,
+                    "command": command,
+                    "cwd": cwd,
+                    "timeout_seconds": timeout_seconds,
+                    "output_limit_bytes": output_limit_bytes,
+                }),
+            )
+            .await
+        }
+        Command::Job(Job::List) => {
+            http.owned(&format!("{base}/api/v1/jobs"), defaults.require()?)
+                .await
+        }
+        Command::Job(Job::Get { id }) => {
+            http.owned(&format!("{base}/api/v1/jobs/{id}"), defaults.require()?)
+                .await
+        }
+        Command::Job(Job::Cancel { id }) => {
+            http.act(
+                &format!("{base}/api/v1/jobs/{id}/cancel"),
+                defaults.require()?,
+            )
+            .await
+        }
+        Command::Job(Job::Logs {
+            id,
+            stream,
+            cursor,
+            limit,
+        }) => {
+            let cursor = urlencoding_encode(&cursor);
+            http.owned(
+                &format!(
+                    "{base}/api/v1/jobs/{id}/logs?stream={}&cursor={cursor}&limit={limit}",
+                    stream.wire()
+                ),
+                defaults.require()?,
+            )
+            .await
+        }
+        Command::Job(Job::Ack { id }) => {
+            http.act(&format!("{base}/api/v1/jobs/{id}/ack"), defaults.require()?)
+                .await
         }
         Command::Webhook(Webhook::List) => http.get(&format!("{base}/api/v1/webhooks")).await,
         Command::Webhook(Webhook::Ensure {

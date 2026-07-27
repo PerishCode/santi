@@ -20,6 +20,37 @@ impl crate::effect::State {
     }
 }
 
+impl crate::job::State {
+    pub fn encode(&self) -> &'static str {
+        match self {
+            Self::Submitting => "submitting",
+            Self::Accepted => "accepted",
+            Self::Running => "running",
+            Self::Cancelling => "cancelling",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::TimedOut => "timed_out",
+            Self::Cancelled => "cancelled",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn decode(value: &str) -> Result<Self, String> {
+        match value {
+            "submitting" => Ok(Self::Submitting),
+            "accepted" => Ok(Self::Accepted),
+            "running" => Ok(Self::Running),
+            "cancelling" => Ok(Self::Cancelling),
+            "succeeded" => Ok(Self::Succeeded),
+            "failed" => Ok(Self::Failed),
+            "timed_out" => Ok(Self::TimedOut),
+            "cancelled" => Ok(Self::Cancelled),
+            "unknown" => Ok(Self::Unknown),
+            other => Err(format!("unknown job state {other}")),
+        }
+    }
+}
+
 impl crate::message::Role {
     pub fn encode(&self) -> &'static str {
         match self {

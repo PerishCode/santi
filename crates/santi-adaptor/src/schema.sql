@@ -29,6 +29,55 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
 CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_receipt
 ON webhook_deliveries(inbox_id);
 
+CREATE TABLE IF NOT EXISTS job_capabilities (
+    digest TEXT PRIMARY KEY,
+    soul_id TEXT NOT NULL,
+    strand_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    tool_call_id TEXT NOT NULL,
+    effect_id TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    consumed_job_id TEXT,
+    request_sha256 TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_job_capabilities_expiry
+ON job_capabilities(expires_at);
+
+CREATE TABLE IF NOT EXISTS jobs (
+    id TEXT PRIMARY KEY,
+    soul_id TEXT NOT NULL,
+    strand_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    tool_call_id TEXT NOT NULL,
+    effect_id TEXT NOT NULL,
+    description TEXT NOT NULL,
+    command TEXT NOT NULL,
+    cwd TEXT,
+    timeout_seconds INTEGER NOT NULL CHECK (timeout_seconds > 0),
+    output_limit_bytes INTEGER NOT NULL CHECK (output_limit_bytes > 0),
+    request_sha256 TEXT NOT NULL,
+    capability_sha256 TEXT NOT NULL UNIQUE,
+    generation TEXT NOT NULL UNIQUE,
+    supervisor_ref TEXT NOT NULL UNIQUE,
+    state TEXT NOT NULL CHECK (state IN (
+        'submitting', 'accepted', 'running', 'cancelling', 'succeeded',
+        'failed', 'timed_out', 'cancelled', 'unknown'
+    )),
+    reason TEXT,
+    exit_code INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    accepted_at TEXT,
+    started_at TEXT,
+    finished_at TEXT,
+    acknowledged_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_soul_time
+ON jobs(soul_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_state_time
+ON jobs(state, updated_at);
+
 CREATE TABLE IF NOT EXISTS messages (
     id TEXT PRIMARY KEY,
     actor_type TEXT NOT NULL CHECK (actor_type IN ('soul', 'system')),

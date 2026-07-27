@@ -46,6 +46,14 @@ struct Shell<'a> {
     limit: Option<usize>,
 }
 
+struct Origin<'a> {
+    strand: &'a str,
+    turn: &'a str,
+    soul: &'a str,
+    call: &'a str,
+    effect: &'a str,
+}
+
 impl Service {
     pub(super) fn tooled(
         &self,
@@ -109,9 +117,18 @@ impl Service {
             limit: output_limit,
         } = shell;
         let soul = self.store.keeper(strand)?;
-        let prepared = match argued::<shell::Args>(&call.arguments)
-            .and_then(|args| self.prepared(strand, turn, &soul, args))
-        {
+        let prepared = match argued::<shell::Args>(&call.arguments).and_then(|args| {
+            self.prepared(
+                Origin {
+                    strand,
+                    turn,
+                    soul: &soul,
+                    call: &call.call,
+                    effect,
+                },
+                args,
+            )
+        }) {
             Ok(prepared) => prepared,
             Err(error) => {
                 return self.store.redeem(
@@ -154,31 +171,35 @@ impl Service {
         }
     }
 
-    fn prepared(
-        &self,
-        strand: &str,
-        turn: &str,
-        soul: &str,
-        args: shell::Args,
-    ) -> Result<shell::Prepared, String> {
-        std::fs::create_dir_all(self.soulhome(soul)).map_err(|error| error.to_string())?;
-        std::fs::create_dir_all(self.strandhome(strand)).map_err(|error| error.to_string())?;
-        let cwd = self.situated(strand, soul, args.cwd.as_deref())?;
+    fn prepared(&self, origin: Origin<'_>, args: shell::Args) -> Result<shell::Prepared, String> {
+        std::fs::create_dir_all(self.soulhome(origin.soul)).map_err(|error| error.to_string())?;
+        std::fs::create_dir_all(self.strandhome(origin.strand))
+            .map_err(|error| error.to_string())?;
+        let cwd = self.situated(origin.strand, origin.soul, args.cwd.as_deref())?;
         std::fs::create_dir_all(&cwd).map_err(|error| error.to_string())?;
+        let capability = self.permit(origin.strand, origin.turn, origin.call, origin.effect)?;
         let mut command = shell::shell(&args.command);
         command
             .current_dir(&cwd)
-            .env("SANTI_SOUL_MEMORY_DIR", self.soulhome(soul))
-            .env("SANTI_STRAND_MEMORY_DIR", self.strandhome(strand))
-            .env("SANTI_SOUL_ID", soul)
-            .env("SANTI_STRAND_ID", strand)
-            .env("SANTI_TURN_ID", turn)
+            .env("SANTI_SOUL_MEMORY_DIR", self.soulhome(origin.soul))
+            .env("SANTI_STRAND_MEMORY_DIR", self.strandhome(origin.strand))
+            .env("SANTI_SOUL_ID", origin.soul)
+            .env("SANTI_STRAND_ID", origin.strand)
+            .env("SANTI_TURN_ID", origin.turn)
+            .env("SANTI_TOOL_CALL_ID", origin.call)
+            .env("SANTI_EFFECT_ID", origin.effect)
+            .env("SANTI_JOB_CREATE_CAPABILITY", capability)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         Ok(shell::Prepared { command, cwd })
     }
 
-    fn situated(&self, strand: &str, soul: &str, cwd: Option<&str>) -> Result<PathBuf, String> {
+    pub(in crate::service) fn situated(
+        &self,
+        strand: &str,
+        soul: &str,
+        cwd: Option<&str>,
+    ) -> Result<PathBuf, String> {
         let Some(cwd) = cwd else {
             return Ok(self.execution());
         };

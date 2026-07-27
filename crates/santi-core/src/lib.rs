@@ -8,7 +8,7 @@ pub mod workspace;
 pub use santi_error as error;
 pub use santi_error::*;
 pub use santi_model::{
-    Health, Timestamp, budget, compact, downstream, drive, effect, event, ingest, material,
+    Health, Timestamp, budget, compact, downstream, drive, effect, event, ingest, job, material,
     message, now, receipt, soul, stamped, strand, stream, tag, thinking, tool, trace, turn,
     webhook,
 };

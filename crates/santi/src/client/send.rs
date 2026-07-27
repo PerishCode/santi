@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 
-use super::REQUEST_TIMEOUT;
+use super::TIMEOUT;
 use crate::cli::WatchFormat;
 use crate::watch::{Watch, watch_until_idle};
 
@@ -18,7 +18,7 @@ pub async fn send(request: Request<'_>) -> Result<()> {
     let response = request
         .client
         .post(&url)
-        .timeout(REQUEST_TIMEOUT)
+        .timeout(TIMEOUT)
         .json(&request.body)
         .send()
         .await

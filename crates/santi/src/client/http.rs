@@ -76,7 +76,7 @@ impl Http<'_> {
         let response = self
             .client
             .get(url)
-            .timeout(REQUEST_TIMEOUT)
+            .timeout(TIMEOUT)
             .send()
             .await
             .with_context(|| format!("GET {url}"))?;
@@ -84,11 +84,53 @@ impl Http<'_> {
     }
 
     pub(super) async fn post(&self, url: &str, body: Option<serde_json::Value>) -> Result<()> {
-        let mut request = self.client.post(url).timeout(REQUEST_TIMEOUT);
+        let mut request = self.client.post(url).timeout(TIMEOUT);
         if let Some(body) = body {
             request = request.json(&body);
         }
         let response = request
+            .send()
+            .await
+            .with_context(|| format!("POST {url}"))?;
+        print_json(response).await
+    }
+
+    pub(super) async fn owned(&self, url: &str, soul: &str) -> Result<()> {
+        let response = self
+            .client
+            .get(url)
+            .header("x-santi-soul-id", soul)
+            .timeout(TIMEOUT)
+            .send()
+            .await
+            .with_context(|| format!("GET {url}"))?;
+        print_json(response).await
+    }
+
+    pub(super) async fn act(&self, url: &str, soul: &str) -> Result<()> {
+        let response = self
+            .client
+            .post(url)
+            .header("x-santi-soul-id", soul)
+            .timeout(TIMEOUT)
+            .send()
+            .await
+            .with_context(|| format!("POST {url}"))?;
+        print_json(response).await
+    }
+
+    pub(super) async fn spawn(
+        &self,
+        url: &str,
+        capability: &str,
+        body: serde_json::Value,
+    ) -> Result<()> {
+        let response = self
+            .client
+            .post(url)
+            .header("x-santi-job-capability", capability)
+            .json(&body)
+            .timeout(TIMEOUT)
             .send()
             .await
             .with_context(|| format!("POST {url}"))?;

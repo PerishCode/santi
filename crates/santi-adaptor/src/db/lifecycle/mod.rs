@@ -40,7 +40,7 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
         return tx.commit().map_err(|error| error.to_string());
     }
 
-    if (32..=35).contains(&version) {
+    if (32..=36).contains(&version) {
         let tx = conn
             .unchecked_transaction()
             .map_err(|error| error.to_string())?;

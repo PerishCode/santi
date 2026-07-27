@@ -28,8 +28,10 @@ fn requires() {
 #[test]
 fn trims() {
     assert_eq!(defaults(None, Some("soul_x")).soul(), Some("soul_x"));
+    assert_eq!(defaults(None, Some("soul_x")).require().unwrap(), "soul_x");
     assert_eq!(defaults(None, Some("   ")).soul(), None);
     assert_eq!(defaults(None, None).soul(), None);
+    assert!(defaults(None, None).require().is_err());
 }
 
 #[test]

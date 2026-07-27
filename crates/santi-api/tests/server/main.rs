@@ -124,6 +124,8 @@ mod openapi {
         assert!(document.contains("/api/v1/effects/{effect}"));
         assert!(document.contains("/api/v1/effects/{effect}/resolve"));
         assert!(document.contains("/api/v1/effects/{effect}/trace"));
+        assert!(document.contains("/api/v1/jobs/{job}/logs"));
+        assert!(document.contains("job.Accepted"));
         assert!(document.contains("trace.Record"));
         assert!(document.contains("ingest.Receipt"));
         assert!(document.contains("/api/v1/turn-events/stream"));
@@ -236,6 +238,7 @@ mod effects {
     }
 }
 
+mod jobs;
 mod recovery;
 
 fn status(message: &str) -> StatusCode {

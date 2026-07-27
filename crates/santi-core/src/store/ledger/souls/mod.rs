@@ -7,6 +7,9 @@ use super::{Store, db::Database};
 use crate::store::{Begun, budget, rows};
 use crate::{ingest, message, strand, webhook};
 
+mod jobs;
+pub(crate) use jobs::{Entry, Grant, Prepared, Record};
+
 impl Store {
     pub fn labeled(&self, soul: &str, label: &str) -> Result<Strand, String> {
         let mut conn = self.conn.lock().unwrap();

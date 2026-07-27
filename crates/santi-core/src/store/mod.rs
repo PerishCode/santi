@@ -15,13 +15,14 @@ mod lifecycle;
 mod runtime;
 mod turns;
 
-pub(crate) use budget::{Ingress, Launch, Replay};
+pub(crate) use budget::{Ingress, Launch, Notice, Offered, Replay};
 pub(crate) use compact::Collapse;
 pub use db::version;
 use db::*;
 pub(crate) use effects::Settlement;
 pub(crate) use ledger::{
-    Entry as JobEntry, Grant as JobGrant, Prepared as JobPrepared, Record as JobRecord,
+    Attention as JobAttention, Entry as JobEntry, Grant as JobGrant, Prepared as JobPrepared,
+    Record as JobRecord,
 };
 use rows::{Decode, collected};
 pub use runtime::Invocation;

@@ -72,6 +72,7 @@ fn accepts() {
         cwd: None,
         timeout: Some(90),
         output: Some(1024),
+        remind: None,
     };
 
     let accepted = service.spawn(capability, draft()).expect("accept job");
@@ -95,6 +96,17 @@ fn accepts() {
         )
         .expect_err("changed retry must conflict");
     assert!(error.contains("conflicts with its accepted request"));
+
+    let error = service
+        .spawn(
+            "unused",
+            JobDraft {
+                remind: Some(0),
+                ..draft()
+            },
+        )
+        .expect_err("zero reminder must be rejected");
+    assert!(error.contains("reminder interval must be greater than zero"));
 
     supervisor.observe(JobObservation::Running);
     let running = service
@@ -136,6 +148,7 @@ fn abstains() {
                 cwd: None,
                 timeout: None,
                 output: None,
+                remind: None,
             },
         )
         .expect("accept job");

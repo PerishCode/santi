@@ -1,4 +1,5 @@
 mod inbox;
+pub(in crate::store) mod notice;
 mod state;
 mod turn;
 
@@ -93,6 +94,21 @@ pub(crate) enum Replay<'a> {
 
 pub(crate) struct Intake {
     pub outcome: ingest::Outcome,
+    pub inserted: bool,
+}
+
+pub(crate) struct Notice<'a> {
+    pub strand: &'a str,
+    pub key: &'a str,
+    pub revision: u64,
+    pub digest: &'a str,
+    pub content: message::Content,
+    pub source: ingest::Source,
+    pub causes: Vec<String>,
+}
+
+pub(crate) struct Offered {
+    pub inbox: Option<String>,
     pub inserted: bool,
 }
 

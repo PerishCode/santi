@@ -6,6 +6,7 @@ use super::Service;
 use crate::job;
 use crate::store::{JobEntry, JobGrant, JobPrepared, JobRecord};
 
+mod attention;
 mod draft;
 mod logs;
 
@@ -18,6 +19,7 @@ pub struct Draft {
     pub cwd: Option<String>,
     pub timeout: Option<u64>,
     pub output: Option<u64>,
+    pub remind: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -99,6 +101,7 @@ impl Service {
                 cwd: normalized.cwd,
                 timeout: normalized.timeout,
                 output: normalized.output,
+                remind: normalized.remind,
                 digest: normalized.digest,
             },
         )?;
@@ -177,6 +180,29 @@ impl Service {
         Ok(())
     }
 
+    fn sweep(&self) -> Result<(), String> {
+        for record in self.store.active()? {
+            let id = record.job.id.clone();
+            let result = self
+                .refresh(record)
+                .and_then(|record| attention::capture(self, record));
+            if let Err(error) = result {
+                eprintln!("santi: job attention failed job={id} detail={error}");
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn watch(&self) {
+        while !self.closing() {
+            if let Err(error) = self.sweep() {
+                eprintln!("santi: job attention scan failed: {error}");
+            }
+            self.rouse();
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    }
+
     fn launch(&self, record: &JobRecord) -> Result<Launch, String> {
         let cwd = self.situated(
             &record.job.origin.strand,
@@ -217,7 +243,11 @@ impl Service {
         let Some((state, reason, exit)) = transition else {
             return Ok(record);
         };
-        if record.job.state == state && record.job.reason == reason && record.job.exit_code == exit
+        let incomplete = state == job::State::Running && record.started.is_none();
+        if record.job.state == state
+            && record.job.reason == reason
+            && record.job.exit_code == exit
+            && !incomplete
         {
             return Ok(record);
         }

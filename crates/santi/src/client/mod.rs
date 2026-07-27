@@ -210,6 +210,7 @@ pub(crate) async fn run(
             cwd,
             timeout_seconds,
             output_limit_bytes,
+            remind_every_seconds,
         }) => {
             let capability = crate::config::env("SANTI_JOB_CREATE_CAPABILITY").ok_or_else(|| {
                 anyhow::anyhow!(
@@ -225,6 +226,7 @@ pub(crate) async fn run(
                     "cwd": cwd,
                     "timeout_seconds": timeout_seconds,
                     "output_limit_bytes": output_limit_bytes,
+                    "remind_every_seconds": remind_every_seconds,
                 }),
             )
             .await

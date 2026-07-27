@@ -41,6 +41,7 @@ fn vertical() {
                 cwd: None,
                 timeout: Some(30),
                 output: Some(4096),
+                remind: None,
             },
         )
         .expect("accept job");
@@ -103,6 +104,7 @@ fn restarts() {
                 cwd: None,
                 timeout: Some(30),
                 output: Some(4096),
+                remind: None,
             },
         )
         .expect("accept job");

@@ -1,4 +1,4 @@
-use crate::store::Ingress;
+use crate::store::{Ingress, JobAttention, Notice};
 use crate::{Fault, engine, strand::Strand};
 
 use super::super::{Service, drive};
@@ -54,6 +54,35 @@ struct Drive<'a> {
 }
 
 impl Service {
+    pub(in crate::service) fn notify(
+        &self,
+        attention: JobAttention<'_>,
+        notice: Notice<'_>,
+    ) -> Result<(), String> {
+        let strand = notice.strand.to_string();
+        let offered = self.store.attend(attention, notice)?;
+        self.dispatched();
+        if offered.inserted
+            && let Some(inbox) = offered.inbox
+        {
+            self.inboxes.lock().unwrap().insert(strand, inbox);
+        }
+        Ok(())
+    }
+
+    pub(in crate::service) fn rouse(&self) {
+        let pending = std::mem::take(&mut *self.inboxes.lock().unwrap());
+        for (strand, inbox) in pending {
+            let outcome = self.poke(&strand, "system", Some(&inbox), "inbox_notice_poke");
+            if let drive::Outcome::Failed(error) = outcome {
+                eprintln!(
+                    "santi: inbox notice wake failed strand={} code={} detail={}",
+                    strand, error.code, error.message
+                );
+            }
+        }
+    }
+
     pub fn ingest(
         &self,
         selector: strand::Selector,

@@ -99,7 +99,8 @@ the shell tool `nohup`/`tmux` conventions:
 ```sh
 santi job create "compile release" "cargo build --release" \
   --timeout-seconds 3600 \
-  --output-limit-bytes 16777216
+  --output-limit-bytes 16777216 \
+  --remind-every-seconds 300
 santi job list
 santi job get <job_id>
 santi job logs <job_id> --stream stdout --cursor 0
@@ -112,6 +113,8 @@ a short-lived, single-use capability bound to that soul/strand/turn/tool
 origin. Success means the job specification and supervisor acceptance are
 durable; it does not mean the command is running or complete. The job then has
 an independent lifecycle and may outlive the creating turn or an API restart.
+`--remind-every-seconds` is optional; when present it must be greater than zero
+and wakes the owning strand with a coalesced current job snapshot.
 Cold start reconciles retained evidence and never automatically replays an
 uncertain job. The launched process receives origin locators but never inherits
 the create capability.

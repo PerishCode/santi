@@ -19,6 +19,8 @@ pub(super) struct Normalized {
     pub timeout: u64,
     #[serde(rename = "output_limit_bytes")]
     pub output: u64,
+    #[serde(rename = "remind_every_seconds")]
+    pub remind: Option<u64>,
     #[serde(skip)]
     pub digest: String,
 }
@@ -47,12 +49,17 @@ pub(super) fn normalize(draft: Draft) -> Result<Normalized, String> {
     }
     let timeout = bounded("job timeout", draft.timeout.unwrap_or(TIMEOUT), TIMECAP)?;
     let output = bounded("job output limit", draft.output.unwrap_or(OUTPUT), OUTCAP)?;
+    let remind = draft
+        .remind
+        .map(|value| bounded("job reminder interval", value, TIMECAP))
+        .transpose()?;
     let mut normalized = Normalized {
         description,
         command,
         cwd,
         timeout,
         output,
+        remind,
         digest: String::new(),
     };
     let encoded = serde_json::to_vec(&normalized).map_err(|error| error.to_string())?;

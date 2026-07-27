@@ -2,6 +2,7 @@ use super::support::*;
 use santi_core::service::{self, Service};
 use santi_core::{effect, message, strand};
 
+mod attention;
 mod jobs;
 mod more;
 

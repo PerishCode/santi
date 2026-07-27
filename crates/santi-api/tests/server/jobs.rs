@@ -87,6 +87,7 @@ async fn accepts() {
         cwd: None,
         timeout_seconds: Some(30),
         output_limit_bytes: Some(4096),
+        remind_every_seconds: Some(5),
     };
 
     let (status, Json(first)) =
@@ -96,6 +97,7 @@ async fn accepts() {
     assert_eq!(status, StatusCode::ACCEPTED);
     assert_eq!(first.job.state, job::State::Accepted);
     assert_eq!(first.job.origin.soul, strand.soul);
+    assert_eq!(first.job.remind, Some(5));
 
     let (_, Json(retried)) = create_job_handler(State(service.clone()), headers, Json(request()))
         .await

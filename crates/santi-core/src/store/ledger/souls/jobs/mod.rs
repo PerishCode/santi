@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 use crate::store::Store;
 use crate::{job, now, tag};
 
+mod attention;
 mod rows;
 mod state;
 
@@ -25,6 +26,7 @@ pub(crate) struct Entry {
     pub cwd: Option<String>,
     pub timeout: u64,
     pub output: u64,
+    pub remind: Option<u64>,
     pub digest: String,
 }
 
@@ -33,11 +35,27 @@ pub(crate) struct Record {
     pub job: job::Job,
     pub generation: String,
     pub supervisor: String,
+    pub started: Option<i64>,
+    pub revision: u64,
+    pub runtime: bool,
+    pub output: bool,
+    pub reminder: u64,
 }
 
 pub(crate) enum Prepared {
     New(Record),
     Existing(Record),
+}
+
+pub(crate) struct Attention<'a> {
+    pub id: &'a str,
+    pub base: u64,
+    pub at: &'a str,
+    pub runtime: bool,
+    pub output: bool,
+    pub reminded: bool,
+    pub tick: u64,
+    pub next: Option<&'a str>,
 }
 
 impl Store {
@@ -144,19 +162,27 @@ impl Store {
             i64::try_from(draft.timeout).map_err(|_| "job timeout is out of range".to_string())?;
         let output = i64::try_from(draft.output)
             .map_err(|_| "job output limit is out of range".to_string())?;
+        let remind = draft
+            .remind
+            .map(i64::try_from)
+            .transpose()
+            .map_err(|_| "job reminder interval is out of range".to_string())?;
         tx.execute(
             r#"
             INSERT INTO jobs (
                 id, soul_id, strand_id, turn_id, tool_call_id, effect_id,
                 description, command, cwd, timeout_seconds, output_limit_bytes,
+                remind_every_seconds,
                 request_sha256, capability_sha256, generation, supervisor_ref,
                 state, reason, exit_code, created_at, updated_at, accepted_at,
-                started_at, finished_at, acknowledged_at
+                started_at, started_millis, finished_at, acknowledged_at,
+                attention_revision, runtime_warned_at, output_warned_at,
+                last_reminded_at, next_reminder_at, reminder_tick
             )
             VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-                ?12, ?13, ?14, ?15, 'submitting', NULL, NULL,
-                ?16, ?16, NULL, NULL, NULL, NULL
+                ?12, ?13, ?14, ?15, ?16, 'submitting', NULL, NULL,
+                ?17, ?17, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL, 0
             )
             "#,
             params![
@@ -171,6 +197,7 @@ impl Store {
                 draft.cwd,
                 timeout,
                 output,
+                remind,
                 draft.digest,
                 proof,
                 generation,
@@ -195,7 +222,7 @@ impl Store {
     }
 }
 
-fn epoch() -> Result<i64, String> {
+pub(super) fn epoch() -> Result<i64, String> {
     let elapsed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|error| error.to_string())?;

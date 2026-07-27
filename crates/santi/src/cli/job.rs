@@ -12,6 +12,8 @@ pub enum Job {
         timeout_seconds: Option<u64>,
         #[arg(long)]
         output_limit_bytes: Option<u64>,
+        #[arg(long)]
+        remind_every_seconds: Option<u64>,
     },
     #[command(about = "List jobs owned by --soul/SANTI_SOUL_ID")]
     List,

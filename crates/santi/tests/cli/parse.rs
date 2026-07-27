@@ -62,6 +62,8 @@ fn jobs() {
         "90",
         "--output-limit-bytes",
         "4096",
+        "--remind-every-seconds",
+        "30",
     ])
     .unwrap();
     let Command::Job(Job::Create {
@@ -70,6 +72,7 @@ fn jobs() {
         cwd,
         timeout_seconds,
         output_limit_bytes,
+        remind_every_seconds,
     }) = parsed.command
     else {
         panic!("expected job create");
@@ -79,6 +82,7 @@ fn jobs() {
     assert_eq!(cwd.as_deref(), Some("strand://repo"));
     assert_eq!(timeout_seconds, Some(90));
     assert_eq!(output_limit_bytes, Some(4096));
+    assert_eq!(remind_every_seconds, Some(30));
 
     let parsed = Cli::try_parse_from([
         "santi", "job", "logs", "job_1", "--stream", "stderr", "--cursor", "12", "--limit", "80",

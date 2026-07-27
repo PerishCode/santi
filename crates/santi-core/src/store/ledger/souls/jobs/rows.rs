@@ -6,9 +6,12 @@ use crate::job;
 pub(super) const COLUMNS: &str = r#"
     id, soul_id, strand_id, turn_id, tool_call_id, effect_id,
     description, command, cwd, timeout_seconds, output_limit_bytes,
+    remind_every_seconds,
     request_sha256, capability_sha256, generation, supervisor_ref,
     state, reason, exit_code, created_at, updated_at, accepted_at,
-    started_at, finished_at, acknowledged_at
+    started_at, started_millis, finished_at, acknowledged_at,
+    attention_revision, runtime_warned_at, output_warned_at,
+    last_reminded_at, next_reminder_at, reminder_tick
 "#;
 
 pub(super) fn record(conn: &rusqlite::Connection, id: &str) -> Result<Option<Record>, String> {
@@ -19,9 +22,9 @@ pub(super) fn record(conn: &rusqlite::Connection, id: &str) -> Result<Option<Rec
 }
 
 pub(super) fn decode(row: &Row<'_>) -> rusqlite::Result<Record> {
-    let state = job::State::decode(&row.get::<_, String>(15)?).map_err(|error| {
+    let state = job::State::decode(&row.get::<_, String>(16)?).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(
-            15,
+            16,
             rusqlite::types::Type::Text,
             Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, error)),
         )
@@ -41,18 +44,26 @@ pub(super) fn decode(row: &Row<'_>) -> rusqlite::Result<Record> {
             cwd: row.get(8)?,
             timeout_seconds: unsigned(row, 9)?,
             output_limit_bytes: unsigned(row, 10)?,
+            remind: optional(row, 11)?,
             state,
-            reason: row.get(16)?,
-            exit_code: row.get(17)?,
-            created: row.get(18)?,
-            updated: row.get(19)?,
-            accepted: row.get(20)?,
-            started: row.get(21)?,
-            finished: row.get(22)?,
-            acknowledged: row.get(23)?,
+            reason: row.get(17)?,
+            exit_code: row.get(18)?,
+            created: row.get(19)?,
+            updated: row.get(20)?,
+            accepted: row.get(21)?,
+            started: row.get(22)?,
+            last: row.get(29)?,
+            next: row.get(30)?,
+            finished: row.get(24)?,
+            acknowledged: row.get(25)?,
         },
-        generation: row.get(13)?,
-        supervisor: row.get(14)?,
+        generation: row.get(14)?,
+        supervisor: row.get(15)?,
+        started: row.get(23)?,
+        revision: unsigned(row, 26)?,
+        runtime: row.get::<_, Option<String>>(27)?.is_some(),
+        output: row.get::<_, Option<String>>(28)?.is_some(),
+        reminder: unsigned(row, 31)?,
     })
 }
 
@@ -65,4 +76,17 @@ fn unsigned(row: &Row<'_>, index: usize) -> rusqlite::Result<u64> {
             Box::new(error),
         )
     })
+}
+
+fn optional(row: &Row<'_>, index: usize) -> rusqlite::Result<Option<u64>> {
+    row.get::<_, Option<i64>>(index)?
+        .map(u64::try_from)
+        .transpose()
+        .map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                index,
+                rusqlite::types::Type::Integer,
+                Box::new(error),
+            )
+        })
 }

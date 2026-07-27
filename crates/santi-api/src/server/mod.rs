@@ -56,6 +56,10 @@ pub async fn serve() -> Result<(), String> {
         .await
         .map_err(|error| error.to_string())?;
     service.resume()?;
+    let watcher = {
+        let service = service.clone();
+        tokio::spawn(async move { service.watch().await })
+    };
     println!("santi-api listening on http://{address}");
     let shutdown_signal = {
         let service = service.clone();
@@ -66,10 +70,13 @@ pub async fn serve() -> Result<(), String> {
         }
     };
     let drainer = service.clone();
-    axum::serve(listener, routes::router(service))
+    let result = axum::serve(listener, routes::router(service))
         .with_graceful_shutdown(shutdown_signal)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| error.to_string());
+    drainer.close();
+    watcher.await.map_err(|error| error.to_string())?;
+    result?;
     drainer.drain(held.grace).await;
     println!("santi-api: drained; exiting");
     Ok(())

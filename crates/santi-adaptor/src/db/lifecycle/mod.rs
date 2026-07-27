@@ -40,12 +40,34 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
         return tx.commit().map_err(|error| error.to_string());
     }
 
-    if (32..=36).contains(&version) {
+    if (32..=37).contains(&version) {
         let tx = conn
             .unchecked_transaction()
             .map_err(|error| error.to_string())?;
         if version <= 34 {
             reshape(&tx)?;
+        }
+        if version == 37 {
+            tx.execute_batch(
+                r#"
+                ALTER TABLE jobs ADD COLUMN remind_every_seconds INTEGER
+                    CHECK (remind_every_seconds IS NULL OR remind_every_seconds > 0);
+                ALTER TABLE jobs ADD COLUMN started_millis INTEGER;
+                ALTER TABLE jobs ADD COLUMN attention_revision INTEGER NOT NULL DEFAULT 0
+                    CHECK (attention_revision >= 0);
+                ALTER TABLE jobs ADD COLUMN runtime_warned_at TEXT;
+                ALTER TABLE jobs ADD COLUMN output_warned_at TEXT;
+                ALTER TABLE jobs ADD COLUMN last_reminded_at TEXT;
+                ALTER TABLE jobs ADD COLUMN next_reminder_at TEXT;
+                ALTER TABLE jobs ADD COLUMN reminder_tick INTEGER NOT NULL DEFAULT 0
+                    CHECK (reminder_tick >= 0);
+                ALTER TABLE strand_inbox ADD COLUMN coalesce_key TEXT;
+                ALTER TABLE strand_inbox ADD COLUMN coalesce_revision INTEGER
+                    CHECK (coalesce_revision IS NULL OR coalesce_revision > 0);
+                ALTER TABLE strand_inbox ADD COLUMN coalesce_causes TEXT;
+                "#,
+            )
+            .map_err(|error| error.to_string())?;
         }
         tx.execute_batch(SCHEMA)
             .map_err(|error| error.to_string())?;

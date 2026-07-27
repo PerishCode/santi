@@ -20,6 +20,7 @@ pub struct CreateJobRequest {
     pub cwd: Option<String>,
     pub timeout_seconds: Option<u64>,
     pub output_limit_bytes: Option<u64>,
+    pub remind_every_seconds: Option<u64>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -57,6 +58,7 @@ pub async fn create(
                 cwd: request.cwd,
                 timeout: request.timeout_seconds,
                 output: request.output_limit_bytes,
+                remind: request.remind_every_seconds,
             },
         )
         .map(|accepted| (StatusCode::ACCEPTED, Json(accepted)))

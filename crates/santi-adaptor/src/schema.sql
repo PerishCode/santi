@@ -56,6 +56,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     cwd TEXT,
     timeout_seconds INTEGER NOT NULL CHECK (timeout_seconds > 0),
     output_limit_bytes INTEGER NOT NULL CHECK (output_limit_bytes > 0),
+    remind_every_seconds INTEGER CHECK (
+        remind_every_seconds IS NULL OR remind_every_seconds > 0
+    ),
     request_sha256 TEXT NOT NULL,
     capability_sha256 TEXT NOT NULL UNIQUE,
     generation TEXT NOT NULL UNIQUE,
@@ -70,8 +73,15 @@ CREATE TABLE IF NOT EXISTS jobs (
     updated_at TEXT NOT NULL,
     accepted_at TEXT,
     started_at TEXT,
+    started_millis INTEGER,
     finished_at TEXT,
-    acknowledged_at TEXT
+    acknowledged_at TEXT,
+    attention_revision INTEGER NOT NULL DEFAULT 0 CHECK (attention_revision >= 0),
+    runtime_warned_at TEXT,
+    output_warned_at TEXT,
+    last_reminded_at TEXT,
+    next_reminder_at TEXT,
+    reminder_tick INTEGER NOT NULL DEFAULT 0 CHECK (reminder_tick >= 0)
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_soul_time
 ON jobs(soul_id, created_at DESC, id DESC);
@@ -291,9 +301,28 @@ CREATE TABLE IF NOT EXISTS strand_inbox (
     source_type TEXT,
     source_ref TEXT,
     source_metadata TEXT,
+    coalesce_key TEXT,
+    coalesce_revision INTEGER CHECK (
+        coalesce_revision IS NULL OR coalesce_revision > 0
+    ),
+    coalesce_causes TEXT,
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_strand_inbox_strand_created_at ON strand_inbox (strand_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_strand_inbox_coalesce
+ON strand_inbox(strand_id, coalesce_key)
+WHERE coalesce_key IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS inbox_slots (
+    strand_id TEXT NOT NULL,
+    slot_key TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK (revision > 0),
+    digest TEXT NOT NULL,
+    inbox_id TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (strand_id, slot_key),
+    UNIQUE (inbox_id)
+);
 
 -- Durable responsibility root for every accepted inbox item. Content remains
 -- in the inbox/timeline; this table carries only obligation state and locators.

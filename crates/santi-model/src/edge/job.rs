@@ -47,6 +47,8 @@ pub struct Job {
     pub cwd: Option<String>,
     pub timeout_seconds: u64,
     pub output_limit_bytes: u64,
+    #[serde(rename = "remind_every_seconds")]
+    pub remind: Option<u64>,
     pub state: State,
     pub reason: Option<String>,
     pub exit_code: Option<i32>,
@@ -54,6 +56,10 @@ pub struct Job {
     pub updated: Timestamp,
     pub accepted: Option<Timestamp>,
     pub started: Option<Timestamp>,
+    #[serde(rename = "last_reminded")]
+    pub last: Option<Timestamp>,
+    #[serde(rename = "next_reminder")]
+    pub next: Option<Timestamp>,
     pub finished: Option<Timestamp>,
     pub acknowledged: Option<Timestamp>,
 }

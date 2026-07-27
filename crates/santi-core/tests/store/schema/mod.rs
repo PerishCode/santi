@@ -27,6 +27,7 @@ fn matches() {
         "trace_records",
         "strands",
         "strand_inbox",
+        "inbox_slots",
         "inbox_receipts",
         "receipt_transitions",
         "turns",

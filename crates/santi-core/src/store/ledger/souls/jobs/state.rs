@@ -2,7 +2,8 @@ use rusqlite::params;
 
 use super::{Record, rows};
 use crate::store::Store;
-use crate::{job, now};
+use crate::{job, now, stamped};
+use std::time::{Duration, UNIX_EPOCH};
 
 impl Store {
     pub(crate) fn accept(&self, id: &str) -> Result<Record, String> {
@@ -32,6 +33,29 @@ impl Store {
 
     pub(crate) fn records(&self) -> Result<Vec<Record>, String> {
         self.gathered(None)
+    }
+
+    pub(crate) fn active(&self) -> Result<Vec<Record>, String> {
+        let conn = self.conn.lock().unwrap();
+        let sql = format!(
+            r#"
+            SELECT {} FROM jobs
+            WHERE state NOT IN (
+                'succeeded', 'failed', 'timed_out', 'cancelled', 'unknown'
+            )
+            ORDER BY updated_at ASC, id ASC
+            "#,
+            rows::COLUMNS
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|error| error.to_string())?;
+        let rows = stmt
+            .query_map([], rows::decode)
+            .map_err(|error| error.to_string())?;
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row.map_err(|error| error.to_string())?);
+        }
+        Ok(records)
     }
 
     pub(crate) fn owned(&self, soul: &str) -> Result<Vec<Record>, String> {
@@ -82,7 +106,15 @@ impl Store {
     ) -> Result<Record, String> {
         let conn = self.conn.lock().unwrap();
         let timestamp = now();
+        let current = rows::record(&conn, id)?.ok_or_else(|| "job not found".to_string())?;
         let running = (state == job::State::Running).then_some(timestamp.as_str());
+        let started = (state == job::State::Running)
+            .then(super::epoch)
+            .transpose()?;
+        let next = match (state == job::State::Running, current.job.remind) {
+            (true, Some(seconds)) => started.map(|millis| future(millis, seconds)).transpose()?,
+            _ => None,
+        };
         let finished = state.terminal().then_some(timestamp.as_str());
         conn.execute(
             r#"
@@ -92,7 +124,12 @@ impl Store {
                 exit_code = ?4,
                 updated_at = ?5,
                 started_at = COALESCE(started_at, ?6),
-                finished_at = COALESCE(finished_at, ?7)
+                started_millis = COALESCE(started_millis, ?7),
+                finished_at = COALESCE(finished_at, ?8),
+                next_reminder_at = CASE
+                    WHEN ?9 = 1 THEN NULL
+                    ELSE COALESCE(next_reminder_at, ?10)
+                END
             WHERE id = ?1
             "#,
             params![
@@ -102,7 +139,10 @@ impl Store {
                 exit,
                 timestamp,
                 running,
-                finished
+                started,
+                finished,
+                state.terminal() as i64,
+                next
             ],
         )
         .map_err(|error| error.to_string())?;
@@ -142,4 +182,15 @@ impl Store {
             .map(|record| record.job)
             .collect())
     }
+}
+
+fn future(millis: i64, seconds: u64) -> Result<String, String> {
+    let base = u64::try_from(millis).map_err(|_| "job start time is out of range".to_string())?;
+    let delta = seconds
+        .checked_mul(1000)
+        .ok_or_else(|| "job reminder interval is out of range".to_string())?;
+    let total = base
+        .checked_add(delta)
+        .ok_or_else(|| "job reminder time is out of range".to_string())?;
+    stamped(UNIX_EPOCH + Duration::from_millis(total))
 }

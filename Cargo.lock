@@ -1632,6 +1632,7 @@ dependencies = [
  "futures-util",
  "hex",
  "hmac",
+ "libc",
  "plumb",
  "rusqlite",
  "santi-core",

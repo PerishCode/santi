@@ -122,6 +122,11 @@ pub(super) fn log(directory: &Path, name: &str) -> Result<File, String> {
         .map_err(|error| error.to_string())
 }
 
+#[cfg(target_os = "macos")]
+pub(super) fn artifact(path: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
+    replace(&path.join(name), bytes)
+}
+
 fn replace(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let temporary = path.with_extension(format!("tmp.{}", uuid::Uuid::new_v4().simple()));
     let mut file = create(&temporary)?;

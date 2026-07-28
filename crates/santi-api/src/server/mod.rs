@@ -34,7 +34,7 @@ pub async fn serve() -> Result<(), String> {
     }
     fs::create_dir_all(&paths.runtime).map_err(|error| error.to_string())?;
     fs::create_dir_all(&paths.execution).map_err(|error| error.to_string())?;
-    let supervisor = std::sync::Arc::new(crate::jobs::Systemd::current()?);
+    let supervisor = std::sync::Arc::new(crate::jobs::Native::current()?);
     let service = Service::supervised(
         service::Config {
             database: paths.database.display().to_string(),

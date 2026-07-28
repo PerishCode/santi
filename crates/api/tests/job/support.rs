@@ -36,7 +36,7 @@ impl Provider for Silent {
 }
 
 pub struct Guard<'a> {
-    pub supervisor: &'a santi_api::jobs::Systemd,
+    pub supervisor: &'a santi_api::jobs::Native,
     pub launch: &'a JobLaunch,
 }
 
@@ -46,12 +46,21 @@ pub struct Unit {
 
 impl Drop for Unit {
     fn drop(&mut self) {
-        let _ = Command::new("systemctl")
-            .args(["--user", "stop", &self.unit])
-            .status();
-        let _ = Command::new("systemctl")
-            .args(["--user", "reset-failed", &self.unit])
-            .status();
+        #[cfg(target_os = "linux")]
+        {
+            let _ = Command::new("systemctl")
+                .args(["--user", "stop", &self.unit])
+                .status();
+            let _ = Command::new("systemctl")
+                .args(["--user", "reset-failed", &self.unit])
+                .status();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = Command::new("launchctl")
+                .args(["bootout", &target(&self.unit)])
+                .status();
+        }
     }
 }
 
@@ -66,12 +75,12 @@ pub fn launch(
     description: &str,
     command: &str,
     output: u64,
-) -> (santi_api::jobs::Systemd, JobLaunch) {
+) -> (santi_api::jobs::Native, JobLaunch) {
     let id = format!("job_{}", uuid::Uuid::new_v4().simple());
     let stamp = format!("stamp_{}", uuid::Uuid::new_v4().simple());
     let supervisor = format!("santi-{}.service", stamp.replace('_', "-"));
     (
-        santi_api::jobs::Systemd::new(env!("CARGO_BIN_EXE_santi-api")),
+        santi_api::jobs::Native::new(env!("CARGO_BIN_EXE_santi-api")),
         JobLaunch {
             job: job::Job {
                 id: id.clone(),
@@ -108,7 +117,7 @@ pub fn launch(
     )
 }
 
-pub fn terminal(supervisor: &santi_api::jobs::Systemd, launch: &JobLaunch) -> JobTerminal {
+pub fn terminal(supervisor: &santi_api::jobs::Native, launch: &JobLaunch) -> JobTerminal {
     (0..100)
         .find_map(|_| {
             let observed = supervisor.observe(launch).expect("observe job");
@@ -123,8 +132,19 @@ pub fn terminal(supervisor: &santi_api::jobs::Systemd, launch: &JobLaunch) -> Jo
 }
 
 pub fn available() -> bool {
-    Command::new("systemctl")
-        .args(["--user", "show-environment"])
+    #[cfg(target_os = "linux")]
+    let mut command = {
+        let mut command = Command::new("systemctl");
+        command.args(["--user", "show-environment"]);
+        command
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("launchctl");
+        command.args(["print", &domain()]);
+        command
+    };
+    command
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
@@ -141,11 +161,28 @@ pub fn alive(pid: &str) -> bool {
 }
 
 pub fn state(unit: &str) -> String {
-    let output = Command::new("systemctl")
-        .args(["--user", "show", unit, "--property=LoadState", "--value"])
-        .output()
-        .expect("inspect load state");
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
+    #[cfg(target_os = "linux")]
+    {
+        let output = Command::new("systemctl")
+            .args(["--user", "show", unit, "--property=LoadState", "--value"])
+            .output()
+            .expect("inspect load state");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if Command::new("launchctl")
+            .args(["print", &target(unit)])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+        {
+            "loaded".to_string()
+        } else {
+            "not-found".to_string()
+        }
+    }
 }
 
 pub fn seed(database: &std::path::Path, token: &str, soul: &str, strand: &str) {
@@ -189,7 +226,7 @@ pub fn service(temp: &tempfile::TempDir, database: &std::path::Path) -> Service 
             constitution: None,
         },
         Arc::new(Silent),
-        Arc::new(santi_api::jobs::Systemd::new(env!(
+        Arc::new(santi_api::jobs::Native::new(env!(
             "CARGO_BIN_EXE_santi-api"
         ))),
     )
@@ -198,4 +235,15 @@ pub fn service(temp: &tempfile::TempDir, database: &std::path::Path) -> Service 
 
 pub fn path(launch: &JobLaunch) -> PathBuf {
     PathBuf::from(&launch.directory)
+}
+
+#[cfg(target_os = "macos")]
+fn domain() -> String {
+    let output = Command::new("id").arg("-u").output().expect("inspect uid");
+    format!("gui/{}", String::from_utf8_lossy(&output.stdout).trim())
+}
+
+#[cfg(target_os = "macos")]
+fn target(unit: &str) -> String {
+    format!("{}/{unit}", domain())
 }

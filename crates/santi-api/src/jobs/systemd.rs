@@ -2,8 +2,6 @@ use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
     process::Command,
-    thread,
-    time::{Duration, Instant},
 };
 
 use santi_core::{
@@ -12,16 +10,9 @@ use santi_core::{
 };
 
 use super::{
-    files,
+    DIRECTORY, GENERATION, STAMP, TIMEOUT, files, handoff,
     model::{Phase, Spec},
 };
-
-pub(super) const DIRECTORY: &str = "SANTI_JOB_DIRECTORY";
-pub(super) const GENERATION: &str = "SANTI_JOB_GENERATION";
-pub(super) const STAMP: &str = "SANTI_JOB_STAMP";
-
-const HANDOFF: Duration = Duration::from_secs(5);
-const POLL: Duration = Duration::from_millis(20);
 
 pub struct Systemd {
     executable: PathBuf,
@@ -50,29 +41,6 @@ impl Systemd {
                 || environment.contains(&format!("{GENERATION}={}", launch.stamp))
         }))
     }
-
-    fn handoff(&self, launch: &JobLaunch) -> Result<(), String> {
-        let directory = Path::new(&launch.directory);
-        let start = Instant::now();
-        loop {
-            if files::state(directory)?.is_some() {
-                return Ok(());
-            }
-            if files::terminal(directory)?.is_some() {
-                return Err(format!(
-                    "job {} sidecar failed before claimed handoff",
-                    launch.job.id
-                ));
-            }
-            if start.elapsed() >= HANDOFF {
-                return Err(format!(
-                    "job {} sidecar did not claim the detached handoff",
-                    launch.job.id
-                ));
-            }
-            thread::sleep(POLL);
-        }
-    }
 }
 
 impl JobSupervisor for Systemd {
@@ -86,7 +54,7 @@ impl JobSupervisor for Systemd {
             return if retained.legacy() {
                 Ok(())
             } else {
-                self.handoff(launch)
+                handoff(&launch.job.id, directory)
             };
         }
 
@@ -108,12 +76,13 @@ impl JobSupervisor for Systemd {
             .arg(format!("--property=ExecStopPost={stop}"))
             .arg(format!("--setenv={DIRECTORY}={}", launch.directory))
             .arg(format!("--setenv={STAMP}={}", launch.stamp))
+            .arg(format!("--setenv={TIMEOUT}={}", launch.job.timeout_seconds))
             .arg(&self.executable)
             .args(["__job", "run"])
             .output()
             .map_err(|error| format!("failed to invoke systemd-run: {error}"))?;
         if output.status.success() || self.matching(launch)? {
-            return self.handoff(launch);
+            return handoff(&launch.job.id, directory);
         }
         Err(format!(
             "systemd did not accept job {}: {}",

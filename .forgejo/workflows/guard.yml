@@ -35,3 +35,19 @@ jobs:
       - name: sccache statistics
         if: ${{ always() }}
         run: sccache --show-stats
+
+  guard-macos:
+    runs-on: macos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Fetch dependencies
+        run: cargo fetch --locked
+
+      - name: Verify native detached jobs
+        run: cargo test --locked -p api --test job -- --nocapture
+
+      - name: sccache statistics
+        if: ${{ always() }}
+        run: sccache --show-stats

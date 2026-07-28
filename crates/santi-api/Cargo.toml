@@ -16,6 +16,7 @@ futures-core.workspace = true
 futures-util.workspace = true
 hex.workspace = true
 hmac.workspace = true
+libc.workspace = true
 santi-core.workspace = true
 santi-provider.workspace = true
 serde.workspace = true

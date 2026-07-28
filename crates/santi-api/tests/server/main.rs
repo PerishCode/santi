@@ -84,6 +84,10 @@ mod errors {
             StatusCode::CONFLICT
         );
         assert_eq!(
+            status("launchd did not accept job job_x: unavailable"),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
             ApiError::forbidden("outside zone").status(),
             StatusCode::FORBIDDEN
         );

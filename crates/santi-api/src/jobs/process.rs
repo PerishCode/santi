@@ -10,11 +10,15 @@ use std::{
 };
 
 use santi_core::job;
+use std::os::unix::process::CommandExt;
+
+mod control;
+
+use control::Halt;
 
 use super::{
-    files,
+    DIRECTORY, GENERATION, STAMP, files,
     model::{Phase, Record, Spec},
-    systemd::{DIRECTORY, GENERATION, STAMP, control},
 };
 
 pub(super) fn run() -> Result<(), String> {
@@ -32,6 +36,7 @@ pub(super) fn run() -> Result<(), String> {
         .args(["-lc", &spec.command])
         .current_dir(&spec.cwd)
         .env_clear()
+        .process_group(0)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     allow(&mut command);
@@ -64,7 +69,6 @@ pub(super) fn run() -> Result<(), String> {
         remaining: remaining.clone(),
         exceeded: exceeded.clone(),
         directory: directory.clone(),
-        sidecar: spec.sidecar.clone(),
     });
     let err = copy(Sink {
         reader: stderr,
@@ -72,32 +76,39 @@ pub(super) fn run() -> Result<(), String> {
         remaining,
         exceeded: exceeded.clone(),
         directory: directory.clone(),
-        sidecar: spec.sidecar,
     });
-    let status = child.wait().map_err(|error| error.to_string())?;
+    let (status, halt) = control::wait(&mut child, &directory, &exceeded)?;
     join(out)?;
     join(err)?;
-    let terminal = if exceeded.load(Ordering::Acquire) {
-        Record {
+    let terminal = match halt {
+        Some(Halt::Output) => Record {
             state: job::State::Failed,
             reason: Some("output_limit".to_string()),
             exit: status.code(),
-        }
-    } else if status.success() {
-        Record {
+        },
+        Some(Halt::Cancel) => Record {
+            state: job::State::Cancelled,
+            reason: Some("cancel_requested".to_string()),
+            exit: status.code(),
+        },
+        Some(Halt::Timeout) => Record {
+            state: job::State::TimedOut,
+            reason: Some("runtime_limit".to_string()),
+            exit: status.code(),
+        },
+        None if status.success() => Record {
             state: job::State::Succeeded,
             reason: None,
             exit: Some(0),
-        }
-    } else {
-        Record {
+        },
+        None => Record {
             state: job::State::Failed,
             reason: Some("exit_code".to_string()),
             exit: status.code(),
-        }
+        },
     };
     finish(&directory, &terminal)?;
-    if status.success() {
+    if terminal.state == job::State::Succeeded {
         Ok(())
     } else {
         std::process::exit(status.code().unwrap_or(1));
@@ -159,7 +170,6 @@ struct Sink<R> {
     remaining: Arc<AtomicU64>,
     exceeded: Arc<AtomicBool>,
     directory: PathBuf,
-    sidecar: String,
 }
 
 fn copy<R: Read + Send + 'static>(
@@ -184,7 +194,6 @@ fn copy<R: Read + Send + 'static>(
             }
             if keep < read && !sink.exceeded.swap(true, Ordering::AcqRel) {
                 files::mark(&sink.directory, files::LIMIT)?;
-                let _ = control(&["stop", "--no-block", &sink.sidecar], false);
             }
         }
     })

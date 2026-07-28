@@ -10,12 +10,12 @@ use super::support::{Silent, Unit, available, seed, service, stamp};
 #[test]
 fn vertical() {
     if !available() {
-        eprintln!("skipping systemd job test: user manager is unavailable");
+        eprintln!("skipping native job test: user supervisor is unavailable");
         return;
     }
     let temp = tempfile::tempdir().expect("temp dir");
     let database = temp.path().join("santi.sqlite");
-    let supervisor = santi_api::jobs::Systemd::new(env!("CARGO_BIN_EXE_santi-api"));
+    let supervisor = santi_api::jobs::Native::new(env!("CARGO_BIN_EXE_santi-api"));
     let service = Service::supervised(
         service::Config {
             database: database.display().to_string(),
@@ -114,7 +114,7 @@ fn vertical() {
 #[test]
 fn restarts() {
     if !available() {
-        eprintln!("skipping systemd job test: user manager is unavailable");
+        eprintln!("skipping native job test: user supervisor is unavailable");
         return;
     }
     let temp = tempfile::tempdir().expect("temp dir");
@@ -145,10 +145,20 @@ fn restarts() {
 
     let restarted = service(&temp, &database);
     restarted.resume().expect("cold-start reconcile");
-    let completed = restarted
-        .job(&strand.soul, &accepted.job.id)
-        .expect("query")
-        .expect("job");
+    let completed = (0..100)
+        .find_map(|_| {
+            let current = restarted
+                .job(&strand.soul, &accepted.job.id)
+                .expect("query")
+                .expect("job");
+            if current.state.terminal() {
+                Some(current)
+            } else {
+                thread::sleep(Duration::from_millis(50));
+                None
+            }
+        })
+        .expect("reconciled completion");
     assert_eq!(completed.state, job::State::Succeeded);
     let log = restarted
         .logs(JobRead {

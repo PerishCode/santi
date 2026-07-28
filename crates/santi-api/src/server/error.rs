@@ -113,6 +113,7 @@ impl ApiError {
             Self::unauthorized(message)
         } else if text.starts_with("job supervisor is unavailable")
             || text.starts_with("systemd did not accept job")
+            || text.starts_with("launchd did not accept job")
             || text.contains("sidecar did not claim")
             || text.contains("sidecar failed before claimed")
         {

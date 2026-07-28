@@ -10,14 +10,14 @@ use super::support::{Guard, alive, available, launch, path, state, terminal};
 #[test]
 fn retains() {
     if !available() {
-        eprintln!("skipping systemd job test: user manager is unavailable");
+        eprintln!("skipping native job test: user supervisor is unavailable");
         return;
     }
     let temp = tempfile::tempdir().expect("temp dir");
     let id = format!("job_{}", uuid::Uuid::new_v4().simple());
     let stamp = format!("stamp_{}", uuid::Uuid::new_v4().simple());
-    let supervisor_ref = format!("santi-{}.service", stamp.replace('_', "-"));
-    let supervisor = santi_api::jobs::Systemd::new(env!("CARGO_BIN_EXE_santi-api"));
+    let sidecar = format!("santi-{}.service", stamp.replace('_', "-"));
+    let supervisor = santi_api::jobs::Native::new(env!("CARGO_BIN_EXE_santi-api"));
     let launch = JobLaunch {
         job: job::Job {
             id: id.clone(),
@@ -28,7 +28,7 @@ fn retains() {
                 call: "call_probe".to_string(),
                 effect: "effect_probe".to_string(),
             },
-            description: "systemd production adapter probe".to_string(),
+            description: "native production adapter probe".to_string(),
             command: r#"printf 'capability=%s\nsoul=%s\n' "${SANTI_JOB_CREATE_CAPABILITY-unset}" "$SANTI_SOUL_ID"; printf 'stderr-probe\n' >&2; exit 7"#.to_string(),
             cwd: None,
             timeout_seconds: 30,
@@ -47,7 +47,7 @@ fn retains() {
             acknowledged: None,
         },
         stamp,
-        sidecar: supervisor_ref.clone(),
+        sidecar: sidecar.clone(),
         cwd: temp.path().display().to_string(),
         directory: temp.path().join("job").display().to_string(),
     };
@@ -70,14 +70,14 @@ fn retains() {
     supervisor
         .acknowledge(&launch)
         .expect("acknowledge transient unit");
-    assert_eq!(state(&supervisor_ref), "not-found");
+    assert_eq!(state(&sidecar), "not-found");
     std::mem::forget(guard);
 }
 
 #[test]
 fn bounds() {
     if !available() {
-        eprintln!("skipping systemd job test: user manager is unavailable");
+        eprintln!("skipping native job test: user supervisor is unavailable");
         return;
     }
     let temp = tempfile::tempdir().expect("temp dir");
@@ -109,7 +109,7 @@ fn bounds() {
 #[test]
 fn times() {
     if !available() {
-        eprintln!("skipping systemd job test: user manager is unavailable");
+        eprintln!("skipping native job test: user supervisor is unavailable");
         return;
     }
     let temp = tempfile::tempdir().expect("temp dir");
@@ -133,7 +133,7 @@ fn times() {
 #[test]
 fn cancels() {
     if !available() {
-        eprintln!("skipping systemd job test: user manager is unavailable");
+        eprintln!("skipping native job test: user supervisor is unavailable");
         return;
     }
     let temp = tempfile::tempdir().expect("temp dir");

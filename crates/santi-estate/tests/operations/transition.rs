@@ -5,6 +5,15 @@ use std::path::{Path, PathBuf};
 
 const VERSION: i64 = 39;
 const LEGACY: &str = include_str!("legacy-v39.sql");
+const RETIRED: &str = r#"
+CREATE TABLE im_inbox (id INTEGER);
+CREATE TABLE im_participants (id INTEGER);
+CREATE TABLE r_soul_session_messages (id INTEGER);
+CREATE INDEX idx_im_inbox_participant_seq ON im_inbox(id);
+CREATE INDEX idx_im_inbox_turn ON im_inbox(id);
+CREATE INDEX idx_r_soul_session_messages_seq ON r_soul_session_messages(id);
+CREATE INDEX idx_r_soul_session_messages_target_lookup ON r_soul_session_messages(id);
+"#;
 
 #[tokio::test]
 async fn quarantines_exact_legacy_store() {
@@ -23,6 +32,23 @@ async fn quarantines_exact_legacy_store() {
     assert_eq!(manifest["legacy_version"], VERSION);
     assert!(dirs[0].join("estate.sqlite").exists());
     Store::open(&path).await.expect("reopen estate");
+}
+
+#[tokio::test]
+async fn quarantines_retired_im_shape() {
+    let temp = tempfile::tempdir().expect("temp");
+    let path = temp.path().join("estate.sqlite");
+    fixture(&path, VERSION).await;
+    execute(&path, RETIRED).await;
+
+    let store = Store::open(&path).await.expect("transition");
+    assert!(store.souls().await.expect("souls").is_empty());
+    drop(store);
+
+    let dirs = quarantines(&path);
+    assert_eq!(dirs.len(), 1);
+    assert_eq!(manifest(&dirs[0])["state"], "ready");
+    assert!(dirs[0].join("estate.sqlite").exists());
 }
 
 #[tokio::test]

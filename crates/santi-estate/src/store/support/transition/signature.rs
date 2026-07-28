@@ -1,7 +1,7 @@
 pub(super) const VERSION: i64 = 39;
 
 pub(super) fn exact(objects: &[String]) -> bool {
-    objects == expected()
+    objects == expected() || objects == residue()
 }
 
 pub(super) fn expected() -> Vec<String> {
@@ -11,6 +11,26 @@ pub(super) fn expected() -> Vec<String> {
         .map(str::to_string)
         .collect()
 }
+
+fn residue() -> Vec<String> {
+    let mut objects = expected();
+    objects.extend(
+        RETIRED
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(str::to_string),
+    );
+    objects.sort();
+    objects
+}
+
+const RETIRED: &str = r#"index|idx_im_inbox_participant_seq|im_inbox
+index|idx_im_inbox_turn|im_inbox
+index|idx_r_soul_session_messages_seq|r_soul_session_messages
+index|idx_r_soul_session_messages_target_lookup|r_soul_session_messages
+table|im_inbox|im_inbox
+table|im_participants|im_participants
+table|r_soul_session_messages|r_soul_session_messages"#;
 
 const OBJECTS: &str = r#"index|idx_compacts_strand|compacts
 index|idx_downstream_ingest_receipt|downstream_ingest

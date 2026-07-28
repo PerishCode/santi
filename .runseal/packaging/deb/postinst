@@ -25,6 +25,13 @@ configure)
     mkdir -p /home/santi/.santi
     chown -R santi:santi /home/santi/.santi
 
+    # Detached jobs live in santi's user manager, independently of the API
+    # system service and login sessions. On a live systemd host, lingering is a
+    # required cold-boot invariant: start the manager now and at every boot.
+    if command -v loginctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+        loginctl enable-linger santi
+    fi
+
     # systemd: reload + enable the runtime unit. daemon-reload/enable are best-effort
     # so the package configures cleanly in containers without a live systemd.
     if command -v systemctl >/dev/null 2>&1; then

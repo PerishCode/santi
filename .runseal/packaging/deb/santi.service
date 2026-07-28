@@ -8,6 +8,9 @@ Wants=network-online.target
 Type=simple
 User=santi
 Group=santi
+# Jobs detach into santi's persistent user manager. PAM supplies this system
+# service with the matching XDG runtime directory and user-bus address.
+PAMName=login
 # Operator-managed secrets + config (env:// refs resolve from here). The .deb
 # ships an example at /etc/santi/santi.env.example; it never overwrites a real
 # one. Optional (`-`): a missing file does not fail unit load — `serve` then

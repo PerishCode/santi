@@ -10,6 +10,7 @@ use crate::runtime::{self, Runtime};
 pub struct DoctorReport {
     pub database: String,
     pub database_exists: bool,
+    pub estate_bound: bool,
     pub estate_ready: bool,
     pub estate_error: Option<String>,
     pub genesis: String,
@@ -198,17 +199,17 @@ impl Layout {
         provider: Option<ProviderDoctorReport>,
     ) -> Result<DoctorReport, String> {
         let database_exists = self.database.exists();
-        let (estate_ready, estate_error) = if database_exists {
+        let (estate_bound, estate_ready, estate_error) = if database_exists {
             match santi_core::Store::open(&self.database).await {
                 Ok(store) => match store.soul(santi_core::GENESIS).await {
-                    Ok(Some(_)) => (true, None),
-                    Ok(None) => (false, Some("genesis soul is missing".to_string())),
-                    Err(error) => (false, Some(error)),
+                    Ok(Some(_)) => (true, true, None),
+                    Ok(None) => (true, false, Some("genesis soul is missing".to_string())),
+                    Err(error) => (true, false, Some(error)),
                 },
-                Err(error) => (false, Some(error)),
+                Err(error) => (false, false, Some(error)),
             }
         } else {
-            (false, Some("estate database is missing".to_string()))
+            (false, false, Some("estate database is missing".to_string()))
         };
         let memory_path = self
             .runtime
@@ -227,6 +228,7 @@ impl Layout {
         Ok(DoctorReport {
             database: self.database.display().to_string(),
             database_exists,
+            estate_bound,
             estate_ready,
             estate_error,
             genesis: santi_core::GENESIS.to_string(),

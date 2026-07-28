@@ -35,6 +35,7 @@ mod runtime {
 
         let report = paths.doctor().await.expect("doctor");
         assert!(report.ok, "expected healthy: {report:?}");
+        assert!(report.estate_bound);
         assert!(report.estate_ready);
         assert!(report.estate_error.is_none());
         assert!(report.memory_present && report.memory_readable);
@@ -50,6 +51,7 @@ mod runtime {
 
         let report = paths.doctor().await.expect("doctor");
         assert!(!report.ok);
+        assert!(!report.estate_bound);
         assert!(!report.estate_ready);
         assert!(report.estate_error.is_some());
     }
@@ -76,9 +78,29 @@ mod runtime {
         let report = missing.doctor().await.expect("doctor");
         assert!(!report.ok);
         assert!(!report.database_exists);
+        assert!(!report.estate_bound);
         assert_eq!(
             report.estate_error.as_deref(),
             Some("estate database is missing")
+        );
+    }
+
+    #[tokio::test]
+    async fn binds() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let paths = paths_under(temp.path());
+        drop(
+            santi_core::Store::open(&paths.database)
+                .await
+                .expect("open store"),
+        );
+
+        let report = paths.doctor().await.expect("doctor");
+        assert!(report.estate_bound);
+        assert!(!report.estate_ready);
+        assert_eq!(
+            report.estate_error.as_deref(),
+            Some("genesis soul is missing")
         );
     }
 
@@ -95,6 +117,7 @@ mod runtime {
             .expect("seed");
         let report = paths.doctor().await.expect("doctor");
         let json = serde_json::to_string(&report).expect("serialize");
+        assert!(json.contains("\"estate_bound\""));
         assert!(json.contains("\"estate_ready\""));
         assert!(json.contains("\"provider\":null"));
         let _ = PathBuf::from(&report.database);

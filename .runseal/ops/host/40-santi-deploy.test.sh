@@ -85,7 +85,7 @@ EOF
 
 cat >"$FAKE_BIN/santi-api" <<'EOF'
 #!/usr/bin/env bash
-printf '{"estate_ready":true,"estate_error":null,"ok":true}\n'
+printf '{"estate_bound":true,"estate_ready":true,"estate_error":null,"ok":true}\n'
 EOF
 
 chmod 0755 "$FAKE_BIN"/*

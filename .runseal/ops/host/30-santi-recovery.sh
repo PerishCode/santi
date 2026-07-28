@@ -150,7 +150,7 @@ estate_for_runtime() {
     SANTI_PATHS_DATABASE="$runtime/db" \
     SANTI_PATHS_RUNTIME_ROOT="$runtime" \
     "$binary" doctor --storage-only 2>/dev/null || true)
-  json_true_field_from_text estate_ready "$output"
+  json_true_field_from_text estate_bound "$output"
   printf 'ready\n'
 }
 

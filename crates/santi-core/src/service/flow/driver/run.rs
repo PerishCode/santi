@@ -3,23 +3,33 @@ use crate::context::budget::gauged;
 use crate::service::flow::budget::Verdict;
 use crate::service::flow::failure::{Admission, Failure, Metadata, Operation, Persistence, Stage};
 use crate::service::tools::tools;
-use crate::service::{Service, address::Address, notice::Observation, timing};
+use crate::service::{Service, address::Address, interrupt::Control, notice::Observation, timing};
 use santi_provider::Request;
 
 use super::*;
 use crate::{message, stream, turn};
 
 impl Service {
-    pub(in crate::service::flow) async fn conduct(&self, strand: String, turn: String) {
-        match self.run(&strand, &turn).await {
+    pub(in crate::service::flow) async fn conduct(
+        &self,
+        strand: String,
+        turn: String,
+        control: Control,
+    ) {
+        match self.run(&strand, &turn, &control).await {
             Err(failure) => {
                 self.bury(&strand, &turn, failure);
             }
             Ok((last, response)) => {
-                self.land(&strand, &turn, last, response);
+                if let Some(cause) = self.halted(&control) {
+                    self.bury(&strand, &turn, Failure::stopped(cause, ""));
+                } else {
+                    self.land(&strand, &turn, last, response);
+                }
             }
         }
         self.noticed(&turn);
+        self.release(&turn);
         self.poke(&strand, "strand_send", None, "turn_completion_poke");
         self.relieve(&strand);
     }
@@ -66,11 +76,14 @@ impl Service {
                     }),
                 );
             }
-            Err(error) => self.bury(
-                strand,
-                turn,
-                Failure::runtime(Operation::Persistence(Persistence::Completion), error, ""),
-            ),
+            Err(error) => match self.store.stopping(turn) {
+                Ok(Some(cause)) => self.bury(strand, turn, Failure::stopped(cause, "")),
+                Ok(None) | Err(_) => self.bury(
+                    strand,
+                    turn,
+                    Failure::runtime(Operation::Persistence(Persistence::Completion), error, ""),
+                ),
+            },
         }
     }
 
@@ -78,6 +91,7 @@ impl Service {
         &self,
         strand: &str,
         turn: &str,
+        control: &Control,
     ) -> Result<(Option<message::Placed>, Option<String>), Failure> {
         let mut prose = String::new();
         let mut last: Option<message::Placed> = None;
@@ -103,6 +117,9 @@ impl Service {
                 return Err(Failure::execution(error, &prose));
             }
             round = next;
+            if let Some(cause) = self.halted(control) {
+                return Err(Failure::stopped(cause, &prose));
+            }
             let input = provider_try!(Operation::Assembly, input(&self.store, strand));
             let metadata = self.provider.metadata();
             let family = metadata.provider.to_string();
@@ -134,9 +151,16 @@ impl Service {
                 input: &request.input,
                 instructions: request.instructions.as_deref(),
             });
+            if let Some(cause) = self.halted(control) {
+                return Err(Failure::stopped(cause, &prose));
+            }
             self.stirred(strand, turn, turn::Motion::Requesting, None);
             let model = request.model.clone();
-            let stream = match self.provider.stream(request).await {
+            let reached = tokio::select! {
+                cause = control.wait() => return Err(Failure::stopped(cause, &prose)),
+                reached = self.provider.stream(request) => reached,
+            };
+            let stream = match reached {
                 Ok(stream) => {
                     timing.reached(round);
                     stream
@@ -177,7 +201,7 @@ impl Service {
                 speech: String::new(),
                 seen: false,
             }
-            .consume(stream)
+            .consume(stream, control)
             .await?;
 
             if !speech.is_empty() {
@@ -204,11 +228,17 @@ impl Service {
             timing.outputting(round, calls.len());
             let count = calls.len();
             for (call, output_limit) in calls.into_iter().zip(limits) {
+                if let Some(cause) = self.halted(control) {
+                    return Err(Failure::stopped(cause, &prose));
+                }
                 self.stirred(strand, turn, turn::Motion::Running, active.clone());
-                provider_try!(
-                    Operation::Tool,
-                    self.tooled(strand, turn, call, output_limit)
-                );
+                let result = self
+                    .tooled(Address { strand, turn }, call, output_limit, control)
+                    .await;
+                if let Some(cause) = self.halted(control) {
+                    return Err(Failure::stopped(cause, &prose));
+                }
+                provider_try!(Operation::Tool, result);
             }
             timing.outputted(round, count);
         };

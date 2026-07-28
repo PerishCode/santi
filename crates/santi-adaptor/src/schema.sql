@@ -377,6 +377,12 @@ CREATE INDEX IF NOT EXISTS idx_strands_soul_id ON strands (soul_id);
 CREATE INDEX IF NOT EXISTS idx_strands_lineage ON strands (parent_strand_id, fork_point);
 CREATE INDEX IF NOT EXISTS idx_turns_strand_created_at ON turns (strand_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_turns_strand_status_created_at ON turns (strand_id, status, created_at);
+CREATE TABLE IF NOT EXISTS turn_stops (
+    turn_id TEXT PRIMARY KEY,
+    cause TEXT NOT NULL CHECK (cause IN ('operator', 'shutdown')),
+    requested_at TEXT NOT NULL,
+    settled_at TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_turn_id_created_at ON tool_calls (turn_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_tool_results_tool_call_id ON tool_results (tool_call_id);
 CREATE INDEX IF NOT EXISTS idx_thinking_spans_turn_id_created_at ON thinking_spans (turn_id, created_at);

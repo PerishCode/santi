@@ -60,6 +60,7 @@ pub(super) fn router(service: Service) -> Router {
         .route("/api/v1/strands/{strand}/runtime", get(snapshot))
         .route("/api/v1/turn-events", get(turn_events))
         .route("/api/v1/turn-events/stream", get(turn_event_stream))
+        .route("/api/v1/turns/{turn}/stop", post(stop))
         .route("/api/v1/downstreams", post(enroll).get(downstreams))
         .route("/api/v1/ingest", post(ingest))
         .route(

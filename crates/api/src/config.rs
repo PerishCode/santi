@@ -76,7 +76,7 @@ pub struct Server {
 
 impl Default for Server {
     fn default() -> Self {
-        Server { grace: 600 }
+        Server { grace: 30 }
     }
 }
 

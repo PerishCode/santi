@@ -1,7 +1,7 @@
 use clap::Parser;
 use santi::cli::{
     Cli, Command, CompactCommand, EffectCommand, EffectOutcomeArg, Job, StrandCommand, Strategy,
-    Stream, WatchFormat, Webhook,
+    Stream, Turn, WatchFormat, Webhook,
 };
 
 #[test]
@@ -46,6 +46,15 @@ fn receipt() {
         panic!("expected receipt command");
     };
     assert_eq!(inbox, "inbox_123");
+}
+
+#[test]
+fn turns() {
+    let parsed = Cli::try_parse_from(["santi", "turn", "stop", "turn_123"]).unwrap();
+    let Command::Turn(Turn::Stop { id }) = parsed.command else {
+        panic!("expected turn stop command");
+    };
+    assert_eq!(id, "turn_123");
 }
 
 #[test]

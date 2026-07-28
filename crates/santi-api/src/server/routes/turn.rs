@@ -1,5 +1,6 @@
 use super::*;
 use santi_core::event;
+use santi_core::turn;
 
 #[utoipa::path(
     get,
@@ -36,4 +37,25 @@ pub(super) async fn turn_events(
 pub(super) struct TurnEventParams {
     since: Option<i64>,
     limit: Option<usize>,
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/turns/{turn}/stop",
+    params(("turn" = String, Path)),
+    responses(
+        (status = 200, body = turn::Stop),
+        (status = 404, body = Fault),
+        (status = 500, body = Fault)
+    )
+)]
+pub async fn stop(
+    State(service): State<Service>,
+    Path(turn): Path<String>,
+) -> Result<Json<turn::Stop>, ApiError> {
+    service
+        .stop(&turn)
+        .map_err(ApiError::from_service)?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("turn not found"))
 }

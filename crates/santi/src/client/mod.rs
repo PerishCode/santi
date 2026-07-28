@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use futures_util::StreamExt;
 
 use crate::cli::{
-    ClientDefaults, Command, CompactCommand, EffectCommand, Job, StrandCommand, WatchFormat,
+    ClientDefaults, Command, CompactCommand, EffectCommand, Job, StrandCommand, Turn, WatchFormat,
     Webhook, split_send_args,
 };
 use crate::text::source::read_summary_file;
@@ -264,6 +264,10 @@ pub(crate) async fn run(
         }
         Command::Job(Job::Ack { id }) => {
             http.act(&format!("{base}/api/v1/jobs/{id}/ack"), defaults.require()?)
+                .await
+        }
+        Command::Turn(Turn::Stop { id }) => {
+            http.post(&format!("{base}/api/v1/turns/{id}/stop"), None)
                 .await
         }
         Command::Webhook(Webhook::List) => http.get(&format!("{base}/api/v1/webhooks")).await,

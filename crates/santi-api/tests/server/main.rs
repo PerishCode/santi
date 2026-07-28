@@ -129,6 +129,8 @@ mod openapi {
         assert!(document.contains("trace.Record"));
         assert!(document.contains("ingest.Receipt"));
         assert!(document.contains("/api/v1/turn-events/stream"));
+        assert!(document.contains("/api/v1/turns/{turn}/stop"));
+        assert!(document.contains("turn.Stop"));
         assert!(document.contains("event.Batch"));
         assert!(document.contains("request"));
         assert!(document.contains("downstream_bearer"));

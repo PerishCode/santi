@@ -88,6 +88,9 @@ pub enum Command {
     #[command(about = "Soul-owned detached jobs under /api/v1/jobs")]
     #[command(subcommand)]
     Job(Job),
+    #[command(about = "Turn controls under /api/v1/turns")]
+    #[command(subcommand)]
+    Turn(Turn),
     #[command(about = "Inspect or idempotently ensure webhook subscriptions")]
     #[command(subcommand)]
     Webhook(Webhook),
@@ -107,6 +110,12 @@ pub enum EffectCommand {
         #[arg(long)]
         evidence: String,
     },
+}
+
+#[derive(Subcommand)]
+pub enum Turn {
+    #[command(about = "Idempotently stop one exact running turn")]
+    Stop { id: String },
 }
 
 #[derive(Subcommand)]

@@ -3,6 +3,7 @@ use santi_provider::{Call, Event, Streaming};
 
 use super::super::{Service, address::Address, text::delta, timing, timing::named};
 use super::failure::{Failure, Metadata, Operation, Persistence, Stage};
+use crate::service::interrupt::Control;
 use crate::{thinking, turn};
 
 mod run;
@@ -33,8 +34,19 @@ struct Driver<'a, 'turn> {
 }
 
 impl Driver<'_, '_> {
-    async fn consume(mut self, mut stream: Streaming) -> Result<Output, Failure> {
-        while let Some(event) = stream.next().await {
+    async fn consume(
+        mut self,
+        mut stream: Streaming,
+        control: &Control,
+    ) -> Result<Output, Failure> {
+        loop {
+            let event = tokio::select! {
+                cause = control.wait() => return Err(Failure::stopped(cause, self.prose)),
+                event = stream.next() => event,
+            };
+            let Some(event) = event else {
+                break;
+            };
             let Some(event) = self.received(event)? else {
                 continue;
             };

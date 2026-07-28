@@ -28,6 +28,7 @@ pub(super) async fn strand_events(
     drop(held);
 
     let mut receiver = service.listen();
+    let service = service.clone();
     let opened = strand.clone();
     let stream = async_stream::stream! {
         yield Ok(sse_event(santi_core::stream::Event {
@@ -37,7 +38,7 @@ pub(super) async fn strand_events(
             payload: stream::Payload::Open,
         }));
 
-        while let Some(event) = receive_strand(&mut receiver, &strand).await {
+        while let Some(event) = receive_strand(&service, &mut receiver, &strand).await {
             yield Ok(sse_event(event));
         }
     };
@@ -53,8 +54,9 @@ pub(super) async fn transitions(
     State(service): State<Service>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let mut receiver = service.harken();
+    let service = service.clone();
     let stream = async_stream::stream! {
-        while let Some(transition) = receive(&mut receiver).await {
+        while let Some(transition) = receive(&service, &mut receiver).await {
             yield Ok(error_sse_event(transition));
         }
     };
@@ -79,8 +81,9 @@ pub(super) async fn turn_event_stream(
         .map_err(ApiError::from_service)?
         .ok_or_else(|| ApiError::unauthorized("invalid or missing credential"))?;
     let mut receiver = service.listen();
+    let service = service.clone();
     let stream = async_stream::stream! {
-        while receive_turn(&mut receiver, &principal.prefix).await {
+        while receive_turn(&service, &mut receiver, &principal.prefix).await {
             yield Ok(Event::default().event("turn_event_available").data("{}"));
         }
     };
@@ -88,20 +91,25 @@ pub(super) async fn turn_event_stream(
 }
 
 async fn receive_strand(
+    service: &Service,
     receiver: &mut broadcast::Receiver<stream::Event>,
     strand: &str,
 ) -> Option<stream::Event> {
     loop {
-        let event = receive(receiver).await?;
+        let event = receive(service, receiver).await?;
         if event.strand == strand {
             return Some(event);
         }
     }
 }
 
-async fn receive_turn(receiver: &mut broadcast::Receiver<stream::Event>, prefix: &str) -> bool {
+async fn receive_turn(
+    service: &Service,
+    receiver: &mut broadcast::Receiver<stream::Event>,
+    prefix: &str,
+) -> bool {
     loop {
-        let Some(event) = receive(receiver).await else {
+        let Some(event) = receive(service, receiver).await else {
             return false;
         };
         if let stream::Payload::Turn(santi_core::turn::Beat::Completed {
@@ -114,9 +122,16 @@ async fn receive_turn(receiver: &mut broadcast::Receiver<stream::Event>, prefix:
     }
 }
 
-async fn receive<T: Clone>(receiver: &mut broadcast::Receiver<T>) -> Option<T> {
+async fn receive<T: Clone>(service: &Service, receiver: &mut broadcast::Receiver<T>) -> Option<T> {
     loop {
-        match receiver.recv().await {
+        if service.closing() {
+            return None;
+        }
+        let received = tokio::select! {
+            received = receiver.recv() => received,
+            _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => continue,
+        };
+        match received {
             Ok(event) => return Some(event),
             Err(broadcast::error::RecvError::Lagged(_)) => {}
             Err(broadcast::error::RecvError::Closed) => return None,

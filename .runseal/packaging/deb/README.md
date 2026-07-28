@@ -26,5 +26,5 @@ After the destructive boundary, any failed check restores the source runtime and
 the candidate runtime for diagnosis. A successful candidate is not complete until
 `30-santi-recovery.sh` validates and arms the post-deploy recovery capsule.
 
-The service has `TimeoutStopSec=620`, greater than the default `SANTI_SERVER_GRACE=600`, so systemd
+The service has `TimeoutStopSec=50`, greater than the default `SANTI_SERVER_GRACE=30`, so systemd
 allows an in-flight turn to drain.

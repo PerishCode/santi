@@ -64,10 +64,14 @@ pub async fn serve() -> Result<(), String> {
     println!("santi-api listening on http://{address}");
     let shutdown_signal = {
         let service = service.clone();
+        let grace = held.grace;
         async move {
             wait_for_shutdown_signal().await;
-            println!("santi-api: shutdown signal received — quiescing (no new turns)");
-            service.close();
+            println!(
+                "santi-api: shutdown signal received — quiescing (no new turns; grace={}s)",
+                grace.as_secs()
+            );
+            service.quiesce(grace);
         }
     };
     let drainer = service.clone();
@@ -75,10 +79,12 @@ pub async fn serve() -> Result<(), String> {
         .with_graceful_shutdown(shutdown_signal)
         .await
         .map_err(|error| error.to_string());
-    drainer.close();
+    if !drainer.closing() {
+        drainer.quiesce(std::time::Duration::ZERO);
+    }
     watcher.await.map_err(|error| error.to_string())?;
     result?;
-    drainer.drain(held.grace).await;
+    drainer.drain().await;
     println!("santi-api: drained; exiting");
     Ok(())
 }

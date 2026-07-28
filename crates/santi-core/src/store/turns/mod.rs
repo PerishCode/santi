@@ -12,6 +12,7 @@ pub use completion::Completion;
 
 const BREADTH: usize = 4096;
 mod fail;
+mod stop;
 use crate::{thinking, tool};
 use fail::indict;
 
@@ -83,43 +84,83 @@ impl Store {
         let tx = conn.transaction().map_err(|error| error.to_string())?;
         let now = now();
         let mut stmt = tx
-            .prepare("SELECT id, strand_id FROM turns WHERE status = 'running'")
+            .prepare(
+                r#"
+                SELECT t.id, t.strand_id, s.cause
+                FROM turns t
+                LEFT JOIN turn_stops s ON s.turn_id = t.id
+                WHERE t.status = 'running'
+                "#,
+            )
             .map_err(|error| error.to_string())?;
         let rows = stmt
             .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
             })
             .map_err(|error| error.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| error.to_string())?;
         drop(stmt);
-        for (turn, strand) in &rows {
-            Database::new(&tx).reconcile(
-                turn,
-                "restart_before_dispatch",
-                "restart_during_dispatch",
-                &now,
-            )?;
+        for (turn, strand, stopped) in &rows {
+            let cause = stopped.as_deref().map(crate::turn::Cause::decode);
+            let (before, during, detail) = match cause {
+                Some(cause) => (
+                    "turn_stopped_before_dispatch",
+                    "turn_stopped_during_dispatch",
+                    format!("interrupted by {}", cause.encode()),
+                ),
+                None => (
+                    "restart_before_dispatch",
+                    "restart_during_dispatch",
+                    "interrupted by restart".to_string(),
+                ),
+            };
+            Database::new(&tx).reconcile(turn, before, during, &now)?;
             tx.execute(
                 r#"
                 UPDATE turns
-                SET status = 'failed', error_text = 'interrupted by restart',
-                    updated_at = ?2, finished_at = ?2
+                SET status = 'failed', error_text = ?2,
+                    updated_at = ?3, finished_at = ?3
                 WHERE id = ?1 AND status = 'running'
                 "#,
-                params![turn, now],
+                params![turn, detail, now],
             )
             .map_err(|error| error.to_string())?;
-            let error = indict(
-                &tx,
-                strand,
-                turn,
-                Stumble {
-                    operation: "turn.restart_reconcile",
-                    detail: "interrupted by restart",
-                },
-            )?;
-            Database::new(&tx).fail(turn, error.incident.as_deref(), &now)?;
+            match cause {
+                Some(cause) => {
+                    stop::mark(
+                        &tx,
+                        stop::Mark {
+                            strand,
+                            turn,
+                            cause,
+                            now: &now,
+                        },
+                    )?;
+                    tx.execute(
+                        "UPDATE turn_stops SET settled_at = COALESCE(settled_at, ?2) WHERE turn_id = ?1",
+                        params![turn, now],
+                    )
+                    .map_err(|error| error.to_string())?;
+                    Database::new(&tx).fail(turn, None, &now)?;
+                }
+                None => {
+                    let error = indict(
+                        &tx,
+                        strand,
+                        turn,
+                        Stumble {
+                            operation: "turn.restart_reconcile",
+                            detail: "interrupted by restart",
+                        },
+                    )?;
+                    Database::new(&tx).fail(turn, error.incident.as_deref(), &now)?;
+                }
+            }
         }
         tx.commit().map_err(|error| error.to_string())?;
         Ok(rows.len())

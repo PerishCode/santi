@@ -13,10 +13,22 @@ fn read(text: &str) -> Config {
 fn example() {
     let held = read(include_str!("../../../santi.example.toml"));
     assert_eq!(held.providers.len(), 3);
+    assert_eq!(held.server.grace, 30);
     assert_eq!(
         held.jobs.retention().unwrap(),
         std::time::Duration::from_secs(604800)
     );
+}
+
+#[test]
+fn grace() {
+    let held = read(
+        r#"
+[server]
+grace = 0
+"#,
+    );
+    assert_eq!(held.server.grace, 0);
 }
 
 #[test]

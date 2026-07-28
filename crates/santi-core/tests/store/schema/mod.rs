@@ -31,6 +31,7 @@ fn matches() {
         "inbox_receipts",
         "receipt_transitions",
         "turns",
+        "turn_stops",
         "tool_calls",
         "tool_results",
         "thinking_spans",

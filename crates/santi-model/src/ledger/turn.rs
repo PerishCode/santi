@@ -20,6 +20,30 @@ pub enum Status {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[schema(as = turn::Cause)]
+pub enum Cause {
+    Operator,
+    Shutdown,
+}
+
+impl Cause {
+    pub fn encode(self) -> &'static str {
+        match self {
+            Self::Operator => "operator",
+            Self::Shutdown => "shutdown",
+        }
+    }
+
+    pub fn decode(value: &str) -> Self {
+        match value {
+            "shutdown" => Self::Shutdown,
+            _ => Self::Operator,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[schema(as = turn::Turn)]
 pub struct Turn {
@@ -34,6 +58,16 @@ pub struct Turn {
     pub created: Timestamp,
     pub updated: Timestamp,
     pub finished: Option<Timestamp>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[schema(as = turn::Stop)]
+pub struct Stop {
+    pub turn: Turn,
+    pub accepted: bool,
+    pub cause: Option<Cause>,
+    pub requested: Option<Timestamp>,
+    pub settled: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -82,6 +116,7 @@ pub enum Beat {
 pub enum Error {
     Provider,
     Runtime,
+    Interrupted,
 }
 
 impl santi_error::Ruled for Error {
@@ -100,6 +135,13 @@ impl santi_error::Ruled for Error {
                 category: Category::Internal,
                 severity: Severity::Error,
                 retry: Retry::Later,
+                exposure: Exposure::CALLER_AND_OPERATOR,
+            },
+            Self::Interrupted => santi_error::Descriptor {
+                code: "runtime.turn.interrupted",
+                category: Category::Unavailable,
+                severity: Severity::Error,
+                retry: Retry::Changed,
                 exposure: Exposure::CALLER_AND_OPERATOR,
             },
         }

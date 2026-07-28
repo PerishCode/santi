@@ -118,6 +118,7 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 13] = [
         super::sse::turn_event_stream,
         super::routes::snapshot,
         super::routes::turn_events,
+        super::routes::stop,
         super::routes::enroll,
         super::routes::downstreams,
         super::routes::ingest,
@@ -201,7 +202,9 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 13] = [
         santi_core::turn::Activity,
         santi_core::turn::Motion,
         santi_core::turn::Status,
-        santi_core::turn::Trigger
+        santi_core::turn::Trigger,
+        santi_core::turn::Cause,
+        santi_core::turn::Stop
     ))
 )]
 struct ApiDoc;

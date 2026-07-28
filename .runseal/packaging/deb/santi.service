@@ -21,10 +21,10 @@ ExecStart=/usr/bin/santi-api serve
 Restart=on-failure
 RestartSec=2
 # Graceful shutdown: santi pauses inbox consumption on SIGTERM and drains its
-# in-flight turn (SANTI_SERVER_GRACE, default 600). TimeoutStopSec MUST be
+# in-flight turn (SANTI_SERVER_GRACE, default 30). TimeoutStopSec MUST be
 # >= that grace, or systemd SIGKILLs the drain mid-turn. Keep a margin.
 KillSignal=SIGTERM
-TimeoutStopSec=620
+TimeoutStopSec=50
 
 [Install]
 WantedBy=multi-user.target

@@ -178,21 +178,22 @@ impl Service {
         match started {
             Ok(Opened::Started(started)) => {
                 self.refreshed();
+                let background = self.clone();
+                let strand = strand.id.clone();
+                let turn = started.turn.id.clone();
+                let control = background.register(&turn);
                 for message in started.drained.iter().cloned() {
                     self.publish(
-                        &strand.id,
+                        &strand,
                         stream::Payload::Message(crate::message::Beat::Created { message }),
                     );
                 }
                 self.publish(
-                    &strand.id,
+                    &strand,
                     stream::Payload::Turn(crate::turn::Beat::Started {
                         turn: started.turn.clone(),
                     }),
                 );
-                let background = self.clone();
-                let strand = strand.id.clone();
-                let turn = started.turn.id.clone();
                 let context = {
                     let _entered = background.context.enter();
                     background.context.with(plumb::trace::Span::open("turn"))
@@ -200,7 +201,7 @@ impl Service {
                 tokio::spawn(context.carry(async move {
                     plumb::trace::Span::note("turn", &turn);
                     plumb::trace::Span::note("strand", &strand);
-                    background.conduct(strand, turn).await;
+                    background.conduct(strand, turn, control).await;
                 }));
                 drive::Outcome::Started(started.turn, started.drained)
             }

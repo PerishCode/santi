@@ -10,6 +10,8 @@ mod inbox;
 mod receipt_schema;
 #[path = "store/schema/mod.rs"]
 mod schema;
+#[path = "store/stop.rs"]
+mod stop;
 #[path = "store/support.rs"]
 mod support;
 #[path = "store/timeline.rs"]

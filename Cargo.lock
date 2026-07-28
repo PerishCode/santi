@@ -1658,6 +1658,7 @@ dependencies = [
  "futures-util",
  "hex",
  "jiff",
+ "libc",
  "plumb",
  "rusqlite",
  "santi-adaptor",

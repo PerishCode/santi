@@ -51,8 +51,9 @@ impl Store {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .map_err(|error| error.to_string())?;
-        tx.execute(
-            r#"
+        let changed = tx
+            .execute(
+                r#"
             UPDATE turns
             SET status = 'completed',
                 end_strand_seq = (
@@ -61,10 +62,17 @@ impl Store {
                 updated_at = ?2,
                 finished_at = ?2
             WHERE id = ?1
+              AND status = 'running'
+              AND NOT EXISTS (
+                SELECT 1 FROM turn_stops WHERE turn_id = turns.id
+              )
             "#,
-            params![completion.turn, now],
-        )
-        .map_err(|error| error.to_string())?;
+                params![completion.turn, now],
+            )
+            .map_err(|error| error.to_string())?;
+        if changed != 1 {
+            return Err("turn is no longer eligible for completion".to_string());
+        }
         tx.execute(
             r#"
             UPDATE strands

@@ -1,13 +1,17 @@
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::{path::PathBuf, process::Stdio};
 
 use santi_provider::{Call, Function, Tool};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::service::address::Address;
 use crate::workspace;
 use crate::{SOULSPACE, STRANDSPACE, parsed, soulward, strandward};
 
 use super::Service;
+use crate::service::interrupt::Control;
 use crate::{effect, stream};
 
 mod shell;
@@ -55,13 +59,14 @@ struct Origin<'a> {
 }
 
 impl Service {
-    pub(super) fn tooled(
+    pub(super) async fn tooled(
         &self,
-        strand: &str,
-        turn: &str,
+        address: Address<&str>,
         call: Call,
         output_limit: Option<usize>,
+        control: &Control,
     ) -> Result<(), String> {
+        let Address { strand, turn } = address;
         let kind = (call.name == "shell").then_some("shell");
         let provenance = crate::tool::Provenance {
             family: self.provider.metadata().provider.to_string(),
@@ -84,13 +89,17 @@ impl Service {
             stream::Payload::Tool(crate::tool::Beat::Called { call: held.clone() }),
         );
         let result = if let Some(effect) = effect {
-            self.shelled(Shell {
-                strand,
-                turn,
-                call: &call,
-                effect: &effect.id,
-                limit: output_limit,
-            })?
+            self.shelled(
+                Shell {
+                    strand,
+                    turn,
+                    call: &call,
+                    effect: &effect.id,
+                    limit: output_limit,
+                },
+                control,
+            )
+            .await?
         } else {
             self.store.reply(
                 &call.call,
@@ -108,7 +117,11 @@ impl Service {
         Ok(())
     }
 
-    fn shelled(&self, shell: Shell<'_>) -> Result<crate::tool::Reply, String> {
+    async fn shelled(
+        &self,
+        shell: Shell<'_>,
+        control: &Control,
+    ) -> Result<crate::tool::Reply, String> {
         let Shell {
             strand,
             turn,
@@ -142,8 +155,19 @@ impl Service {
                 );
             }
         };
+        if let Some(cause) = self.halted(control) {
+            return self.store.redeem(
+                effect,
+                crate::store::Settlement {
+                    call: &call.call,
+                    output: None,
+                    error: Some(format!("interrupted by {} before dispatch", cause.encode())),
+                    state: effect::State::Settled(effect::Outcome::NotApplied),
+                },
+            );
+        }
         self.store.dispatch(effect)?;
-        match shell::ran(prepared, output_limit) {
+        match shell::ran(prepared, output_limit, control).await {
             shell::Outcome::Captured(output) => self.store.redeem(
                 effect,
                 crate::store::Settlement {
@@ -168,6 +192,10 @@ impl Service {
                     "shell effect {effect} outcome is unknown; automatic replay is forbidden: {error}"
                 ))
             }
+            shell::Outcome::Stopped(error) => {
+                self.store.unmark(effect, &error)?;
+                Err(error)
+            }
         }
     }
 
@@ -179,6 +207,8 @@ impl Service {
         std::fs::create_dir_all(&cwd).map_err(|error| error.to_string())?;
         let capability = self.permit(origin.strand, origin.turn, origin.call, origin.effect)?;
         let mut command = shell::shell(&args.command);
+        #[cfg(unix)]
+        command.process_group(0);
         command
             .current_dir(&cwd)
             .env("SANTI_SOUL_MEMORY_DIR", self.soulhome(origin.soul))

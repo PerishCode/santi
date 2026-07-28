@@ -4,6 +4,8 @@ use crate::{message, stream};
 
 use super::super::Service;
 
+mod stop;
+
 #[derive(Debug, Clone, Copy)]
 pub(super) enum Stage {
     Request,
@@ -42,6 +44,7 @@ enum Cause {
     Provider(Metadata),
     Budget(Admission, Box<Fault>),
     Runtime(Operation),
+    Stopped(crate::turn::Cause),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -122,6 +125,14 @@ impl Failure {
             cause: Cause::Budget(Admission::Execution, Box::new(error)),
         }
     }
+
+    pub(super) fn stopped(cause: crate::turn::Cause, partial: &str) -> Self {
+        Self {
+            error: format!("interrupted by {}", cause.encode()),
+            partial: partial.to_string(),
+            cause: Cause::Stopped(cause),
+        }
+    }
 }
 
 impl Service {
@@ -149,6 +160,7 @@ impl Service {
             Cause::Budget(Admission::Context, error) => condemned(*error, "context"),
             Cause::Budget(Admission::Execution, error) => condemned(*error, "execution"),
             Cause::Runtime(operation) => self.tripped(strand, turn, &error, operation),
+            Cause::Stopped(cause) => self.interrupted(strand, turn, cause, &error),
         };
 
         if let Some(held) = finished {

@@ -8,6 +8,7 @@ pub use jobs::{
     Draft as JobDraft, Launch as JobLaunch, Observation as JobObservation, Read as JobRead,
     Supervisor as JobSupervisor, Terminal as JobTerminal,
 };
+mod interrupt;
 mod text;
 mod tools;
 
@@ -41,6 +42,8 @@ pub struct Service {
     budgets: Arc<Mutex<HashMap<String, budget::Execution>>>,
     pressure: Arc<Mutex<()>>,
     closing: Arc<AtomicBool>,
+    controls: Arc<Mutex<HashMap<String, interrupt::Control>>>,
+    deadline: Arc<Mutex<Option<Instant>>>,
     degraded: Arc<AtomicBool>,
     supervisor: Arc<dyn jobs::Supervisor>,
     handoffs: Arc<Mutex<HashSet<String>>>,
@@ -99,6 +102,8 @@ impl Service {
             budgets: Arc::new(Mutex::new(HashMap::new())),
             pressure: Arc::new(Mutex::new(())),
             closing: Arc::new(AtomicBool::new(false)),
+            controls: Arc::new(Mutex::new(HashMap::new())),
+            deadline: Arc::new(Mutex::new(None)),
             degraded: Arc::new(AtomicBool::new(degraded)),
             supervisor,
             handoffs: Arc::new(Mutex::new(HashSet::new())),
@@ -128,27 +133,6 @@ impl Service {
 
     pub fn closing(&self) -> bool {
         self.closing.load(Ordering::SeqCst)
-    }
-
-    pub async fn drain(&self, cap: Duration) {
-        let start = Instant::now();
-        loop {
-            let remaining = match self.store.running() {
-                Ok(0) => return,
-                Ok(remaining) => remaining,
-                Err(error) => {
-                    eprintln!("santi: shutdown drain scan failed: {error}");
-                    return;
-                }
-            };
-            if start.elapsed() >= cap {
-                eprintln!(
-                    "santi: shutdown drain cap reached with {remaining} turn(s) still running; leaving them to boot-recovery"
-                );
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
     }
 
     pub fn resume(&self) -> Result<(), String> {

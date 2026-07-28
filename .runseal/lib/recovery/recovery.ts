@@ -2,15 +2,7 @@
 //! points. The host script owns validation and all state transitions.
 
 import { runRecoveryRemote } from "@/lib/recovery/remote.ts";
-
-const SAFE_ARGUMENT = /^[A-Za-z0-9._:+~-]+$/;
-
-function requireSafeArgument(value: string): string {
-  if (!SAFE_ARGUMENT.test(value)) {
-    throw new Error(`invalid recovery argument: ${JSON.stringify(value)}`);
-  }
-  return value;
-}
+import { parseCommand } from "@perish/sealkit/operator";
 
 export type RecoveryRequest =
   | { action: "status" }
@@ -18,27 +10,37 @@ export type RecoveryRequest =
   | { action: "execute"; capsule: string; candidateVersion: string }
   | { action: "accept"; capsule: string };
 
+const COMMANDS = [
+  { action: "status", tokens: ["status"] },
+  { action: "repair", tokens: ["repair"] },
+  { action: "accept", tokens: ["accept", { capture: "capsule" }] },
+  {
+    action: "execute",
+    tokens: [
+      "execute",
+      { capture: "capsule" },
+      "--confirm",
+      { capture: "candidateVersion" },
+    ],
+  },
+] as const;
+
 export function parseRecoveryRequest(argv: string[]): RecoveryRequest {
-  if (argv.length === 1 && argv[0] === "status") {
+  const request = parseCommand(argv, COMMANDS);
+  if (request.action === "status") {
     return { action: "status" };
   }
-  if (argv.length === 1 && argv[0] === "repair") {
+  if (request.action === "repair") {
     return { action: "repair" };
   }
-  if (argv.length === 2 && argv[0] === "accept") {
-    return { action: "accept", capsule: requireSafeArgument(argv[1]) };
+  if (request.action === "accept") {
+    return { action: "accept", capsule: request.values.capsule };
   }
-  if (
-    argv.length === 4 && argv[0] === "execute" && argv[2] === "--confirm" &&
-    argv[1] !== "" && argv[3] !== ""
-  ) {
-    return {
-      action: "execute",
-      capsule: requireSafeArgument(argv[1]),
-      candidateVersion: requireSafeArgument(argv[3]),
-    };
-  }
-  throw new Error("invalid recovery command");
+  return {
+    action: "execute",
+    capsule: request.values.capsule,
+    candidateVersion: request.values.candidateVersion,
+  };
 }
 
 function printHelp(): void {

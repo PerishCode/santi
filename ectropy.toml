@@ -1,0 +1,73 @@
+[comment]
+allow = false
+
+[[grant]]
+paths = ["crates/*/tests/**/*.rs"]
+syntax = "test"
+
+[[grant]]
+paths = [
+  "crates/*/tests/**/*.rs",
+  "crates/api/src/config.rs",
+  "crates/santi-api/src/config/profile.rs",
+  "crates/santi-api/src/jobs/**/*.rs",
+  "crates/santi/src/config.rs",
+]
+syntax = "environment"
+
+[limit]
+block = 4
+fanout = 10
+file = 300
+markup = 8
+param = 4
+path = 4
+
+[module]
+roots = [
+  "crates/*/src",
+  "crates/*/tests",
+]
+
+[scan]
+exclude = ["**/target/**"]
+include = ["crates/**/*.rs"]
+
+[[vocabulary.term]]
+name = "OpenAI"
+description = "The provider brand spelling is one vendor-owned atom."
+
+[[vocabulary.term]]
+name = "OpenAiResponses"
+description = "The OpenAI Responses API is one vendor-owned product name."
+
+[[vocabulary.term]]
+name = "ChatCompletions"
+description = "Chat Completions is the fixed industry protocol name."
+
+[[vocabulary.term]]
+name = "api_key"
+description = "Provider configuration binds the established credential field name."
+
+[[vocabulary.term]]
+name = "base_url"
+description = "Provider configuration binds the established endpoint field name."
+
+[[vocabulary.term]]
+name = "reasoning_effort"
+description = "The OpenAI request parameter is a vendor-fixed wire field."
+
+[[vocabulary.term]]
+name = "max_output_tokens"
+description = "The OpenAI Responses request parameter is a vendor-fixed wire field."
+
+[[vocabulary.term]]
+name = "max_tokens"
+description = "The Chat Completions request parameter is a fixed wire field."
+
+[[vocabulary.term]]
+name = "encrypt_key"
+description = "The Feishu webhook parameter is a vendor-fixed wire field."
+
+[word]
+single = true

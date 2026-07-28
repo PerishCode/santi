@@ -2,6 +2,8 @@ use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
     process::Command,
+    thread,
+    time::{Duration, Instant},
 };
 
 use santi_core::{
@@ -15,6 +17,8 @@ use super::{
 };
 
 const PLIST: &str = "launchd.plist";
+const BOOTOUT: Duration = Duration::from_secs(5);
+const POLL: Duration = Duration::from_millis(50);
 
 pub struct Launchd {
     executable: PathBuf,
@@ -221,10 +225,18 @@ fn bootout(target: &str) -> Result<(), String> {
         .output()
         .map_err(|error| format!("failed to invoke launchctl: {error}"))?;
     let message = diagnostic(&output);
-    if output.status.success() || missing(&message) {
-        Ok(())
-    } else {
-        Err(format!("launchctl bootout {target} failed: {message}"))
+    if !output.status.success() && !missing(&message) {
+        return Err(format!("launchctl bootout {target} failed: {message}"));
+    }
+    let start = Instant::now();
+    loop {
+        if inspect(target)?.is_none() {
+            return Ok(());
+        }
+        if start.elapsed() >= BOOTOUT {
+            return Err(format!("launchctl kept {target} loaded after bootout"));
+        }
+        thread::sleep(POLL);
     }
 }
 

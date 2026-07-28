@@ -34,9 +34,10 @@ cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo test --locked --workspace
 ```
 
-CI (`.forgejo/workflows/guard.yml`) runs pinned Negentropy structural laws plus
-the Rust fmt/clippy/test triad on the self-hosted Linux runner. Release workflows
-publish both executables in Linux x86_64 tar and Debian artifacts to R2.
+CI (`.forgejo/workflows/guard.yml`) runs Ectropy syntax laws, Plumb repository
+shape, and the Rust fmt/clippy/test triad on the self-hosted Linux runner.
+Release workflows publish both executables in Linux x86_64 tar and Debian
+artifacts to R2.
 
 ## Trigger a single turn locally (hot path)
 

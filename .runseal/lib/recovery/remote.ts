@@ -4,19 +4,13 @@
 
 import { join } from "@/lib/std/fs.ts";
 import { repoRoot } from "@/lib/std/repo.ts";
+import { remoteCommand } from "@perish/sealkit/operator";
 
 const HOST = "hk-03.zxiyun";
 const SSH_CONFIG = ".local/ssh/config";
 const SCRIPT = ".runseal/ops/host/30-santi-recovery.sh";
-const SAFE_ARGUMENT = /^[A-Za-z0-9._:+~-]+$/;
-
 export function recoveryRemoteCommand(argv: string[]): string {
-  for (const argument of argv) {
-    if (!SAFE_ARGUMENT.test(argument)) {
-      throw new Error(`unsafe recovery argument: ${JSON.stringify(argument)}`);
-    }
-  }
-  return ["bash", "-s", "--", ...argv].join(" ");
+  return remoteCommand(["bash", "-s", "--"], argv);
 }
 
 export async function runRecoveryRemote(argv: string[]): Promise<number> {

@@ -19,11 +19,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install pinned Negentropy
+      - name: Install guard tools
         run: |
           set -eu
-          curl -fsSL https://releases.negentropy.perish.uk/manage.sh -o "$RUNNER_TEMP/manage-negentropy.sh"
-          sh "$RUNNER_TEMP/manage-negentropy.sh" install --channel stable --bin-dir "$HOME/.local/bin"
+          curl -fsSL https://releases.ectropy.perish.uk/manage.sh -o "$RUNNER_TEMP/manage-ectropy.sh"
+          sh "$RUNNER_TEMP/manage-ectropy.sh" install --channel stable --bin-dir "$HOME/.local/bin"
+          curl -fsSL https://releases.plumb.perish.uk/manage.sh -o "$RUNNER_TEMP/manage-plumb.sh"
+          sh "$RUNNER_TEMP/manage-plumb.sh" install --channel stable --bin-dir "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Guard

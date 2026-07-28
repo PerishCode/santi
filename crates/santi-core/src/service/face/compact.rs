@@ -7,19 +7,27 @@ use super::Service;
 use crate::{budget, compact};
 
 impl Service {
-    pub fn exec(&self, strand: &str, request: compact::Exec) -> Result<compact::Report, String> {
+    pub async fn exec(
+        &self,
+        strand: &str,
+        request: compact::Exec,
+    ) -> Result<compact::Report, String> {
         let summary = request.summary.trim();
         if summary.is_empty() {
             return Err("compact summary must not be empty".to_string());
         }
         let strand = self
             .store
-            .strand(strand)?
+            .strand(strand)
+            .await?
             .ok_or_else(|| "strand not found".to_string())?;
-        let (from, to) = self.bounded2(&strand.id, &request)?;
-        let before = self.estimate(&strand.id)?;
+        let (from, to) = self.bounded2(&strand.id, &request).await?;
+        let before = self.estimate(&strand.id).await?;
         if request.dry {
-            let mut response = self.store.previewing(&strand.id, &from, &to)?;
+            let mut response = self
+                .store
+                .preview_compact(&crate::tag("compact"), &strand.id, &from, &to)
+                .await?;
             response.before = Some(before);
             if let Some(capsule) = request.capsule.as_ref() {
                 let metadata = encapsulated(Capsule {
@@ -31,7 +39,9 @@ impl Service {
                     budget: self.budget().as_ref(),
                     ratio: None,
                 });
-                let after = self.foreseen(&strand.id, &response, summary, metadata)?;
+                let after = self
+                    .foreseen(&strand.id, &response, summary, metadata)
+                    .await?;
                 let ratio = squeezed(response.before.as_ref().unwrap(), &after);
                 let metadata = encapsulated(Capsule {
                     compact: Some(&response.compact),
@@ -42,7 +52,9 @@ impl Service {
                     budget: self.budget().as_ref(),
                     ratio,
                 });
-                let after = self.foreseen(&strand.id, &response, summary, metadata)?;
+                let after = self
+                    .foreseen(&strand.id, &response, summary, metadata)
+                    .await?;
                 response.ratio = squeezed(response.before.as_ref().unwrap(), &after);
                 response.after = Some(after);
             }
@@ -60,14 +72,20 @@ impl Service {
                 ratio: None,
             })
         });
-        let mut response = self.store.noted(crate::store::Collapse {
-            strand: &strand.id,
-            from: &from,
-            to: &to,
-            summary,
-            metadata: initial,
-        })?;
-        let mut after = self.estimate(&strand.id)?;
+        let compact_tag = crate::tag("compact");
+        let mut response = self
+            .store
+            .create_compact(santi_estate::CompactDraft {
+                tag: &compact_tag,
+                strand: &strand.id,
+                first: &from,
+                last: &to,
+                summary,
+                metadata: initial.as_ref(),
+                created: &crate::now(),
+            })
+            .await?;
+        let mut after = self.estimate(&strand.id).await?;
         let mut ratio = squeezed(&before, &after);
         if let Some(capsule) = request.capsule.as_ref() {
             let metadata = encapsulated(Capsule {
@@ -79,8 +97,10 @@ impl Service {
                 budget: self.budget().as_ref(),
                 ratio,
             });
-            self.store.annotate(&response.compact, metadata)?;
-            after = self.estimate(&strand.id)?;
+            self.store
+                .annotate_compact(&response.compact, &metadata)
+                .await?;
+            after = self.estimate(&strand.id).await?;
             ratio = squeezed(&before, &after);
             let metadata = encapsulated(Capsule {
                 compact: Some(&response.compact),
@@ -91,11 +111,14 @@ impl Service {
                 budget: self.budget().as_ref(),
                 ratio,
             });
-            self.store.annotate(&response.compact, metadata)?;
+            self.store
+                .annotate_compact(&response.compact, &metadata)
+                .await?;
         }
-        response.active_incident_resolved = self.absolve(&strand.id, "compact_exec")?;
+        response.active_incident_resolved = self.absolve(&strand.id, "compact_exec").await?;
         if response.active_incident_resolved {
-            self.poked(&strand.id, "strand_send", None, "compact_recovery_poke");
+            self.poked(&strand.id, "strand_send", None, "compact_recovery_poke")
+                .await;
         }
         response.before = Some(before);
         response.after = Some(after);
@@ -103,7 +126,11 @@ impl Service {
         Ok(response)
     }
 
-    fn bounded2(&self, strand: &str, request: &compact::Exec) -> Result<(String, String), String> {
+    async fn bounded2(
+        &self,
+        strand: &str,
+        request: &compact::Exec,
+    ) -> Result<(String, String), String> {
         let from = request
             .first
             .as_deref()
@@ -119,11 +146,13 @@ impl Service {
             (None, None, Some(from), Some(to)) => {
                 let from = self
                     .store
-                    .seated(strand, from)?
+                    .seated(strand, from)
+                    .await?
                     .ok_or_else(|| format!("compact from {from} is not a message"))?;
                 let to = self
                     .store
-                    .seated(strand, to)?
+                    .seated(strand, to)
+                    .await?
                     .ok_or_else(|| format!("compact to {to} is not a message"))?;
                 Ok((from, to))
             }
@@ -131,27 +160,30 @@ impl Service {
         }
     }
 
-    fn foreseen(
+    async fn foreseen(
         &self,
         strand: &str,
         response: &compact::Report,
         summary: &str,
         metadata: serde_json::Value,
     ) -> Result<budget::Estimate, String> {
-        let input = self.store.preview(strand, response, summary, metadata)?;
-        let instructions = self.wording(strand)?;
+        let input =
+            crate::provider_preview(&self.store, strand, response, summary, &metadata).await?;
+        let instructions = self.wording(strand).await?;
         let tools = tools();
         Ok(estimated(&input, Some(&instructions), Some(&tools)))
     }
 
-    pub fn page(
+    pub async fn page(
         &self,
         compact: &str,
         keyword: Option<&str>,
         page_index: i64,
         page_size: i64,
     ) -> Result<Option<compact::Page>, String> {
-        self.store.page(compact, keyword, page_index, page_size)
+        self.store
+            .compact_page(compact, keyword, page_index, page_size)
+            .await
     }
 }
 

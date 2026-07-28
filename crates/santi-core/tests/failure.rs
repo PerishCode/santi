@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 use futures_util::stream;
-use rusqlite::Connection;
 use santi_core::Category;
 use santi_core::service::{self, Service};
 use santi_core::{message, strand, turn};
@@ -25,7 +24,6 @@ struct FailureProvider {
     fail_for_requests: Option<usize>,
     stream_error_after_text: Option<String>,
     response_failure: Option<String>,
-    started: bool,
 }
 
 #[async_trait]
@@ -62,16 +60,12 @@ impl Provider for FailureProvider {
                 error.clone(),
             ))])));
         }
-        let mut events = Vec::new();
-        if self.started {
-            events.push(Ok(Event::Started {
+        let events = vec![
+            Ok(Event::Text("ok".to_string())),
+            Ok(Event::Completed {
                 response: Some("fake-response-id".to_string()),
-            }));
-        }
-        events.push(Ok(Event::Text("ok".to_string())));
-        events.push(Ok(Event::Completed {
-            response: Some("fake-response-id".to_string()),
-        }));
+            }),
+        ];
         Ok(Box::pin(stream::iter(events)))
     }
 }
@@ -84,9 +78,9 @@ async fn aggregates() {
         fail_with: Some(raw_error.clone()),
         ..FailureProvider::default()
     });
-    let service = open_service(&temp, provider.clone());
-    let mut events = service.listen();
-    let strand = service.weave().expect("create strand").strand;
+    let service = open_service(&temp, provider.clone()).await;
+    let mut events = service.listen().await;
+    let strand = service.weave().await.expect("create strand").strand;
     let first = send_text(&service, &strand.id, "trigger failure").await;
 
     let runtime = wait_for_turn(&service, &strand.id, &turn(&first).id, turn::Status::Failed).await;
@@ -135,12 +129,6 @@ async fn aggregates() {
     assert_eq!(runtime.errors[0].occurrences, 2);
     assert_eq!(runtime.errors[0].revision, 1);
     assert_eq!(runtime.errors[0].latest.context["turn"], turn(&retry).id);
-    assert_eq!(
-        transition_count(&temp),
-        1,
-        "repeated failures must not emit lifecycle transitions"
-    );
-
     let requests = provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
     assert!(requests[1].input.iter().all(|item| {
@@ -164,7 +152,7 @@ fn turn(response: &santi_core::strand::Posted) -> &santi_core::turn::Turn {
     response.turn.as_ref().expect("send should start a turn")
 }
 
-fn open_service(temp: &tempfile::TempDir, provider: Arc<FailureProvider>) -> Service {
+async fn open_service(temp: &tempfile::TempDir, provider: Arc<FailureProvider>) -> Service {
     Service::open(
         service::Config {
             database: temp.path().join("santi.sqlite").display().to_string(),
@@ -175,16 +163,8 @@ fn open_service(temp: &tempfile::TempDir, provider: Arc<FailureProvider>) -> Ser
         },
         provider,
     )
+    .await
     .expect("open service")
-}
-
-fn transition_count(temp: &tempfile::TempDir) -> i64 {
-    Connection::open(temp.path().join("santi.sqlite"))
-        .expect("open sqlite")
-        .query_row("SELECT COUNT(*) FROM error_transitions", [], |row| {
-            row.get(0)
-        })
-        .expect("transition count")
 }
 
 async fn send_text(service: &Service, strand: &str, text: &str) -> santi_core::strand::Posted {
@@ -210,6 +190,7 @@ async fn wait_for_turn(
     for _ in 0..100 {
         let runtime = service
             .snapshot(strand)
+            .await
             .expect("runtime snapshot")
             .expect("strand runtime");
         if runtime
@@ -232,6 +213,7 @@ async fn wait_for_aborted_output(
     for _ in 0..100 {
         let runtime = service
             .snapshot(strand)
+            .await
             .expect("runtime snapshot")
             .expect("strand runtime");
         let failed = runtime

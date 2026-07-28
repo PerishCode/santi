@@ -2,10 +2,10 @@
 members = [
   "crates/api",
   "crates/santi",
-  "crates/santi-adaptor",
   "crates/santi-api",
   "crates/santi-core",
   "crates/santi-error",
+  "crates/santi-estate",
   "crates/santi-model",
   "crates/santi-object",
   "crates/santi-provider",
@@ -31,16 +31,17 @@ clap = { version = "4.6.1", features = ["derive", "env"] }
 dotenvy = "0.15.7"
 futures-core = "0.3.32"
 futures-util = "0.3.32"
+fs2 = "0.4.3"
 hex = "0.4.3"
 hmac = "0.12.1"
 jiff = "0.2.28"
+keel = { version = "0.8.0", registry = "perish" }
 libc = "0.2.180"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "stream"] }
-rusqlite = { version = "0.40.1", features = ["bundled"] }
 santi-api = { path = "crates/santi-api" }
 santi-core = { path = "crates/santi-core" }
-santi-adaptor = { path = "crates/santi-adaptor" }
 santi-error = { path = "crates/santi-error" }
+santi-estate = { path = "crates/santi-estate" }
 santi-model = { path = "crates/santi-model" }
 santi-object = { path = "crates/santi-object" }
 santi-provider = { path = "crates/santi-provider" }
@@ -48,6 +49,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 rust-embed = "8.7.2"
 sha2 = "0.10.9"
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite"] }
 tokio = { version = "1.52.3", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = "0.1.18"
 toml = "1.1.2"

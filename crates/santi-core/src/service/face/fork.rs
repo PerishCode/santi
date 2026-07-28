@@ -4,13 +4,23 @@ use super::Service;
 use crate::strand;
 
 impl Service {
-    pub fn fork(&self, parent: &str) -> Result<strand::Forked, String> {
+    pub async fn fork(&self, parent: &str) -> Result<strand::Forked, String> {
         let parent = self
             .store
-            .strand(parent)?
+            .strand(parent)
+            .await?
             .ok_or_else(|| "parent strand not found".to_string())?;
         let fork = parent.next - 1;
-        let child = self.store.fork(&parent.id, fork)?;
+        let child_tag = crate::tag("ss");
+        let child = self
+            .store
+            .fork(santi_estate::ForkDraft {
+                tag: &child_tag,
+                parent: &parent.id,
+                at: fork,
+                created: &crate::now(),
+            })
+            .await?;
         if let Err(error) = self.bequeath(&parent.id, &child.id) {
             let nursery = self.strandhome(&child.id);
             if let Some(child_root) = nursery.parent() {
@@ -18,7 +28,7 @@ impl Service {
             } else {
                 let _ = fs::remove_dir_all(&nursery);
             }
-            let _ = self.store.disown(&child.id);
+            let _ = self.store.discard_fork(&child.id).await;
             return Err(format!("fork workspace sync failed: {error}"));
         }
         Ok(strand::Forked { strand: child })

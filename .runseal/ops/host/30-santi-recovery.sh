@@ -82,13 +82,12 @@ json_string_field() {
   printf '%s\n' "$value"
 }
 
-json_number_field_from_text() {
-  local field=$1 text=$2 value
-  value=$(printf '%s' "$text" |
+json_true_field_from_text() {
+  local field=$1 text=$2
+  printf '%s' "$text" |
     tr -d '\n' |
-    sed -n "s/.*\"$field\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p")
-  [[ $value =~ ^[0-9]+$ ]] || fail "JSON number unavailable: $field"
-  printf '%s\n' "$value"
+    grep -q "\"$field\"[[:space:]]*:[[:space:]]*true" ||
+    fail "JSON true field unavailable: $field"
 }
 
 archive_entries_are_safe() {
@@ -137,7 +136,7 @@ find_single_deb() {
   printf '%s\n' "$match"
 }
 
-schema_for_runtime() {
+estate_for_runtime() {
   local runtime=$1 output binary=$SANTI_RECOVERY_BIN
   if [[ -z $binary ]]; then
     if [[ -x /usr/bin/santi-api ]]; then
@@ -151,7 +150,8 @@ schema_for_runtime() {
     SANTI_PATHS_DATABASE="$runtime/db" \
     SANTI_PATHS_RUNTIME_ROOT="$runtime" \
     "$binary" doctor --storage-only 2>/dev/null || true)
-  json_number_field_from_text schema_version "$output"
+  json_true_field_from_text estate_ready "$output"
+  printf 'ready\n'
 }
 
 manifest_value() {
@@ -248,7 +248,7 @@ load_archive_facts() {
   require_deb_identity "$retained" "$A_SOURCE_VERSION"
   A_SOURCE_DEB_SHA256=$(sha256_file "$retained")
   A_SOURCE_DEB_BYTES=$(bytes_file "$retained")
-  A_SOURCE_SCHEMA=$(schema_for_runtime "$runtime")
+  A_SOURCE_SCHEMA=$(estate_for_runtime "$runtime")
   A_MEMORY_SHA256=$(sha256_file "$runtime/$MEMORY_RELATIVE")
   rm -rf -- "$scratch"
 }
@@ -262,8 +262,8 @@ validate_capsule() {
   [[ $M_CAPSULE_ID == "$expected_id" ]] || fail "capsule id disagrees with manifest"
   safe_token "$M_SOURCE_VERSION"
   safe_token "$M_CANDIDATE_VERSION"
-  require_number "$M_SOURCE_SCHEMA"
-  require_number "$M_CANDIDATE_SCHEMA"
+  safe_token "$M_SOURCE_SCHEMA"
+  safe_token "$M_CANDIDATE_SCHEMA"
   require_number "$M_BACKUP_BYTES"
   require_number "$M_SOURCE_DEB_BYTES"
   require_number "$M_CANDIDATE_DEB_BYTES"
@@ -319,7 +319,7 @@ require_current_candidate() {
   current=$(installed_version)
   [[ $current == "$M_CANDIDATE_VERSION" ]] ||
     fail "installed version is not the capsule candidate: expected=$M_CANDIDATE_VERSION actual=$current"
-  [[ $(schema_for_runtime "$RUNTIME_ROOT") == "$M_CANDIDATE_SCHEMA" ]] ||
+  [[ $(estate_for_runtime "$RUNTIME_ROOT") == "$M_CANDIDATE_SCHEMA" ]] ||
     fail "current schema differs from capsule"
 }
 
@@ -402,8 +402,8 @@ action_arm() {
   candidate_deb=$(find_single_deb "$RUNTIME_ROOT/upgrade/packages" "$candidate_version")
   require_deb_identity "$source_deb" "$source_version"
   require_deb_identity "$candidate_deb" "$candidate_version"
-  source_schema=$(schema_for_runtime "$source_stage/runtime")
-  candidate_schema=$(schema_for_runtime "$RUNTIME_ROOT")
+  source_schema=$(estate_for_runtime "$source_stage/runtime")
+  candidate_schema=$(estate_for_runtime "$RUNTIME_ROOT")
   source_memory=$(sha256_file "$source_stage/runtime/$MEMORY_RELATIVE")
 
   cp -- "$RAW_BACKUP" "$temporary/runtime.tar.gz"
@@ -535,7 +535,7 @@ action_execute() {
   [[ ! -e $candidate_runtime ]] || fail "candidate runtime quarantine already exists"
   stage="$RECOVERY_ROOT/.rollback-${capsule_id}.$$"
   extract_archive "$capsule/runtime.tar.gz" "$stage"
-  [[ $(schema_for_runtime "$stage/runtime") == "$M_SOURCE_SCHEMA" ]] ||
+  [[ $(estate_for_runtime "$stage/runtime") == "$M_SOURCE_SCHEMA" ]] ||
     fail "staged source schema differs from capsule"
   restored_memory=$(sha256_file "$stage/runtime/$MEMORY_RELATIVE")
   [[ $restored_memory == "$M_MEMORY_SHA256" ]] || fail "staged source memory differs from capsule"
@@ -559,7 +559,7 @@ action_execute() {
   current=$(installed_version)
   [[ $current == "$M_SOURCE_VERSION" ]] ||
     fail "source package did not install: expected=$M_SOURCE_VERSION actual=$current"
-  [[ $(schema_for_runtime "$current_runtime") == "$M_SOURCE_SCHEMA" ]] ||
+  [[ $(estate_for_runtime "$current_runtime") == "$M_SOURCE_SCHEMA" ]] ||
     fail "restored source runtime failed storage verification"
   [[ $(sha256_file "$current_runtime/$MEMORY_RELATIVE") == "$M_MEMORY_SHA256" ]] ||
     fail "restored source memory failed verification"

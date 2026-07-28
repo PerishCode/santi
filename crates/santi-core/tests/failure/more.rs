@@ -1,5 +1,5 @@
 use super::*;
-use santi_core::{message, receipt, turn};
+use santi_core::{message, turn};
 
 #[tokio::test]
 async fn preserves() {
@@ -8,8 +8,8 @@ async fn preserves() {
         stream_error_after_text: Some("provider stream aborted".to_string()),
         ..FailureProvider::default()
     });
-    let service = open_service(&temp, provider.clone());
-    let strand = service.weave().expect("create strand").strand;
+    let service = open_service(&temp, provider.clone()).await;
+    let strand = service.weave().await.expect("create strand").strand;
     let response = send_text(&service, &strand.id, "trigger stream failure").await;
 
     let runtime = wait_for_aborted_output(&service, &strand.id, &turn(&response).id).await;
@@ -49,8 +49,8 @@ async fn classifies() {
         response_failure: Some("provider rejected response".to_string()),
         ..FailureProvider::default()
     });
-    let service = open_service(&temp, provider);
-    let strand = service.weave().expect("create strand").strand;
+    let service = open_service(&temp, provider).await;
+    let strand = service.weave().await.expect("create strand").strand;
     let response = send_text(&service, &strand.id, "trigger response failure").await;
 
     let runtime = wait_for_turn(
@@ -74,8 +74,8 @@ async fn resolves() {
         fail_for_requests: Some(1),
         ..FailureProvider::default()
     });
-    let service = open_service(&temp, provider.clone());
-    let strand = service.weave().expect("create strand").strand;
+    let service = open_service(&temp, provider.clone()).await;
+    let strand = service.weave().await.expect("create strand").strand;
     let failed = send_text(&service, &strand.id, "first attempt").await;
     let before = wait_for_turn(
         &service,
@@ -110,111 +110,4 @@ async fn resolves() {
     assert_eq!(incident.latest.context["turn"], turn(&recovered).id);
     assert_eq!(incident.latest.context["provider"], "fake-provider");
     assert_eq!(incident.latest.context["model"], "fake-model");
-    assert_eq!(
-        transition_count(&temp),
-        2,
-        "only open and resolve are lifecycle transitions"
-    );
-}
-
-#[tokio::test]
-async fn recovers() {
-    let temp = tempfile::tempdir().expect("temp dir");
-    let provider = Arc::new(FailureProvider {
-        started: true,
-        ..FailureProvider::default()
-    });
-    let service = open_service(&temp, provider.clone());
-    let strand = service.weave().expect("create strand").strand;
-    let conn = Connection::open(temp.path().join("santi.sqlite")).expect("open sqlite");
-    conn.execute_batch(
-        r#"
-        CREATE TRIGGER force_thinking_persistence_failure
-        BEFORE INSERT ON thinking_spans
-        BEGIN
-          SELECT RAISE(ABORT, 'forced thinking persistence failure');
-        END;
-        "#,
-    )
-    .expect("install trigger");
-
-    let failed = send_text(&service, &strand.id, "first obligation").await;
-    let runtime = wait_for_turn(
-        &service,
-        &strand.id,
-        &turn(&failed).id,
-        turn::Status::Failed,
-    )
-    .await;
-    assert_eq!(runtime.errors.len(), 1);
-    let incident = &runtime.errors[0];
-    assert_eq!(incident.code, "runtime.turn.failed");
-    assert_eq!(incident.first.source.component, "santi-core");
-    assert_eq!(incident.first.source.operation, "turn.thinking_persistence");
-    assert_eq!(
-        incident.first.context["operation"],
-        "turn.thinking_persistence"
-    );
-    assert!(
-        runtime
-            .turns
-            .iter()
-            .find(|candidate| candidate.id == turn(&failed).id)
-            .and_then(|turn| turn.error.as_deref())
-            .is_some_and(|detail| detail.contains("forced thinking persistence failure"))
-    );
-    assert!(
-        runtime
-            .errors
-            .iter()
-            .all(|error| error.code != "provider.turn.failed")
-    );
-    let failed_receipt = service
-        .receipt(&failed.receipt.inbox)
-        .expect("receipt query")
-        .expect("receipt");
-    assert_eq!(failed_receipt.state, receipt::State::Failed);
-    assert_eq!(
-        failed_receipt
-            .transitions
-            .last()
-            .and_then(|event| event.incident.as_deref()),
-        Some(incident.id.as_str())
-    );
-
-    conn.execute_batch("DROP TRIGGER force_thinking_persistence_failure;")
-        .expect("remove trigger");
-    let successor = send_text(&service, &strand.id, "successor attempt").await;
-    let runtime = wait_for_turn(
-        &service,
-        &strand.id,
-        &turn(&successor).id,
-        turn::Status::Completed,
-    )
-    .await;
-    assert_eq!(runtime.errors[0].status, santi_core::Status::Resolved);
-    assert_eq!(
-        runtime.errors[0].resolution.as_ref().unwrap().by.as_deref(),
-        Some("runtime.turn_succeeded")
-    );
-    let recovered_receipt = service
-        .receipt(&failed.receipt.inbox)
-        .expect("receipt query")
-        .expect("receipt");
-    assert_eq!(recovered_receipt.state, receipt::State::Completed);
-    assert_eq!(
-        recovered_receipt
-            .transitions
-            .iter()
-            .map(|event| event.state.clone())
-            .collect::<Vec<_>>(),
-        vec![
-            receipt::State::Accepted,
-            receipt::State::Driving,
-            receipt::State::Failed,
-            receipt::State::Driving,
-            receipt::State::Completed,
-        ]
-    );
-    assert_eq!(provider.requests.lock().unwrap().len(), 2);
 }

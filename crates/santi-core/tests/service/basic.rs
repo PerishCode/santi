@@ -16,9 +16,10 @@ async fn sends() {
         },
         provider.clone(),
     )
+    .await
     .expect("open service");
 
-    let strand = service.weave().expect("create strand").strand;
+    let strand = service.weave().await.expect("create strand").strand;
     let response = service
         .send(
             &strand.id,
@@ -53,7 +54,7 @@ async fn sends() {
             .any(|message| message.text == "hi from runtime")
     );
 
-    let requests = provider.requests.lock().unwrap();
+    let requests = provider.requests.lock().unwrap().clone();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].model, "fake-model");
     assert_eq!(requests[0].input.len(), 1);
@@ -132,8 +133,26 @@ async fn sends() {
 
     let detail = service
         .strand(&strand.id)
+        .await
         .expect("load detail")
         .expect("strand");
     assert_eq!(detail.messages.len(), 2);
     assert_eq!(runtime.turns.len(), 1);
+
+    let store = santi_core::Store::open(temp.path().join("santi.sqlite"))
+        .await
+        .expect("open estate");
+    let mut traces = Vec::new();
+    for _ in 0..50 {
+        traces = store
+            .traces("turn", &accepted_turn(&response).id)
+            .await
+            .expect("turn traces");
+        if !traces.is_empty() {
+            break;
+        }
+        sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(traces.len(), 1, "async trace writer must persist the turn");
+    assert_eq!(traces[0].name, "turn");
 }

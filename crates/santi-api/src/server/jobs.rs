@@ -61,6 +61,7 @@ pub async fn create(
                 remind: request.remind_every_seconds,
             },
         )
+        .await
         .map(|accepted| (StatusCode::ACCEPTED, Json(accepted)))
         .map_err(ApiError::from_service)
 }
@@ -79,7 +80,11 @@ pub async fn list(
     headers: HeaderMap,
 ) -> Result<Json<Vec<job::Job>>, ApiError> {
     let soul = header(&headers, SOUL).ok_or_else(|| ApiError::unauthorized("missing soul id"))?;
-    service.jobs(soul).map(Json).map_err(ApiError::from_service)
+    service
+        .jobs(soul)
+        .await
+        .map(Json)
+        .map_err(ApiError::from_service)
 }
 
 #[utoipa::path(
@@ -101,6 +106,7 @@ pub async fn get(
     let soul = header(&headers, SOUL).ok_or_else(|| ApiError::unauthorized("missing soul id"))?;
     service
         .job(soul, &id)
+        .await
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("job not found"))
@@ -125,6 +131,7 @@ pub async fn cancel(
     let soul = header(&headers, SOUL).ok_or_else(|| ApiError::unauthorized("missing soul id"))?;
     service
         .cancel(soul, &id)
+        .await
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("job not found"))
@@ -150,6 +157,7 @@ pub async fn acknowledge(
     let soul = header(&headers, SOUL).ok_or_else(|| ApiError::unauthorized("missing soul id"))?;
     service
         .ack(soul, &id)
+        .await
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("job not found"))
@@ -187,6 +195,7 @@ pub async fn logs(
             cursor: query.cursor.as_deref().unwrap_or("0"),
             limit: query.limit.unwrap_or(64 * 1024),
         })
+        .await
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("job not found"))

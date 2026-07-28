@@ -1,11 +1,9 @@
 use crate::Ruled;
 use std::fs;
 
-use santi_provider::Item;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
-use crate::store::Ingress;
 use crate::{soulward, strand::Strand};
 
 use super::super::{Service, drive};
@@ -45,17 +43,20 @@ impl Service {
         }
     }
 
-    pub(super) fn gate(&self, strand: &Strand) -> Result<Gate, String> {
-        let _guard = self.pressure.lock().unwrap();
+    pub(super) async fn gate(&self, strand: &Strand) -> Result<Gate, String> {
+        let _guard = self.pressure.lock().await;
         let policy = self.regimen();
         let snapshot = self.measure(&strand.soul)?;
-        self.reconcile(&strand.soul, &snapshot, policy)?;
+        self.reconcile(&strand.soul, &snapshot, policy).await?;
         if snapshot.weight <= policy.allowance {
             return Ok(Gate::Allow);
         }
 
-        let maintenance = self.store.labeled(&strand.soul, MAINTENANCE)?;
-        self.brief(&maintenance, &snapshot, policy)?;
+        let maintenance = self
+            .store
+            .labeled(&strand.soul, MAINTENANCE, &crate::now())
+            .await?;
+        self.brief(&maintenance, &snapshot, policy).await?;
         if strand.id == maintenance.id {
             Ok(Gate::Allow)
         } else {
@@ -65,14 +66,14 @@ impl Service {
         }
     }
 
-    pub(super) fn relieve(&self, strand: &str) {
-        if let Err(error) = self.remeasure(strand) {
+    pub(super) async fn relieve(&self, strand: &str) {
+        if let Err(error) = self.remeasure(strand).await {
             eprintln!("santi: soul memory relief scan failed strand={strand}: {error}");
         }
     }
 
-    fn remeasure(&self, strand: &str) -> Result<(), String> {
-        let Some(maintenance) = self.store.strand(strand)? else {
+    async fn remeasure(&self, strand: &str) -> Result<(), String> {
+        let Some(maintenance) = self.store.strand(strand).await? else {
             return Ok(());
         };
         if maintenance.label.as_deref() != Some(MAINTENANCE) {
@@ -80,25 +81,27 @@ impl Service {
         }
         let policy = self.regimen();
         let snapshot = self.measure(&maintenance.soul)?;
-        self.reconcile(&maintenance.soul, &snapshot, policy)?;
+        self.reconcile(&maintenance.soul, &snapshot, policy).await?;
         if snapshot.weight > policy.allowance {
             return Ok(());
         }
 
-        for pending_id in self.store.awaiting()? {
+        for pending_id in self.store.pending_strands().await? {
             if pending_id == strand {
                 continue;
             }
-            let Some(pending) = self.store.strand(&pending_id)? else {
+            let Some(pending) = self.store.strand(&pending_id).await? else {
                 continue;
             };
             if pending.soul == maintenance.soul {
-                let _ = self.poke(
-                    &pending_id,
-                    "strand_send",
-                    None,
-                    "soul_memory_relief_resume",
-                );
+                let _ = self
+                    .poke(
+                        &pending_id,
+                        "strand_send",
+                        None,
+                        "soul_memory_relief_resume",
+                    )
+                    .await;
             }
         }
         Ok(())
@@ -117,7 +120,7 @@ impl Service {
         })
     }
 
-    fn brief(
+    async fn brief(
         &self,
         maintenance: &Strand,
         snapshot: &Snapshot,
@@ -126,80 +129,97 @@ impl Service {
         let fingerprint = format!("source_sha256: {}", snapshot.sha256);
         let recorded = self
             .store
-            .messages(&maintenance.id)?
+            .messages(&maintenance.id)
+            .await?
             .iter()
             .any(|message| message.text.contains(&fingerprint));
         let pending = self
             .store
-            .pending(&maintenance.id)?
+            .inboxes(&maintenance.id)
+            .await?
             .iter()
-            .any(|item| contains(item, &fingerprint));
+            .any(|item| item.content.rendered().contains(&fingerprint));
         if recorded || pending {
             return Ok(());
         }
 
-        let outcome = self.store.harbor(Ingress {
-            strand: &maintenance.id,
-            kind: message::Kind::SantiSystem,
-            content: metaprompt(snapshot, policy),
-            source: Some(
-                ingest::Source::new("runtime_memory_pressure").with_ref(maintenance.soul.clone()),
-            ),
-            admission: None,
-            replay: None,
-        })?;
-        match outcome.outcome {
-            ingest::Outcome::Accepted { .. } => Ok(()),
-            ingest::Outcome::Rejected { error } => Err(format!(
-                "memory maintenance metaprompt was rejected: {}",
-                error.message
-            )),
-        }
+        let content = metaprompt(snapshot, policy);
+        let source =
+            ingest::Source::new("runtime_memory_pressure").with_ref(maintenance.soul.clone());
+        let inbox = crate::tag("inbox");
+        self.store
+            .accept_inbox(
+                santi_estate::InboxDraft {
+                    tag: &inbox,
+                    strand: &maintenance.id,
+                    kind: message::Kind::SantiSystem,
+                    content: &content,
+                    source: Some(&source),
+                    created: &crate::now(),
+                },
+                500,
+            )
+            .await
+            .map(|_| ())
     }
 
-    fn reconcile(&self, soul: &str, snapshot: &Snapshot, policy: Policy) -> Result<(), String> {
+    async fn reconcile(
+        &self,
+        soul: &str,
+        snapshot: &Snapshot,
+        policy: Policy,
+    ) -> Result<(), String> {
         let key = crate::soul::Error::Intervention
             .descriptor()
             .key("soul", soul);
-        let active = self.store.incident(&key)?;
+        let active = self.store.incident(&key).await?;
         let mutated = if snapshot.weight > policy.threshold {
             if active.is_some() {
                 false
             } else {
-                self.store.raise(santi_error::Draft {
-                    key,
-                    descriptor: crate::soul::Error::Intervention.descriptor(),
-                    scope: santi_error::Scope::new("soul", soul),
-                    source: santi_error::Source::new("santi-core", "soul_memory_pressure"),
-                    message: "soul memory exceeds the human-intervention threshold".to_string(),
-                    context: json!({
-                        "schema": "santi.error.soul_memory.v1",
-                        "source": soulward(),
-                        "source_bytes": snapshot.weight,
-                        "allowance_bytes": policy.allowance,
-                        "operator_threshold_bytes": policy.threshold,
-                        "maintenance_label": MAINTENANCE,
-                        "runtime_mutated_memory": false,
-                    }),
-                })?;
+                self.store
+                    .raise(
+                        santi_error::Draft {
+                            key,
+                            descriptor: crate::soul::Error::Intervention.descriptor(),
+                            scope: santi_error::Scope::new("soul", soul),
+                            source: santi_error::Source::new("santi-core", "soul_memory_pressure"),
+                            message: "soul memory exceeds the human-intervention threshold"
+                                .to_string(),
+                            context: json!({
+                                "schema": "santi.error.soul_memory.v1",
+                                "source": soulward(),
+                                "source_bytes": snapshot.weight,
+                                "allowance_bytes": policy.allowance,
+                                "operator_threshold_bytes": policy.threshold,
+                                "maintenance_label": MAINTENANCE,
+                                "runtime_mutated_memory": false,
+                            }),
+                        },
+                        &crate::now(),
+                    )
+                    .await?;
                 true
             }
         } else if active.is_some() {
-            self.store.resolve(
-                &key,
-                "soul_memory_remeasured",
-                json!({
-                    "schema": "santi.error.soul_memory.resolution.v1",
-                    "source_bytes": snapshot.weight,
-                    "allowance_bytes": policy.allowance,
-                    "operator_threshold_bytes": policy.threshold,
-                }),
-            )?
+            self.store
+                .resolve(
+                    &key,
+                    "soul_memory_remeasured",
+                    json!({
+                        "schema": "santi.error.soul_memory.resolution.v1",
+                        "source_bytes": snapshot.weight,
+                        "allowance_bytes": policy.allowance,
+                        "operator_threshold_bytes": policy.threshold,
+                    }),
+                    &crate::now(),
+                )
+                .await?
         } else {
             false
         };
         if mutated {
-            self.dispatched();
+            self.dispatched().await;
         }
         Ok(())
     }
@@ -234,17 +254,16 @@ fn metaprompt(snapshot: &Snapshot, policy: Policy) -> message::Content {
     )
 }
 
-fn contains(item: &Item, needle: &str) -> bool {
-    matches!(item, Item::Message { content, .. } if content.contains(needle))
-}
-
-pub(super) fn maintain(service: &Service, maintenance_strand_id: &str) {
-    if let drive::Outcome::Held(error) | drive::Outcome::Failed(error) = service.poke(
-        maintenance_strand_id,
-        "system",
-        None,
-        "soul_memory_maintenance",
-    ) {
+pub(super) async fn maintain(service: &Service, maintenance_strand_id: &str) {
+    if let drive::Outcome::Held(error) | drive::Outcome::Failed(error) = service
+        .poke(
+            maintenance_strand_id,
+            "system",
+            None,
+            "soul_memory_maintenance",
+        )
+        .await
+    {
         eprintln!(
             "santi: memory maintenance drive failed strand={} code={}",
             maintenance_strand_id, error.code

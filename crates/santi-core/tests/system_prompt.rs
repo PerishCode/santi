@@ -25,13 +25,13 @@ impl Provider for FakeProvider {
     }
 }
 
-#[test]
-fn renders() {
-    let harness = PromptHarness::open();
+#[tokio::test]
+async fn renders() {
+    let harness = PromptHarness::open().await;
     harness.write_soul("---\nplain: value\n---\n# Soul");
     harness.write_strand("# Strand");
 
-    let text = harness.system_prompt().text;
+    let text = harness.system_prompt().await.text;
 
     assert!(text.contains("[santi]"));
     assert!(text.contains(
@@ -71,45 +71,45 @@ fn renders() {
     assert!(!text.contains("@strand"));
 }
 
-#[test]
-fn leaves() {
-    let harness = PromptHarness::open();
+#[tokio::test]
+async fn leaves() {
+    let harness = PromptHarness::open().await;
     harness.write_soul("---\nplain: value\n---\n# Soul");
 
-    let text = harness.system_prompt().text;
+    let text = harness.system_prompt().await.text;
 
     assert!(text.contains("content:\n---\nplain: value\n---\n# Soul"));
     assert!(!text.contains("hint:"));
 }
 
-#[test]
-fn overrides() {
-    let harness = PromptHarness::open();
+#[tokio::test]
+async fn overrides() {
+    let harness = PromptHarness::open().await;
     harness.write_constitution("my own physics, hot-edited");
 
-    let text = harness.system_prompt().text;
+    let text = harness.system_prompt().await.text;
 
     assert!(text.contains("[santi]\nmy own physics, hot-edited"));
     assert!(!text.contains("santi is an agent runtime: a container that keeps souls"));
 }
 
-#[test]
-fn fallback() {
-    let harness = PromptHarness::open();
+#[tokio::test]
+async fn fallback() {
+    let harness = PromptHarness::open().await;
 
-    let text = harness.system_prompt().text;
+    let text = harness.system_prompt().await.text;
 
     assert!(text.contains("Your memory is still empty. You are a soul"));
     assert!(!text.to_lowercase().contains("secretary"));
 }
 
-#[test]
-fn projects() {
-    let harness = PromptHarness::open();
+#[tokio::test]
+async fn projects() {
+    let harness = PromptHarness::open().await;
     let memory = format!("# Memory\n{}\nSOURCE_TAIL", "界".repeat(90_000));
     harness.write_soul(&memory);
 
-    let text = harness.system_prompt().text;
+    let text = harness.system_prompt().await.text;
 
     assert!(text.contains("kind: soul_memory_projection"));
     assert!(text.contains("allowance_bytes: 250000"));
@@ -124,10 +124,11 @@ fn projects() {
 
 #[tokio::test]
 async fn excludes() {
-    let harness = PromptHarness::open();
+    let harness = PromptHarness::open().await;
     let first = harness
         .service
         .evented(santi_core::GENESIS, "stim:operator", "hello".to_string())
+        .await
         .expect("first strand");
     let second = harness
         .service
@@ -136,6 +137,7 @@ async fn excludes() {
             "github:ops:issue:PerishCode/santi#1",
             "hello".to_string(),
         )
+        .await
         .expect("second strand");
     let santi_core::ingest::Outcome::Accepted {
         receipt: first_receipt,
@@ -149,8 +151,8 @@ async fn excludes() {
     else {
         panic!("second ingest rejected");
     };
-    let first_text = harness.system_prompt_for(&first_receipt.strand).text;
-    let second_text = harness.system_prompt_for(&second_receipt.strand).text;
+    let first_text = harness.system_prompt_for(&first_receipt.strand).await.text;
+    let second_text = harness.system_prompt_for(&second_receipt.strand).await.text;
     assert!(!first_text.contains("stim:operator"));
     assert!(!second_text.contains("github:ops:issue:PerishCode/santi#1"));
 }
@@ -163,7 +165,7 @@ struct PromptHarness {
 }
 
 impl PromptHarness {
-    fn open() -> Self {
+    async fn open() -> Self {
         let temp = tempfile::tempdir().expect("temp dir");
         let runtime = temp.path().join("runtime");
         let service = Service::open(
@@ -176,8 +178,9 @@ impl PromptHarness {
             },
             Arc::new(FakeProvider),
         )
+        .await
         .expect("open service");
-        let strand = service.weave().expect("create strand").strand.id;
+        let strand = service.weave().await.expect("create strand").strand.id;
         Self {
             _temp: temp,
             service,
@@ -211,11 +214,11 @@ impl PromptHarness {
         fs::write(self.runtime.join("constitution.md"), text).expect("write constitution");
     }
 
-    fn system_prompt(&self) -> material::Material {
-        self.system_prompt_for(&self.strand)
+    async fn system_prompt(&self) -> material::Material {
+        self.system_prompt_for(&self.strand).await
     }
 
-    fn system_prompt_for(&self, strand: &str) -> material::Material {
+    async fn system_prompt_for(&self, strand: &str) -> material::Material {
         self.service
             .material(
                 strand,
@@ -223,6 +226,7 @@ impl PromptHarness {
                     kind: material::Kind::SystemPrompt,
                 },
             )
+            .await
             .expect("system prompt material")
     }
 }

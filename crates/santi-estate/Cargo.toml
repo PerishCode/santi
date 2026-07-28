@@ -1,0 +1,18 @@
+[package]
+name = "santi-estate"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+fs2.workspace = true
+keel.workspace = true
+santi-error.workspace = true
+santi-model.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+
+[dev-dependencies]
+tempfile = "3.27.0"
+tokio.workspace = true

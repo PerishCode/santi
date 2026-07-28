@@ -4,26 +4,26 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use super::Service;
-use crate::store::{JobAttention, JobRecord, Notice};
 use crate::{ingest, message, now, stamped};
+use santi_estate::JobRecord;
 
 const NUMERATOR: u128 = 4;
 const DENOMINATOR: u128 = 5;
 
-pub(super) fn capture(service: &Service, record: JobRecord) -> Result<(), String> {
+pub(super) async fn capture(service: &Service, record: JobRecord) -> Result<(), String> {
     if record.job.state.terminal() {
         return Ok(());
     }
-    let Some(started) = record.started else {
+    let Some(started) = record.started_millis else {
         return Ok(());
     };
     let current = epoch()?;
     let elapsed = current.saturating_sub(started) as u64;
     let (stdout, stderr) = output(service, &record)?;
     let combined = stdout.saturating_add(stderr);
-    let runtime =
-        !record.runtime && threshold(elapsed, record.job.timeout_seconds.saturating_mul(1000));
-    let out = !record.output && threshold(combined, record.job.output_limit_bytes);
+    let runtime = !record.runtime_warned
+        && threshold(elapsed, record.job.timeout_seconds.saturating_mul(1000));
+    let out = !record.output_warned && threshold(combined, record.job.output_limit_bytes);
     let (reminded, tick, next) = reminder(&record, elapsed, started)?;
     if !runtime && !out && !reminded {
         return Ok(());
@@ -31,7 +31,7 @@ pub(super) fn capture(service: &Service, record: JobRecord) -> Result<(), String
 
     let observed = now();
     let revision = record
-        .revision
+        .attention_revision
         .checked_add(1)
         .ok_or_else(|| "job attention revision is out of range".to_string())?;
     let causes = causes(runtime, out, reminded);
@@ -45,36 +45,42 @@ pub(super) fn capture(service: &Service, record: JobRecord) -> Result<(), String
     });
     let encoded = serde_json::to_vec(&content).map_err(|error| error.to_string())?;
     let digest = format!("{:x}", Sha256::digest(encoded));
-    let key = format!("job/{}/{}", record.job.id, record.stamp);
+    let key = format!("job/{}/{}", record.job.id, record.generation);
     let source = ingest::Source::new("job")
         .with_ref(record.job.id.clone())
         .with_metadata(json!({
             "schema": "santi.job.attention.v1",
-            "stamp": record.stamp,
+            "stamp": record.generation,
             "revision": revision,
             "observed_at": observed,
         }));
-    service.notify(
-        JobAttention {
-            id: &record.job.id,
-            base: record.revision,
-            at: &observed,
-            runtime,
-            output: out,
-            reminded,
-            tick,
-            next: next.as_deref(),
-        },
-        Notice {
-            strand: &record.job.origin.strand,
-            key: &key,
-            revision,
-            digest: &digest,
-            content,
-            source,
-            causes,
-        },
-    )
+    let inbox = crate::tag("inbox");
+    service
+        .notify(
+            santi_estate::AttentionDraft {
+                job: &record.job.id,
+                base: record.attention_revision,
+                at: &observed,
+                runtime,
+                output: out,
+                reminded,
+                tick,
+                next: next.as_deref(),
+            },
+            santi_estate::NoticeDraft {
+                tag: &inbox,
+                strand: &record.job.origin.strand,
+                key: &key,
+                revision: i64::try_from(revision)
+                    .map_err(|_| "job attention revision is out of range".to_string())?,
+                digest: &digest,
+                content: &content,
+                source: &source,
+                causes: &causes,
+                created: &observed,
+            },
+        )
+        .await
 }
 
 struct Fragment<'a> {
@@ -92,7 +98,7 @@ fn fragment(input: Fragment<'_>) -> message::Content {
         [
             "item_kind: job_attention".to_string(),
             format!("job_id: {}", job.id),
-            format!("stamp: {}", input.record.stamp),
+            format!("stamp: {}", input.record.generation),
             format!("description: {:?}", job.description),
             format!("state: {}", job.state.encode()),
             format!("observed_at: {}", input.observed),
@@ -117,14 +123,14 @@ fn reminder(
     started: i64,
 ) -> Result<(bool, u64, Option<String>), String> {
     let Some(interval) = record.job.remind else {
-        return Ok((false, record.reminder, None));
+        return Ok((false, record.reminder_tick, None));
     };
     let period = interval
         .checked_mul(1000)
         .ok_or_else(|| "job reminder interval is out of range".to_string())?;
     let tick = elapsed / period;
-    if tick == 0 || tick <= record.reminder {
-        return Ok((false, record.reminder, record.job.next.clone()));
+    if tick == 0 || tick <= record.reminder_tick {
+        return Ok((false, record.reminder_tick, record.job.next.clone()));
     }
     let following = tick
         .checked_add(1)

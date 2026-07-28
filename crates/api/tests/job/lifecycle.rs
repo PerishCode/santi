@@ -1,4 +1,4 @@
-use std::{sync::Arc, thread, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use santi_core::{
     job,
@@ -7,8 +7,8 @@ use santi_core::{
 
 use super::support::{Silent, Unit, available, seed, service, stamp};
 
-#[test]
-fn vertical() {
+#[tokio::test]
+async fn vertical() {
     if !available() {
         eprintln!("skipping native job test: user supervisor is unavailable");
         return;
@@ -27,10 +27,11 @@ fn vertical() {
         Arc::new(Silent),
         Arc::new(supervisor),
     )
+    .await
     .expect("open service");
-    let strand = service.weave().expect("create strand").strand;
+    let strand = service.weave().await.expect("create strand").strand;
     let capability = "jobcap_vertical_probe";
-    seed(&database, capability, &strand.soul, &strand.id);
+    seed(&database, capability, &strand.soul, &strand.id).await;
 
     let accepted = service
         .spawn(
@@ -44,8 +45,9 @@ fn vertical() {
                 remind: None,
             },
         )
+        .await
         .expect("accept job");
-    let stamp = stamp(&database, &accepted.job.id);
+    let stamp = stamp(&database, &accepted.job.id).await;
     let guard = Unit {
         unit: format!("santi-{}.service", stamp.replace('_', "-")),
     };
@@ -77,20 +79,20 @@ fn vertical() {
             .join(&accepted.job.id)
             .exists()
     );
-    let completed = (0..100)
-        .find_map(|_| {
-            let current = service
-                .job(&strand.soul, &accepted.job.id)
-                .expect("query job")
-                .expect("job");
-            if current.state.terminal() {
-                Some(current)
-            } else {
-                thread::sleep(Duration::from_millis(50));
-                None
-            }
-        })
-        .expect("job completion");
+    let mut completed = None;
+    for _ in 0..100 {
+        let current = service
+            .job(&strand.soul, &accepted.job.id)
+            .await
+            .expect("query job")
+            .expect("job");
+        if current.state.terminal() {
+            completed = Some(current);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let completed = completed.expect("job completion");
     assert_eq!(completed.state, job::State::Succeeded);
     let log = service
         .logs(JobRead {
@@ -100,29 +102,31 @@ fn vertical() {
             cursor: "0",
             limit: 4096,
         })
+        .await
         .expect("read log")
         .expect("log");
     assert_eq!(log.data, "vertical-ok\n");
     let acknowledged = service
         .ack(&strand.soul, &accepted.job.id)
+        .await
         .expect("acknowledge")
         .expect("job");
     assert!(acknowledged.acknowledged.is_some());
     std::mem::forget(guard);
 }
 
-#[test]
-fn restarts() {
+#[tokio::test]
+async fn restarts() {
     if !available() {
         eprintln!("skipping native job test: user supervisor is unavailable");
         return;
     }
     let temp = tempfile::tempdir().expect("temp dir");
     let database = temp.path().join("santi.sqlite");
-    let runtime = service(&temp, &database);
-    let strand = runtime.weave().expect("create strand").strand;
+    let runtime = service(&temp, &database).await;
+    let strand = runtime.weave().await.expect("create strand").strand;
     let capability = "jobcap_restart_probe";
-    seed(&database, capability, &strand.soul, &strand.id);
+    seed(&database, capability, &strand.soul, &strand.id).await;
     let accepted = runtime
         .spawn(
             capability,
@@ -135,30 +139,31 @@ fn restarts() {
                 remind: None,
             },
         )
+        .await
         .expect("accept job");
-    let stamp = stamp(&database, &accepted.job.id);
+    let stamp = stamp(&database, &accepted.job.id).await;
     let guard = Unit {
         unit: format!("santi-{}.service", stamp.replace('_', "-")),
     };
     drop(runtime);
-    thread::sleep(Duration::from_millis(400));
+    tokio::time::sleep(Duration::from_millis(400)).await;
 
-    let restarted = service(&temp, &database);
-    restarted.resume().expect("cold-start reconcile");
-    let completed = (0..100)
-        .find_map(|_| {
-            let current = restarted
-                .job(&strand.soul, &accepted.job.id)
-                .expect("query")
-                .expect("job");
-            if current.state.terminal() {
-                Some(current)
-            } else {
-                thread::sleep(Duration::from_millis(50));
-                None
-            }
-        })
-        .expect("reconciled completion");
+    let restarted = service(&temp, &database).await;
+    restarted.resume().await.expect("cold-start reconcile");
+    let mut completed = None;
+    for _ in 0..100 {
+        let current = restarted
+            .job(&strand.soul, &accepted.job.id)
+            .await
+            .expect("query")
+            .expect("job");
+        if current.state.terminal() {
+            completed = Some(current);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let completed = completed.expect("reconciled completion");
     assert_eq!(completed.state, job::State::Succeeded);
     let log = restarted
         .logs(JobRead {
@@ -168,11 +173,13 @@ fn restarts() {
             cursor: "0",
             limit: 4096,
         })
+        .await
         .expect("read log")
         .expect("log");
     assert_eq!(log.data, "after-restart\n");
     restarted
         .ack(&strand.soul, &accepted.job.id)
+        .await
         .expect("ack")
         .expect("job");
     std::mem::forget(guard);

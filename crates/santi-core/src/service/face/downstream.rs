@@ -5,19 +5,19 @@ use crate::service::flow::ingest::External;
 use crate::{downstream, ingest};
 
 impl Service {
-    pub fn principal(&self, bearer: &str) -> Result<Option<downstream::Credential>, String> {
+    pub async fn principal(&self, bearer: &str) -> Result<Option<downstream::Credential>, String> {
         if bearer.is_empty() {
             return Ok(None);
         }
         let digest = hex::encode(Sha256::digest(bearer.as_bytes()));
-        self.store.downstreams().map(|downstreams| {
+        self.store.downstreams().await.map(|downstreams| {
             downstreams
                 .into_iter()
                 .find(|downstream| same(&downstream.digest, &digest))
         })
     }
 
-    pub fn enroll(
+    pub async fn enroll(
         &self,
         request: crate::downstream::Draft,
     ) -> Result<downstream::Credential, String> {
@@ -36,14 +36,21 @@ impl Service {
         if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err("downstream digest must be 64 hexadecimal characters".to_string());
         }
-        self.store.enroll(id, prefix, &digest)
+        self.store
+            .enroll(santi_estate::DownstreamDraft {
+                tag: id,
+                prefix,
+                digest: &digest,
+                created: &crate::now(),
+            })
+            .await
     }
 
-    pub fn downstreams(&self) -> Result<Vec<downstream::Credential>, String> {
-        self.store.downstreams()
+    pub async fn downstreams(&self) -> Result<Vec<downstream::Credential>, String> {
+        self.store.downstreams().await
     }
 
-    pub fn downstream(
+    pub async fn downstream(
         &self,
         bearer: &str,
         mut request: ingest::Request,
@@ -58,7 +65,7 @@ impl Service {
         if request.request.len() > 256 {
             return Err("downstream request must not exceed 256 bytes".to_string());
         }
-        let Some(downstream) = self.principal(bearer)? else {
+        let Some(downstream) = self.principal(bearer).await? else {
             return Ok(Admission::Denied);
         };
         if !request.label.starts_with(&downstream.prefix) {
@@ -71,25 +78,19 @@ impl Service {
         let digest = hex::encode(Sha256::digest(
             serde_json::to_vec(&request).map_err(|error| error.to_string())?,
         ));
-        if let Some(receipt) = self
-            .store
-            .replayed(&downstream.id, &request.request, &digest)?
-        {
-            return Ok(Admission::Accepted(crate::ingest::Outcome::Accepted {
-                receipt,
-            }));
-        }
-        let outcome = self.external(External {
-            soul: &request.soul,
-            label: &request.label,
-            text: request.text,
-            source,
-            replay: Some(crate::store::Replay::Downstream {
-                owner: &downstream.id,
-                request: &request.request,
-                digest: &digest,
-            }),
-        })?;
+        let outcome = self
+            .external(External {
+                soul: &request.soul,
+                label: &request.label,
+                text: request.text,
+                source,
+                replay: Some(santi_estate::ReplayDraft::Downstream {
+                    owner: &downstream.id,
+                    request: &request.request,
+                    digest: &digest,
+                }),
+            })
+            .await?;
         Ok(Admission::Accepted(outcome))
     }
 }

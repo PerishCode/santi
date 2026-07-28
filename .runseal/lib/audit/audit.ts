@@ -1,15 +1,13 @@
 //! `runseal :audit [session] [--turn id] [--failed] [-n N] [--full] [-f]`
 //!
-//! Read-only tool-activity view, aggregated straight from the runtime's SQLite
-//! store — no runtime code, no API endpoint. It joins tool_calls → turns →
-//! tool_results so you can see, for getting work done: when, which turn (and its
-//! status), what command ran, and what came back.
+//! Read-only tool-activity view projected by the local operator binary from the
+//! Keel estate. It stays off the HTTP surface while refusing knowledge of
+//! Keel's physical schema.
 
 import { capture, sleep } from "@/lib/std/cmd.ts";
 import { exists, join } from "@/lib/std/fs.ts";
 import { repoRoot } from "@/lib/std/repo.ts";
 
-const DEFAULT_DB = ".tmp/santi.sqlite";
 const DEFAULT_LIMIT = 30;
 const FOLLOW_INTERVAL_MS = 2_000;
 const HEAD_LINES = 3;
@@ -29,10 +27,11 @@ interface Options {
 interface Row {
   created_at: string;
   status: string;
+  strand_id: string;
   turn_id: string;
   tool_name: string;
-  arguments: string;
-  output: string | null;
+  arguments: unknown;
+  output: unknown | null;
   error_text: string | null;
 }
 
@@ -51,31 +50,19 @@ export async function audit(argv: string[]): Promise<number> {
   if (opts instanceof Error) return fail(opts.message);
 
   const repo = repoRoot();
-  const configured = dbPath(repo);
-  const db = configured.startsWith("/") ? configured : join(repo, configured);
-  if (!exists(db)) {
-    return fail(`no database at ${db} — start the server first (runseal :dev start)`);
+  const binary = join(repo, "target/debug/santi-api");
+  if (!exists(binary)) {
+    return fail(`operator binary is missing at ${binary} — run runseal :dev start first`);
   }
-
-  const where: string[] = [];
   if (opts.session) {
     if (!ID_RE.test(opts.session)) return fail(`invalid session id: ${opts.session}`);
-    where.push(`ss.session_id = '${opts.session}'`);
   }
   if (opts.turn) {
     if (!ID_RE.test(opts.turn)) return fail(`invalid turn id: ${opts.turn}`);
-    where.push(`t.id = '${opts.turn}'`);
-  }
-  if (opts.failed) {
-    where.push(
-      "(tr.error_text IS NOT NULL OR t.status = 'failed' OR " +
-        "IFNULL(json_extract(tr.output, '$.exit_code'), 0) <> 0)",
-    );
   }
 
   try {
-    const recent = await query(db, sql(where, `ORDER BY tc.created_at DESC LIMIT ${opts.limit}`));
-    recent.reverse();
+    const recent = await query(binary, opts);
     for (const row of recent) console.log(renderRow(row, opts.full));
 
     if (!opts.follow) return 0;
@@ -83,8 +70,7 @@ export async function audit(argv: string[]): Promise<number> {
     let last = recent.length > 0 ? recent[recent.length - 1].created_at : "";
     while (opts.follow) {
       await sleep(FOLLOW_INTERVAL_MS);
-      const conditions = last === "" ? where : [...where, `tc.created_at > '${last}'`];
-      const fresh = await query(db, sql(conditions, "ORDER BY tc.created_at ASC"));
+      const fresh = await query(binary, opts, last === "" ? undefined : last);
       for (const row of fresh) {
         console.log(renderRow(row, opts.full));
         last = row.created_at;
@@ -96,24 +82,16 @@ export async function audit(argv: string[]): Promise<number> {
   }
 }
 
-function sql(where: string[], tail: string): string {
-  const clause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
-  return `
-SELECT tc.created_at AS created_at, t.status AS status, tc.turn_id AS turn_id,
-       tc.tool_name AS tool_name, tc.arguments AS arguments,
-       tr.output AS output, tr.error_text AS error_text
-FROM tool_calls tc
-JOIN turns t ON t.id = tc.turn_id
-LEFT JOIN tool_results tr ON tr.tool_call_id = tc.id
-JOIN soul_sessions ss ON ss.id = t.soul_session_id
-${clause}
-${tail};`;
-}
-
-async function query(db: string, statement: string): Promise<Row[]> {
-  const result = await capture("sqlite3", ["-readonly", "-json", db, statement]);
+async function query(binary: string, opts: Options, after?: string): Promise<Row[]> {
+  const args: string[] = [];
+  if (opts.session) args.push("--strand", opts.session);
+  args.push("audit", "--limit", String(opts.limit));
+  if (opts.turn) args.push("--turn", opts.turn);
+  if (opts.failed) args.push("--failed");
+  if (after) args.push("--after", after);
+  const result = await capture(binary, args);
   if (result.code !== 0) {
-    throw new Error(`sqlite3 failed: ${(result.stderr || result.stdout).trim()}`);
+    throw new Error(`santi-api audit failed: ${(result.stderr || result.stdout).trim()}`);
   }
   const text = result.stdout.trim();
   return text === "" ? [] : (JSON.parse(text) as Row[]);
@@ -130,19 +108,14 @@ function resultLines(row: Row, full: boolean): string[] {
   if (row.error_text) return block(`✗ ${row.error_text}`, full);
 
   if (row.output === null) return [];
-  let parsed: ShellOutput | null = null;
-  try {
-    parsed = JSON.parse(row.output) as ShellOutput;
-  } catch {
-    parsed = null;
-  }
+  const parsed = typeof row.output === "object" ? row.output as ShellOutput : null;
   if (parsed && (parsed.stdout !== undefined || parsed.stderr !== undefined)) {
     const exit = parsed.exit_code ?? 0;
     const marker = exit === 0 ? "→ " : `✗ exit ${exit}: `;
     const text = (parsed.stdout ?? "").trim() || (parsed.stderr ?? "").trim();
     return text === "" ? [INDENT + marker.trimEnd()] : block(marker + text, full);
   }
-  return block(`→ ${row.output}`, full);
+  return block(`→ ${JSON.stringify(row.output)}`, full);
 }
 
 function block(text: string, full: boolean): string[] {
@@ -156,27 +129,13 @@ function block(text: string, full: boolean): string[] {
 }
 
 function commandOf(row: Row): string {
-  try {
-    const args = JSON.parse(row.arguments) as { command?: string };
+  if (typeof row.arguments === "object" && row.arguments !== null) {
+    const args = row.arguments as { command?: unknown };
     if (typeof args.command === "string") return firstLine(args.command);
-  } catch {
-    // not JSON / not a shell call; fall back to the raw arguments
   }
-  return firstLine(row.arguments);
-}
-
-function dbPath(repo: string): string {
-  const fromEnv = Deno.env.get("SANTI_PATHS_DATABASE");
-  if (fromEnv) return fromEnv;
-  try {
-    const match = Deno.readTextFileSync(join(repo, ".env")).match(
-      /^\s*SANTI_PATHS_DATABASE\s*=\s*(\S+)\s*$/m,
-    );
-    if (match) return match[1];
-  } catch {
-    // no .env; use the default
-  }
-  return DEFAULT_DB;
+  return firstLine(
+    typeof row.arguments === "string" ? row.arguments : JSON.stringify(row.arguments),
+  );
 }
 
 function parseArgs(argv: string[]): Options | Error {
@@ -242,8 +201,8 @@ function truncate(text: string, max: number): string {
 function usage(): void {
   console.log("Usage: runseal :audit [session] [--turn <id>] [--failed] [-n N] [--full] [-f]");
   console.log("");
-  console.log("Read-only tool-activity view aggregated from the runtime SQLite store.");
-  console.log("  session    scope to one session id");
+  console.log("Read-only tool-activity view projected from the local Keel estate.");
+  console.log("  session    scope to one strand id (legacy positional spelling)");
   console.log("  --turn id  scope to one turn id");
   console.log("  --failed   only tool errors or failed turns");
   console.log("  -n N       show the last N calls (default 30)");

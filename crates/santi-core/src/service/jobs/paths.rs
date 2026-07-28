@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
 use super::Service;
-use crate::store::JobRecord;
+use santi_estate::JobRecord;
 
 impl Service {
     pub(super) fn jobhome(&self, record: &JobRecord) -> PathBuf {
-        let key = if record.stamp.starts_with("stamp_") {
-            &record.stamp
+        let key = if record.generation.starts_with("stamp_") {
+            &record.generation
         } else {
             &record.job.id
         };

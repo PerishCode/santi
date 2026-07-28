@@ -9,7 +9,7 @@ pub(in crate::service) type Key = (String, material::Kind);
 const PLAIN: &str = "text/plain; charset=utf-8";
 
 impl Service {
-    pub fn material(
+    pub async fn material(
         &self,
         strand: &str,
         request: material::Request,
@@ -18,17 +18,19 @@ impl Service {
             material::Kind::SystemPrompt => {
                 let strand = self
                     .store
-                    .strand(strand)?
+                    .strand(strand)
+                    .await?
                     .ok_or_else(|| "strand not found".to_string())?;
                 self.prompt(&strand)
             }
         }
     }
 
-    pub(in crate::service) fn wording(&self, strand: &str) -> Result<String, String> {
+    pub(in crate::service) async fn wording(&self, strand: &str) -> Result<String, String> {
         let strand = self
             .store
-            .strand(strand)?
+            .strand(strand)
+            .await?
             .ok_or_else(|| "strand not found".to_string())?;
         Ok(self.prompt(&strand)?.text)
     }
@@ -42,7 +44,7 @@ impl Service {
             memoir: self.memoir(&strand.soul),
             journal: self.journal(id),
             allowance: self.regimen().allowance,
-            genesis: strand.soul == self.store.genesis(),
+            genesis: strand.soul == crate::GENESIS,
         })?;
         let key: Key = (id.to_string(), material::Kind::SystemPrompt);
         let mut cache = self.materials.lock().unwrap();

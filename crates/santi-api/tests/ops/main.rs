@@ -13,44 +13,59 @@ fn paths_under(root: &Path) -> Layout {
 mod runtime {
     use super::*;
 
-    #[test]
-    fn reads() {
+    #[tokio::test]
+    async fn reads() {
         let temp = tempfile::tempdir().expect("temp dir");
         let paths = paths_under(temp.path());
-        santi_core::Store::open(&paths.database).expect("open store");
-        let memory = santi_core::memoir(&paths.runtime, santi_core::GENESIS);
+        let store = santi_core::Store::open(&paths.database)
+            .await
+            .expect("open store");
+        store
+            .seed(santi_core::GENESIS, &santi_core::now())
+            .await
+            .expect("seed");
+        let memory = paths
+            .runtime
+            .join("souls")
+            .join(santi_core::GENESIS)
+            .join("memory")
+            .join(santi_core::MEMORY);
         std::fs::create_dir_all(memory.parent().unwrap()).unwrap();
         std::fs::write(&memory, "# memory").unwrap();
 
-        let report = paths.doctor().expect("doctor");
+        let report = paths.doctor().await.expect("doctor");
         assert!(report.ok, "expected healthy: {report:?}");
-        assert!(report.schema_ok);
-        assert_eq!(report.schema_version, Some(santi_core::VERSION));
+        assert!(report.estate_ready);
+        assert!(report.estate_error.is_none());
         assert!(report.memory_present && report.memory_readable);
         assert!(report.memory_bytes > 0);
     }
 
-    #[test]
-    fn rejects() {
+    #[tokio::test]
+    async fn rejects() {
         let temp = tempfile::tempdir().expect("temp dir");
         let paths = paths_under(temp.path());
         std::fs::create_dir_all(paths.database.parent().unwrap()).unwrap();
-        let conn = rusqlite::Connection::open(&paths.database).unwrap();
-        conn.pragma_update(None, "user_version", 5u32).unwrap();
-        drop(conn);
+        std::fs::write(&paths.database, b"not an estate").expect("write malformed estate");
 
-        let report = paths.doctor().expect("doctor");
+        let report = paths.doctor().await.expect("doctor");
         assert!(!report.ok);
-        assert!(!report.schema_ok);
-        assert_eq!(report.schema_version, Some(5));
+        assert!(!report.estate_ready);
+        assert!(report.estate_error.is_some());
     }
 
-    #[test]
-    fn handles() {
+    #[tokio::test]
+    async fn handles() {
         let temp = tempfile::tempdir().expect("temp dir");
         let paths = paths_under(temp.path());
-        santi_core::Store::open(&paths.database).expect("open store");
-        let report = paths.doctor().expect("doctor");
+        let store = santi_core::Store::open(&paths.database)
+            .await
+            .expect("open store");
+        store
+            .seed(santi_core::GENESIS, &santi_core::now())
+            .await
+            .expect("seed");
+        let report = paths.doctor().await.expect("doctor");
         assert!(report.ok, "absent memory should be fine: {report:?}");
         assert!(!report.memory_present);
 
@@ -58,19 +73,29 @@ mod runtime {
             database: temp.path().join("void").join("db"),
             ..paths
         };
-        let report = missing.doctor().expect("doctor");
+        let report = missing.doctor().await.expect("doctor");
         assert!(!report.ok);
-        assert_eq!(report.schema_version, None);
+        assert!(!report.database_exists);
+        assert_eq!(
+            report.estate_error.as_deref(),
+            Some("estate database is missing")
+        );
     }
 
-    #[test]
-    fn serializes() {
+    #[tokio::test]
+    async fn serializes() {
         let temp = tempfile::tempdir().expect("temp dir");
         let paths = paths_under(temp.path());
-        santi_core::Store::open(&paths.database).expect("open store");
-        let report = paths.doctor().expect("doctor");
+        let store = santi_core::Store::open(&paths.database)
+            .await
+            .expect("open store");
+        store
+            .seed(santi_core::GENESIS, &santi_core::now())
+            .await
+            .expect("seed");
+        let report = paths.doctor().await.expect("doctor");
         let json = serde_json::to_string(&report).expect("serialize");
-        assert!(json.contains("\"schema_ok\""));
+        assert!(json.contains("\"estate_ready\""));
         assert!(json.contains("\"provider\":null"));
         let _ = PathBuf::from(&report.database);
     }
@@ -79,61 +104,168 @@ mod runtime {
 mod seed {
     use super::*;
 
-    #[test]
-    fn boots() {
+    #[tokio::test]
+    async fn boots() {
         let temp = tempfile::tempdir().expect("temp dir");
         let paths = paths_under(temp.path());
         let strand = {
-            let store = santi_core::Store::open(&paths.database).expect("open");
-            store.weave().expect("create strand").id
+            let store = santi_core::Store::open(&paths.database)
+                .await
+                .expect("open");
+            store
+                .seed(santi_core::GENESIS, &santi_core::now())
+                .await
+                .expect("seed");
+            store
+                .create_strand(santi_estate::StrandDraft {
+                    tag: "ss_seed",
+                    soul: santi_core::GENESIS,
+                    label: None,
+                    parent: None,
+                    fork: None,
+                    created: &santi_core::now(),
+                })
+                .await
+                .expect("create strand")
+                .id
         };
 
-        let report = paths.inbox_seed(&strand, "come look").unwrap();
+        let report = paths.inbox_seed(&strand, "come look").await.unwrap();
         assert!(report.accepted);
-        let store = santi_core::Store::open(&paths.database).expect("reopen");
-        let started = store
-            .tried(&strand, "strand_send", None)
-            .unwrap()
-            .expect("turn starts");
-        assert_eq!(started.drained.len(), 1);
-        assert_eq!(started.drained[0].text, "come look");
-        assert_eq!(
-            started.drained[0].message.kind,
-            santi_core::message::Kind::SantiSystem
-        );
+        let store = santi_core::Store::open(&paths.database)
+            .await
+            .expect("reopen");
+        let inboxes = store.inboxes(&strand).await.expect("pending inbox");
+        assert_eq!(inboxes.len(), 1);
+        assert_eq!(inboxes[0].content.rendered(), "come look");
+        assert_eq!(inboxes[0].kind, santi_core::message::Kind::SantiSystem);
     }
 
-    #[test]
-    fn labels() {
+    #[tokio::test]
+    async fn labels() {
         let temp = tempfile::tempdir().expect("temp dir");
         let paths = paths_under(temp.path());
-        santi_core::Store::open(&paths.database).expect("open");
+        let store = santi_core::Store::open(&paths.database)
+            .await
+            .expect("open");
+        store
+            .seed(santi_core::GENESIS, &santi_core::now())
+            .await
+            .expect("seed");
         let label = "soul:soul_default:ops";
 
         let report = paths
             .inbox_seed_label(santi_core::GENESIS, label, "upgrade finished")
+            .await
             .unwrap();
         assert!(report.accepted);
-        let store = santi_core::Store::open(&paths.database).expect("reopen");
-        let strand = store.strand(&report.strand).unwrap().expect("strand");
+        let store = santi_core::Store::open(&paths.database)
+            .await
+            .expect("reopen");
+        let strand = store.strand(&report.strand).await.unwrap().expect("strand");
         assert_eq!(strand.label.as_deref(), Some(label));
-        let started = store
-            .tried(&report.strand, "strand_send", None)
-            .unwrap()
-            .expect("turn starts");
-        assert_eq!(started.drained[0].text, "upgrade finished");
+        let inboxes = store.inboxes(&report.strand).await.expect("inboxes");
+        assert_eq!(inboxes[0].content.rendered(), "upgrade finished");
     }
 
-    #[test]
-    fn unknown() {
+    #[tokio::test]
+    async fn unknown() {
         let temp = tempfile::tempdir().expect("temp dir");
         let paths = paths_under(temp.path());
-        santi_core::Store::open(&paths.database).expect("open");
+        let store = santi_core::Store::open(&paths.database)
+            .await
+            .expect("open");
+        store
+            .seed(santi_core::GENESIS, &santi_core::now())
+            .await
+            .expect("seed");
 
-        let error = paths.inbox_seed("ss_missing", "x").unwrap_err();
+        let error = paths.inbox_seed("ss_missing", "x").await.unwrap_err();
         assert!(error.contains("unknown strand"), "got: {error}");
-        let store = santi_core::Store::open(&paths.database).expect("reopen");
-        assert!(store.awaiting().unwrap().is_empty());
+        let store = santi_core::Store::open(&paths.database)
+            .await
+            .expect("reopen");
+        assert!(store.pending_strands().await.unwrap().is_empty());
+    }
+}
+
+mod audit {
+    use super::*;
+
+    #[tokio::test]
+    async fn projects() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let paths = paths_under(temp.path());
+        let store = santi_core::Store::open(&paths.database)
+            .await
+            .expect("open");
+        store
+            .seed(santi_core::GENESIS, &santi_core::now())
+            .await
+            .expect("seed");
+        store
+            .create_strand(santi_estate::StrandDraft {
+                tag: "ss_audit",
+                soul: santi_core::GENESIS,
+                label: None,
+                parent: None,
+                fork: None,
+                created: "2026-07-28T00:00:00.000Z",
+            })
+            .await
+            .expect("strand");
+        store
+            .create_turn(santi_estate::TurnDraft {
+                tag: "turn_audit",
+                strand: "ss_audit",
+                trigger: santi_core::turn::Trigger::System,
+                source: None,
+                from: 0,
+                created: "2026-07-28T00:00:00.000Z",
+            })
+            .await
+            .expect("turn");
+        store
+            .create_call(santi_estate::CallDraft {
+                tag: "call_audit",
+                turn: "turn_audit",
+                tool: "shell",
+                arguments: &serde_json::json!({"command": "printf audit"}),
+                created: "2026-07-28T00:00:01.000Z",
+            })
+            .await
+            .expect("call");
+        store
+            .create_reply(santi_estate::ReplyDraft {
+                tag: "result_audit",
+                call: "call_audit",
+                output: Some(&serde_json::json!({"exit_code": 0, "stdout": "audit"})),
+                error: None,
+                created: "2026-07-28T00:00:02.000Z",
+            })
+            .await
+            .expect("reply");
+        store
+            .complete_turn("turn_audit", 2, "2026-07-28T00:00:03.000Z")
+            .await
+            .expect("complete");
+
+        let rows = paths
+            .audit(Some("ss_audit"), None, false, 30, None)
+            .await
+            .expect("audit");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].turn_id, "turn_audit");
+        assert_eq!(rows[0].status, "completed");
+        assert_eq!(rows[0].arguments["command"], "printf audit");
+        assert_eq!(rows[0].output.as_ref().unwrap()["stdout"], "audit");
+        assert!(
+            paths
+                .audit(Some("ss_audit"), None, true, 30, None)
+                .await
+                .expect("failed")
+                .is_empty()
+        );
     }
 }
 

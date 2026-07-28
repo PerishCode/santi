@@ -5,14 +5,20 @@ use std::time::Duration;
 use santi_api::config::{Layout, Profile};
 use santi_api::runtime::Runtime;
 
-#[test]
-fn reports() {
+#[tokio::test]
+async fn reports() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
-    santi_core::Store::open(&paths.database).expect("open store");
+    let store = santi_core::Store::open(&paths.database)
+        .await
+        .expect("open store");
+    store
+        .seed(santi_core::GENESIS, &santi_core::now())
+        .await
+        .expect("seed");
     let held = runtime_under(temp.path(), Some(120000));
 
-    let report = paths.configured(&held).expect("doctor");
+    let report = paths.configured(&held).await.expect("doctor");
     assert!(report.ok, "expected healthy: {report:?}");
     let provider = report.provider.expect("provider report");
     assert_eq!(provider.profile.as_deref(), Some("openai"));
@@ -22,14 +28,20 @@ fn reports() {
     assert_eq!(provider.source.as_deref(), Some("provider_config"));
 }
 
-#[test]
-fn rejects() {
+#[tokio::test]
+async fn rejects() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
-    santi_core::Store::open(&paths.database).expect("open store");
+    let store = santi_core::Store::open(&paths.database)
+        .await
+        .expect("open store");
+    store
+        .seed(santi_core::GENESIS, &santi_core::now())
+        .await
+        .expect("seed");
     let held = runtime_under(temp.path(), None);
 
-    let report = paths.configured(&held).expect("doctor");
+    let report = paths.configured(&held).await.expect("doctor");
     assert!(!report.ok);
     let provider = report.provider.expect("provider report");
     assert!(!provider.ok);

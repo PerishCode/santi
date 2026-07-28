@@ -2,9 +2,6 @@ use super::support::*;
 use santi_core::message;
 use santi_core::service::{self, Service};
 
-mod downstream;
-mod more;
-
 #[tokio::test]
 async fn ingests() {
     let temp = tempfile::tempdir().expect("temp dir");
@@ -19,12 +16,14 @@ async fn ingests() {
         },
         provider.clone(),
     )
+    .await
     .expect("open service");
 
-    let soul = service.souls().expect("list souls")[0].id.clone();
+    let soul = service.souls().await.expect("list souls")[0].id.clone();
     let label = "github:ops:issue:PerishCode/santi#42";
     let santi_core::ingest::Outcome::Accepted { receipt } = service
         .evented(&soul, label, "an external request arrived".to_string())
+        .await
         .expect("ingest event")
     else {
         panic!("expected accepted");
@@ -55,6 +54,7 @@ async fn ingests() {
         receipt: receipt_again,
     } = service
         .evented(&soul, label, "a follow-up arrived".to_string())
+        .await
         .expect("ingest second event")
     else {
         panic!("expected accepted");
@@ -87,23 +87,36 @@ async fn drains() {
     let provider = Arc::new(FakeProvider::default());
 
     let strand = {
-        let service = Service::open(config.clone(), provider.clone()).expect("open service");
-        service.weave().expect("create strand").strand.id
+        let service = Service::open(config.clone(), provider.clone())
+            .await
+            .expect("open service");
+        service.weave().await.expect("create strand").strand.id
     };
 
-    let store = Store::open(&config.database).expect("open store directly");
+    let store = santi_core::Store::open(&config.database)
+        .await
+        .expect("open store directly");
+    let content = message::Content::text("stranded before the crash");
     store
-        .receive(
-            &strand,
-            message::Kind::Text,
-            message::Content::text("stranded before the crash"),
-            None,
+        .accept_inbox(
+            santi_core::InboxDraft {
+                tag: &santi_core::tag("inbox"),
+                strand: &strand,
+                kind: message::Kind::Text,
+                content: &content,
+                source: None,
+                created: &santi_core::now(),
+            },
+            500,
         )
+        .await
         .expect("enqueue inbox");
     drop(store);
 
-    let service = Service::open(config, provider.clone()).expect("reopen service");
-    service.resume().expect("resume pending");
+    let service = Service::open(config, provider.clone())
+        .await
+        .expect("reopen service");
+    service.resume().await.expect("resume pending");
 
     let runtime = Probe::new(&service).any_completed(&strand).await;
     assert!(

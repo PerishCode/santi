@@ -35,6 +35,17 @@ pub enum Command {
         )]
         storage_only: bool,
     },
+    #[command(about = "Read durable tool activity from the local Keel estate")]
+    Audit {
+        #[arg(long)]
+        turn: Option<String>,
+        #[arg(long)]
+        failed: bool,
+        #[arg(short = 'n', long = "limit", default_value_t = 30)]
+        limit: usize,
+        #[arg(long, hide = true)]
+        after: Option<String>,
+    },
     #[command(about = "Operate directly on local runtime state")]
     #[command(subcommand)]
     Inbox(InboxCommand),

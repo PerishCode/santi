@@ -20,8 +20,8 @@ tokio.workspace = true
 [dev-dependencies]
 async-trait.workspace = true
 futures-util.workspace = true
-rusqlite.workspace = true
 santi-core.workspace = true
+santi-estate.workspace = true
 santi-provider.workspace = true
 sha2.workspace = true
 tempfile = "3.27.0"

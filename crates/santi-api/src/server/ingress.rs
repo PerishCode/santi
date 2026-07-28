@@ -39,6 +39,7 @@ pub(super) async fn ingest_webhook(
 ) -> Result<Response, ApiError> {
     let subscription = service
         .webhook(&name)
+        .await
         .map_err(ApiError::from_service)?
         .ok_or_else(|| ApiError::not_found("webhook not found"))?;
     let adaptor = adaptor_for(&subscription.adaptor)
@@ -80,29 +81,35 @@ pub(super) async fn ingest_webhook(
     let outcome = match event.delivery.as_deref() {
         Some(delivery) => {
             let digest = digest(&subscription.adaptor, &headers, &body);
-            service.deliver(
-                santi_core::service::Envelope {
-                    soul: &subscription.soul,
-                    label: &label,
-                    text: event.santi_system_text,
-                    source: Some(source),
-                },
-                santi_core::service::Delivery {
-                    subscription: &subscription.name,
-                    id: delivery,
-                    digest: &digest,
-                },
-            )
+            service
+                .deliver(
+                    santi_core::service::Envelope {
+                        soul: &subscription.soul,
+                        label: &label,
+                        text: event.santi_system_text,
+                        source: Some(source),
+                    },
+                    santi_core::service::Delivery {
+                        subscription: &subscription.name,
+                        id: delivery,
+                        digest: &digest,
+                    },
+                )
+                .await
         }
         None if subscription.adaptor == "github" => {
             return Err(ApiError::bad_request("missing X-GitHub-Delivery header"));
         }
-        None => service.sourced(
-            &subscription.soul,
-            &label,
-            event.santi_system_text,
-            Some(source),
-        ),
+        None => {
+            service
+                .sourced(
+                    &subscription.soul,
+                    &label,
+                    event.santi_system_text,
+                    Some(source),
+                )
+                .await
+        }
     }
     .map_err(ApiError::from_service)?;
     match outcome {

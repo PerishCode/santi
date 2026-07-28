@@ -1,9 +1,11 @@
-use crate::store::{Misfire, Stumble};
-use crate::{Fault, catalog, engine, turn::Turn};
+use crate::{Fault, Ruled, catalog, engine, turn::Turn};
 use crate::{message, stream};
 
 use super::super::Service;
 
+mod provider;
+mod runtime;
+mod salvage;
 mod stop;
 
 #[derive(Debug, Clone, Copy)]
@@ -136,37 +138,26 @@ impl Failure {
 }
 
 impl Service {
-    pub(super) fn bury(&self, strand: &str, turn: &str, failure: Failure) {
+    pub(super) async fn bury(&self, strand: &str, turn: &str, failure: Failure) {
         let Failure {
             error,
             partial,
             cause,
         } = failure;
-        let condemned = |canonical_error: Fault, budget: &str| match self.store.condemn(
-            turn,
-            &error,
-            canonical_error.incident.as_deref(),
-        ) {
-            Ok(turn) => (Some(turn), canonical_error),
-            Err(persistence_error) => {
-                eprintln!(
-                    "santi: {budget}-budget turn persistence failed for {turn}: {persistence_error}"
-                );
-                (None, unwritten(strand, turn, persistence_error))
-            }
-        };
         let (finished, canonical_error) = match cause {
-            Cause::Provider(metadata) => self.misfired(strand, turn, &error, metadata),
-            Cause::Budget(Admission::Context, error) => condemned(*error, "context"),
-            Cause::Budget(Admission::Execution, error) => condemned(*error, "execution"),
-            Cause::Runtime(operation) => self.tripped(strand, turn, &error, operation),
-            Cause::Stopped(cause) => self.interrupted(strand, turn, cause, &error),
+            Cause::Provider(metadata) => self.misfired(strand, turn, &error, metadata).await,
+            Cause::Budget(admission, canonical_error) => {
+                self.failed_budget(strand, turn, &error, admission, *canonical_error)
+                    .await
+            }
+            Cause::Runtime(operation) => self.tripped(strand, turn, &error, operation).await,
+            Cause::Stopped(cause) => self.interrupted(strand, turn, cause, &error).await,
         };
 
         if let Some(held) = finished {
-            self.salvage(strand, &held.id, &held, partial);
+            self.salvage(strand, &held.id, &held, partial).await;
         }
-        self.dispatched();
+        self.dispatched().await;
         self.publish(
             strand,
             stream::Payload::Turn(crate::turn::Beat::Failed {
@@ -176,87 +167,31 @@ impl Service {
         );
     }
 
-    fn misfired(
+    async fn failed_budget(
         &self,
         strand: &str,
         turn: &str,
         error: &str,
-        metadata: Metadata,
+        admission: Admission,
+        canonical: Fault,
     ) -> (Option<Turn>, Fault) {
-        match self.store.misfire(
-            turn,
-            error,
-            Misfire {
-                provider: &metadata.provider,
-                model: &metadata.model,
-                stage: metadata.stage.name(),
-                operation: metadata.stage.operation(),
-                round: metadata.round,
-                detail: error,
-            },
-        ) {
-            Ok((turn, error)) => (Some(turn), error),
-            Err(persistence_error) => {
-                eprintln!(
-                    "santi: provider failure incident persistence failed for {turn}: {persistence_error}"
-                );
-                let held = self.store.fail(turn, error).ok();
-                (held, unrecorded(strand, turn, persistence_error))
+        let persisted = match canonical.incident.as_deref() {
+            Some(incident) => {
+                self.store
+                    .fail_linked(turn, error, incident, &crate::now())
+                    .await
             }
-        }
-    }
-
-    fn tripped(
-        &self,
-        strand: &str,
-        turn: &str,
-        error: &str,
-        operation: Operation,
-    ) -> (Option<Turn>, Fault) {
-        match self.store.stumble(
-            turn,
-            error,
-            Stumble {
-                operation: operation.name(),
-                detail: error,
-            },
-        ) {
-            Ok((turn, error)) => (Some(turn), error),
-            Err(persistence_error) => {
-                eprintln!(
-                    "santi: runtime turn failure persistence failed for {turn}: {persistence_error}"
-                );
-                (None, unwritten(strand, turn, persistence_error))
-            }
-        }
-    }
-
-    fn salvage(&self, strand: &str, turn: &str, held: &Turn, partial: String) {
-        if partial.trim().is_empty() {
-            return;
-        }
-        match self.store.pen(crate::Draft {
-            strand: &held.strand,
-            actor: message::Role::Soul,
-            id: self.store.genesis(),
-            content: message::Content::text(partial),
-            state: message::State::Aborted,
-            intake: message::Intake::Record,
-        }) {
-            Ok(message) => {
-                let seq = message.message.relation.seq;
-                self.publish(
-                    strand,
-                    stream::Payload::Message(crate::message::Beat::Created {
-                        message: message.message,
-                    }),
-                );
-                if let Err(error) = self.store.seal(turn, seq) {
-                    eprintln!("santi: failed to finalize partial output for {turn}: {error}");
-                }
-            }
-            Err(error) => {
-                eprintln!("santi: failed to persist partial output for {turn}: {error}");
+            None => self.store.fail_turn(turn, error, &crate::now()).await,
+        };
+        match persisted {
+            Ok(turn) => (Some(turn), canonical),
+            Err(detail) => {
+                let budget = match admission {
+                    Admission::Context => "context",
+                    Admission::Execution => "execution",
+                };
+                eprintln!("santi: {budget}-budget turn persistence failed for {turn}: {detail}");
+                (None, unwritten(strand, turn, detail))
             }
         }
     }

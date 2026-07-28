@@ -30,6 +30,7 @@ pub(crate) async fn fetch(
 ) -> Result<Response, ApiError> {
     let payload = service
         .fetch(&soul, &strand, &key)
+        .await
         .map_err(ApiError::from_service)?
         .ok_or_else(|| ApiError::not_found("object not found"))?;
     Response::builder()

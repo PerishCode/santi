@@ -10,11 +10,19 @@ pub(in crate::service) struct Progress<'a> {
 }
 
 impl Service {
-    pub(in crate::service) fn tend(&self, progress: Progress<'_>) -> Result<(), String> {
+    pub(in crate::service) async fn tend(&self, progress: Progress<'_>) -> Result<(), String> {
         if let Some(thinking) = progress.current {
             if progress.response.is_some()
                 && thinking.response != progress.response
-                && let Some(updated) = self.store.attribute(&thinking.id, progress.response)?
+                && let Some(updated) = self
+                    .store
+                    .update_thinking(
+                        &thinking.id,
+                        progress.response.as_deref(),
+                        None,
+                        &crate::now(),
+                    )
+                    .await?
             {
                 *thinking = updated.clone();
                 *progress.summary = Some(updated.clone());
@@ -26,7 +34,15 @@ impl Service {
             return Ok(());
         }
 
-        let thinking = self.store.muse(progress.turn, progress.response)?;
+        let thinking = self
+            .store
+            .create_thinking(santi_estate::ThinkingDraft {
+                tag: &crate::tag("thinking"),
+                turn: progress.turn,
+                response: progress.response.as_deref(),
+                created: &crate::now(),
+            })
+            .await?;
         self.publish(
             progress.strand,
             stream::Payload::Thinking(crate::thinking::Beat::Created {
@@ -38,7 +54,7 @@ impl Service {
         Ok(())
     }
 
-    pub(in crate::service) fn summarize(
+    pub(in crate::service) async fn summarize(
         &self,
         strand: &str,
         summary_target: &mut Option<thinking::Span>,
@@ -50,7 +66,11 @@ impl Service {
         let Some(thinking) = summary_target else {
             return Ok(());
         };
-        if let Some(updated) = self.store.summarize(&thinking.id, summary)? {
+        if let Some(updated) = self
+            .store
+            .update_thinking(&thinking.id, None, Some(&summary), &crate::now())
+            .await?
+        {
             *thinking = updated.clone();
             self.publish(
                 strand,
@@ -60,7 +80,7 @@ impl Service {
         Ok(())
     }
 
-    pub(in crate::service) fn conclude(
+    pub(in crate::service) async fn conclude(
         &self,
         strand: &str,
         current: &mut Option<thinking::Span>,
@@ -69,7 +89,11 @@ impl Service {
         let Some(thinking) = current.take() else {
             return Ok(());
         };
-        if let Some(completed) = self.store.conclude(&thinking.id, completion_reason)? {
+        if let Some(completed) = self
+            .store
+            .complete_thinking(&thinking.id, completion_reason, &crate::now())
+            .await?
+        {
             self.publish(
                 strand,
                 stream::Payload::Thinking(crate::thinking::Beat::Completed {
@@ -80,7 +104,7 @@ impl Service {
         Ok(())
     }
 
-    pub(in crate::service) fn abandon(
+    pub(in crate::service) async fn abandon(
         &self,
         strand: &str,
         current: &mut Option<thinking::Span>,
@@ -89,7 +113,11 @@ impl Service {
         let Some(thinking) = current.take() else {
             return Ok(());
         };
-        if let Some(failed) = self.store.abandon(&thinking.id, error)? {
+        if let Some(failed) = self
+            .store
+            .fail_thinking(&thinking.id, &error, &crate::now())
+            .await?
+        {
             self.publish(
                 strand,
                 stream::Payload::Thinking(crate::thinking::Beat::Completed { thinking: failed }),

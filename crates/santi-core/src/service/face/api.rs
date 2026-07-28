@@ -1,5 +1,6 @@
 use super::*;
-use crate::{Incident, engine, now, soul::Soul, strand::Strand, tag};
+use crate::Ruled;
+use crate::{Incident, now, soul::Soul, strand::Strand, tag};
 use crate::{budget, effect, ingest, receipt, soul, strand, stream, webhook};
 
 pub enum Admission {
@@ -9,14 +10,25 @@ pub enum Admission {
 }
 
 impl Service {
-    pub fn weave(&self) -> Result<strand::Created, String> {
+    pub async fn weave(&self) -> Result<strand::Created, String> {
+        let created = now();
         Ok(strand::Created {
-            strand: self.store.weave()?,
+            strand: self
+                .store
+                .create_strand(santi_estate::StrandDraft {
+                    tag: &tag("ss"),
+                    soul: crate::GENESIS,
+                    label: None,
+                    parent: None,
+                    fork: None,
+                    created: &created,
+                })
+                .await?,
         })
     }
 
-    pub fn awaken(&self, request: soul::Draft) -> Result<Soul, String> {
-        let soul = self.store.awaken()?;
+    pub async fn awaken(&self, request: soul::Draft) -> Result<Soul, String> {
+        let soul = self.store.create_soul(&tag("soul"), &now()).await?;
         if let Some(memory) = request
             .memory
             .as_deref()
@@ -32,15 +44,18 @@ impl Service {
         Ok(soul)
     }
 
-    pub fn souls(&self) -> Result<Vec<Soul>, String> {
-        self.store.souls()
+    pub async fn souls(&self) -> Result<Vec<Soul>, String> {
+        self.store.souls().await
     }
 
-    pub fn soul(&self, soul: &str) -> Result<Option<Soul>, String> {
-        self.store.soul(soul)
+    pub async fn soul(&self, soul: &str) -> Result<Option<Soul>, String> {
+        self.store.soul(soul).await
     }
 
-    pub fn subscribe(&self, request: webhook::Draft) -> Result<webhook::Subscription, String> {
+    pub async fn subscribe(
+        &self,
+        request: webhook::Draft,
+    ) -> Result<webhook::Subscription, String> {
         let name = request.name.trim();
         let adaptor = request.adaptor.trim();
         let soul = request.soul.trim();
@@ -54,7 +69,7 @@ impl Service {
         if credential.is_empty() {
             return Err("webhook credential must not be empty".to_string());
         }
-        if self.store.soul(soul)?.is_none() {
+        if self.store.soul(soul).await?.is_none() {
             return Err("soul not found".to_string());
         }
         let strategy = request
@@ -66,83 +81,110 @@ impl Service {
         if !matches!(strategy, "per_thread" | "single") {
             return Err("strategy must be 'per_thread' or 'single'".to_string());
         }
-        self.store.subscribe(webhook::Draft {
-            name: name.to_string(),
-            adaptor: adaptor.to_string(),
-            soul: soul.to_string(),
-            strategy: Some(strategy.to_string()),
-            credential: credential.to_string(),
-        })
+        self.store
+            .subscribe(santi_estate::WebhookDraft {
+                name,
+                adaptor,
+                soul,
+                strategy,
+                credential,
+                created: &now(),
+            })
+            .await
     }
 
-    pub fn webhooks(&self) -> Result<Vec<webhook::Subscription>, String> {
-        self.store.webhooks()
+    pub async fn webhooks(&self) -> Result<Vec<webhook::Subscription>, String> {
+        self.store.webhooks().await
     }
 
-    pub fn webhook(&self, name: &str) -> Result<Option<webhook::Subscription>, String> {
-        self.store.webhook(name)
+    pub async fn webhook(&self, name: &str) -> Result<Option<webhook::Subscription>, String> {
+        self.store.webhook(name).await
     }
-    pub fn strands(&self) -> Result<Vec<Strand>, String> {
-        self.store.strands()
+    pub async fn strands(&self) -> Result<Vec<Strand>, String> {
+        self.store.strands().await
     }
 
-    pub fn strand(&self, strand: &str) -> Result<Option<strand::Detail>, String> {
-        let Some(strand) = self.store.strand(strand)? else {
+    pub async fn strand(&self, strand: &str) -> Result<Option<strand::Detail>, String> {
+        let Some(strand) = self.store.strand(strand).await? else {
             return Ok(None);
         };
         Ok(Some(strand::Detail {
-            messages: self.store.messages(&strand.id)?,
+            messages: self.store.messages(&strand.id).await?,
             strand,
         }))
     }
 
-    pub fn snapshot(&self, strand: &str) -> Result<Option<stream::Snapshot>, String> {
-        self.store.snapshot(strand)
+    pub async fn snapshot(&self, strand: &str) -> Result<Option<stream::Snapshot>, String> {
+        self.store.snapshot(strand).await
     }
 
-    pub fn audit(&self, strand: &str) -> Result<Option<budget::Snapshot>, String> {
-        let Some(strand) = self.store.strand(strand)? else {
+    pub async fn audit(&self, strand: &str) -> Result<Option<budget::Snapshot>, String> {
+        let Some(strand) = self.store.strand(strand).await? else {
             return Ok(None);
         };
         Ok(Some(budget::Snapshot {
             strand: strand.id.clone(),
-            estimate: self.estimate(&strand.id)?,
+            estimate: self.estimate(&strand.id).await?,
             budget: self.budget(),
-            incident: self.store.pressure(&strand.id)?,
+            incident: self
+                .store
+                .incident(
+                    &crate::budget::Error::Context
+                        .descriptor()
+                        .key("strand", &strand.id),
+                )
+                .await?,
         }))
     }
 
-    pub fn stranded(&self, strand: &str, limit: i64) -> Result<Option<Vec<Incident>>, String> {
-        let Some(strand) = self.store.strand(strand)? else {
+    pub async fn stranded(
+        &self,
+        strand: &str,
+        limit: i64,
+    ) -> Result<Option<Vec<Incident>>, String> {
+        let Some(strand) = self.store.strand(strand).await? else {
             return Ok(None);
         };
-        self.store.stranded(&strand.id, limit).map(Some)
+        self.store
+            .incidents(
+                &santi_error::Scope::new("strand", &strand.id),
+                usize::try_from(limit).unwrap_or(usize::MAX),
+            )
+            .await
+            .map(Some)
     }
 
-    pub fn errors(&self, scope: &santi_error::Scope, limit: i64) -> Result<Vec<Incident>, String> {
-        self.store.incidents(scope, limit)
+    pub async fn errors(
+        &self,
+        scope: &santi_error::Scope,
+        limit: i64,
+    ) -> Result<Vec<Incident>, String> {
+        self.store
+            .incidents(scope, usize::try_from(limit).unwrap_or(usize::MAX))
+            .await
     }
 
-    pub fn receipt(&self, inbox: &str) -> Result<Option<receipt::Status>, String> {
-        self.store.receipt(inbox)
+    pub async fn receipt(&self, inbox: &str) -> Result<Option<receipt::Status>, String> {
+        self.store.receipt(inbox).await
     }
 
-    pub fn effect(&self, effect: &str) -> Result<Option<effect::Status>, String> {
-        self.store.effect(effect)
+    pub async fn effect(&self, effect: &str) -> Result<Option<effect::Status>, String> {
+        self.store.effect(effect).await
     }
 
-    pub fn settle(
+    pub async fn settle(
         &self,
         effect: &str,
         outcome: effect::Outcome,
         evidence: &str,
     ) -> Result<Option<effect::Status>, String> {
-        let _entered = self.context.enter();
-        self.store.settle(effect, outcome, evidence)
+        self.store
+            .settle_effect(effect, outcome, evidence, &now())
+            .await
     }
 
-    pub fn trail(&self, effect: &str) -> Result<Vec<crate::trace::Record>, String> {
-        self.store.trail("effect", effect)
+    pub async fn trail(&self, effect: &str) -> Result<Vec<crate::trace::Record>, String> {
+        self.store.traces("effect", effect).await
     }
 
     pub(crate) fn publish(&self, strand: &str, payload: stream::Payload) {
@@ -165,21 +207,46 @@ impl Service {
             .map_err(|_| ())
     }
 
-    pub fn since(
+    pub async fn since(
         &self,
         after_seq: i64,
         prefix: &str,
         limit: usize,
     ) -> Result<crate::event::Batch, String> {
-        self.store.since(after_seq, prefix, limit)
+        self.store.outbox("turns", after_seq, prefix, limit).await
     }
 
-    pub(in crate::service) fn dispatched(&self) {
+    pub(in crate::service) async fn dispatched(&self) {
         let sink = error::Sink { service: self };
-        if let Err(error) = engine().dispatch(&self.store, &sink, 256)
-            && error != error::UNHEARD
-        {
-            eprintln!("santi: error outbox dispatch failed: {error}");
+        let transitions = match self.store.pending_errors(256).await {
+            Ok(transitions) => transitions,
+            Err(error) => {
+                eprintln!("santi: error outbox read failed: {error}");
+                return;
+            }
+        };
+        for transition in transitions {
+            if !self.dispatch_transition(&sink, &transition).await {
+                break;
+            }
         }
+    }
+
+    async fn dispatch_transition(
+        &self,
+        sink: &error::Sink<'_>,
+        transition: &crate::Transition,
+    ) -> bool {
+        if let Err(error) = santi_error::Sink::publish(sink, transition) {
+            if error != error::UNHEARD {
+                eprintln!("santi: error outbox dispatch failed: {error}");
+            }
+            return false;
+        }
+        if let Err(error) = self.store.deliver_error(&transition.id, &now()).await {
+            eprintln!("santi: error outbox acknowledgement failed: {error}");
+            return false;
+        }
+        true
     }
 }

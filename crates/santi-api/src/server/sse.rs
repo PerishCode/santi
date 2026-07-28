@@ -23,11 +23,12 @@ pub(super) async fn strand_events(
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
     let held = service
         .strand(&strand)
+        .await
         .map_err(ApiError::from_service)?
         .ok_or_else(|| ApiError::not_found("strand not found"))?;
     drop(held);
 
-    let mut receiver = service.listen();
+    let mut receiver = service.listen().await;
     let service = service.clone();
     let opened = strand.clone();
     let stream = async_stream::stream! {
@@ -53,7 +54,7 @@ pub(super) async fn strand_events(
 pub(super) async fn transitions(
     State(service): State<Service>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let mut receiver = service.harken();
+    let mut receiver = service.harken().await;
     let service = service.clone();
     let stream = async_stream::stream! {
         while let Some(transition) = receive(&service, &mut receiver).await {
@@ -78,9 +79,10 @@ pub(super) async fn turn_event_stream(
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
     let principal = service
         .principal(bearer(&headers))
+        .await
         .map_err(ApiError::from_service)?
         .ok_or_else(|| ApiError::unauthorized("invalid or missing credential"))?;
-    let mut receiver = service.listen();
+    let mut receiver = service.listen().await;
     let service = service.clone();
     let stream = async_stream::stream! {
         while receive_turn(&service, &mut receiver, &principal.prefix).await {

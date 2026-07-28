@@ -99,7 +99,7 @@ async fn missing() -> impl IntoResponse {
     )
 )]
 pub async fn health(State(service): State<Service>) -> impl IntoResponse {
-    let incidents = service.strained();
+    let incidents = service.strained().await;
     let degraded = service.degraded() || incidents > 0;
     let status = if degraded {
         StatusCode::SERVICE_UNAVAILABLE
@@ -112,7 +112,7 @@ pub async fn health(State(service): State<Service>) -> impl IntoResponse {
             ok: !degraded,
             degraded,
             service: "santi-api".to_string(),
-            incidents,
+            incidents: i64::try_from(incidents).unwrap_or(i64::MAX),
         }),
     )
 }

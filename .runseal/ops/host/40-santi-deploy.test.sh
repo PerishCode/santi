@@ -85,8 +85,7 @@ EOF
 
 cat >"$FAKE_BIN/santi-api" <<'EOF'
 #!/usr/bin/env bash
-schema=$(cat "$SANTI_DEPLOY_TEST_HOME/runtime/db.schema")
-printf '{"schema_version":%s,"expected_schema_version":%s,"ok":true}\n' "$schema" "$schema"
+printf '{"estate_ready":true,"estate_error":null,"ok":true}\n'
 EOF
 
 chmod 0755 "$FAKE_BIN"/*

@@ -12,37 +12,37 @@ impl Service {
         Ok(object::Uri::parse(value)?.http())
     }
 
-    pub fn stash(&self, uri: &object::Uri, bytes: &[u8]) -> Result<object::Meta, String> {
-        self.bucket(&uri.bucket)?;
+    pub async fn stash(&self, uri: &object::Uri, bytes: &[u8]) -> Result<object::Meta, String> {
+        self.bucket(&uri.bucket).await?;
         self.objects().put(uri, bytes)
     }
 
-    pub fn fetch(
+    pub async fn fetch(
         &self,
         soul: &str,
         strand: &str,
         key: &str,
     ) -> Result<Option<object::Payload>, String> {
-        let uri = self.uri(soul, strand, key)?;
+        let uri = self.uri(soul, strand, key).await?;
         self.objects().get(&uri)
     }
 
-    pub fn peek(&self, uri: &object::Uri) -> Result<Option<object::Meta>, String> {
-        self.bucket(&uri.bucket)?;
+    pub async fn peek(&self, uri: &object::Uri) -> Result<Option<object::Meta>, String> {
+        self.bucket(&uri.bucket).await?;
         self.objects().head(uri)
     }
 
-    pub fn erase(&self, uri: &object::Uri) -> Result<bool, String> {
-        self.bucket(&uri.bucket)?;
+    pub async fn erase(&self, uri: &object::Uri) -> Result<bool, String> {
+        self.bucket(&uri.bucket).await?;
         self.objects().delete(uri)
     }
 
-    pub fn shelve(
+    pub async fn shelve(
         &self,
         bucket: &object::Bucket,
         prefix: Option<&str>,
     ) -> Result<Vec<object::Meta>, String> {
-        self.bucket(bucket)?;
+        self.bucket(bucket).await?;
         self.objects().list(bucket, prefix)
     }
 
@@ -50,16 +50,17 @@ impl Service {
         object::Store::new(PathBuf::from(&self.config.runtime))
     }
 
-    fn uri(&self, soul: &str, strand: &str, key: &str) -> Result<object::Uri, String> {
+    async fn uri(&self, soul: &str, strand: &str, key: &str) -> Result<object::Uri, String> {
         let bucket = object::Bucket::new(soul, strand)?;
-        self.bucket(&bucket)?;
+        self.bucket(&bucket).await?;
         object::Uri::new(bucket, key)
     }
 
-    fn bucket(&self, bucket: &object::Bucket) -> Result<(), String> {
+    async fn bucket(&self, bucket: &object::Bucket) -> Result<(), String> {
         let strand = self
             .store
-            .strand(&bucket.strand)?
+            .strand(&bucket.strand)
+            .await?
             .ok_or_else(|| "strand not found".to_string())?;
         if strand.soul != bucket.soul {
             return Err("soul not found".to_string());

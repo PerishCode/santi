@@ -44,6 +44,7 @@ pub async fn drive(
 ) -> Result<Json<drive::Response>, ApiError> {
     service
         .drive(&strand)
+        .await
         .map(Json)
         .map_err(|error| ApiError::from_santi(*error))
 }
@@ -64,6 +65,7 @@ pub(super) async fn fork(
 ) -> Result<Json<strand::Forked>, ApiError> {
     service
         .fork(&strand)
+        .await
         .map(Json)
         .map_err(ApiError::from_service)
 }
@@ -87,6 +89,7 @@ pub(super) async fn exec(
 ) -> Result<Json<compact::Report>, ApiError> {
     service
         .exec(&strand, request)
+        .await
         .map(Json)
         .map_err(ApiError::from_service)
 }
@@ -118,6 +121,7 @@ pub(super) async fn page(
             params.page_index.unwrap_or(0),
             params.page_size.unwrap_or(50),
         )
+        .await
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("compact not found"))
@@ -146,6 +150,7 @@ pub(super) async fn snapshot(
 ) -> Result<Json<stream::Snapshot>, ApiError> {
     service
         .snapshot(&strand)
+        .await
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("strand not found"))
@@ -167,6 +172,7 @@ pub(super) async fn audit(
 ) -> Result<Json<budget::Snapshot>, ApiError> {
     service
         .audit(&strand)
+        .await
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("strand not found"))

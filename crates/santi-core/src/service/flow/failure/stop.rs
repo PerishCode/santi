@@ -2,21 +2,28 @@ use crate::service::Service;
 use crate::{Fault, Ruled, engine, stream, turn::Turn};
 
 impl Service {
-    pub(super) fn interrupted(
+    pub(super) async fn interrupted(
         &self,
         strand: &str,
         turn: &str,
         cause: crate::turn::Cause,
         error: &str,
     ) -> (Option<Turn>, Fault) {
-        match self.store.interrupt(turn, cause) {
+        match self
+            .store
+            .interrupt_turn(santi_estate::InterruptionDraft {
+                turn,
+                cause,
+                actor: crate::SYSTEM,
+                occurred: &crate::now(),
+            })
+            .await
+        {
             Ok(stopped) => {
-                if let Some(marker) = stopped.marker {
+                if let Some(marker) = stopped.notice {
                     self.publish(
                         strand,
-                        stream::Payload::Message(crate::message::Beat::Created {
-                            message: marker.message,
-                        }),
+                        stream::Payload::Message(crate::message::Beat::Created { message: marker }),
                     );
                 }
                 let fault = engine().transient(crate::Signal {
@@ -29,7 +36,7 @@ impl Service {
                         "cause": cause.encode(),
                     }),
                 });
-                (Some(stopped.turn), fault)
+                (Some(stopped.stop.turn), fault)
             }
             Err(detail) => {
                 eprintln!("santi: interrupted turn persistence failed for {turn}: {detail}");

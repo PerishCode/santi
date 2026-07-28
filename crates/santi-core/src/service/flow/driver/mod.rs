@@ -47,11 +47,11 @@ impl Driver<'_, '_> {
             let Some(event) = event else {
                 break;
             };
-            let Some(event) = self.received(event)? else {
+            let Some(event) = self.received(event).await? else {
                 continue;
             };
             self.recorded(&event);
-            if self.handled(event)? {
+            if self.handled(event).await? {
                 break;
             }
         }
@@ -63,7 +63,7 @@ impl Driver<'_, '_> {
         })
     }
 
-    fn received(&mut self, event: Result<Event, String>) -> Result<Option<Event>, Failure> {
+    async fn received(&mut self, event: Result<Event, String>) -> Result<Option<Event>, Failure> {
         match event {
             Ok(Event::Traced(trace)) => {
                 self.timing.traced(self.number, trace);
@@ -75,6 +75,7 @@ impl Driver<'_, '_> {
                 let result =
                     self.service
                         .abandon(self.address.strand, &mut self.span, error.clone());
+                let result = result.await;
                 self.runtime(Operation::Persistence(Persistence::Thinking), result)?;
                 Err(self.faulted(error, Stage::Stream))
             }
@@ -88,34 +89,36 @@ impl Driver<'_, '_> {
         }
     }
 
-    fn handled(&mut self, event: Event) -> Result<bool, Failure> {
+    async fn handled(&mut self, event: Event) -> Result<bool, Failure> {
         match event {
             Event::Traced(_) => Ok(false),
-            Event::Started { response } | Event::Working { response } => self.progressed(response),
+            Event::Started { response } | Event::Working { response } => {
+                self.progressed(response).await
+            }
             Event::Thinking(delta) => {
                 self.summary.push_str(&delta);
-                self.sketched()?;
+                self.sketched().await?;
                 Ok(false)
             }
             Event::Thought(summary) => {
                 self.summary = summary;
-                self.sketched()?;
+                self.sketched().await?;
                 Ok(false)
             }
             Event::Text(delta) => {
-                self.delta(delta)?;
+                self.delta(delta).await?;
                 Ok(false)
             }
             Event::Called(call) => {
-                self.called(call)?;
+                self.called(call).await?;
                 Ok(false)
             }
-            Event::Completed { response } => self.complete(response),
-            Event::Failed(error) => Err(self.failed(error)),
+            Event::Completed { response } => self.complete(response).await,
+            Event::Failed(error) => Err(self.failed(error).await),
         }
     }
 
-    fn progressed(&mut self, response: Option<String>) -> Result<bool, Failure> {
+    async fn progressed(&mut self, response: Option<String>) -> Result<bool, Failure> {
         self.active = response.clone();
         let result = self.service.tend(crate::service::thinking::Progress {
             strand: self.address.strand,
@@ -124,6 +127,7 @@ impl Driver<'_, '_> {
             summary: &mut self.sketch,
             response: response.clone(),
         });
+        let result = result.await;
         self.runtime(Operation::Persistence(Persistence::Thinking), result)?;
         self.service.stirred(
             self.address.strand,
@@ -134,14 +138,15 @@ impl Driver<'_, '_> {
         Ok(false)
     }
 
-    fn sketched(&mut self) -> Result<(), Failure> {
+    async fn sketched(&mut self) -> Result<(), Failure> {
         let result =
             self.service
                 .summarize(self.address.strand, &mut self.sketch, self.summary.clone());
+        let result = result.await;
         self.runtime(Operation::Persistence(Persistence::Thinking), result)
     }
 
-    fn delta(&mut self, delta: String) -> Result<(), Failure> {
+    async fn delta(&mut self, delta: String) -> Result<(), Failure> {
         let update = delta::Update {
             address: self.address.clone(),
             prose: self.prose,
@@ -152,16 +157,18 @@ impl Driver<'_, '_> {
             active: &self.active,
         };
         let result = self.service.spoken(delta, update);
+        let result = result.await;
         self.runtime(Operation::Persistence(Persistence::Text), result)
     }
 
-    fn called(&mut self, call: Call) -> Result<(), Failure> {
+    async fn called(&mut self, call: Call) -> Result<(), Failure> {
         self.timing.called(self.number, &call.name);
         let result = self.service.conclude(
             self.address.strand,
             &mut self.span,
             thinking::Reason::Called,
         );
+        let result = result.await;
         self.runtime(Operation::Persistence(Persistence::Thinking), result)?;
         self.service.stirred(
             self.address.strand,
@@ -173,7 +180,7 @@ impl Driver<'_, '_> {
         Ok(())
     }
 
-    fn complete(&mut self, response: Option<String>) -> Result<bool, Failure> {
+    async fn complete(&mut self, response: Option<String>) -> Result<bool, Failure> {
         self.timing.completed(self.number);
         self.active = response.clone();
         let result = self.service.conclude(
@@ -181,16 +188,18 @@ impl Driver<'_, '_> {
             &mut self.span,
             thinking::Reason::Finished,
         );
+        let result = result.await;
         self.runtime(Operation::Persistence(Persistence::Thinking), result)?;
         self.completed = response;
         Ok(true)
     }
 
-    fn failed(&mut self, error: String) -> Failure {
+    async fn failed(&mut self, error: String) -> Failure {
         self.timing.failed(self.number, "provider_response", &error);
         let result = self
             .service
             .abandon(self.address.strand, &mut self.span, error.clone());
+        let result = result.await;
         match self.runtime(Operation::Persistence(Persistence::Thinking), result) {
             Ok(()) => self.faulted(error, Stage::Response),
             Err(failure) => failure,

@@ -42,8 +42,11 @@ impl Control {
 }
 
 impl Service {
-    pub fn stop(&self, turn: &str) -> Result<Option<turn::Stop>, String> {
-        let stopped = self.store.request(turn, turn::Cause::Operator)?;
+    pub async fn stop(&self, turn: &str) -> Result<Option<turn::Stop>, String> {
+        let stopped = self
+            .store
+            .request_stop(turn, turn::Cause::Operator, &crate::now())
+            .await?;
         if stopped
             .as_ref()
             .is_some_and(|stopped| stopped.turn.status == turn::Status::Running)
@@ -67,7 +70,7 @@ impl Service {
         let service = self.clone();
         tokio::spawn(async move {
             tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
-            service.expire();
+            service.expire().await;
         });
     }
 
@@ -98,7 +101,7 @@ impl Service {
         control.cause()
     }
 
-    fn expire(&self) {
+    async fn expire(&self) {
         let active = self
             .controls
             .lock()
@@ -107,7 +110,11 @@ impl Service {
             .map(|(turn, control)| (turn.clone(), control.clone()))
             .collect::<Vec<_>>();
         for (turn, control) in active {
-            match self.store.request(&turn, turn::Cause::Shutdown) {
+            match self
+                .store
+                .request_stop(&turn, turn::Cause::Shutdown, &crate::now())
+                .await
+            {
                 Ok(Some(_)) => control.stop(turn::Cause::Shutdown),
                 Ok(None) => {}
                 Err(error) => {

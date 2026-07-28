@@ -11,6 +11,7 @@ pub use jobs::{
 mod interrupt;
 mod text;
 mod tools;
+mod traces;
 
 use santi_provider::Provider;
 use std::{
@@ -23,8 +24,9 @@ use std::{
 };
 use tokio::sync::broadcast;
 
-use crate::{Store, Transition};
+use crate::{Ruled, Transition};
 use crate::{budget, material, stream};
+use santi_estate::Store;
 
 pub const RETENTION: u64 = 7 * 24 * 60 * 60;
 
@@ -40,7 +42,7 @@ pub struct Service {
     notices: notice::Bus,
     inboxes: Arc<Mutex<HashMap<String, String>>>,
     budgets: Arc<Mutex<HashMap<String, budget::Execution>>>,
-    pressure: Arc<Mutex<()>>,
+    pressure: Arc<tokio::sync::Mutex<()>>,
     closing: Arc<AtomicBool>,
     controls: Arc<Mutex<HashMap<String, interrupt::Control>>>,
     deadline: Arc<Mutex<Option<Instant>>>,
@@ -73,22 +75,27 @@ pub struct Envelope<'a> {
 }
 
 impl Service {
-    pub fn open(config: Config, provider: Arc<dyn Provider>) -> Result<Self, String> {
-        Self::supervised(config, provider, Arc::new(jobs::Unavailable))
+    pub async fn open(config: Config, provider: Arc<dyn Provider>) -> Result<Self, String> {
+        Self::supervised(config, provider, Arc::new(jobs::Unavailable)).await
     }
 
-    pub fn supervised(
+    pub async fn supervised(
         config: Config,
         provider: Arc<dyn Provider>,
         supervisor: Arc<dyn jobs::Supervisor>,
     ) -> Result<Self, String> {
-        let store = Store::open(&config.database)?;
-        let context = plumb::context::Context::root().with(store.sink());
-        {
-            let _entered = context.enter();
-            store.reconciled()?;
-        }
-        let degraded = store.strained()? > 0;
+        let store = Store::open(&config.database).await?;
+        store.seed(crate::GENESIS, &crate::now()).await?;
+        let traces = traces::Writer::start(store.clone());
+        let sink = plumb::trace::Sink::from(traces);
+        let context = plumb::context::Context::root().with(sink);
+        store
+            .recover_turns("santi.cold_start", &crate::now())
+            .await?;
+        let degraded = store
+            .active_incident_count(crate::drive::Error::Failed.descriptor().code)
+            .await?
+            > 0;
         Ok(Self {
             store,
             context,
@@ -100,7 +107,7 @@ impl Service {
             notices: notice::Bus::new(),
             inboxes: Arc::new(Mutex::new(HashMap::new())),
             budgets: Arc::new(Mutex::new(HashMap::new())),
-            pressure: Arc::new(Mutex::new(())),
+            pressure: Arc::new(tokio::sync::Mutex::new(())),
             closing: Arc::new(AtomicBool::new(false)),
             controls: Arc::new(Mutex::new(HashMap::new())),
             deadline: Arc::new(Mutex::new(None)),
@@ -111,9 +118,9 @@ impl Service {
         })
     }
 
-    pub fn ration(&self, strand: &str, budget: budget::Execution) -> Result<(), String> {
+    pub async fn ration(&self, strand: &str, budget: budget::Execution) -> Result<(), String> {
         budget.validate()?;
-        if self.store.strand(strand)?.is_none() {
+        if self.store.strand(strand).await?.is_none() {
             return Err("strand not found".to_string());
         }
         self.budgets
@@ -135,11 +142,13 @@ impl Service {
         self.closing.load(Ordering::SeqCst)
     }
 
-    pub fn resume(&self) -> Result<(), String> {
-        self.dispatched();
-        let pending = self.store.awaiting()?;
+    pub async fn resume(&self) -> Result<(), String> {
+        self.dispatched().await;
+        let pending = self.store.pending_strands().await?;
         for strand in pending {
-            let outcome = self.poke(&strand, "strand_send", None, "cold_start_resume");
+            let outcome = self
+                .poke(&strand, "strand_send", None, "cold_start_resume")
+                .await;
             if let drive::Outcome::Failed(error) = outcome
                 && error.code == crate::catalog::UNSAVED.code
             {
@@ -156,8 +165,12 @@ impl Service {
         self.degraded.load(Ordering::SeqCst)
     }
 
-    pub fn strained(&self) -> i64 {
-        match self.store.strained() {
+    pub async fn strained(&self) -> usize {
+        match self
+            .store
+            .active_incident_count(crate::drive::Error::Failed.descriptor().code)
+            .await
+        {
             Ok(count) => count,
             Err(error) => {
                 self.degraded.store(true, Ordering::SeqCst);
@@ -171,8 +184,12 @@ impl Service {
         self.degraded.store(true, Ordering::SeqCst);
     }
 
-    pub(in crate::service) fn refreshed(&self) {
-        match self.store.strained() {
+    pub(in crate::service) async fn refreshed(&self) {
+        match self
+            .store
+            .active_incident_count(crate::drive::Error::Failed.descriptor().code)
+            .await
+        {
             Ok(count) => self.degraded.store(count > 0, Ordering::SeqCst),
             Err(error) => {
                 self.degraded.store(true, Ordering::SeqCst);
@@ -181,15 +198,15 @@ impl Service {
         }
     }
 
-    pub fn listen(&self) -> broadcast::Receiver<stream::Event> {
+    pub async fn listen(&self) -> broadcast::Receiver<stream::Event> {
         let receiver = self.streams.subscribe();
-        self.dispatched();
+        self.dispatched().await;
         receiver
     }
 
-    pub fn harken(&self) -> broadcast::Receiver<Transition> {
+    pub async fn harken(&self) -> broadcast::Receiver<Transition> {
         let receiver = self.errors.subscribe();
-        self.dispatched();
+        self.dispatched().await;
         receiver
     }
 }

@@ -8,11 +8,11 @@ use std::{
 
 use async_trait::async_trait;
 use futures_util::stream;
-use rusqlite::Connection;
 use santi_core::{
     job,
     service::{self, JobLaunch, JobObservation, JobSupervisor, JobTerminal, Service},
 };
+use santi_estate::{CallDraft, CapabilityDraft, EffectDraft, TurnDraft};
 use santi_provider::{Event, Metadata, Provider, Request, Streaming};
 use sha2::{Digest, Sha256};
 
@@ -185,38 +185,75 @@ pub fn state(unit: &str) -> String {
     }
 }
 
-pub fn seed(database: &std::path::Path, token: &str, soul: &str, strand: &str) {
+pub async fn seed(database: &std::path::Path, token: &str, soul: &str, strand: &str) {
     let digest = format!("{:x}", Sha256::digest(token.as_bytes()));
     let expiry = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock")
         .as_millis() as i64
         + 60_000;
-    let conn = Connection::open(database).expect("open sqlite");
-    conn.execute(
-        r#"
-        INSERT INTO job_capabilities (
-            digest, soul_id, strand_id, turn_id, tool_call_id, effect_id,
-            expires_at, consumed_job_id, request_sha256, created_at
-        )
-        VALUES (?1, ?2, ?3, 'turn_vertical', 'call_vertical', 'effect_vertical',
-                ?4, NULL, NULL, '2026-07-27T00:00:00.000Z')
-        "#,
-        rusqlite::params![digest, soul, strand, expiry],
-    )
-    .expect("seed capability");
-}
-
-pub fn stamp(database: &std::path::Path, job: &str) -> String {
-    Connection::open(database)
-        .expect("open sqlite")
-        .query_row("SELECT generation FROM jobs WHERE id = ?1", [job], |row| {
-            row.get(0)
+    let store = santi_core::Store::open(database)
+        .await
+        .expect("open estate");
+    store
+        .create_turn(TurnDraft {
+            tag: "turn_vertical",
+            strand,
+            trigger: santi_core::turn::Trigger::System,
+            source: None,
+            from: 0,
+            created: &santi_core::now(),
         })
-        .expect("job stamp")
+        .await
+        .expect("turn");
+    store
+        .create_call(CallDraft {
+            tag: "call_vertical",
+            turn: "turn_vertical",
+            tool: "shell",
+            arguments: &serde_json::json!({"command": "true"}),
+            created: &santi_core::now(),
+        })
+        .await
+        .expect("call");
+    store
+        .prepare_effect(EffectDraft {
+            tag: "effect_vertical",
+            turn: "turn_vertical",
+            call: Some("call_vertical"),
+            kind: "shell",
+            metadata: None,
+            created: &santi_core::now(),
+        })
+        .await
+        .expect("effect");
+    store
+        .create_capability(CapabilityDraft {
+            digest: &digest,
+            expires: expiry,
+            soul,
+            strand,
+            turn: "turn_vertical",
+            call: "call_vertical",
+            effect: "effect_vertical",
+            created: &santi_core::now(),
+        })
+        .await
+        .expect("seed capability");
 }
 
-pub fn service(temp: &tempfile::TempDir, database: &std::path::Path) -> Service {
+pub async fn stamp(database: &std::path::Path, job: &str) -> String {
+    santi_core::Store::open(database)
+        .await
+        .expect("open estate")
+        .job_record(job)
+        .await
+        .expect("job query")
+        .expect("job")
+        .generation
+}
+
+pub async fn service(temp: &tempfile::TempDir, database: &std::path::Path) -> Service {
     Service::supervised(
         service::Config {
             database: database.display().to_string(),
@@ -230,6 +267,7 @@ pub fn service(temp: &tempfile::TempDir, database: &std::path::Path) -> Service 
             "CARGO_BIN_EXE_santi-api"
         ))),
     )
+    .await
     .expect("open service")
 }
 

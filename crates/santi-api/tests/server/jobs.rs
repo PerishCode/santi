@@ -9,6 +9,7 @@ use santi_core::{
     job,
     service::{self, JobLaunch, JobObservation, JobSupervisor, Service},
 };
+use santi_estate::{CallDraft, CapabilityDraft, EffectDraft, TurnDraft};
 use sha2::{Digest, Sha256};
 
 use super::*;
@@ -54,8 +55,9 @@ async fn accepts() {
         Arc::new(DriverProvider),
         supervisor.clone(),
     )
+    .await
     .expect("open service");
-    let strand = service.weave().expect("create strand").strand;
+    let strand = service.weave().await.expect("create strand").strand;
     let capability = "jobcap_http_probe";
     let digest = format!("{:x}", Sha256::digest(capability.as_bytes()));
     let expiry = SystemTime::now()
@@ -63,19 +65,54 @@ async fn accepts() {
         .expect("clock")
         .as_millis() as i64
         + 60_000;
-    let conn = Connection::open(&database).expect("open sqlite");
-    conn.execute(
-        r#"
-        INSERT INTO job_capabilities (
-            digest, soul_id, strand_id, turn_id, tool_call_id, effect_id,
-            expires_at, consumed_job_id, request_sha256, created_at
-        )
-        VALUES (?1, ?2, ?3, 'turn_http', 'call_http', 'effect_http',
-                ?4, NULL, NULL, '2026-07-27T00:00:00.000Z')
-        "#,
-        rusqlite::params![digest, strand.soul, strand.id, expiry],
-    )
-    .expect("seed capability");
+    let store = santi_core::Store::open(&database)
+        .await
+        .expect("open estate");
+    store
+        .create_turn(TurnDraft {
+            tag: "turn_http",
+            strand: &strand.id,
+            trigger: santi_core::turn::Trigger::System,
+            source: None,
+            from: 0,
+            created: &santi_core::now(),
+        })
+        .await
+        .expect("turn");
+    store
+        .create_call(CallDraft {
+            tag: "call_http",
+            turn: "turn_http",
+            tool: "shell",
+            arguments: &serde_json::json!({"command": "printf ok"}),
+            created: &santi_core::now(),
+        })
+        .await
+        .expect("call");
+    store
+        .prepare_effect(EffectDraft {
+            tag: "effect_http",
+            turn: "turn_http",
+            call: Some("call_http"),
+            kind: "shell",
+            metadata: None,
+            created: &santi_core::now(),
+        })
+        .await
+        .expect("effect");
+    store
+        .create_capability(CapabilityDraft {
+            digest: &digest,
+            expires: expiry,
+            soul: &strand.soul,
+            strand: &strand.id,
+            turn: "turn_http",
+            call: "call_http",
+            effect: "effect_http",
+            created: &santi_core::now(),
+        })
+        .await
+        .expect("seed capability");
     let mut headers = HeaderMap::new();
     headers.insert(
         "x-santi-job-capability",

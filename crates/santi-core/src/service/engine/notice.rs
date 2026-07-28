@@ -156,33 +156,42 @@ impl Service {
         let _ = self.notices.publish(Event::Observed(event));
     }
 
-    pub(in crate::service) fn noticed(&self, turn: &str) {
+    pub(in crate::service) async fn noticed(&self, turn: &str) {
         for event in self.notices.drained(turn) {
-            if let Err(error) = self.absorbed(event) {
+            if let Err(error) = self.absorbed(event).await {
                 eprintln!("santi: internal runtime notice failed: {error}");
             }
         }
     }
 
-    fn absorbed(&self, event: Event) -> Result<(), String> {
+    async fn absorbed(&self, event: Event) -> Result<(), String> {
         match event {
-            Event::Observed(event) => self.remind(event),
+            Event::Observed(event) => self.remind(event).await,
         }
     }
 
-    fn remind(&self, event: Observed) -> Result<(), String> {
+    async fn remind(&self, event: Observed) -> Result<(), String> {
         if !event.remindable() {
             return Ok(());
         }
         let content = reminded(&event);
-        let message =
-            self.store
-                .inscribe(&event.address.strand, content, message::Intake::Record)?;
+        let message = self
+            .store
+            .place(santi_estate::MessageDraft {
+                tag: &crate::tag("msg"),
+                strand: &event.address.strand,
+                actor: message::Role::System,
+                actor_id: crate::SYSTEM,
+                kind: message::Kind::SantiSystem,
+                content: &content,
+                state: message::State::Fixed,
+                request: false,
+                created: &crate::now(),
+            })
+            .await?;
         self.publish(
             &event.address.strand,
-            stream::Payload::Message(crate::message::Beat::Created {
-                message: message.message,
-            }),
+            stream::Payload::Message(crate::message::Beat::Created { message }),
         );
         Ok(())
     }

@@ -15,10 +15,11 @@ pub struct Read<'a> {
 }
 
 impl Service {
-    pub fn logs(&self, request: Read<'_>) -> Result<Option<job::Log>, String> {
+    pub async fn logs(&self, request: Read<'_>) -> Result<Option<job::Log>, String> {
         let Some(record) = self
             .store
-            .record(request.id)?
+            .job_record(request.id)
+            .await?
             .filter(|record| record.job.origin.soul == request.soul)
         else {
             return Ok(None);

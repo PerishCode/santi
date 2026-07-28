@@ -48,7 +48,8 @@ pub async fn serve() -> Result<(), String> {
         },
         provider,
         supervisor,
-    )?
+    )
+    .await?
     .retain(held.retention)?;
     let address: SocketAddr = bind
         .parse()
@@ -56,7 +57,7 @@ pub async fn serve() -> Result<(), String> {
     let listener = tokio::net::TcpListener::bind(address)
         .await
         .map_err(|error| error.to_string())?;
-    service.resume()?;
+    service.resume().await?;
     let watcher = {
         let service = service.clone();
         tokio::spawn(async move { service.watch().await })

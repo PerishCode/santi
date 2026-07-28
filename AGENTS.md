@@ -8,7 +8,8 @@ is no product layer here, and none should be added speculatively.
 ```text
 crates/
   api/             # the `santi-api` binary: config, bootstrap, serve, local ops
-  santi-core/      # runtime model + service (store, turns, assembly, objects, workspace)
+  santi-core/      # runtime model + service (turns, assembly, objects, workspace)
+  santi-estate/    # Keel graph + durable ceremonies and projections
   santi-provider/  # ProviderClient boundary; keeps santi-core provider-agnostic
   santi-api/       # HTTP/SSE/OpenAPI server library over santi-core
   santi/           # the `santi` transport-only HTTP client binary

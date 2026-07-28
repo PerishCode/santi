@@ -1,40 +1,43 @@
-use crate::assembly::input::input;
 use crate::context::budget::gauged;
 use crate::service::flow::budget::Verdict;
 use crate::service::flow::failure::{Admission, Failure, Metadata, Operation, Persistence, Stage};
 use crate::service::tools::tools;
 use crate::service::{Service, address::Address, interrupt::Control, notice::Observation, timing};
 use santi_provider::Request;
+use std::{future::Future, pin::Pin};
 
 use super::*;
 use crate::{message, stream, turn};
 
 impl Service {
-    pub(in crate::service::flow) async fn conduct(
+    pub(in crate::service::flow) fn conduct(
         &self,
         strand: String,
         turn: String,
         control: Control,
-    ) {
-        match self.run(&strand, &turn, &control).await {
-            Err(failure) => {
-                self.bury(&strand, &turn, failure);
-            }
-            Ok((last, response)) => {
-                if let Some(cause) = self.halted(&control) {
-                    self.bury(&strand, &turn, Failure::stopped(cause, ""));
-                } else {
-                    self.land(&strand, &turn, last, response);
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(async move {
+            match self.run(&strand, &turn, &control).await {
+                Err(failure) => {
+                    self.bury(&strand, &turn, failure).await;
+                }
+                Ok((last, response)) => {
+                    if let Some(cause) = self.halted(&control) {
+                        self.bury(&strand, &turn, Failure::stopped(cause, "")).await;
+                    } else {
+                        self.land(&strand, &turn, last, response).await;
+                    }
                 }
             }
-        }
-        self.noticed(&turn);
-        self.release(&turn);
-        self.poke(&strand, "strand_send", None, "turn_completion_poke");
-        self.relieve(&strand);
+            self.noticed(&turn).await;
+            self.release(&turn);
+            self.poke(&strand, "strand_send", None, "turn_completion_poke")
+                .await;
+            self.relieve(&strand).await;
+        })
     }
 
-    fn land(
+    async fn land(
         &self,
         strand: &str,
         turn: &str,
@@ -51,18 +54,21 @@ impl Service {
             );
         }
         let metadata = self.provider.metadata();
-        match self.store.finish(
-            crate::Completion {
+        match self
+            .store
+            .finish_turn(santi_estate::CompletionDraft {
                 turn,
-                sequence: last.as_ref().map(|message| message.relation.seq),
+                reply: last.as_ref().map(|message| message.message.id.as_str()),
                 provider: &metadata.provider,
                 model: &metadata.model,
-                response,
-            },
-            last.as_ref(),
-        ) {
-            Ok((_, turned)) => {
-                self.dispatched();
+                response: response.as_deref(),
+                occurred: &crate::now(),
+            })
+            .await
+        {
+            Ok(completion) => {
+                self.dispatched().await;
+                let turned = completion.event;
                 let (label, text) = match turned {
                     Some(event) => (Some(event.label), Some(event.text)),
                     None => (None, None),
@@ -76,13 +82,23 @@ impl Service {
                     }),
                 );
             }
-            Err(error) => match self.store.stopping(turn) {
-                Ok(Some(cause)) => self.bury(strand, turn, Failure::stopped(cause, "")),
-                Ok(None) | Err(_) => self.bury(
-                    strand,
-                    turn,
-                    Failure::runtime(Operation::Persistence(Persistence::Completion), error, ""),
-                ),
+            Err(error) => match self.store.stop(turn).await {
+                Ok(Some(stop)) if stop.cause.is_some() => {
+                    self.bury(strand, turn, Failure::stopped(stop.cause.unwrap(), ""))
+                        .await
+                }
+                Ok(_) | Err(_) => {
+                    self.bury(
+                        strand,
+                        turn,
+                        Failure::runtime(
+                            Operation::Persistence(Persistence::Completion),
+                            error,
+                            "",
+                        ),
+                    )
+                    .await
+                }
             },
         }
     }
@@ -112,7 +128,7 @@ impl Service {
             let next = round + 1;
             if let Some(error) = provider_try!(
                 Operation::Admission(Admission::Execution),
-                self.readmit(strand, turn, next)
+                self.readmit(strand, turn, next).await
             ) {
                 return Err(Failure::execution(error, &prose));
             }
@@ -120,12 +136,15 @@ impl Service {
             if let Some(cause) = self.halted(control) {
                 return Err(Failure::stopped(cause, &prose));
             }
-            let input = provider_try!(Operation::Assembly, input(&self.store, strand));
+            let input = provider_try!(
+                Operation::Assembly,
+                crate::provider_input(&self.store, strand).await
+            );
             let metadata = self.provider.metadata();
             let family = metadata.provider.to_string();
             let request = Request {
                 model: metadata.model,
-                instructions: Some(provider_try!(Operation::Prompt, self.wording(strand))),
+                instructions: Some(provider_try!(Operation::Prompt, self.wording(strand).await)),
                 input,
                 tools: Some(tools()),
                 previous: None,
@@ -133,7 +152,7 @@ impl Service {
             let estimate = gauged(&request);
             if let Some(error) = provider_try!(
                 Operation::Admission(Admission::Context),
-                self.overdrawn(strand, turn, &request, &estimate)
+                self.overdrawn(strand, turn, &request, &estimate).await
             ) {
                 timing.failed(round, "context_budget", &error.to_string());
                 return Err(Failure::context(error));
@@ -207,7 +226,19 @@ impl Service {
             if !speech.is_empty() {
                 last = Some(provider_try!(
                     Operation::Persistence(Persistence::Assistant),
-                    self.store.voice(strand, &speech)
+                    self.store
+                        .place(santi_estate::MessageDraft {
+                            tag: &crate::tag("msg"),
+                            strand,
+                            actor: crate::message::Role::Soul,
+                            actor_id: crate::GENESIS,
+                            kind: crate::message::Kind::Text,
+                            content: &crate::message::Content::text(&speech),
+                            state: crate::message::State::Fixed,
+                            request: false,
+                            created: &crate::now(),
+                        })
+                        .await
                 ));
             }
 
@@ -217,7 +248,7 @@ impl Service {
 
             let limits = match provider_try!(
                 Operation::Admission(Admission::Execution),
-                self.judge(strand, turn, round, calls.len())
+                self.judge(strand, turn, round, calls.len()).await
             ) {
                 Verdict::Unbounded => vec![None; calls.len()],
                 Verdict::Bounded(limits) => limits.into_iter().map(Some).collect::<Vec<_>>(),

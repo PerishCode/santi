@@ -5,7 +5,8 @@ use std::{
 };
 
 use super::Service;
-use crate::{stamped, store::JobExpired};
+use crate::stamped;
+use santi_estate::ExpiredJob;
 
 const BATCH: usize = 128;
 const TRASH: &str = ".gc";
@@ -19,8 +20,8 @@ impl Service {
         Ok(self)
     }
 
-    pub(super) fn reap(&self) -> Result<bool, String> {
-        if self.recover()? {
+    pub(super) async fn reap(&self) -> Result<bool, String> {
+        if self.recover().await? {
             return Ok(true);
         }
         let cutoff = stamped(
@@ -28,10 +29,10 @@ impl Service {
                 .checked_sub(self.retention)
                 .unwrap_or(UNIX_EPOCH),
         )?;
-        let expired = self.store.expired(&cutoff, BATCH)?;
+        let expired = self.store.expired_jobs(&cutoff, BATCH).await?;
         let full = expired.len() == BATCH;
         for job in expired {
-            if let Err(error) = self.collect(&job, &cutoff) {
+            if let Err(error) = self.collect(&job, &cutoff).await {
                 eprintln!(
                     "santi: acknowledged job collection failed job={} detail={error}",
                     job.id
@@ -41,12 +42,12 @@ impl Service {
         Ok(full)
     }
 
-    pub(super) fn pace(&self, next: Instant) -> Instant {
+    pub(super) async fn pace(&self, next: Instant) -> Instant {
         let now = Instant::now();
         if now < next {
             return next;
         }
-        match self.reap() {
+        match self.reap().await {
             Ok(true) => now + Duration::from_secs(1),
             Ok(false) => now + Duration::from_secs(60 * 60),
             Err(error) => {
@@ -56,7 +57,7 @@ impl Service {
         }
     }
 
-    fn recover(&self) -> Result<bool, String> {
+    async fn recover(&self) -> Result<bool, String> {
         let trash = self.trash();
         let entries = match fs::read_dir(&trash) {
             Ok(entries) => entries.take(BATCH).collect::<Result<Vec<_>, _>>(),
@@ -71,7 +72,7 @@ impl Service {
                 .into_string()
                 .map_err(|_| "job collection key is not valid UTF-8".to_string())?;
             let archived = entry.path();
-            if self.store.retained(&key)? {
+            if self.store.retained_job(&key).await? {
                 let canonical = self.jobroot().join(&key);
                 if canonical.exists() {
                     return Err(format!(
@@ -87,7 +88,7 @@ impl Service {
         Ok(full)
     }
 
-    fn collect(&self, job: &JobExpired, cutoff: &str) -> Result<(), String> {
+    async fn collect(&self, job: &ExpiredJob, cutoff: &str) -> Result<(), String> {
         let canonical = self.jobroot().join(&job.key);
         let archived = self.trash().join(&job.key);
         let moved = if canonical.exists() {
@@ -103,7 +104,7 @@ impl Service {
         } else {
             false
         };
-        let removed = match self.store.purge(&job.id, cutoff) {
+        let removed = match self.store.purge_job(&job.id, cutoff).await {
             Ok(removed) => removed,
             Err(error) => {
                 if moved {

@@ -4,12 +4,29 @@ use serde_json::json;
 use crate::Fault;
 use crate::context::budget::estimated;
 use crate::service::tools::tools;
-use crate::store::budget::{Admission, Pressure};
+use santi_provider::Item;
 
 use super::super::Service;
 use crate::budget;
 
+mod execution;
+pub(super) use execution::Verdict;
+
 const PROVIDER: &str = "provider_request_exceeds_budget";
+
+struct Pressure<'a> {
+    strand: &'a str,
+    code: &'a str,
+    text: &'a str,
+    operation: &'a str,
+    provider: Option<&'a str>,
+    model: Option<&'a str>,
+    source: Option<&'a str>,
+    bytes: Option<i64>,
+    estimate: &'a budget::Estimate,
+    observed: Option<&'a str>,
+    metadata: serde_json::Value,
+}
 
 impl Service {
     pub(in crate::service) fn budget(&self) -> Option<budget::Cap> {
@@ -19,30 +36,106 @@ impl Service {
         })
     }
 
-    pub(in crate::service) fn estimate(&self, strand: &str) -> Result<budget::Estimate, String> {
-        let mut input = self.store.assembly(strand)?;
-        input.extend(self.store.pending(strand)?);
-        let instructions = self.wording(strand)?;
+    pub(in crate::service) async fn estimate(
+        &self,
+        strand: &str,
+    ) -> Result<budget::Estimate, String> {
+        let mut input = crate::provider_input(&self.store, strand).await?;
+        input.extend(self.pending_input(strand).await?);
+        let instructions = self.wording(strand).await?;
         let tools = tools();
         Ok(estimated(&input, Some(&instructions), Some(&tools)))
     }
 
-    pub(in crate::service) fn admission(&self, strand: &str) -> Result<Option<Admission>, String> {
+    async fn pending_input(&self, strand: &str) -> Result<Vec<Item>, String> {
+        Ok(self
+            .store
+            .inboxes(strand)
+            .await?
+            .into_iter()
+            .filter_map(|inbox| {
+                let content = inbox.content.rendered();
+                (!content.trim().is_empty()).then(|| Item::Message {
+                    role: match inbox.kind {
+                        crate::message::Kind::Text => "user",
+                        crate::message::Kind::SantiSystem => "system",
+                    }
+                    .to_string(),
+                    content,
+                })
+            })
+            .collect())
+    }
+
+    pub(in crate::service) async fn admit_candidate(
+        &self,
+        strand: &str,
+        kind: &crate::message::Kind,
+        content: &crate::message::Content,
+    ) -> Result<Option<Fault>, String> {
         let Some(budget) = self.budget() else {
             return Ok(None);
         };
+        let mut input = crate::provider_input(&self.store, strand).await?;
+        input.extend(self.pending_input(strand).await?);
+        if let Some(candidate) = crate::context::budget::inbound(kind, content) {
+            input.push(candidate);
+        }
+        let tools = tools();
+        let estimate = estimated(&input, Some(&self.wording(strand).await?), Some(&tools));
+        if estimate.total <= budget.bytes {
+            return Ok(None);
+        }
         let metadata = self.provider.metadata();
-        Ok(Some(Admission {
-            provider: metadata.provider.to_string(),
-            model: metadata.model,
-            source: budget.source,
-            bytes: budget.bytes,
-            instructions: Some(self.wording(strand)?),
-            tools: tools(),
-        }))
+        let reason = reason(estimate.total, budget.bytes);
+        self.pressure(Pressure {
+            strand,
+            code: "candidate_input_exceeds_budget",
+            text: &reason,
+            operation: "ingest_admission",
+            provider: Some(metadata.provider.as_ref()),
+            model: Some(&metadata.model),
+            source: Some(&budget.source),
+            bytes: Some(budget.bytes),
+            estimate: &estimate,
+            observed: None,
+            metadata: serde_json::json!({"estimator": estimate.estimator}),
+        })
+        .await
+        .map(Some)
     }
 
-    pub(in crate::service) fn overdrawn(
+    pub(in crate::service) async fn admit_pending(
+        &self,
+        strand: &str,
+    ) -> Result<Option<Fault>, String> {
+        let Some(budget) = self.budget() else {
+            return Ok(None);
+        };
+        let estimate = self.estimate(strand).await?;
+        if estimate.total <= budget.bytes {
+            return Ok(None);
+        }
+        let metadata = self.provider.metadata();
+        let reason = reason(estimate.total, budget.bytes);
+        self.pressure(Pressure {
+            strand,
+            code: "pending_drain_would_exceed_budget",
+            text: &reason,
+            operation: "pending_drain_admission",
+            provider: Some(metadata.provider.as_ref()),
+            model: Some(&metadata.model),
+            source: Some(&budget.source),
+            bytes: Some(budget.bytes),
+            estimate: &estimate,
+            observed: None,
+            metadata: serde_json::json!({"estimator": estimate.estimator}),
+        })
+        .await
+        .map(Some)
+    }
+
+    pub(in crate::service) async fn overdrawn(
         &self,
         strand: &str,
         turn: &str,
@@ -58,12 +151,13 @@ impl Service {
         let metadata = self.provider.metadata();
         let strand = self
             .store
-            .strand(strand)?
+            .strand(strand)
+            .await?
             .ok_or_else(|| "strand not found".to_string())?;
         let reason = reason(estimate.total, budget.bytes);
-        let error = self.store.press(
-            &strand.id,
-            Pressure {
+        let error = self
+            .pressure(Pressure {
+                strand: &strand.id,
                 code: PROVIDER,
                 text: &reason,
                 operation: "provider_preflight",
@@ -73,188 +167,80 @@ impl Service {
                 bytes: Some(budget.bytes),
                 estimate,
                 observed: Some(turn),
-                at: Some(strand.next - 1),
-                metadata: Some(json!({
+                metadata: json!({
                     "phase": "provider_preflight",
                     "estimator": estimate.estimator,
-                })),
-            },
-        )?;
-        self.dispatched();
+                    "observed_at_seq": strand.next - 1,
+                }),
+            })
+            .await?;
+        self.dispatched().await;
         Ok(Some(error))
     }
 
-    pub(in crate::service) fn absolve(
+    async fn pressure(&self, pressure: Pressure<'_>) -> Result<Fault, String> {
+        self.store
+            .raise(
+                santi_error::Draft {
+                    key: crate::budget::Error::Context
+                        .descriptor()
+                        .key("strand", pressure.strand),
+                    descriptor: crate::budget::Error::Context.descriptor(),
+                    scope: santi_error::Scope::new("strand", pressure.strand),
+                    source: santi_error::Source::new("santi-core", pressure.operation),
+                    message: pressure.text.to_string(),
+                    context: json!({
+                        "schema": "santi.error.context_budget.v1",
+                        "reason": pressure.code,
+                        "provider": pressure.provider,
+                        "model": pressure.model,
+                        "budget": {"source": pressure.source, "input": pressure.bytes},
+                        "estimate": pressure.estimate,
+                        "observed_turn_id": pressure.observed,
+                        "details": pressure.metadata,
+                    }),
+                },
+                &crate::now(),
+            )
+            .await
+    }
+
+    pub(in crate::service) async fn absolve(
         &self,
         strand: &str,
         cleared_by: &str,
     ) -> Result<bool, String> {
-        if self.store.pressure(strand)?.is_none() {
+        let key = crate::budget::Error::Context
+            .descriptor()
+            .key("strand", strand);
+        if self.store.incident(&key).await?.is_none() {
             return Ok(false);
         }
         let Some(budget) = self.budget() else {
             return Ok(false);
         };
-        let estimate = self.estimate(strand)?;
+        let estimate = self.estimate(strand).await?;
         if estimate.total > budget.bytes {
             return Ok(false);
         }
-        let resolved = self.store.vent(strand, cleared_by, &estimate)?;
-        self.dispatched();
+        let resolved = self
+            .store
+            .resolve(
+                &key,
+                cleared_by,
+                json!({
+                    "schema": "santi.error.context_budget.resolution.v1",
+                    "resolved_by": cleared_by,
+                    "estimate": estimate,
+                }),
+                &crate::now(),
+            )
+            .await?;
+        self.dispatched().await;
         Ok(resolved)
     }
 }
 
 fn reason(total: i64, bytes: i64) -> String {
     format!("strand context is over budget ({total} estimated bytes, budget {bytes})")
-}
-
-pub(super) enum Verdict {
-    Unbounded,
-    Bounded(Vec<usize>),
-    Rejected(Box<Fault>),
-}
-
-impl Service {
-    pub(super) fn readmit(
-        &self,
-        strand: &str,
-        turn: &str,
-        next: usize,
-    ) -> Result<Option<Fault>, String> {
-        let Some(budget) = self.rationed(strand) else {
-            return Ok(None);
-        };
-        if next <= budget.rounds {
-            return Ok(None);
-        }
-        let usage = self.store.spent(strand)?;
-        self.breached(Breach {
-            strand,
-            turn,
-            budget: &budget,
-            usage,
-            reason: "provider_rounds",
-            request: json!({"next_provider_round": next}),
-        })
-        .map(Some)
-    }
-
-    pub(super) fn judge(
-        &self,
-        strand: &str,
-        turn: &str,
-        round: usize,
-        calls: usize,
-    ) -> Result<Verdict, String> {
-        let Some(budget) = self.rationed(strand) else {
-            return Ok(Verdict::Unbounded);
-        };
-        let usage = self.store.spent(strand)?;
-        let request = json!({
-            "provider_round": round,
-            "calls": calls,
-        });
-        if round >= budget.rounds {
-            return self
-                .breached(Breach {
-                    strand,
-                    turn,
-                    budget: &budget,
-                    usage,
-                    reason: "provider_rounds",
-                    request,
-                })
-                .map(Box::new)
-                .map(Verdict::Rejected);
-        }
-        if usage.calls.saturating_add(calls) > budget.calls {
-            return self
-                .breached(Breach {
-                    strand,
-                    turn,
-                    budget: &budget,
-                    usage,
-                    reason: "calls",
-                    request,
-                })
-                .map(Box::new)
-                .map(Verdict::Rejected);
-        }
-        let room = budget.output.saturating_sub(usage.output);
-        if room < calls {
-            return self
-                .breached(Breach {
-                    strand,
-                    turn,
-                    budget: &budget,
-                    usage,
-                    reason: "output",
-                    request,
-                })
-                .map(Box::new)
-                .map(Verdict::Rejected);
-        }
-        Ok(Verdict::Bounded(allotted(room, budget.shell, calls)))
-    }
-
-    fn breached(&self, breach: Breach<'_>) -> Result<Fault, String> {
-        let Breach {
-            strand,
-            turn,
-            budget,
-            usage,
-            reason,
-            request,
-        } = breach;
-        let error = self.store.raise(santi_error::Draft {
-            key: crate::budget::Error::Execution
-                .descriptor()
-                .key("strand", strand),
-            descriptor: crate::budget::Error::Execution.descriptor(),
-            scope: santi_error::Scope::new("strand", strand),
-            source: santi_error::Source::new("santi-core", "turn.execution_budget"),
-            message: format!("strand execution budget exceeded: {reason}"),
-            context: json!({
-                "schema": "santi.error.execution_budget.v1",
-                "profile": budget.profile,
-                "reason": reason,
-                "turn": turn,
-                "limits": {
-                    "provider_rounds": budget.rounds,
-                    "calls": budget.calls,
-                    "output": budget.output,
-                    "shell_output_bytes": budget.shell,
-                },
-                "usage": {
-                    "calls": usage.calls,
-                    "output": usage.output,
-                },
-                "request": request,
-            }),
-        })?;
-        self.dispatched();
-        Ok(error)
-    }
-}
-
-struct Breach<'a> {
-    strand: &'a str,
-    turn: &'a str,
-    budget: &'a budget::Execution,
-    usage: budget::Usage,
-    reason: &'a str,
-    request: serde_json::Value,
-}
-
-fn allotted(total: usize, per_call: usize, calls: usize) -> Vec<usize> {
-    let mut remaining = total;
-    let mut limits = Vec::with_capacity(calls);
-    for index in 0..calls {
-        let left = calls - index;
-        let limit = (remaining / left).min(per_call);
-        limits.push(limit);
-        remaining -= limit;
-    }
-    limits
 }

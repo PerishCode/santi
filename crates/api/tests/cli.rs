@@ -21,6 +21,27 @@ fn local() {
         parsed.command,
         Some(Command::Doctor { storage_only: true })
     ));
+    let parsed = Cli::try_parse_from([
+        "santi-api",
+        "--strand",
+        "ss_one",
+        "audit",
+        "--turn",
+        "turn_one",
+        "--failed",
+        "-n",
+        "7",
+    ])
+    .unwrap();
+    assert!(matches!(
+        parsed.command,
+        Some(Command::Audit {
+            turn: Some(ref turn),
+            failed: true,
+            limit: 7,
+            after: None,
+        }) if turn == "turn_one"
+    ));
 }
 
 #[test]

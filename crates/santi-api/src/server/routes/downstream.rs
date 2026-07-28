@@ -20,6 +20,7 @@ pub(super) async fn enroll(
 ) -> Result<Json<downstream::Credential>, ApiError> {
     service
         .enroll(request)
+        .await
         .map(Json)
         .map_err(ApiError::from_service)
 }
@@ -37,6 +38,7 @@ pub(super) async fn downstreams(
 ) -> Result<Json<Vec<downstream::Credential>>, ApiError> {
     service
         .downstreams()
+        .await
         .map(Json)
         .map_err(ApiError::from_service)
 }
@@ -63,6 +65,7 @@ pub(super) async fn ingest(
     let token = bearer(&headers);
     match service
         .downstream(token, request)
+        .await
         .map_err(ApiError::from_service)?
     {
         Admission::Accepted(ingest::Outcome::Accepted { receipt }) => Ok(Json(receipt)),

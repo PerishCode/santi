@@ -7,7 +7,8 @@ It keeps the architecture deliberately small:
 ```text
 crates/
   api/             # the `santi-api` server binary: config, bootstrap, and local ops
-  santi-core/      # soul runtime: sessions, turns, context assembly, store, objects, workspace
+  santi-core/      # soul runtime: sessions, turns, context assembly, objects, workspace
+  santi-estate/    # Keel resource graph, persistence ceremonies, and projections
   santi-provider/  # provider-agnostic ProviderClient boundary (OpenAI Responses, chat-completions)
   santi-api/       # HTTP/SSE + OpenAPI server library over santi-core
   santi/           # the `santi` transport-only HTTP client binary
@@ -20,9 +21,11 @@ workspace/memory. The only way into the runtime is HTTP.
 
 ## Crates
 
-- `santi-core` — runtime model and service. SQLite-backed store, turn
-  execution, context assembly, `santi://` object store, soul/session
-  workspaces and memory.
+- `santi-core` — runtime model and service. Turn execution, context assembly,
+  `santi://` object store, soul/session workspaces and memory.
+- `santi-estate` — the Keel-backed persistent resource graph. It owns durable
+  facts, lifecycle ceremonies, projections, schema evolution, and the exact
+  one-way transition from the retired v39 store.
 - `santi-provider` — the `ProviderClient` trait and its OpenAI Responses /
   chat-completions implementations. `santi-core` stays provider-agnostic
   behind this boundary.
@@ -193,7 +196,7 @@ file > defaults):
 | --- | --- | --- |
 | `SANTI_HOME` | `~/.santi` | Anchor for the defaults below |
 | `SANTI_CONFIG` | `$SANTI_HOME/santi.toml` | Provider config file (`--config` overrides) |
-| `SANTI_PATHS_DATABASE` | `$SANTI_HOME/runtime/db` | SQLite store |
+| `SANTI_PATHS_DATABASE` | `$SANTI_HOME/runtime/db` | Keel estate |
 | `SANTI_PATHS_RUNTIME_ROOT` | `$SANTI_HOME/runtime` | Soul/session memory, objects |
 | `SANTI_PATHS_EXECUTION_ROOT` | `$SANTI_HOME/execution` | Shell tool working area |
 | `SANTI_PROVIDER` | `openai` | Selected provider profile |

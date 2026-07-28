@@ -23,12 +23,14 @@ pub(super) async fn turn_events(
 ) -> Result<Json<event::Batch>, ApiError> {
     let principal = service
         .principal(bearer(&headers))
+        .await
         .map_err(ApiError::from_service)?
         .ok_or_else(|| ApiError::unauthorized("invalid or missing credential"))?;
     let since = params.since.unwrap_or(0).max(0);
     let limit = params.limit.unwrap_or(256).clamp(1, 1000);
     service
         .since(since, &principal.prefix, limit)
+        .await
         .map(Json)
         .map_err(ApiError::from_service)
 }
@@ -55,6 +57,7 @@ pub async fn stop(
 ) -> Result<Json<turn::Stop>, ApiError> {
     service
         .stop(&turn)
+        .await
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("turn not found"))

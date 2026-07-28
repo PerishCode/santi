@@ -28,15 +28,36 @@ pub async fn run() -> Result<()> {
         Command::Doctor { storage_only } => {
             config::boot(config.as_deref(), over.partial()).map_err(anyhow::Error::msg)?;
             let report = if storage_only {
-                santi_api::runtime::held().paths.doctor()
+                santi_api::runtime::held().paths.doctor().await
             } else {
-                santi_api::ops::doctor()
+                santi_api::ops::doctor().await
             }
             .map_err(anyhow::Error::msg)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
             if !report.ok {
                 anyhow::bail!("doctor: unhealthy (see report above)");
             }
+            Ok(())
+        }
+        Command::Audit {
+            turn,
+            failed,
+            limit,
+            after,
+        } => {
+            config::boot(config.as_deref(), over.partial()).map_err(anyhow::Error::msg)?;
+            let rows = santi_api::runtime::held()
+                .paths
+                .audit(
+                    strand.as_deref(),
+                    turn.as_deref(),
+                    failed,
+                    limit,
+                    after.as_deref(),
+                )
+                .await
+                .map_err(anyhow::Error::msg)?;
+            println!("{}", serde_json::to_string(&rows)?);
             Ok(())
         }
         Command::Inbox(InboxCommand::Seed { text, file, stdin }) => {
@@ -46,7 +67,9 @@ pub async fn run() -> Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("no strand id: set --strand / SANTI_STRAND_ID"))?;
             let text = text::read(text, file, stdin)?;
             config::boot(config.as_deref(), over.partial()).map_err(anyhow::Error::msg)?;
-            let report = santi_api::ops::inbox_seed(&strand, &text).map_err(anyhow::Error::msg)?;
+            let report = santi_api::ops::inbox_seed(&strand, &text)
+                .await
+                .map_err(anyhow::Error::msg)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
             if !report.accepted {
                 anyhow::bail!(

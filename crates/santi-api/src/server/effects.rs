@@ -30,6 +30,7 @@ pub async fn effect(
 ) -> Result<Json<effect::Status>, ApiError> {
     service
         .effect(&effect)
+        .await
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("effect not found"))
@@ -50,6 +51,7 @@ pub async fn trail(
 ) -> Result<Json<Vec<trace::Record>>, ApiError> {
     service
         .trail(&effect)
+        .await
         .map(Json)
         .map_err(ApiError::from_service)
 }
@@ -73,6 +75,7 @@ pub async fn settle(
 ) -> Result<Json<effect::Status>, ApiError> {
     service
         .settle(&effect, request.outcome, &request.evidence)
+        .await
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("effect not found"))

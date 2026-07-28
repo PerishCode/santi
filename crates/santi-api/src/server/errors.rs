@@ -32,6 +32,7 @@ pub(super) async fn stranded(
 ) -> Result<Json<Vec<Incident>>, ApiError> {
     service
         .stranded(&strand, params.limit.unwrap_or(50))
+        .await
         .map_err(ApiError::from_service)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("strand not found"))
@@ -60,6 +61,7 @@ pub(super) async fn errors(
             &santi_core::Scope::new(scope_kind, scope_id),
             params.limit.unwrap_or(50),
         )
+        .await
         .map(Json)
         .map_err(ApiError::from_service)
 }

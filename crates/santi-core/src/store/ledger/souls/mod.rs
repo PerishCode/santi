@@ -8,7 +8,7 @@ use crate::store::{Begun, budget, rows};
 use crate::{ingest, message, strand, webhook};
 
 mod jobs;
-pub(crate) use jobs::{Attention, Entry, Grant, Prepared, Record};
+pub(crate) use jobs::{Attention, Entry, Expired, Grant, Prepared, Record};
 
 impl Store {
     pub fn labeled(&self, soul: &str, label: &str) -> Result<Strand, String> {

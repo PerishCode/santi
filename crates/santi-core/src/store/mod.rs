@@ -21,8 +21,8 @@ pub use db::version;
 use db::*;
 pub(crate) use effects::Settlement;
 pub(crate) use ledger::{
-    Attention as JobAttention, Entry as JobEntry, Grant as JobGrant, Prepared as JobPrepared,
-    Record as JobRecord,
+    Attention as JobAttention, Entry as JobEntry, Expired as JobExpired, Grant as JobGrant,
+    Prepared as JobPrepared, Record as JobRecord,
 };
 use rows::{Decode, collected};
 pub use runtime::Invocation;

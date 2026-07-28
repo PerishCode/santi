@@ -8,6 +8,8 @@ mod attention;
 mod draft;
 mod logs;
 mod paths;
+mod retention;
+mod watch;
 
 pub use logs::Read;
 
@@ -183,29 +185,6 @@ impl Service {
         }
         self.supervisor.acknowledge(&self.launch(&record)?)?;
         self.store.acknowledge(id).map(|record| Some(record.job))
-    }
-
-    fn sweep(&self) -> Result<(), String> {
-        for record in self.store.active()? {
-            let id = record.job.id.clone();
-            let result = self
-                .refresh(record)
-                .and_then(|record| attention::capture(self, record));
-            if let Err(error) = result {
-                eprintln!("santi: job attention failed job={id} detail={error}");
-            }
-        }
-        Ok(())
-    }
-
-    pub async fn watch(&self) {
-        while !self.closing() {
-            if let Err(error) = self.sweep() {
-                eprintln!("santi: job attention scan failed: {error}");
-            }
-            self.rouse();
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        }
     }
 
     fn launch(&self, record: &JobRecord) -> Result<Launch, String> {

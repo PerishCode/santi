@@ -48,7 +48,8 @@ pub async fn serve() -> Result<(), String> {
         },
         provider,
         supervisor,
-    )?;
+    )?
+    .retain(held.retention)?;
     let address: SocketAddr = bind
         .parse()
         .map_err(|_| "listen host/port did not form a valid socket address".to_string())?;

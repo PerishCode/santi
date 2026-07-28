@@ -25,6 +25,8 @@ use tokio::sync::broadcast;
 use crate::{Store, Transition};
 use crate::{budget, material, stream};
 
+pub const RETENTION: u64 = 7 * 24 * 60 * 60;
+
 #[derive(Clone)]
 pub struct Service {
     pub(crate) store: Store,
@@ -42,6 +44,7 @@ pub struct Service {
     degraded: Arc<AtomicBool>,
     supervisor: Arc<dyn jobs::Supervisor>,
     handoffs: Arc<Mutex<HashSet<String>>>,
+    retention: Duration,
 }
 
 #[derive(Debug, Clone)]
@@ -99,6 +102,7 @@ impl Service {
             degraded: Arc::new(AtomicBool::new(degraded)),
             supervisor,
             handoffs: Arc::new(Mutex::new(HashSet::new())),
+            retention: Duration::from_secs(RETENTION),
         })
     }
 

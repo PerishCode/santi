@@ -10,4 +10,4 @@ pub(in crate::store) mod turn;
 
 use super::Store;
 
-pub(crate) use souls::{Attention, Entry, Grant, Prepared, Record};
+pub(crate) use souls::{Attention, Entry, Expired, Grant, Prepared, Record};

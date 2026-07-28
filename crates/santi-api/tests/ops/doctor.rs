@@ -73,6 +73,7 @@ fn runtime_under(root: &Path, budget: Option<usize>) -> Runtime {
         providers: file.providers,
         paths: paths_under(root),
         grace: Duration::from_secs(600),
+        retention: Duration::from_secs(santi_api::RETENTION),
         github: Default::default(),
         feishu: Default::default(),
         constitution: None,

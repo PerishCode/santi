@@ -13,6 +13,7 @@ pub struct Runtime {
     pub providers: BTreeMap<String, Profile>,
     pub paths: Layout,
     pub grace: Duration,
+    pub retention: Duration,
     pub github: Github,
     pub feishu: Feishu,
     pub constitution: Option<PathBuf>,

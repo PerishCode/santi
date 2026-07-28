@@ -7,8 +7,11 @@ use crate::store::Store;
 use crate::{job, now, tag};
 
 mod attention;
+mod retention;
 mod rows;
 mod state;
+
+pub(crate) use retention::Expired;
 
 const TTL: u64 = 120;
 

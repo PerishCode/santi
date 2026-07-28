@@ -16,6 +16,7 @@ use sha2::{Digest, Sha256};
 use crate::support::FakeProvider;
 
 mod cold;
+mod retention;
 
 struct Probe {
     observation: Mutex<JobObservation>,

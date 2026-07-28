@@ -19,6 +19,8 @@ pub struct Config {
     #[cascade(section)]
     pub server: Server,
     #[cascade(section)]
+    pub jobs: Jobs,
+    #[cascade(section)]
     pub paths: Paths,
     #[cascade(section)]
     pub webhooks: Webhooks,
@@ -35,10 +37,34 @@ impl Default for Config {
                 prefix: String::new(),
             },
             server: Server::default(),
+            jobs: Jobs::default(),
             paths: Paths::default(),
             webhooks: Webhooks::default(),
             providers: BTreeMap::new(),
         }
+    }
+}
+
+#[derive(Debug, Cascade)]
+#[cascade(section)]
+pub struct Jobs {
+    pub acknowledged_retention_seconds: u64,
+}
+
+impl Default for Jobs {
+    fn default() -> Self {
+        Self {
+            acknowledged_retention_seconds: santi_api::RETENTION,
+        }
+    }
+}
+
+impl Jobs {
+    pub fn retention(&self) -> Result<Duration, String> {
+        if self.acknowledged_retention_seconds == 0 {
+            return Err("acknowledged job retention must be greater than zero".to_string());
+        }
+        Ok(Duration::from_secs(self.acknowledged_retention_seconds))
     }
 }
 
@@ -98,7 +124,7 @@ pub fn boot(config: Option<&str>, over: ConfigPartial) -> Result<(), String> {
     let file = path(config);
     let file = file.is_file().then_some(file.as_path());
     let held = resolved(file, over).map_err(|error| error.to_string())?;
-    runtime::hold(runtime(held));
+    runtime::hold(runtime(held)?);
     Ok(())
 }
 
@@ -135,9 +161,9 @@ fn legacy(key: &str) -> Option<String> {
     names.iter().find_map(|name| env(name))
 }
 
-fn runtime(held: Config) -> Runtime {
+fn runtime(held: Config) -> Result<Runtime, String> {
     let home = home();
-    Runtime {
+    Ok(Runtime {
         bind: held.listen.address(),
         port: held.listen.port,
         provider: held.provider,
@@ -154,6 +180,7 @@ fn runtime(held: Config) -> Runtime {
                 .unwrap_or_else(|| home.join("execution")),
         },
         grace: Duration::from_secs(held.server.grace),
+        retention: held.jobs.retention()?,
         github: runtime::Github {
             login: held.webhooks.github.login,
             allow: held.webhooks.github.allow,
@@ -163,5 +190,5 @@ fn runtime(held: Config) -> Runtime {
             allow: held.webhooks.feishu.allow,
         },
         constitution: held.paths.charter,
-    }
+    })
 }

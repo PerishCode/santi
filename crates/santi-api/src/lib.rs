@@ -8,6 +8,7 @@ mod bucket;
 mod server;
 pub mod webhook;
 
+pub use santi_core::service::RETENTION;
 pub use server::{
     ApiError, CreateJobRequest, ResolveEffectRequest, acknowledge_job as acknowledge_job_handler,
     cancel_job as cancel_job_handler, create_job as create_job_handler,

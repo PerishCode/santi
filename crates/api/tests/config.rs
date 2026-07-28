@@ -13,6 +13,10 @@ fn read(text: &str) -> Config {
 fn example() {
     let held = read(include_str!("../../../santi.example.toml"));
     assert_eq!(held.providers.len(), 3);
+    assert_eq!(
+        held.jobs.retention().unwrap(),
+        std::time::Duration::from_secs(604800)
+    );
 }
 
 #[test]
@@ -48,4 +52,15 @@ bytez = 120000
     )
     .unwrap();
     assert!(plumb::config::load::<ConfigPartial>(file.path()).is_err());
+}
+
+#[test]
+fn retention() {
+    let held = read(
+        r#"
+[jobs]
+acknowledged_retention_seconds = 0
+"#,
+    );
+    assert!(held.jobs.retention().is_err());
 }

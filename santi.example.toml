@@ -1,5 +1,8 @@
 provider = "openai"
 
+[jobs]
+acknowledged_retention_seconds = 604800
+
 [providers.openai]
 kind = "openai_responses"
 api_key = ""

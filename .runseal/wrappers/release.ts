@@ -1,5 +1,3 @@
-//! `runseal :release --channel beta|stable [options]` — dispatch Forgejo CI.
+import { release } from "@perish/sealkit/release";
 
-import { dispatch } from "@/lib/release/dispatch.ts";
-
-Deno.exit(await dispatch(Deno.args));
+await release(Deno.args);

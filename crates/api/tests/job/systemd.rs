@@ -72,7 +72,10 @@ fn retains() {
     #[cfg(target_os = "windows")]
     assert!(stdout.contains("capability="), "{stdout}");
     assert!(stdout.contains("soul=soul_probe"), "{stdout}");
+    #[cfg(unix)]
     assert_eq!(stderr, "stderr-probe\n");
+    #[cfg(target_os = "windows")]
+    assert_eq!(stderr, "stderr-probe\r\n");
 
     supervisor
         .acknowledge(&launch)
@@ -150,7 +153,7 @@ fn cancels() {
     #[cfg(unix)]
     let command = r#"printf '%s\n' $$ > main.pid; bash -c 'printf "%s\n" $$ > child.pid; sleep 300 & printf "%s\n" $! > grandchild.pid; wait' & wait"#;
     #[cfg(target_os = "windows")]
-    let command = r#"Set-Content -NoNewline main.pid $PID; $child=Start-Process powershell.exe -ArgumentList "-NoLogo","-NoProfile","-NonInteractive","-Command","Start-Sleep -Seconds 300" -PassThru; Set-Content -NoNewline child.pid $child.Id; Wait-Process -Id $child.Id"#;
+    let command = r#"Set-Content -LiteralPath "main.pid" -Value $PID -NoNewline; $child=Start-Process powershell.exe -ArgumentList "-NoLogo","-NoProfile","-NonInteractive","-Command","Start-Sleep -Seconds 300" -PassThru; Set-Content -LiteralPath "child.pid" -Value $child.Id -NoNewline; Wait-Process -Id $child.Id"#;
     let (supervisor, launch) = launch(&temp, "process tree probe", command, 4096);
     let guard = Guard {
         supervisor: &supervisor,

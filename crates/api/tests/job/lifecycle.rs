@@ -106,7 +106,10 @@ async fn vertical() {
         .await
         .expect("read log")
         .expect("log");
+    #[cfg(unix)]
     assert_eq!(log.data, "vertical-ok\n");
+    #[cfg(target_os = "windows")]
+    assert_eq!(log.data, "vertical-ok\r\n");
     let acknowledged = service
         .ack(&strand.soul, &accepted.job.id)
         .await
@@ -179,7 +182,10 @@ async fn restarts() {
         .await
         .expect("read log")
         .expect("log");
+    #[cfg(unix)]
     assert_eq!(log.data, "after-restart\n");
+    #[cfg(target_os = "windows")]
+    assert_eq!(log.data, "after-restart\r\n");
     restarted
         .ack(&strand.soul, &accepted.job.id)
         .await

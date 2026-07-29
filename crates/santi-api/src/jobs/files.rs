@@ -158,9 +158,17 @@ pub(super) fn active(directory: &Path) -> Result<bool, String> {
             fs2::FileExt::unlock(&file).map_err(|error| error.to_string())?;
             Ok(false)
         }
-        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(true),
+        Err(error) if contended(&error) => Ok(true),
         Err(error) => Err(error.to_string()),
     }
+}
+
+#[cfg(target_os = "windows")]
+fn contended(error: &std::io::Error) -> bool {
+    const ERROR_LOCK_VIOLATION: i32 = 33;
+
+    error.kind() == std::io::ErrorKind::WouldBlock
+        || error.raw_os_error() == Some(ERROR_LOCK_VIOLATION)
 }
 
 #[cfg(target_os = "macos")]

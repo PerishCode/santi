@@ -47,7 +47,6 @@ async fn vertical() {
         )
         .await
         .expect("accept job");
-    #[cfg(unix)]
     let stamp = stamp(&database, &accepted.job.id).await;
     let guard = Unit {
         #[cfg(unix)]

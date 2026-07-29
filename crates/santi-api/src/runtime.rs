@@ -11,6 +11,7 @@ pub struct Runtime {
     pub port: u16,
     pub provider: String,
     pub providers: BTreeMap<String, Profile>,
+    pub environment: BTreeMap<String, String>,
     pub paths: Layout,
     pub grace: Duration,
     pub retention: Duration,

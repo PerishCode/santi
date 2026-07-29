@@ -4,6 +4,7 @@ use utoipa::ToSchema;
 pub mod budget;
 mod codec;
 mod edge;
+pub mod environ;
 mod ledger;
 pub mod stream;
 

@@ -48,13 +48,13 @@ pub async fn run() -> Result<()> {
             config::boot(config.as_deref(), over.partial()).map_err(anyhow::Error::msg)?;
             let rows = santi_api::runtime::held()
                 .paths
-                .audit(
-                    strand.as_deref(),
-                    turn.as_deref(),
+                .audit(santi_api::ops::Audit {
+                    strand: strand.as_deref(),
+                    turn: turn.as_deref(),
                     failed,
                     limit,
-                    after.as_deref(),
-                )
+                    after: after.as_deref(),
+                })
                 .await
                 .map_err(anyhow::Error::msg)?;
             println!("{}", serde_json::to_string(&rows)?);

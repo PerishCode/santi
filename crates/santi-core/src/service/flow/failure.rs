@@ -147,8 +147,14 @@ impl Service {
         let (finished, canonical_error) = match cause {
             Cause::Provider(metadata) => self.misfired(strand, turn, &error, metadata).await,
             Cause::Budget(admission, canonical_error) => {
-                self.failed_budget(strand, turn, &error, admission, *canonical_error)
-                    .await
+                self.failed_budget(Budget {
+                    strand,
+                    turn,
+                    error: &error,
+                    admission,
+                    canonical: *canonical_error,
+                })
+                .await
             }
             Cause::Runtime(operation) => self.tripped(strand, turn, &error, operation).await,
             Cause::Stopped(cause) => self.interrupted(strand, turn, cause, &error).await,
@@ -167,14 +173,14 @@ impl Service {
         );
     }
 
-    async fn failed_budget(
-        &self,
-        strand: &str,
-        turn: &str,
-        error: &str,
-        admission: Admission,
-        canonical: Fault,
-    ) -> (Option<Turn>, Fault) {
+    async fn failed_budget(&self, failure: Budget<'_>) -> (Option<Turn>, Fault) {
+        let Budget {
+            strand,
+            turn,
+            error,
+            admission,
+            canonical,
+        } = failure;
         let persisted = match canonical.incident.as_deref() {
             Some(incident) => {
                 self.store
@@ -195,6 +201,14 @@ impl Service {
             }
         }
     }
+}
+
+struct Budget<'a> {
+    strand: &'a str,
+    turn: &'a str,
+    error: &'a str,
+    admission: Admission,
+    canonical: Fault,
 }
 
 fn unrecorded(strand: &str, turn: &str, detail: String) -> Fault {

@@ -31,7 +31,7 @@ impl Severity {
         }
     }
 
-    pub fn read(_value: &str) -> Self {
+    pub fn read(_: &str) -> Self {
         Severity::Error
     }
 }

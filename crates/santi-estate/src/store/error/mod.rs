@@ -5,6 +5,13 @@ use santi_error::{Fault, Incident, Transition};
 mod codec;
 mod persist;
 
+pub(in crate::store) struct Resolution<'a> {
+    pub key: &'a str,
+    pub by: &'a str,
+    pub context: serde_json::Value,
+    pub now: &'a str,
+}
+
 impl Store {
     pub async fn raise(&self, draft: santi_error::Draft, now: &str) -> Result<Fault, String> {
         self.core
@@ -21,7 +28,18 @@ impl Store {
         now: &str,
     ) -> Result<bool, String> {
         self.core
-            .batch(async |tx| resolve_in(tx, key, by, context, now).await)
+            .batch(async |tx| {
+                resolve_in(
+                    tx,
+                    Resolution {
+                        key,
+                        by,
+                        context,
+                        now,
+                    },
+                )
+                .await
+            })
             .await
             .map_err(read::error)
     }
@@ -167,19 +185,17 @@ pub(in crate::store) async fn raise_in(
 
 pub(in crate::store) async fn resolve_in(
     tx: &mut keel::Tx<'_, keel::adapt::db::Sqlite>,
-    key: &str,
-    by: &str,
-    context: serde_json::Value,
-    now: &str,
+    resolution: Resolution<'_>,
 ) -> Result<bool, keel::adapt::Error> {
     let Some(row) = tx
-        .one(&form("ErrorIncident").when("incident_key", Op::Eq, key))
+        .one(&form("ErrorIncident").when("incident_key", Op::Eq, resolution.key))
         .await?
     else {
         return Ok(false);
     };
     let active = codec::incident(&row, false).map_err(adapt)?;
-    let mutation = santi_error::engine().resolve(&active, by, context, now);
+    let mutation =
+        santi_error::engine().resolve(&active, resolution.by, resolution.context, resolution.now);
     persist::resolved(tx, row.key(), &mutation).await?;
     Ok(true)
 }

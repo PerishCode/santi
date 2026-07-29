@@ -124,7 +124,16 @@ impl Store {
         page_index: i64,
         page_size: i64,
     ) -> Result<Option<compact::Page>, String> {
-        page::read(self, tag, keyword, page_index, page_size).await
+        page::read(
+            self,
+            page::Query {
+                tag,
+                keyword,
+                index: page_index,
+                size: page_size,
+            },
+        )
+        .await
     }
 
     pub async fn annotate_compact(

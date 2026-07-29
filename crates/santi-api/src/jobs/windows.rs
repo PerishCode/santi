@@ -38,21 +38,21 @@ impl Windows {
 impl JobSupervisor for Windows {
     fn detach(&self, launch: &JobLaunch) -> Result<(), String> {
         let directory = Path::new(&launch.directory);
-        files::prepare(directory)?;
+        files::directory(directory).prepare()?;
         let requested = Spec::from(launch);
-        files::specify(directory, &requested)?;
-        let retained = files::spec(directory)?;
-        if files::terminal(directory)?.is_some() {
+        files::directory(directory).specify(&requested)?;
+        let retained = files::directory(directory).spec()?;
+        if files::directory(directory).terminal()?.is_some() {
             return Ok(());
         }
-        if files::active(directory)? {
+        if files::directory(directory).active()? {
             return if retained.legacy() {
                 Ok(())
             } else {
                 handoff(&launch.job.id, directory)
             };
         }
-        if files::state(directory)?.is_some() {
+        if files::directory(directory).state()?.is_some() {
             return Err(format!(
                 "job {} retains state without an active Windows sidecar",
                 launch.job.id
@@ -75,17 +75,17 @@ impl JobSupervisor for Windows {
 
     fn observe(&self, launch: &JobLaunch) -> Result<JobObservation, String> {
         let directory = Path::new(&launch.directory);
-        let state = files::state(directory)?;
-        if let Some(terminal) = files::terminal(directory)? {
+        let state = files::directory(directory).state()?;
+        if let Some(terminal) = files::directory(directory).terminal()? {
             if state.is_none()
                 && launch.stamp.starts_with("stamp_")
                 && launch.job.state == job::State::Submitting
             {
                 return Ok(JobObservation::Aborted);
             }
-            return Ok(JobObservation::Terminal(terminal.into()));
+            return Ok(JobObservation::Terminal(terminal));
         }
-        if !files::active(directory)? {
+        if !files::directory(directory).active()? {
             return Ok(JobObservation::Missing);
         }
         if state.is_some_and(|state| state.phase == Phase::Claimed) {
@@ -96,11 +96,11 @@ impl JobSupervisor for Windows {
     }
 
     fn stop(&self, launch: &JobLaunch) -> Result<(), String> {
-        files::mark(Path::new(&launch.directory), files::CANCEL)
+        files::directory(Path::new(&launch.directory)).mark(files::CANCEL)
     }
 
     fn acknowledge(&self, launch: &JobLaunch) -> Result<(), String> {
-        if files::active(Path::new(&launch.directory))? {
+        if files::directory(Path::new(&launch.directory)).active()? {
             Err(format!(
                 "job {} Windows sidecar is still active",
                 launch.job.id

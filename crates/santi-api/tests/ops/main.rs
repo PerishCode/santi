@@ -273,22 +273,23 @@ mod audit {
             .await
             .expect("complete");
 
-        let rows = paths
-            .audit(Some("ss_audit"), None, false, 30, None)
-            .await
-            .expect("audit");
+        let rows = paths.audit(query(false)).await.expect("audit");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].turn_id, "turn_audit");
         assert_eq!(rows[0].status, "completed");
         assert_eq!(rows[0].arguments["command"], "printf audit");
         assert_eq!(rows[0].output.as_ref().unwrap()["stdout"], "audit");
-        assert!(
-            paths
-                .audit(Some("ss_audit"), None, true, 30, None)
-                .await
-                .expect("failed")
-                .is_empty()
-        );
+        assert!(paths.audit(query(true)).await.expect("failed").is_empty());
+    }
+}
+
+fn query(failed: bool) -> santi_api::ops::Audit<'static> {
+    santi_api::ops::Audit {
+        strand: Some("ss_audit"),
+        turn: None,
+        failed,
+        limit: 30,
+        after: None,
     }
 }
 

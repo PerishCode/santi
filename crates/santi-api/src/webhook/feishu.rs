@@ -22,18 +22,13 @@ impl FeishuAdaptor {
 }
 
 impl WebhookAdaptor for FeishuAdaptor {
-    fn verify(
-        &self,
-        headers: &HeaderMap,
-        raw_body: &[u8],
-        _secret: &str,
-    ) -> Result<(), WebhookError> {
+    fn verify(&self, headers: &HeaderMap, raw_body: &[u8], _: &str) -> Result<(), WebhookError> {
         verify_signature(headers, raw_body, self.encrypt_key.as_deref())
     }
 
     fn normalize(
         &self,
-        _headers: &HeaderMap,
+        _: &HeaderMap,
         raw_body: &[u8],
         secret: &str,
         webhook_name: &str,

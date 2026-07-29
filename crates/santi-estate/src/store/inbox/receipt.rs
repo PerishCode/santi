@@ -1,3 +1,4 @@
+use super::ReceiptDraft;
 use crate::store::read;
 use keel::adapt::db::Sqlite;
 use keel::{Core, Op, Rank, Tx, form};
@@ -13,6 +14,15 @@ struct Draft<'a> {
     rebuilt: Option<&'a str>,
     occurred: &'a str,
 }
+
+pub(in crate::store) struct Close<'a> {
+    pub turn: &'a str,
+    pub state: receipt::State,
+    pub incident: Option<&'a str>,
+    pub occurred: &'a str,
+}
+
+struct Writer<'a, 'tx>(&'a mut Tx<'tx, Sqlite>);
 
 pub(in crate::store) async fn accept(
     tx: &mut Tx<'_, Sqlite>,
@@ -31,9 +41,8 @@ pub(in crate::store) async fn accept(
             ],
         )
         .await?;
-    transition(
-        tx,
-        Draft {
+    Writer(tx)
+        .transition(Draft {
             receipt,
             sequence: 1,
             state: receipt::State::Accepted,
@@ -41,38 +50,24 @@ pub(in crate::store) async fn accept(
             incident: None,
             rebuilt: None,
             occurred: accepted,
-        },
-    )
-    .await
+        })
+        .await
 }
 
-pub(super) async fn advance(
-    core: &Core<Sqlite>,
-    inbox: &str,
-    state: receipt::State,
-    turn: Option<&str>,
-    incident: Option<&str>,
-    rebuilt: Option<&str>,
-    occurred: &str,
-) -> Result<(), String> {
-    core.batch(async |tx| shift(tx, inbox, state, turn, incident, rebuilt, occurred).await)
+pub(super) async fn advance(core: &Core<Sqlite>, draft: ReceiptDraft<'_>) -> Result<(), String> {
+    core.batch(async |tx| shift(tx, draft).await)
         .await
         .map_err(read::error)
 }
 
 pub(in crate::store) async fn shift(
     tx: &mut Tx<'_, Sqlite>,
-    inbox: &str,
-    state: receipt::State,
-    turn: Option<&str>,
-    incident: Option<&str>,
-    rebuilt: Option<&str>,
-    occurred: &str,
+    draft: ReceiptDraft<'_>,
 ) -> Result<(), keel::adapt::Error> {
     let receipt = tx
-        .one(&form("InboxReceipt").when("tag", Op::Eq, inbox))
+        .one(&form("InboxReceipt").when("tag", Op::Eq, draft.inbox))
         .await?
-        .ok_or_else(|| keel::adapt::Error::Missing(inbox.into()))?;
+        .ok_or_else(|| keel::adapt::Error::Missing(draft.inbox.into()))?;
     let last = tx
         .one(
             &form("ReceiptTransition")
@@ -86,39 +81,37 @@ pub(in crate::store) async fn shift(
         .int("sequence")
         .ok_or_else(|| keel::adapt::Error::Adapt("receipt sequence missing".into()))?
         + 1;
-    let turn = match turn {
+    let turn = match draft.turn {
         Some(turn) => Some(read::need(tx, "Turn", "tag", turn).await?),
         None => None,
     };
     tx.set(
         "InboxReceipt",
         receipt.key(),
-        &[("state", state_text(&state)), ("updated", occurred)],
+        &[
+            ("state", state_text(&draft.state)),
+            ("updated", draft.occurred),
+        ],
     )
     .await?;
-    transition(
-        tx,
-        Draft {
+    Writer(tx)
+        .transition(Draft {
             receipt: receipt.key(),
             sequence,
-            state,
+            state: draft.state,
             turn,
-            incident,
-            rebuilt,
-            occurred,
-        },
-    )
-    .await
+            incident: draft.incident,
+            rebuilt: draft.rebuilt,
+            occurred: draft.occurred,
+        })
+        .await
 }
 
 pub(in crate::store) async fn close(
     tx: &mut Tx<'_, Sqlite>,
-    turn: &str,
-    state: receipt::State,
-    incident: Option<&str>,
-    occurred: &str,
+    draft: Close<'_>,
 ) -> Result<(), keel::adapt::Error> {
-    let turn_row = read::need(tx, "Turn", "tag", turn).await?;
+    let turn_row = read::need(tx, "Turn", "tag", draft.turn).await?;
     let transitions = tx
         .ask(
             &form("ReceiptTransition")
@@ -145,12 +138,14 @@ pub(in crate::store) async fn close(
             .to_string();
         shift(
             tx,
-            &tag,
-            state.clone(),
-            Some(turn),
-            incident,
-            None,
-            occurred,
+            ReceiptDraft {
+                inbox: &tag,
+                state: draft.state.clone(),
+                turn: Some(draft.turn),
+                incident: draft.incident,
+                rebuilt: None,
+                occurred: draft.occurred,
+            },
         )
         .await?;
     }
@@ -187,29 +182,31 @@ pub(super) async fn status(
     }))
 }
 
-async fn transition(tx: &mut Tx<'_, Sqlite>, draft: Draft<'_>) -> Result<(), keel::adapt::Error> {
-    let tag = santi_model::tag("rct");
-    let receipt = draft.receipt.to_string();
-    let sequence = draft.sequence.to_string();
-    let turn = draft.turn.map(|turn| turn.to_string());
-    let mut fields = vec![
-        ("tag", tag.as_str()),
-        ("sequence", sequence.as_str()),
-        ("state", state_text(&draft.state)),
-        ("occurred", draft.occurred),
-        ("receipt", receipt.as_str()),
-    ];
-    if let Some(turn) = turn.as_deref() {
-        fields.push(("turn", turn));
+impl Writer<'_, '_> {
+    async fn transition(&mut self, draft: Draft<'_>) -> Result<(), keel::adapt::Error> {
+        let tag = santi_model::tag("rct");
+        let receipt = draft.receipt.to_string();
+        let sequence = draft.sequence.to_string();
+        let turn = draft.turn.map(|turn| turn.to_string());
+        let mut fields = vec![
+            ("tag", tag.as_str()),
+            ("sequence", sequence.as_str()),
+            ("state", state_text(&draft.state)),
+            ("occurred", draft.occurred),
+            ("receipt", receipt.as_str()),
+        ];
+        if let Some(turn) = turn.as_deref() {
+            fields.push(("turn", turn));
+        }
+        if let Some(incident) = draft.incident {
+            fields.push(("incident", incident));
+        }
+        if let Some(rebuilt) = draft.rebuilt {
+            fields.push(("rebuilt", rebuilt));
+        }
+        self.0.put("ReceiptTransition", &fields).await?;
+        Ok(())
     }
-    if let Some(incident) = draft.incident {
-        fields.push(("incident", incident));
-    }
-    if let Some(rebuilt) = draft.rebuilt {
-        fields.push(("rebuilt", rebuilt));
-    }
-    tx.put("ReceiptTransition", &fields).await?;
-    Ok(())
 }
 
 async fn decode_transition(

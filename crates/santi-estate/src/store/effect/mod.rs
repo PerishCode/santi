@@ -8,7 +8,6 @@ mod types;
 mod write;
 
 pub use types::{EffectDraft, RedemptionDraft};
-use write::shift;
 
 impl Store {
     pub async fn prepare_invocation(
@@ -29,7 +28,9 @@ impl Store {
             .batch(async |tx| {
                 tool::put_call(tx, call, &arguments).await?;
                 if let Some(effect) = effect {
-                    write::prepare(tx, effect, metadata.as_deref()).await?;
+                    write::Writer::new(tx)
+                        .prepare(effect, metadata.as_deref())
+                        .await?;
                 }
                 Ok(())
             })
@@ -58,7 +59,11 @@ impl Store {
             .transpose()
             .map_err(|error| error.to_string())?;
         self.core
-            .batch(async |tx| write::prepare(tx, draft, metadata.as_deref()).await)
+            .batch(async |tx| {
+                write::Writer::new(tx)
+                    .prepare(draft, metadata.as_deref())
+                    .await
+            })
             .await
             .map_err(read::error)?;
         self.effect(draft.tag)
@@ -76,13 +81,13 @@ impl Store {
         tag: &str,
         occurred: &str,
     ) -> Result<effect::Effect, String> {
-        self.move_effect(
+        self.move_effect(write::Shift {
             tag,
-            &["prepared"],
-            effect::State::Dispatching,
-            None,
+            expected: &["prepared"],
+            state: effect::State::Dispatching,
+            error: None,
             occurred,
-        )
+        })
         .await
     }
 
@@ -92,13 +97,13 @@ impl Store {
         evidence: &str,
         occurred: &str,
     ) -> Result<effect::Effect, String> {
-        self.move_effect(
+        self.move_effect(write::Shift {
             tag,
-            &["dispatching"],
-            effect::State::Unknown,
-            Some(evidence),
+            expected: &["dispatching"],
+            state: effect::State::Unknown,
+            error: Some(evidence),
             occurred,
-        )
+        })
         .await
     }
 
@@ -115,13 +120,13 @@ impl Store {
         if self.effect(tag).await?.is_none() {
             return Ok(None);
         }
-        self.move_effect(
+        self.move_effect(write::Shift {
             tag,
-            &["unknown"],
-            effect::State::Settled(outcome),
-            None,
+            expected: &["unknown"],
+            state: effect::State::Settled(outcome),
+            error: None,
             occurred,
-        )
+        })
         .await?;
         self.effect(tag).await
     }
@@ -138,7 +143,11 @@ impl Store {
             .map_err(|error| error.to_string())?;
         let result = draft.result.to_string();
         self.core
-            .batch(async |tx| write::redeem(tx, tag, draft, output.as_deref()).await)
+            .batch(async |tx| {
+                write::Writer::new(tx)
+                    .redeem(tag, draft, output.as_deref())
+                    .await
+            })
             .await
             .map_err(read::error)?;
         self.reply(&result)
@@ -153,20 +162,10 @@ impl Store {
             .map_err(read::error)
     }
 
-    async fn move_effect(
-        &self,
-        tag: &str,
-        expected: &[&str],
-        state: effect::State,
-        error: Option<&str>,
-        occurred: &str,
-    ) -> Result<effect::Effect, String> {
+    async fn move_effect(&self, draft: write::Shift<'_>) -> Result<effect::Effect, String> {
+        let tag = draft.tag;
         self.core
-            .batch(async |tx| {
-                shift(tx, tag, expected, state, error, occurred)
-                    .await
-                    .map(|_| ())
-            })
+            .batch(async |tx| write::Writer::new(tx).shift(draft).await.map(|_| ()))
             .await
             .map_err(read::error)?;
         self.effect(tag)
@@ -181,7 +180,7 @@ pub(in crate::store) async fn reconcile_in(
     turn: &str,
     occurred: &str,
 ) -> Result<(), keel::adapt::Error> {
-    let turn = write::relation(tx, "Turn", turn).await?;
+    let turn = write::Writer::new(tx).relation("Turn", turn).await?;
     let effects = tx
         .ask(
             &form("StrandEffect")
@@ -207,26 +206,26 @@ async fn reconcile(
 ) -> Result<(), keel::adapt::Error> {
     match state {
         Some("prepared") => {
-            shift(
-                tx,
-                tag,
-                &["prepared"],
-                effect::State::Settled(effect::Outcome::NotApplied),
-                None,
-                occurred,
-            )
-            .await?;
+            write::Writer::new(tx)
+                .shift(write::Shift {
+                    tag,
+                    expected: &["prepared"],
+                    state: effect::State::Settled(effect::Outcome::NotApplied),
+                    error: None,
+                    occurred,
+                })
+                .await?;
         }
         Some("dispatching") => {
-            shift(
-                tx,
-                tag,
-                &["dispatching"],
-                effect::State::Unknown,
-                None,
-                occurred,
-            )
-            .await?;
+            write::Writer::new(tx)
+                .shift(write::Shift {
+                    tag,
+                    expected: &["dispatching"],
+                    state: effect::State::Unknown,
+                    error: None,
+                    occurred,
+                })
+                .await?;
         }
         _ => {}
     }

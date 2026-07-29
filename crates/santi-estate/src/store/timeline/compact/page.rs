@@ -1,17 +1,20 @@
-use super::super::decode_target;
+use super::super::target;
 use super::{Store, plan, read};
 use keel::adapt::db::Sqlite;
 use keel::{Op, Rank, Row, Tx, form};
 use santi_model::compact;
 
-pub(super) async fn read(
-    store: &Store,
-    tag: &str,
-    keyword: Option<&str>,
-    page_index: i64,
-    page_size: i64,
-) -> Result<Option<compact::Page>, String> {
-    let Some(compact) = store.compact(tag).await? else {
+pub(super) struct Query<'a> {
+    pub tag: &'a str,
+    pub keyword: Option<&'a str>,
+    pub index: i64,
+    pub size: i64,
+}
+
+struct Reader<'a, 'tx>(&'a mut Tx<'tx, Sqlite>);
+
+pub(super) async fn read(store: &Store, query: Query<'_>) -> Result<Option<compact::Page>, String> {
+    let Some(compact) = store.compact(query.tag).await? else {
         return Ok(None);
     };
     let entries = store
@@ -19,7 +22,8 @@ pub(super) async fn read(
         .batch(async |tx| entries(tx, &compact).await)
         .await
         .map_err(read::error)?;
-    let needle = keyword
+    let needle = query
+        .keyword
         .map(str::trim)
         .filter(|keyword| !keyword.is_empty())
         .map(str::to_lowercase);
@@ -32,15 +36,15 @@ pub(super) async fn read(
         })
         .collect::<Vec<_>>();
     let total = entries.len() as i64;
-    let skip = page_index.max(0).saturating_mul(page_size.max(0)) as usize;
-    let take = page_size.max(0) as usize;
+    let skip = query.index.max(0).saturating_mul(query.size.max(0)) as usize;
+    let take = query.size.max(0) as usize;
     Ok(Some(compact::Page {
         compact: compact.id,
         first: compact.first,
         last: compact.last,
         total,
-        page_index,
-        page_size,
+        page_index: query.index,
+        page_size: query.size,
         entries: entries.into_iter().skip(skip).take(take).collect(),
     }))
 }
@@ -49,9 +53,9 @@ async fn entries(
     tx: &mut Tx<'_, Sqlite>,
     compact: &compact::Compact,
 ) -> Result<Vec<compact::Entry>, keel::adapt::Error> {
-    let strand = need(tx, "Strand", &compact.strand).await?;
-    let first = need(tx, "Message", &compact.first).await?;
-    let last = need(tx, "Message", &compact.last).await?;
+    let strand = Reader(tx).need("Strand", &compact.strand).await?;
+    let first = Reader(tx).need("Message", &compact.first).await?;
+    let last = Reader(tx).need("Message", &compact.last).await?;
     let from = plan::sequence(tx, strand.key(), first.key()).await?;
     let to = plan::sequence(tx, strand.key(), last.key()).await?;
     let rows = tx
@@ -73,7 +77,7 @@ async fn entries(
             seq: row
                 .int("sequence")
                 .ok_or_else(|| keel::adapt::Error::Adapt("entry sequence missing".into()))?,
-            kind: decode_target(kind).map_err(keel::adapt::Error::Adapt)?,
+            kind: target::decode(kind).map_err(keel::adapt::Error::Adapt)?,
             target: target.to_string(),
             text: render(tx, kind, target).await?,
         });
@@ -88,14 +92,14 @@ async fn render(
 ) -> Result<String, keel::adapt::Error> {
     match kind {
         "message" => {
-            let row = need(tx, "Message", tag).await?;
+            let row = Reader(tx).need("Message", tag).await?;
             let content = text(&row, "content")?;
             serde_json::from_str::<santi_model::message::Content>(content)
                 .map(|content| content.rendered())
                 .map_err(|error| keel::adapt::Error::Adapt(error.to_string()))
         }
         "tool_call" => {
-            let row = need(tx, "ToolCall", tag).await?;
+            let row = Reader(tx).need("ToolCall", tag).await?;
             let arguments = json(text(&row, "arguments")?)?;
             Ok(format!(
                 "[tool_call {}] {}",
@@ -105,7 +109,7 @@ async fn render(
         }
         "tool_result" => result(tx, tag).await,
         "thinking" => {
-            let row = need(tx, "ThinkingSpan", tag).await?;
+            let row = Reader(tx).need("ThinkingSpan", tag).await?;
             Ok(row
                 .text("summary")
                 .map(|summary| format!("[thinking] {summary}"))
@@ -116,7 +120,7 @@ async fn render(
 }
 
 async fn result(tx: &mut Tx<'_, Sqlite>, tag: &str) -> Result<String, keel::adapt::Error> {
-    let result = need(tx, "ToolResult", tag).await?;
+    let result = Reader(tx).need("ToolResult", tag).await?;
     let key = result.key().to_string();
     if let Some(output) = tx
         .one(&form("ToolOutput").when("result", Op::Eq, &key))
@@ -136,10 +140,13 @@ async fn result(tx: &mut Tx<'_, Sqlite>, tag: &str) -> Result<String, keel::adap
     Ok("[tool_result]".to_string())
 }
 
-async fn need(tx: &mut Tx<'_, Sqlite>, unit: &str, tag: &str) -> Result<Row, keel::adapt::Error> {
-    tx.one(&form(unit).when("tag", Op::Eq, tag))
-        .await?
-        .ok_or_else(|| keel::adapt::Error::Missing(format!("{unit} {tag}")))
+impl Reader<'_, '_> {
+    async fn need(&mut self, unit: &str, tag: &str) -> Result<Row, keel::adapt::Error> {
+        self.0
+            .one(&form(unit).when("tag", Op::Eq, tag))
+            .await?
+            .ok_or_else(|| keel::adapt::Error::Missing(format!("{unit} {tag}")))
+    }
 }
 
 fn json(value: &str) -> Result<serde_json::Value, keel::adapt::Error> {

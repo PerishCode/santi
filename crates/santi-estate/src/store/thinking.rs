@@ -38,7 +38,16 @@ impl Store {
                     fields.push(("response", response));
                 }
                 tx.put("ThinkingSpan", &fields).await?;
-                write::append(tx, &strand, "thinking", draft.tag, draft.created).await?;
+                write::append(
+                    tx,
+                    write::Entry {
+                        strand: &strand,
+                        kind: "thinking",
+                        target: draft.tag,
+                        created: draft.created,
+                    },
+                )
+                .await?;
                 Ok(())
             })
             .await

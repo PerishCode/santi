@@ -20,7 +20,7 @@ impl Provider for FakeProvider {
         }
     }
 
-    async fn stream(&self, _request: santi_provider::Request) -> Result<Streaming, String> {
+    async fn stream(&self, _: santi_provider::Request) -> Result<Streaming, String> {
         Ok(Box::pin(stream::empty()))
     }
 }
@@ -175,6 +175,7 @@ impl PromptHarness {
                 execution: temp.path().join("execution").display().to_string(),
                 bind: Some("127.0.0.1:0".to_string()),
                 constitution: None,
+                environment: Default::default(),
             },
             Arc::new(FakeProvider),
         )

@@ -8,8 +8,8 @@ pub fn graph() -> keel::Graph {
 pub use store::{
     Accepted, AttentionDraft, Begun, CallDraft, CapabilityDraft, ClassifiedFailure,
     ClassifiedFailureDraft, CompactDraft, Completion, CompletionDraft, DownstreamDraft, DrainDraft,
-    EffectDraft, ExpiredJob, ForkDraft, Inbox, InboxDraft, Interruption, InterruptionDraft,
-    JobDraft, JobRecord, MessageDraft, NoticeDraft, Offer, Opening, OutboxDraft, Prepared,
-    RedemptionDraft, ReplayDraft, ReplyDraft, Store, StrandDraft, ThinkingDraft, TraceDraft,
-    TransitionDraft, TurnDraft, WebhookDraft,
+    EffectDraft, EnvironDraft, ExpiredJob, ForkDraft, Inbox, InboxDraft, Interruption,
+    InterruptionDraft, JobDraft, JobRecord, MessageDraft, NoticeDraft, Offer, Opening, OutboxDraft,
+    Prepared, ReceiptDraft, RedemptionDraft, ReplayDraft, ReplyDraft, Store, StrandDraft,
+    ThinkingDraft, TraceDraft, TransitionDraft, TurnDraft, WebhookDraft,
 };

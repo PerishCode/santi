@@ -38,10 +38,10 @@ const POLL: Duration = Duration::from_millis(20);
 fn handoff(id: &str, directory: &Path) -> Result<(), String> {
     let start = Instant::now();
     loop {
-        if files::state(directory)?.is_some() {
+        if files::directory(directory).state()?.is_some() {
             return Ok(());
         }
-        if files::terminal(directory)?.is_some() {
+        if files::directory(directory).terminal()?.is_some() {
             return Err(format!("job {id} sidecar failed before claimed handoff"));
         }
         if start.elapsed() >= HANDOFF {

@@ -1,45 +1,5 @@
-use std::process::Command;
-
 use super::Spec;
-
-pub(super) fn allow(command: &mut Command) {
-    for name in [
-        "HOME",
-        "USER",
-        "LOGNAME",
-        "PATH",
-        "LANG",
-        "LC_ALL",
-        "TERM",
-        "TMPDIR",
-        "XDG_RUNTIME_DIR",
-        "DBUS_SESSION_BUS_ADDRESS",
-        "SHELL",
-        "APPDATA",
-        "COMSPEC",
-        "HOMEDRIVE",
-        "HOMEPATH",
-        "LOCALAPPDATA",
-        "OS",
-        "PATHEXT",
-        "PROGRAMDATA",
-        "PROGRAMFILES",
-        "PROGRAMFILES(X86)",
-        "PROGRAMW6432",
-        "SYSTEMDRIVE",
-        "SYSTEMROOT",
-        "TEMP",
-        "TMP",
-        "USERDOMAIN",
-        "USERNAME",
-        "USERPROFILE",
-        "WINDIR",
-    ] {
-        if let Some(value) = std::env::var_os(name) {
-            command.env(name, value);
-        }
-    }
-}
+use std::process::Command;
 
 #[cfg(unix)]
 pub(super) fn build(spec: &Spec) -> Command {

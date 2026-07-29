@@ -8,7 +8,7 @@ const FIRST: &str = "2026-07-28T00:00:00.000Z";
 const LATER: &str = "2026-07-28T00:01:00.000Z";
 
 #[tokio::test]
-async fn projects_timeline() {
+async fn timeline() {
     let temp = tempfile::tempdir().expect("temp");
     let path = temp.path().join("estate.sqlite");
     let store = Store::open(&path).await.expect("open");

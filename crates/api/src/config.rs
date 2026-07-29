@@ -24,6 +24,7 @@ pub struct Config {
     pub paths: Paths,
     #[cascade(section)]
     pub webhooks: Webhooks,
+    pub environment: BTreeMap<String, String>,
     pub providers: BTreeMap<String, Profile>,
 }
 
@@ -40,6 +41,7 @@ impl Default for Config {
             jobs: Jobs::default(),
             paths: Paths::default(),
             webhooks: Webhooks::default(),
+            environment: BTreeMap::new(),
             providers: BTreeMap::new(),
         }
     }
@@ -168,6 +170,7 @@ fn runtime(held: Config) -> Result<Runtime, String> {
         port: held.listen.port,
         provider: held.provider,
         providers: held.providers,
+        environment: held.environment,
         paths: Layout {
             database: held
                 .paths

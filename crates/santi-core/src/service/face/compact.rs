@@ -167,8 +167,16 @@ impl Service {
         summary: &str,
         metadata: serde_json::Value,
     ) -> Result<budget::Estimate, String> {
-        let input =
-            crate::provider_preview(&self.store, strand, response, summary, &metadata).await?;
+        let input = crate::provider_preview(
+            &self.store,
+            strand,
+            crate::ProviderPreview {
+                report: response,
+                summary,
+                metadata: &metadata,
+            },
+        )
+        .await?;
         let instructions = self.wording(strand).await?;
         let tools = tools();
         Ok(estimated(&input, Some(&instructions), Some(&tools)))

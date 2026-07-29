@@ -148,7 +148,7 @@ TOKEN=$(openssl rand -hex 32)
 DIGEST=$(printf %s "$TOKEN" | sha256sum | cut -d ' ' -f1)
 curl -X POST http://127.0.0.1:43307/api/v1/downstreams \
   -H 'Content-Type: application/json' \
-  -d "{\"id\":\"stim\",\"label_prefix\":\"stim:\",\"credential_sha256\":\"$DIGEST\"}"
+  -d "{\"id\":\"stim\",\"prefix\":\"stim:\",\"digest\":\"$DIGEST\"}"
 ```
 
 The credential digest is stored but never returned by the management API.
@@ -165,7 +165,7 @@ same key and payload returns the original receipt; changing the payload produces
 curl -X POST https://santi.liberte.top/api/v1/ingest \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"soul_id":"soul_default","label":"stim:alice","text":"hello","request_id":"message-42"}'
+  -d '{"soul":"soul_default","label":"stim:alice","text":"hello","request":"message-42"}'
 ```
 
 Completed turns are pulled with the same credential. The response is
@@ -206,6 +206,30 @@ file > defaults):
 
 A `.env` in the working directory is loaded and overrides the process
 environment (via `dotenvy::dotenv_override`).
+
+### Turn shell environment
+
+Each synchronous turn shell starts from an explicit environment wall instead
+of inheriting the server process wholesale. The small host allowlist is
+overlaid, in order, by `[environment]` in `santi.toml`, soul declarations,
+strand declarations, and Santi's reserved `SANTI_*` runtime variables.
+
+Values can be literals or `env://NAME` references into the server process
+environment. An unresolved reference is passed to the shell unchanged and
+recorded as a `SantiSystem` message, so a missing secret is visible without
+writing that secret into the estate:
+
+```sh
+santi env set soul soul_default STIM_BASE_URL https://stim.example.com:43309
+santi env set soul soul_default STIM_REPLY_TOKEN env://STIM_REPLY_TOKEN
+santi env list soul soul_default
+santi env end soul soul_default STIM_REPLY_TOKEN
+```
+
+Soul and strand declarations are intentionally limited to the synchronous turn
+shell in v1. Detached `santi job create` payloads retain their existing host
+allowlist plus reserved engine variables; they do not receive these
+declarations.
 
 ## Distribution
 

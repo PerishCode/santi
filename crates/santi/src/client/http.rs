@@ -95,6 +95,17 @@ impl Http<'_> {
         print_json(response).await
     }
 
+    pub(super) async fn delete(&self, url: &str) -> Result<()> {
+        let response = self
+            .client
+            .delete(url)
+            .timeout(TIMEOUT)
+            .send()
+            .await
+            .with_context(|| format!("DELETE {url}"))?;
+        print_json(response).await
+    }
+
     pub(super) async fn owned(&self, url: &str, soul: &str) -> Result<()> {
         let response = self
             .client

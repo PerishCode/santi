@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use santi::cli::WatchFormat;
-use santi::client::{Request, send};
+use santi::client::{Request, Target, send};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -138,12 +138,9 @@ async fn completes() {
     let client = reqwest::Client::new();
 
     send(Request {
-        client: &client,
-        base: &server.base_url,
-        strand: "ss_cli",
+        target: Target::new(&client, &server.base_url, "ss_cli", WatchFormat::Raw),
         body: serde_json::json!({"content":[{"type":"text","text":"hello"}]}),
         watch: true,
-        format: WatchFormat::Raw,
     })
     .await
     .expect("send --watch succeeds");
@@ -158,12 +155,9 @@ async fn closes() {
     let client = reqwest::Client::new();
 
     send(Request {
-        client: &client,
-        base: &server.base_url,
-        strand: "ss_cli",
+        target: Target::new(&client, &server.base_url, "ss_cli", WatchFormat::Raw),
         body: serde_json::json!({"content":[{"type":"text","text":"hello"}]}),
         watch: true,
-        format: WatchFormat::Raw,
     })
     .await
     .expect("closed watch stream is not retried as a send");
@@ -178,12 +172,9 @@ async fn errors() {
     let client = reqwest::Client::new();
 
     let error = send(Request {
-        client: &client,
-        base: &server.base_url,
-        strand: "ss_cli",
+        target: Target::new(&client, &server.base_url, "ss_cli", WatchFormat::Raw),
         body: serde_json::json!({"content":[{"type":"text","text":"hello"}]}),
         watch: true,
-        format: WatchFormat::Raw,
     })
     .await
     .expect_err("watch failure should surface to caller");
@@ -199,12 +190,9 @@ async fn warns() {
     let client = reqwest::Client::new();
 
     let error = send(Request {
-        client: &client,
-        base: &server.base_url,
-        strand: "ss_cli",
+        target: Target::new(&client, &server.base_url, "ss_cli", WatchFormat::Raw),
         body: serde_json::json!({"content":[{"type":"text","text":"hello"}]}),
         watch: true,
-        format: WatchFormat::Raw,
     })
     .await
     .expect_err("accepted driver warning must require explicit recovery");

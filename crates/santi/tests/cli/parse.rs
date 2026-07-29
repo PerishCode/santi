@@ -1,7 +1,7 @@
 use clap::Parser;
 use santi::cli::{
-    Cli, Command, CompactCommand, EffectCommand, EffectOutcomeArg, Job, StrandCommand, Strategy,
-    Stream, Turn, WatchFormat, Webhook,
+    Cli, Command, CompactCommand, EffectCommand, EffectOutcomeArg, Environment, EnvironmentScope,
+    Job, StrandCommand, Strategy, Stream, Turn, WatchFormat, Webhook,
 };
 
 #[test]
@@ -55,6 +55,33 @@ fn turns() {
         panic!("expected turn stop command");
     };
     assert_eq!(id, "turn_123");
+}
+
+#[test]
+fn environment() {
+    let parsed = Cli::try_parse_from([
+        "santi",
+        "env",
+        "set",
+        "soul",
+        "soul_default",
+        "STIM_BASE_URL",
+        "https://stim.example.com",
+    ])
+    .unwrap();
+    let Command::Environment(Environment::Set {
+        scope,
+        owner,
+        name,
+        value,
+    }) = parsed.command
+    else {
+        panic!("expected environment set command");
+    };
+    assert_eq!(scope, EnvironmentScope::Soul);
+    assert_eq!(owner, "soul_default");
+    assert_eq!(name, "STIM_BASE_URL");
+    assert_eq!(value, "https://stim.example.com");
 }
 
 #[test]

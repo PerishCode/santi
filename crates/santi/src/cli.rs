@@ -91,6 +91,12 @@ pub enum Command {
     #[command(about = "Turn controls under /api/v1/turns")]
     #[command(subcommand)]
     Turn(Turn),
+    #[command(
+        name = "env",
+        about = "Manage soul or strand shell environment declarations"
+    )]
+    #[command(subcommand)]
+    Environment(Environment),
     #[command(about = "Inspect or idempotently ensure webhook subscriptions")]
     #[command(subcommand)]
     Webhook(Webhook),
@@ -116,6 +122,46 @@ pub enum EffectCommand {
 pub enum Turn {
     #[command(about = "Idempotently stop one exact running turn")]
     Stop { id: String },
+}
+
+#[derive(Subcommand)]
+pub enum Environment {
+    #[command(about = "List declarations for one soul or strand")]
+    List {
+        #[arg(value_enum)]
+        scope: EnvironmentScope,
+        owner: String,
+    },
+    #[command(about = "Create or replace one declaration")]
+    Set {
+        #[arg(value_enum)]
+        scope: EnvironmentScope,
+        owner: String,
+        name: String,
+        value: String,
+    },
+    #[command(about = "Idempotently end one declaration")]
+    End {
+        #[arg(value_enum)]
+        scope: EnvironmentScope,
+        owner: String,
+        name: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+pub enum EnvironmentScope {
+    Soul,
+    Strand,
+}
+
+impl EnvironmentScope {
+    pub fn path(self) -> &'static str {
+        match self {
+            Self::Soul => "souls",
+            Self::Strand => "strands",
+        }
+    }
 }
 
 #[derive(Subcommand)]

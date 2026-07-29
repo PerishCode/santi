@@ -15,7 +15,7 @@ mod traces;
 
 use santi_provider::Provider;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -59,6 +59,7 @@ pub struct Config {
     pub execution: String,
     pub bind: Option<String>,
     pub constitution: Option<String>,
+    pub environment: BTreeMap<String, String>,
 }
 
 pub struct Delivery<'a> {
@@ -84,6 +85,7 @@ impl Service {
         provider: Arc<dyn Provider>,
         supervisor: Arc<dyn jobs::Supervisor>,
     ) -> Result<Self, String> {
+        crate::environment::validate(&config.environment)?;
         let store = Store::open(&config.database).await?;
         store.seed(crate::GENESIS, &crate::now()).await?;
         let traces = traces::Writer::start(store.clone());

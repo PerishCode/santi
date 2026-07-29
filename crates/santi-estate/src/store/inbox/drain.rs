@@ -6,25 +6,11 @@ use santi_model::receipt as receipt_model;
 use serde_json::{Value, json};
 
 mod codec;
+mod types;
 use codec::{Pending, aggregate, decode, trigger};
+use types::{Assigned, Message, Opened, Written};
 
-enum Opened {
-    Started(Vec<String>),
-    Running(String),
-    Idle,
-}
-
-#[derive(Clone)]
-struct Written {
-    key: i64,
-    tag: String,
-    sequence: i64,
-}
-
-struct Assigned {
-    pending: Pending,
-    message: Written,
-}
+struct Writer<'a, 'tx>(&'a mut Tx<'tx, Sqlite>);
 
 pub(super) async fn open(store: &Store, draft: DrainDraft<'_>) -> Result<Opening, String> {
     let turn = draft.turn.to_string();
@@ -81,14 +67,29 @@ async fn open_in(
         .partition(|pending| pending.coalesce_key.is_some());
     let mut messages = Vec::new();
     let mut assigned = Vec::new();
+    let mut writer = Writer(tx);
     for pending in regular {
-        let message = insert(tx, &strand, &pending.kind, &pending.content, &draft).await?;
+        let message = writer
+            .insert(Message {
+                strand: &strand,
+                kind: &pending.kind,
+                content: &pending.content,
+                draft: &draft,
+            })
+            .await?;
         messages.push(message.clone());
         assigned.push(Assigned { pending, message });
     }
     if !notices.is_empty() {
         let content = aggregate(&notices, draft.created)?;
-        let message = insert(tx, &strand, "santi_system", &content, &draft).await?;
+        let message = writer
+            .insert(Message {
+                strand: &strand,
+                kind: "santi_system",
+                content: &content,
+                draft: &draft,
+            })
+            .await?;
         for pending in notices {
             assigned.push(Assigned {
                 pending,
@@ -101,9 +102,9 @@ async fn open_in(
         .last()
         .ok_or_else(|| keel::adapt::Error::Adapt("drain produced no messages".into()))?
         .sequence;
-    put_turn(tx, &strand, &draft, from).await?;
+    writer.put_turn(&strand, &draft, from).await?;
     for item in assigned {
-        consume(tx, item, &draft).await?;
+        writer.consume(item, &draft).await?;
     }
     Ok(Opened::Started(
         messages.into_iter().map(|message| message.tag).collect(),
@@ -155,120 +156,132 @@ async fn pending(tx: &mut Tx<'_, Sqlite>, strand: i64) -> Result<Vec<Pending>, k
     rows.rows().iter().map(decode).collect()
 }
 
-async fn insert(
-    tx: &mut Tx<'_, Sqlite>,
-    strand: &Row,
-    kind: &str,
-    content: &str,
-    draft: &DrainDraft<'_>,
-) -> Result<Written, keel::adapt::Error> {
-    let tag = santi_model::tag("msg");
-    let key = tx
-        .put(
-            "Message",
-            &[
-                ("tag", tag.as_str()),
-                ("actor_type", "system"),
-                ("actor", draft.actor),
-                ("kind", kind),
-                ("content", content),
-                ("state", "fixed"),
-                ("request", "true"),
-                ("created", draft.created),
-                ("updated", draft.created),
-            ],
+impl Writer<'_, '_> {
+    async fn insert(&mut self, message: Message<'_, '_>) -> Result<Written, keel::adapt::Error> {
+        let tag = santi_model::tag("msg");
+        let key = self
+            .0
+            .put(
+                "Message",
+                &[
+                    ("tag", tag.as_str()),
+                    ("actor_type", "system"),
+                    ("actor", message.draft.actor),
+                    ("kind", message.kind),
+                    ("content", message.content),
+                    ("state", "fixed"),
+                    ("request", "true"),
+                    ("created", message.draft.created),
+                    ("updated", message.draft.created),
+                ],
+            )
+            .await?;
+        let strand = self
+            .0
+            .one(&form("Strand").when("id", Op::Eq, &message.strand.key().to_string()))
+            .await?
+            .ok_or_else(|| keel::adapt::Error::Missing("drain strand".into()))?;
+        let sequence = write::append(
+            self.0,
+            write::Entry {
+                strand: &strand,
+                kind: "message",
+                target: &tag,
+                created: message.draft.created,
+            },
         )
         .await?;
-    let strand = tx
-        .one(&form("Strand").when("id", Op::Eq, &strand.key().to_string()))
-        .await?
-        .ok_or_else(|| keel::adapt::Error::Missing("drain strand".into()))?;
-    let sequence = write::append(tx, &strand, "message", &tag, draft.created).await?;
-    Ok(Written { key, tag, sequence })
-}
-
-async fn put_turn(
-    tx: &mut Tx<'_, Sqlite>,
-    strand: &Row,
-    draft: &DrainDraft<'_>,
-    from: i64,
-) -> Result<(), keel::adapt::Error> {
-    let strand = strand.key().to_string();
-    let from = from.to_string();
-    let mut fields = vec![
-        ("tag", draft.turn),
-        ("trigger", trigger(&draft.trigger)),
-        ("from", from.as_str()),
-        ("created", draft.created),
-        ("updated", draft.created),
-        ("strand", strand.as_str()),
-    ];
-    if let Some(source) = draft.source {
-        fields.push(("source", source));
+        Ok(Written { key, tag, sequence })
     }
-    tx.put("Turn", &fields).await?;
-    Ok(())
-}
 
-async fn consume(
-    tx: &mut Tx<'_, Sqlite>,
-    item: Assigned,
-    draft: &DrainDraft<'_>,
-) -> Result<(), keel::adapt::Error> {
-    let metadata = item
-        .pending
-        .source_metadata
-        .as_deref()
-        .map(serde_json::from_str::<Value>)
-        .transpose()
-        .map_err(|error| keel::adapt::Error::Adapt(error.to_string()))?;
-    let payload = json!({
-        "kind": "inbox_drain",
-        "inbox": item.pending.tag,
-        "queued": item.pending.created,
-        "drained_at": draft.created,
-        "committing_turn_id": draft.turn,
-        "message": item.message.tag,
-        "seq": item.message.sequence,
-        "source": {
-            "type": item.pending.source_type,
-            "ref": item.pending.source_ref,
-            "metadata": metadata,
-        }
-    })
-    .to_string();
-    tx.put(
-        "MessageEvent",
-        &[
-            ("tag", &santi_model::tag("mev")),
-            ("action", "insert"),
-            ("actor_type", "system"),
-            ("actor", draft.actor),
-            ("base_version", "1"),
-            ("payload", &payload),
+    async fn put_turn(
+        &mut self,
+        strand: &Row,
+        draft: &DrainDraft<'_>,
+        from: i64,
+    ) -> Result<(), keel::adapt::Error> {
+        let strand = strand.key().to_string();
+        let from = from.to_string();
+        let mut fields = vec![
+            ("tag", draft.turn),
+            ("trigger", trigger(&draft.trigger)),
+            ("from", from.as_str()),
             ("created", draft.created),
-            ("message", &item.message.key.to_string()),
-        ],
-    )
-    .await?;
-    if let Some(slot) = tx
-        .one(&form("InboxSlot").when("inbox", Op::Eq, &item.pending.key.to_string()))
-        .await?
-    {
-        tx.unset("InboxSlot", slot.key(), &["inbox"]).await?;
-        tx.set("InboxSlot", slot.key(), &[("updated", draft.created)])
-            .await?;
+            ("updated", draft.created),
+            ("strand", strand.as_str()),
+        ];
+        if let Some(source) = draft.source {
+            fields.push(("source", source));
+        }
+        self.0.put("Turn", &fields).await?;
+        Ok(())
     }
-    receipt::shift(
-        tx,
-        &item.pending.tag,
-        receipt_model::State::Driving,
-        Some(draft.turn),
-        None,
-        None,
-        draft.created,
-    )
-    .await?;
-    tx.end("StrandInbox", item.pending.key).await?;
-    Ok(())
+
+    async fn consume(
+        &mut self,
+        item: Assigned,
+        draft: &DrainDraft<'_>,
+    ) -> Result<(), keel::adapt::Error> {
+        let metadata = item
+            .pending
+            .source_metadata
+            .as_deref()
+            .map(serde_json::from_str::<Value>)
+            .transpose()
+            .map_err(|error| keel::adapt::Error::Adapt(error.to_string()))?;
+        let payload = json!({
+            "kind": "inbox_drain",
+            "inbox": item.pending.tag,
+            "queued": item.pending.created,
+            "drained_at": draft.created,
+            "committing_turn_id": draft.turn,
+            "message": item.message.tag,
+            "seq": item.message.sequence,
+            "source": {
+                "type": item.pending.source_type,
+                "ref": item.pending.source_ref,
+                "metadata": metadata,
+            }
+        })
+        .to_string();
+        self.0
+            .put(
+                "MessageEvent",
+                &[
+                    ("tag", &santi_model::tag("mev")),
+                    ("action", "insert"),
+                    ("actor_type", "system"),
+                    ("actor", draft.actor),
+                    ("base_version", "1"),
+                    ("payload", &payload),
+                    ("created", draft.created),
+                    ("message", &item.message.key.to_string()),
+                ],
+            )
+            .await?;
+        if let Some(slot) = self
+            .0
+            .one(&form("InboxSlot").when("inbox", Op::Eq, &item.pending.key.to_string()))
+            .await?
+        {
+            self.0.unset("InboxSlot", slot.key(), &["inbox"]).await?;
+            self.0
+                .set("InboxSlot", slot.key(), &[("updated", draft.created)])
+                .await?;
+        }
+        receipt::shift(
+            self.0,
+            super::ReceiptDraft {
+                inbox: &item.pending.tag,
+                state: receipt_model::State::Driving,
+                turn: Some(draft.turn),
+                incident: None,
+                rebuilt: None,
+                occurred: draft.created,
+            },
+        )
+        .await?;
+        self.0.end("StrandInbox", item.pending.key).await?;
+        Ok(())
+    }
 }

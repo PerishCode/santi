@@ -80,10 +80,12 @@ impl Service {
         ));
         let outcome = self
             .external(External {
-                soul: &request.soul,
-                label: &request.label,
-                text: request.text,
-                source,
+                input: crate::service::Envelope {
+                    soul: &request.soul,
+                    label: &request.label,
+                    text: request.text,
+                    source,
+                },
                 replay: Some(santi_estate::ReplayDraft::Downstream {
                     owner: &downstream.id,
                     request: &request.request,

@@ -3,6 +3,10 @@ provider = "openai"
 [jobs]
 acknowledged_retention_seconds = 604800
 
+# Lowest explicit layer for every turn shell. Values may be literals or env://
+# references. Soul and strand environment resources override this map.
+[environment]
+
 [providers.openai]
 kind = "openai_responses"
 api_key = ""

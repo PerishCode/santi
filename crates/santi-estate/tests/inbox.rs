@@ -166,14 +166,14 @@ async fn admission() {
         .await
         .expect("turn");
     let receipt = store
-        .advance_receipt(
-            "inbox_notice",
-            receipt::State::Driving,
-            Some(&turn.id),
-            None,
-            None,
-            LATER,
-        )
+        .advance_receipt(santi_estate::ReceiptDraft {
+            inbox: "inbox_notice",
+            state: receipt::State::Driving,
+            turn: Some(&turn.id),
+            incident: None,
+            rebuilt: None,
+            occurred: LATER,
+        })
         .await
         .expect("drive");
     assert_eq!(receipt.state, receipt::State::Driving);

@@ -18,10 +18,12 @@ impl Service {
         source: Option<ingest::Source>,
     ) -> Result<ingest::Outcome, String> {
         self.external(External {
-            soul,
-            label,
-            text: system_text,
-            source,
+            input: crate::service::Envelope {
+                soul,
+                label,
+                text: system_text,
+                source,
+            },
             replay: None,
         })
         .await
@@ -33,10 +35,7 @@ impl Service {
         delivery: crate::service::Delivery<'_>,
     ) -> Result<ingest::Outcome, String> {
         self.external(External {
-            soul: input.soul,
-            label: input.label,
-            text: input.text,
-            source: input.source,
+            input,
             replay: Some(santi_estate::ReplayDraft::Webhook {
                 subscription: delivery.subscription,
                 delivery: delivery.id,
@@ -48,8 +47,9 @@ impl Service {
 
     pub(in crate::service) async fn external(
         &self,
-        input: External<'_>,
+        external: External<'_>,
     ) -> Result<ingest::Outcome, String> {
+        let External { input, replay } = external;
         let strand = self
             .store
             .selected(
@@ -68,7 +68,7 @@ impl Service {
                     kind: message::Kind::SantiSystem,
                     trigger: "system",
                     source: input.source,
-                    replay: input.replay,
+                    replay,
                 },
             )
             .await?;

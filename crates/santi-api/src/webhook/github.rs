@@ -50,7 +50,7 @@ impl WebhookAdaptor for GithubAdaptor {
         &self,
         headers: &HeaderMap,
         raw_body: &[u8],
-        _secret: &str,
+        _: &str,
         webhook_name: &str,
     ) -> Result<WebhookOutcome, WebhookError> {
         let event_type = headers

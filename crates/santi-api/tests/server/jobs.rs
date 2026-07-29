@@ -19,20 +19,20 @@ struct FakeSupervisor {
 }
 
 impl JobSupervisor for FakeSupervisor {
-    fn detach(&self, _launch: &JobLaunch) -> Result<(), String> {
+    fn detach(&self, _: &JobLaunch) -> Result<(), String> {
         *self.launches.lock().unwrap() += 1;
         Ok(())
     }
 
-    fn observe(&self, _launch: &JobLaunch) -> Result<JobObservation, String> {
+    fn observe(&self, _: &JobLaunch) -> Result<JobObservation, String> {
         Ok(JobObservation::Claimed)
     }
 
-    fn stop(&self, _launch: &JobLaunch) -> Result<(), String> {
+    fn stop(&self, _: &JobLaunch) -> Result<(), String> {
         Ok(())
     }
 
-    fn acknowledge(&self, _launch: &JobLaunch) -> Result<(), String> {
+    fn acknowledge(&self, _: &JobLaunch) -> Result<(), String> {
         Ok(())
     }
 }
@@ -51,6 +51,7 @@ async fn accepts() {
             execution: temp.path().join("execution").display().to_string(),
             bind: Some("127.0.0.1:0".to_string()),
             constitution: None,
+            environment: Default::default(),
         },
         Arc::new(DriverProvider),
         supervisor.clone(),

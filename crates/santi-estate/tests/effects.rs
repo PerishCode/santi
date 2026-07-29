@@ -49,14 +49,14 @@ async fn lifecycle() {
         .await
         .expect("turn");
     store
-        .advance_receipt(
-            &inbox.id,
-            receipt::State::Driving,
-            Some(&turn.id),
-            None,
-            None,
-            FIRST,
-        )
+        .advance_receipt(santi_estate::ReceiptDraft {
+            inbox: &inbox.id,
+            state: receipt::State::Driving,
+            turn: Some(&turn.id),
+            incident: None,
+            rebuilt: None,
+            occurred: FIRST,
+        })
         .await
         .expect("receipt");
     let call = store

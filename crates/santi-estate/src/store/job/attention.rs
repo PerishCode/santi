@@ -18,7 +18,9 @@ impl Store {
         }
         self.core
             .batch(async |tx| {
-                let job = write::relation(tx, "Job", attention.job).await?;
+                let job = write::Writer::new(tx)
+                    .relation("Job", attention.job)
+                    .await?;
                 let current = job.int("attention_revision").ok_or_else(|| {
                     keel::adapt::Error::Adapt("job attention revision missing".into())
                 })?;

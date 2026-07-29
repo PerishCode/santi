@@ -20,6 +20,8 @@ pub struct Completion {
     pub event: Option<event::Event>,
 }
 
+struct Writer<'a, 'tx>(&'a mut Tx<'tx, Sqlite>);
+
 impl Store {
     pub async fn finish_turn(&self, draft: CompletionDraft<'_>) -> Result<Completion, String> {
         let tag = draft.turn.to_string();
@@ -44,7 +46,7 @@ async fn finish(
         .one(&form("Turn").when("tag", Op::Eq, draft.turn))
         .await?
         .ok_or_else(|| keel::adapt::Error::Missing(draft.turn.into()))?;
-    let strand = relation(tx, &turn, "strand", "turn strand").await?;
+    let strand = Writer(tx).relation(&turn, "strand", "turn strand").await?;
     let strand_tag = text(&strand, "tag")?;
     let reply = match draft.reply {
         Some(tag) => Some(reply(tx, &strand, tag).await?),
@@ -67,7 +69,7 @@ async fn finish(
         - 1;
     update_strand(tx, &strand, reply.as_ref(), &draft).await?;
     complete(tx, draft.turn, to, draft.occurred).await?;
-    resolve_success(tx, strand_tag, &draft).await?;
+    Writer(tx).resolve_success(strand_tag, &draft).await?;
     let event = event(&turn, &strand, reply.as_ref(), draft.occurred)?;
     if let Some(event) = event.as_ref() {
         let payload = serde_json::to_string(event)
@@ -157,52 +159,60 @@ async fn update_strand(
     Ok(())
 }
 
-async fn resolve_success(
-    tx: &mut Tx<'_, Sqlite>,
-    strand: &str,
-    draft: &CompletionDraft<'_>,
-) -> Result<(), keel::adapt::Error> {
-    let provider = turn::Error::Provider.descriptor();
-    error::resolve_in(
-        tx,
-        &provider.key("strand", strand),
-        "provider.turn_succeeded",
-        serde_json::json!({
-            "turn": draft.turn,
-            "provider": draft.provider,
-            "model": draft.model,
-            "response": draft.response,
-        }),
-        draft.occurred,
-    )
-    .await?;
-    let runtime = turn::Error::Runtime.descriptor();
-    error::resolve_in(
-        tx,
-        &runtime.key("strand", strand),
-        "runtime.turn_succeeded",
-        serde_json::json!({
-            "turn": draft.turn,
-            "provider": draft.provider,
-            "model": draft.model,
-        }),
-        draft.occurred,
-    )
-    .await?;
-    let execution = santi_model::budget::Error::Execution.descriptor();
-    error::resolve_in(
-        tx,
-        &execution.key("strand", strand),
-        "execution_budget.turn_succeeded",
-        serde_json::json!({
-            "turn": draft.turn,
-            "provider": draft.provider,
-            "model": draft.model,
-        }),
-        draft.occurred,
-    )
-    .await?;
-    Ok(())
+impl Writer<'_, '_> {
+    async fn resolve_success(
+        &mut self,
+        strand: &str,
+        draft: &CompletionDraft<'_>,
+    ) -> Result<(), keel::adapt::Error> {
+        let provider = turn::Error::Provider.descriptor();
+        error::resolve_in(
+            self.0,
+            error::Resolution {
+                key: &provider.key("strand", strand),
+                by: "provider.turn_succeeded",
+                context: serde_json::json!({
+                    "turn": draft.turn,
+                    "provider": draft.provider,
+                    "model": draft.model,
+                    "response": draft.response,
+                }),
+                now: draft.occurred,
+            },
+        )
+        .await?;
+        let runtime = turn::Error::Runtime.descriptor();
+        error::resolve_in(
+            self.0,
+            error::Resolution {
+                key: &runtime.key("strand", strand),
+                by: "runtime.turn_succeeded",
+                context: serde_json::json!({
+                    "turn": draft.turn,
+                    "provider": draft.provider,
+                    "model": draft.model,
+                }),
+                now: draft.occurred,
+            },
+        )
+        .await?;
+        let execution = santi_model::budget::Error::Execution.descriptor();
+        error::resolve_in(
+            self.0,
+            error::Resolution {
+                key: &execution.key("strand", strand),
+                by: "execution_budget.turn_succeeded",
+                context: serde_json::json!({
+                    "turn": draft.turn,
+                    "provider": draft.provider,
+                    "model": draft.model,
+                }),
+                now: draft.occurred,
+            },
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 fn event(
@@ -227,18 +237,21 @@ fn event(
     }))
 }
 
-async fn relation(
-    tx: &mut Tx<'_, Sqlite>,
-    row: &Row,
-    field: &str,
-    missing: &str,
-) -> Result<Row, keel::adapt::Error> {
-    let key = row
-        .int(field)
-        .ok_or_else(|| keel::adapt::Error::Adapt(format!("{missing} missing")))?;
-    tx.one(&form("Strand").when("id", Op::Eq, &key.to_string()))
-        .await?
-        .ok_or_else(|| keel::adapt::Error::Missing(missing.into()))
+impl Writer<'_, '_> {
+    async fn relation(
+        &mut self,
+        row: &Row,
+        field: &str,
+        missing: &str,
+    ) -> Result<Row, keel::adapt::Error> {
+        let key = row
+            .int(field)
+            .ok_or_else(|| keel::adapt::Error::Adapt(format!("{missing} missing")))?;
+        self.0
+            .one(&form("Strand").when("id", Op::Eq, &key.to_string()))
+            .await?
+            .ok_or_else(|| keel::adapt::Error::Missing(missing.into()))
+    }
 }
 
 fn text<'a>(row: &'a Row, field: &str) -> Result<&'a str, keel::adapt::Error> {

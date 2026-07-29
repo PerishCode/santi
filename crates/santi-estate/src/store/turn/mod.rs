@@ -142,7 +142,18 @@ impl Store {
         finished: &str,
     ) -> Result<turn::Turn, String> {
         self.core
-            .batch(async |tx| terminal::fail(tx, tag, error, None, finished).await)
+            .batch(async |tx| {
+                terminal::fail(
+                    tx,
+                    terminal::Failure {
+                        turn: tag,
+                        detail: error,
+                        incident: None,
+                        finished,
+                    },
+                )
+                .await
+            })
             .await
             .map_err(read::error)?;
         self.turn(tag)
@@ -158,7 +169,18 @@ impl Store {
         finished: &str,
     ) -> Result<turn::Turn, String> {
         self.core
-            .batch(async |tx| terminal::fail(tx, tag, error, Some(incident), finished).await)
+            .batch(async |tx| {
+                terminal::fail(
+                    tx,
+                    terminal::Failure {
+                        turn: tag,
+                        detail: error,
+                        incident: Some(incident),
+                        finished,
+                    },
+                )
+                .await
+            })
             .await
             .map_err(read::error)?;
         self.turn(tag)

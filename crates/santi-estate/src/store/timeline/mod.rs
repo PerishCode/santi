@@ -1,6 +1,6 @@
 use super::{Store, read, write};
 use keel::{Op, Rank, form};
-use santi_model::{message, strand};
+use santi_model::message;
 
 mod compact;
 mod fork;
@@ -46,7 +46,16 @@ impl Store {
                     ],
                 )
                 .await?;
-                write::append(tx, &strand, "message", draft.tag, draft.created).await?;
+                write::append(
+                    tx,
+                    write::Entry {
+                        strand: &strand,
+                        kind: "message",
+                        target: draft.tag,
+                        created: draft.created,
+                    },
+                )
+                .await?;
                 Ok(())
             })
             .await
@@ -179,12 +188,16 @@ fn decode_state(value: &str) -> Result<message::State, String> {
     }
 }
 
-fn decode_target(value: &str) -> Result<strand::Target, String> {
-    match value {
-        "message" => Ok(strand::Target::Message),
-        "thinking" => Ok(strand::Target::Thinking),
-        "tool_call" => Ok(strand::Target::ToolCall),
-        "tool_result" => Ok(strand::Target::ToolResult),
-        value => Err(format!("unknown strand target {value}")),
+pub(super) mod target {
+    use santi_model::strand;
+
+    pub(super) fn decode(value: &str) -> Result<strand::Target, String> {
+        match value {
+            "message" => Ok(strand::Target::Message),
+            "thinking" => Ok(strand::Target::Thinking),
+            "tool_call" => Ok(strand::Target::ToolCall),
+            "tool_result" => Ok(strand::Target::ToolResult),
+            value => Err(format!("unknown strand target {value}")),
+        }
     }
 }

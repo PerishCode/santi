@@ -6,7 +6,9 @@ use std::{
 use santi_provider::Item;
 
 use super::{Service, address::Address};
-use crate::{message, stream};
+use crate::{environment, message, stream};
+
+mod unresolved;
 
 pub(in crate::service) struct Observation<'a> {
     pub(in crate::service) address: Address<&'a str>,
@@ -23,20 +25,29 @@ pub(in crate::service) const REFERENCE: usize = 96 * 1024;
 #[derive(Debug, Clone)]
 pub(in crate::service) enum Event {
     Observed(Observed),
+    Environment(Environment),
 }
 
 impl Event {
     fn turn(&self) -> &str {
         match self {
             Self::Observed(event) => &event.address.turn,
+            Self::Environment(event) => &event.address.turn,
         }
     }
 
     fn dedupe(&self) -> Option<String> {
         match self {
             Self::Observed(event) => event.dedupe(),
+            Self::Environment(event) => Some(event.issue.dedupe(&event.address.strand)),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::service) struct Environment {
+    address: Address<String>,
+    issue: environment::Unresolved,
 }
 
 #[derive(Debug, Clone)]
@@ -156,6 +167,17 @@ impl Service {
         let _ = self.notices.publish(Event::Observed(event));
     }
 
+    pub(in crate::service) fn unresolved(
+        &self,
+        address: Address<&str>,
+        issue: environment::Unresolved,
+    ) {
+        let _ = self.notices.publish(Event::Environment(Environment {
+            address: address.owned(),
+            issue,
+        }));
+    }
+
     pub(in crate::service) async fn noticed(&self, turn: &str) {
         for event in self.notices.drained(turn) {
             if let Err(error) = self.absorbed(event).await {
@@ -167,6 +189,7 @@ impl Service {
     async fn absorbed(&self, event: Event) -> Result<(), String> {
         match event {
             Event::Observed(event) => self.remind(event).await,
+            Event::Environment(event) => unresolved::warn(self, event).await,
         }
     }
 

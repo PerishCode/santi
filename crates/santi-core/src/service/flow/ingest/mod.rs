@@ -13,10 +13,7 @@ pub(in crate::service) struct Ingest<'a> {
 }
 
 pub(in crate::service) struct External<'a> {
-    pub(in crate::service) soul: &'a str,
-    pub(in crate::service) label: &'a str,
-    pub(in crate::service) text: String,
-    pub(in crate::service) source: Option<ingest::Source>,
+    pub(in crate::service) input: crate::service::Envelope<'a>,
     pub(in crate::service) replay: Option<santi_estate::ReplayDraft<'a>>,
 }
 
@@ -129,15 +126,7 @@ impl Service {
             Gate::Pause {
                 maintenance_strand_id,
             } => {
-                let intake = self
-                    .intake(
-                        &strand.id,
-                        input.kind,
-                        input.content,
-                        input.source,
-                        input.replay,
-                    )
-                    .await?;
+                let intake = self.intake(&strand.id, input).await?;
                 let outcome = intake.outcome;
                 self.dispatched().await;
                 if let ingest::Outcome::Rejected { error } = &outcome {
@@ -173,15 +162,8 @@ impl Service {
                 drive::Outcome::Idle,
             ));
         }
-        let intake = self
-            .intake(
-                &strand.id,
-                input.kind,
-                input.content,
-                input.source,
-                input.replay,
-            )
-            .await?;
+        let trigger = input.trigger;
+        let intake = self.intake(&strand.id, input).await?;
         let outcome = intake.outcome;
         self.dispatched().await;
         if let ingest::Outcome::Rejected { error } = &outcome {
@@ -189,13 +171,8 @@ impl Service {
         }
         let drive = match &outcome {
             ingest::Outcome::Accepted { receipt } if intake.inserted => {
-                self.poke(
-                    &strand.id,
-                    input.trigger,
-                    Some(&receipt.inbox),
-                    "ingest_poke",
-                )
-                .await
+                self.poke(&strand.id, trigger, Some(&receipt.inbox), "ingest_poke")
+                    .await
             }
             ingest::Outcome::Accepted { .. } | ingest::Outcome::Rejected { .. } => {
                 drive::Outcome::Idle
@@ -213,25 +190,18 @@ impl Service {
         Ok((outcome, drive))
     }
 
-    async fn intake(
-        &self,
-        strand: &str,
-        kind: message::Kind,
-        content: message::Content,
-        source: Option<ingest::Source>,
-        replay: Option<santi_estate::ReplayDraft<'_>>,
-    ) -> Result<Intake, String> {
+    async fn intake(&self, strand: &str, input: Ingest<'_>) -> Result<Intake, String> {
         let inbox = crate::tag("inbox");
         let created = crate::now();
         let draft = santi_estate::InboxDraft {
             tag: &inbox,
             strand,
-            kind,
-            content: &content,
-            source: source.as_ref(),
+            kind: input.kind,
+            content: &input.content,
+            source: input.source.as_ref(),
             created: &created,
         };
-        match replay {
+        match input.replay {
             Some(replay) => {
                 let accepted = self.store.accept_replay(draft, replay, 500).await?;
                 Ok(Intake {

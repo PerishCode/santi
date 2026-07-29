@@ -23,15 +23,15 @@ use super::{
 
 pub(super) fn run() -> Result<(), String> {
     let directory = directory()?;
-    let spec = files::spec(&directory)?;
+    let spec = files::directory(&directory).spec()?;
     verify(&spec)?;
-    let outlog = files::log(&directory, "stdout.log")?;
-    let errlog = files::log(&directory, "stderr.log")?;
+    let outlog = files::directory(&directory).log("stdout.log")?;
+    let errlog = files::directory(&directory).log("stderr.log")?;
     let remaining = Arc::new(AtomicU64::new(spec.output));
     let exceeded = Arc::new(AtomicBool::new(false));
     #[cfg(target_os = "windows")]
-    let _lease = files::lease(&directory)?;
-    files::advance(&directory, Phase::Claimed)?;
+    let _lease = files::directory(&directory).lease()?;
+    files::directory(&directory).advance(Phase::Claimed)?;
 
     let mut command = command::build(&spec);
     command
@@ -39,7 +39,7 @@ pub(super) fn run() -> Result<(), String> {
         .env_clear()
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    command::allow(&mut command);
+    santi_core::environment::allow(&mut command);
     command
         .env("SANTI_SOUL_ID", &spec.origin.soul)
         .env("SANTI_STRAND_ID", &spec.origin.strand)
@@ -50,7 +50,7 @@ pub(super) fn run() -> Result<(), String> {
     let mut child = command
         .spawn()
         .map_err(|error| format!("failed to spawn job command: {error}"))?;
-    if let Err(error) = files::advance(&directory, Phase::Running) {
+    if let Err(error) = files::directory(&directory).advance(Phase::Running) {
         let _ = child.kill();
         let _ = child.wait();
         return Err(error);
@@ -117,7 +117,7 @@ pub(super) fn run() -> Result<(), String> {
 
 pub(super) fn finalize() -> Result<(), String> {
     let directory = directory()?;
-    if files::terminal(&directory)?.is_some() {
+    if files::directory(&directory).terminal()?.is_some() {
         return Ok(());
     }
     let code = std::env::var("EXIT_CODE").unwrap_or_else(|_| "unknown".to_string());
@@ -193,7 +193,7 @@ fn copy<R: Read + Send + 'static>(
                 sink.output.flush().map_err(|error| error.to_string())?;
             }
             if keep < read && !sink.exceeded.swap(true, Ordering::AcqRel) {
-                files::mark(&sink.directory, files::LIMIT)?;
+                files::directory(&sink.directory).mark(files::LIMIT)?;
             }
         }
     })
@@ -239,9 +239,9 @@ fn verify(spec: &Spec) -> Result<(), String> {
 }
 
 fn finish(directory: &std::path::Path, terminal: &Record) -> Result<(), String> {
-    files::finish(directory, terminal)?;
-    if files::state(directory)?.is_some() {
-        files::advance(directory, Phase::Terminal)?;
+    files::directory(directory).finish(terminal)?;
+    if files::directory(directory).state()?.is_some() {
+        files::directory(directory).advance(Phase::Terminal)?;
     }
     Ok(())
 }

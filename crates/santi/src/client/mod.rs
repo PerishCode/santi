@@ -11,9 +11,10 @@ use crate::cli::{
 use crate::text::source::read_summary_file;
 use crate::watch::{next_sse_frame, render_watch_event};
 
+mod environment;
 mod send;
 
-pub use send::{Request, send};
+pub use send::{Request, Target, send};
 
 const TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -117,12 +118,9 @@ pub(crate) async fn run(
             let (id, text) = split_send_args(args, defaults)?;
             let content = strand_send_body(text, defaults.soul());
             send(Request {
-                client: &client,
-                base: &base,
-                strand: &id,
+                target: Target::new(&client, &base, &id, watch_format),
                 body: content,
                 watch,
-                format: watch_format,
             })
             .await
         }
@@ -270,6 +268,7 @@ pub(crate) async fn run(
             http.post(&format!("{base}/api/v1/turns/{id}/stop"), None)
                 .await
         }
+        Command::Environment(command) => environment::run(&http, &base, command).await,
         Command::Webhook(Webhook::List) => http.get(&format!("{base}/api/v1/webhooks")).await,
         Command::Webhook(Webhook::Ensure {
             name,

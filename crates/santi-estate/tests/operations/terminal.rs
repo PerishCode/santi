@@ -223,14 +223,14 @@ async fn running(store: &Store, suffix: &str) {
         .await
         .expect("turn");
     store
-        .advance_receipt(
-            &inbox,
-            receipt::State::Driving,
-            Some(&turn),
-            None,
-            None,
-            FIRST,
-        )
+        .advance_receipt(santi_estate::ReceiptDraft {
+            inbox: &inbox,
+            state: receipt::State::Driving,
+            turn: Some(&turn),
+            incident: None,
+            rebuilt: None,
+            occurred: FIRST,
+        })
         .await
         .expect("drive receipt");
     store

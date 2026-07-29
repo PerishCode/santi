@@ -46,10 +46,10 @@ impl Systemd {
 impl JobSupervisor for Systemd {
     fn detach(&self, launch: &JobLaunch) -> Result<(), String> {
         let directory = Path::new(&launch.directory);
-        files::prepare(directory)?;
+        files::directory(directory).prepare()?;
         let requested = Spec::from(launch);
-        files::specify(directory, &requested)?;
-        let retained = files::spec(directory)?;
+        files::directory(directory).specify(&requested)?;
+        let retained = files::directory(directory).spec()?;
         if self.matching(launch)? {
             return if retained.legacy() {
                 Ok(())
@@ -93,15 +93,15 @@ impl JobSupervisor for Systemd {
 
     fn observe(&self, launch: &JobLaunch) -> Result<JobObservation, String> {
         let directory = Path::new(&launch.directory);
-        let state = files::state(directory)?;
-        if let Some(terminal) = files::terminal(directory)? {
+        let state = files::directory(directory).state()?;
+        if let Some(terminal) = files::directory(directory).terminal()? {
             if state.is_none()
                 && launch.stamp.starts_with("stamp_")
                 && launch.job.state == job::State::Submitting
             {
                 return Ok(JobObservation::Aborted);
             }
-            return Ok(JobObservation::Terminal(terminal.into()));
+            return Ok(JobObservation::Terminal(terminal));
         }
         let held = properties(&launch.sidecar)?;
         if held.get("LoadState").map(String::as_str) == Some("not-found") {
@@ -168,7 +168,7 @@ impl JobSupervisor for Systemd {
     }
 
     fn stop(&self, launch: &JobLaunch) -> Result<(), String> {
-        files::mark(Path::new(&launch.directory), files::CANCEL)?;
+        files::directory(Path::new(&launch.directory)).mark(files::CANCEL)?;
         control(&["stop", &launch.sidecar], true)
     }
 

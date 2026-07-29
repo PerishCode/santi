@@ -52,6 +52,15 @@ pub struct DrainDraft<'a> {
     pub created: &'a str,
 }
 
+pub struct ReceiptDraft<'a> {
+    pub inbox: &'a str,
+    pub state: santi_model::receipt::State,
+    pub turn: Option<&'a str>,
+    pub incident: Option<&'a str>,
+    pub rebuilt: Option<&'a str>,
+    pub occurred: &'a str,
+}
+
 #[derive(Debug, Clone)]
 pub struct Begun {
     pub turn: santi_model::turn::Turn,

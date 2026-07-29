@@ -1,4 +1,4 @@
-use super::{Store, decode_role, decode_target, read};
+use super::{Store, decode_role, read, target};
 use keel::{Op, Rank, form};
 use santi_model::{message, strand, stream};
 
@@ -20,7 +20,7 @@ impl Store {
         for row in rows.rows() {
             entries.push(strand::Entry {
                 strand: read::related(&self.core, "Strand", read::int(row, "strand")?).await?,
-                kind: decode_target(read::text(row, "target_type")?)?,
+                kind: target::decode(read::text(row, "target_type")?)?,
                 target: read::text(row, "target")?.to_string(),
                 seq: read::int(row, "sequence")?,
                 created: read::text(row, "created")?.to_string(),

@@ -36,7 +36,7 @@ impl Provider for BudgetedProvider {
         }
     }
 
-    async fn stream(&self, _request: Request) -> Result<Streaming, String> {
+    async fn stream(&self, _: Request) -> Result<Streaming, String> {
         Ok(Box::pin(stream::iter(vec![Ok(Event::Completed {
             response: None,
         })])))
@@ -53,7 +53,7 @@ impl Provider for DriverProvider {
         }
     }
 
-    async fn stream(&self, _request: Request) -> Result<Streaming, String> {
+    async fn stream(&self, _: Request) -> Result<Streaming, String> {
         Ok(Box::pin(stream::iter(vec![Ok(Event::Completed {
             response: None,
         })])))
@@ -228,6 +228,7 @@ mod effects {
                 execution: temp.path().join("execution").display().to_string(),
                 bind: Some("127.0.0.1:0".to_string()),
                 constitution: None,
+                environment: Default::default(),
             },
             Arc::new(DriverProvider),
         )
@@ -282,6 +283,7 @@ mod effects {
     }
 }
 
+mod environment;
 mod jobs;
 mod recovery;
 

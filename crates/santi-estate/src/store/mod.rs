@@ -16,12 +16,12 @@ mod turn;
 pub use effect::{EffectDraft, RedemptionDraft};
 pub use inbox::{
     Accepted, Begun, DownstreamDraft, DrainDraft, Inbox, InboxDraft, NoticeDraft, Offer, Opening,
-    ReplayDraft, WebhookDraft,
+    ReceiptDraft, ReplayDraft, WebhookDraft,
 };
 pub use job::{
     AttentionDraft, CapabilityDraft, ExpiredJob, JobDraft, JobRecord, Prepared, TransitionDraft,
 };
-pub use support::TraceDraft;
+pub use support::{EnvironDraft, TraceDraft};
 use support::{read, write};
 pub use thinking::ThinkingDraft;
 pub use timeline::{CompactDraft, ForkDraft, MessageDraft};

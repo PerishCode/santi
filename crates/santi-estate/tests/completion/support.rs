@@ -40,14 +40,14 @@ pub(super) async fn driven(store: &Store, suffix: &str) {
         .expect("inbox");
     create_turn(store, &turn, &strand).await;
     store
-        .advance_receipt(
-            &inbox,
-            receipt::State::Driving,
-            Some(&turn),
-            None,
-            None,
-            FIRST,
-        )
+        .advance_receipt(santi_estate::ReceiptDraft {
+            inbox: &inbox,
+            state: receipt::State::Driving,
+            turn: Some(&turn),
+            incident: None,
+            rebuilt: None,
+            occurred: FIRST,
+        })
         .await
         .expect("receipt");
     store

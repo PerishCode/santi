@@ -145,9 +145,11 @@ async fn assembles_ordered_estate() {
     let preview = provider_preview(
         &store,
         "strand_test",
-        &report,
-        "summary",
-        &serde_json::json!({"reason": "test"}),
+        santi_core::ProviderPreview {
+            report: &report,
+            summary: "summary",
+            metadata: &serde_json::json!({"reason": "test"}),
+        },
     )
     .await
     .expect("preview assembly");

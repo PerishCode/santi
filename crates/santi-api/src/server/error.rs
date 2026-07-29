@@ -148,6 +148,7 @@ impl ApiError {
             || text.starts_with("only an unknown effect")
             || text.starts_with("effect resolution evidence")
             || text.starts_with("job ") && text.contains(" must ")
+            || text.starts_with("environment ")
             || text.starts_with("only a terminal job")
         {
             Self::bad_request(message)

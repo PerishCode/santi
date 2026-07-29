@@ -1,4 +1,4 @@
-use santi_core::{Fault, Health, job, soul::Soul, strand::Strand, webhook};
+use santi_core::{Fault, Health, environ, job, soul::Soul, strand::Strand, webhook};
 use utoipa::{
     Modify, OpenApi,
     openapi::{
@@ -90,6 +90,9 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 13] = [
         super::routes::awaken,
         super::routes::souls,
         super::routes::get_soul,
+        super::routes::soul_environs,
+        super::routes::set_soul_environ,
+        super::routes::end_soul_environ,
         super::routes::subscribe,
         super::routes::webhooks,
         super::jobs::create,
@@ -100,6 +103,9 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 13] = [
         super::jobs::acknowledge,
         super::ingress::ingest_webhook,
         super::routes::get_strand,
+        super::routes::strand_environs,
+        super::routes::set_strand_environ,
+        super::routes::end_strand_environ,
         super::routes::list_messages,
         super::routes::material,
         super::routes::send,
@@ -133,6 +139,9 @@ const PROPERTY_DESCRIPTIONS: [(&str, &str, &str); 13] = [
         santi_core::ingest::Request,
         strand::Forked,
         soul::Draft,
+        environ::Scope,
+        environ::Variable,
+        environ::Draft,
         webhook::Draft,
         webhook::Subscription,
         super::jobs::CreateJobRequest,

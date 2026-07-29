@@ -23,6 +23,15 @@ pub struct Interruption {
     pub notice: Option<message::Placed>,
 }
 
+pub(in crate::store) struct Failure<'a> {
+    pub turn: &'a str,
+    pub detail: &'a str,
+    pub incident: Option<&'a str>,
+    pub finished: &'a str,
+}
+
+struct Reader<'a, 'tx>(&'a mut Tx<'tx, Sqlite>);
+
 impl Store {
     pub async fn interrupt_turn(
         &self,
@@ -62,7 +71,7 @@ pub(in crate::store) async fn complete(
     to: i64,
     finished: &str,
 ) -> Result<(), keel::adapt::Error> {
-    let turn = eligible(tx, tag).await?;
+    let turn = Reader(tx).eligible(tag).await?;
     let key = turn.key().to_string();
     if tx
         .one(&form("TurnStop").when("turn", Op::Eq, &key))
@@ -82,42 +91,60 @@ pub(in crate::store) async fn complete(
         ],
     )
     .await?;
-    crate::store::inbox::receipt::close(tx, tag, receipt::State::Completed, None, finished).await?;
+    crate::store::inbox::receipt::close(
+        tx,
+        crate::store::inbox::receipt::Close {
+            turn: tag,
+            state: receipt::State::Completed,
+            incident: None,
+            occurred: finished,
+        },
+    )
+    .await?;
     tx.set("Turn", turn.key(), &[("updated", finished)]).await
 }
 
 pub(in crate::store) async fn fail(
     tx: &mut Tx<'_, Sqlite>,
-    tag: &str,
-    detail: &str,
-    incident: Option<&str>,
-    finished: &str,
+    failure: Failure<'_>,
 ) -> Result<(), keel::adapt::Error> {
-    let turn = eligible(tx, tag).await?;
+    let turn = Reader(tx).eligible(failure.turn).await?;
     tx.put(
         "TurnFailure",
         &[
-            ("error", detail),
-            ("finished", finished),
+            ("error", failure.detail),
+            ("finished", failure.finished),
             ("turn", &turn.key().to_string()),
         ],
     )
     .await?;
-    effect::reconcile_in(tx, tag, finished).await?;
-    crate::store::inbox::receipt::close(tx, tag, receipt::State::Failed, incident, finished)
-        .await?;
-    tx.set("Turn", turn.key(), &[("updated", finished)]).await
+    effect::reconcile_in(tx, failure.turn, failure.finished).await?;
+    crate::store::inbox::receipt::close(
+        tx,
+        crate::store::inbox::receipt::Close {
+            turn: failure.turn,
+            state: receipt::State::Failed,
+            incident: failure.incident,
+            occurred: failure.finished,
+        },
+    )
+    .await?;
+    tx.set("Turn", turn.key(), &[("updated", failure.finished)])
+        .await
 }
 
-async fn eligible(tx: &mut Tx<'_, Sqlite>, tag: &str) -> Result<Row, keel::adapt::Error> {
-    let turn = tx
-        .one(&form("Turn").when("tag", Op::Eq, tag))
-        .await?
-        .ok_or_else(|| keel::adapt::Error::Missing(tag.into()))?;
-    if terminal(tx, turn.key()).await? {
-        return Err(keel::adapt::Error::Adapt("turn already finished".into()));
+impl Reader<'_, '_> {
+    async fn eligible(&mut self, tag: &str) -> Result<Row, keel::adapt::Error> {
+        let turn = self
+            .0
+            .one(&form("Turn").when("tag", Op::Eq, tag))
+            .await?
+            .ok_or_else(|| keel::adapt::Error::Missing(tag.into()))?;
+        if terminal(self.0, turn.key()).await? {
+            return Err(keel::adapt::Error::Adapt("turn already finished".into()));
+        }
+        Ok(turn)
     }
-    Ok(turn)
 }
 
 pub(super) async fn terminal(

@@ -88,6 +88,6 @@ fn sync(path: &Path) -> Result<(), String> {
 }
 
 #[cfg(not(unix))]
-fn sync(_path: &Path) -> Result<(), String> {
+fn sync(_: &Path) -> Result<(), String> {
     Ok(())
 }

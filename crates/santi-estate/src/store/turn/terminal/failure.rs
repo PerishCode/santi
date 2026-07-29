@@ -1,4 +1,4 @@
-use super::{Store, fail, read};
+use super::{Failure, Store, fail, read};
 use crate::store::error;
 use keel::{Op, form};
 use santi_error::Fault;
@@ -46,10 +46,12 @@ impl Store {
                 let fault = error::raise_in(tx, draft.incident, draft.occurred).await?;
                 fail(
                     tx,
-                    draft.turn,
-                    draft.detail,
-                    fault.incident.as_deref(),
-                    draft.occurred,
+                    Failure {
+                        turn: draft.turn,
+                        detail: draft.detail,
+                        incident: fault.incident.as_deref(),
+                        finished: draft.occurred,
+                    },
                 )
                 .await?;
                 Ok(fault)

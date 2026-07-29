@@ -57,6 +57,14 @@ pub struct AuditRow {
     pub error_text: Option<String>,
 }
 
+pub struct Audit<'a> {
+    pub strand: Option<&'a str>,
+    pub turn: Option<&'a str>,
+    pub failed: bool,
+    pub limit: usize,
+    pub after: Option<&'a str>,
+}
+
 pub async fn inbox_seed(strand: &str, text: &str) -> Result<SeedReport, String> {
     runtime::held().paths.inbox_seed(strand, text).await
 }
@@ -90,14 +98,14 @@ async fn inbox_seed_existing_strand(
 }
 
 impl Layout {
-    pub async fn audit(
-        &self,
-        strand: Option<&str>,
-        turn: Option<&str>,
-        failed: bool,
-        limit: usize,
-        after: Option<&str>,
-    ) -> Result<Vec<AuditRow>, String> {
+    pub async fn audit(&self, query: Audit<'_>) -> Result<Vec<AuditRow>, String> {
+        let Audit {
+            strand,
+            turn,
+            failed,
+            limit,
+            after,
+        } = query;
         let store = santi_core::Store::open(&self.database).await?;
         let strands = match strand {
             Some(tag) => vec![

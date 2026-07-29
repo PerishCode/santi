@@ -32,6 +32,25 @@ grace = 0
 }
 
 #[test]
+fn environment() {
+    let held = read(
+        r#"
+[environment]
+GLOBAL_LITERAL = "value"
+GLOBAL_REFERENCE = "env://HOST_VALUE"
+"#,
+    );
+    assert_eq!(
+        held.environment.get("GLOBAL_LITERAL").map(String::as_str),
+        Some("value")
+    );
+    assert_eq!(
+        held.environment.get("GLOBAL_REFERENCE").map(String::as_str),
+        Some("env://HOST_VALUE")
+    );
+}
+
+#[test]
 fn legacy() {
     let held = read(
         r#"

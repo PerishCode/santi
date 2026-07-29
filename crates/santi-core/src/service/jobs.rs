@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::Service;
 use crate::job;
@@ -32,10 +32,11 @@ pub struct Launch {
     pub directory: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Terminal {
     pub state: job::State,
     pub reason: Option<String>,
+    #[serde(rename = "exit_code")]
     pub exit: Option<i32>,
 }
 
@@ -58,19 +59,19 @@ pub trait Supervisor: Send + Sync {
 pub(super) struct Unavailable;
 
 impl Supervisor for Unavailable {
-    fn detach(&self, _launch: &Launch) -> Result<(), String> {
+    fn detach(&self, _: &Launch) -> Result<(), String> {
         Err("job supervisor is unavailable".to_string())
     }
 
-    fn observe(&self, _launch: &Launch) -> Result<Observation, String> {
+    fn observe(&self, _: &Launch) -> Result<Observation, String> {
         Err("job supervisor is unavailable".to_string())
     }
 
-    fn stop(&self, _launch: &Launch) -> Result<(), String> {
+    fn stop(&self, _: &Launch) -> Result<(), String> {
         Err("job supervisor is unavailable".to_string())
     }
 
-    fn acknowledge(&self, _launch: &Launch) -> Result<(), String> {
+    fn acknowledge(&self, _: &Launch) -> Result<(), String> {
         Err("job supervisor is unavailable".to_string())
     }
 }

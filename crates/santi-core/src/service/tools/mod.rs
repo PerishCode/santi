@@ -9,6 +9,7 @@ use super::Service;
 use crate::service::interrupt::Control;
 use crate::{effect, stream};
 
+mod environ;
 mod shell;
 mod workspace;
 

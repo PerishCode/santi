@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use santi_core::service::Service;
 use santi_core::{
@@ -28,6 +28,14 @@ pub(super) fn router(service: Service) -> Router {
         .route("/api/v1/strands", post(weave).get(strands))
         .route("/api/v1/souls", post(awaken).get(souls))
         .route("/api/v1/souls/{soul}", get(get_soul))
+        .route(
+            "/api/v1/souls/{soul}/environment",
+            post(set_soul_environ).get(soul_environs),
+        )
+        .route(
+            "/api/v1/souls/{soul}/environment/{name}",
+            delete(end_soul_environ),
+        )
         .route("/api/v1/webhooks", post(subscribe).get(webhooks))
         .route(
             "/api/v1/jobs",
@@ -38,6 +46,14 @@ pub(super) fn router(service: Service) -> Router {
         .route("/api/v1/jobs/{job}/logs", get(super::jobs::logs))
         .route("/api/v1/jobs/{job}/ack", post(super::jobs::acknowledge))
         .route("/api/v1/strands/{strand}", get(get_strand))
+        .route(
+            "/api/v1/strands/{strand}/environment",
+            post(set_strand_environ).get(strand_environs),
+        )
+        .route(
+            "/api/v1/strands/{strand}/environment/{name}",
+            delete(end_strand_environ),
+        )
         .route("/api/v1/strands/{strand}/messages", get(list_messages))
         .route("/api/v1/strands/{strand}/materials", post(material))
         .route("/api/v1/strands/{strand}/events", get(strand_events))
@@ -119,9 +135,11 @@ pub async fn health(State(service): State<Service>) -> impl IntoResponse {
 
 mod downstream;
 mod drive;
+mod environment;
 mod receipts;
 mod turn;
 pub use downstream::*;
 pub use drive::*;
+pub use environment::*;
 pub use receipts::*;
 pub use turn::*;

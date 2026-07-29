@@ -14,6 +14,8 @@ pub(super) struct Plan {
     pub(super) collapsed: i64,
 }
 
+struct Reader<'a, 'tx>(&'a mut Tx<'tx, Sqlite>);
+
 impl Plan {
     pub(super) fn report(&self, tag: &str, dry: bool) -> compact::Report {
         compact::Report {
@@ -39,7 +41,7 @@ pub(super) async fn build(
     first: &str,
     last: &str,
 ) -> Result<Plan, keel::adapt::Error> {
-    let strand = need(tx, "Strand", strand).await?;
+    let strand = Reader(tx).need("Strand", strand).await?;
     let (first_row, from) = boundary(tx, strand.key(), first, "from").await?;
     let (last_row, to) = boundary(tx, strand.key(), last, "to").await?;
     if from > to {
@@ -102,7 +104,7 @@ async fn boundary(
     tag: &str,
     label: &str,
 ) -> Result<(Row, i64), keel::adapt::Error> {
-    let message = need(tx, "Message", tag).await?;
+    let message = Reader(tx).need("Message", tag).await?;
     if message.text("state") != Some("fixed")
         || !matches!(message.text("actor_type"), Some("soul" | "system"))
         || !matches!(message.text("kind"), Some("text" | "santi_system"))
@@ -149,10 +151,13 @@ pub(super) async fn sequence(
     .ok_or_else(|| keel::adapt::Error::Missing("compact boundary entry".into()))
 }
 
-async fn need(tx: &mut Tx<'_, Sqlite>, unit: &str, tag: &str) -> Result<Row, keel::adapt::Error> {
-    tx.one(&form(unit).when("tag", Op::Eq, tag))
-        .await?
-        .ok_or_else(|| keel::adapt::Error::Missing(format!("{unit} {tag}")))
+impl Reader<'_, '_> {
+    async fn need(&mut self, unit: &str, tag: &str) -> Result<Row, keel::adapt::Error> {
+        self.0
+            .one(&form(unit).when("tag", Op::Eq, tag))
+            .await?
+            .ok_or_else(|| keel::adapt::Error::Missing(format!("{unit} {tag}")))
+    }
 }
 
 fn text<'a>(row: &'a Row, field: &str) -> Result<&'a str, keel::adapt::Error> {

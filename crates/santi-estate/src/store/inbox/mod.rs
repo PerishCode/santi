@@ -11,7 +11,7 @@ mod types;
 pub(in crate::store) mod write;
 
 pub use edge::{Accepted, DownstreamDraft, ReplayDraft, WebhookDraft};
-pub use types::{Begun, DrainDraft, Inbox, InboxDraft, NoticeDraft, Offer, Opening};
+pub use types::{Begun, DrainDraft, Inbox, InboxDraft, NoticeDraft, Offer, Opening, ReceiptDraft};
 pub(in crate::store) use write::offer as offer_in;
 
 impl Store {
@@ -27,7 +27,18 @@ impl Store {
             .map(json)
             .transpose()?;
         self.core
-            .batch(async |tx| write::accept(tx, &draft, gate, &content, metadata.as_deref()).await)
+            .batch(async |tx| {
+                write::accept(
+                    tx,
+                    write::Acceptance {
+                        draft: &draft,
+                        gate,
+                        content: &content,
+                        metadata: metadata.as_deref(),
+                    },
+                )
+                .await
+            })
             .await
             .map_err(read::error)?;
         self.inbox(draft.tag)
@@ -83,14 +94,10 @@ impl Store {
 
     pub async fn advance_receipt(
         &self,
-        inbox: &str,
-        state: santi_model::receipt::State,
-        turn: Option<&str>,
-        incident: Option<&str>,
-        rebuilt: Option<&str>,
-        occurred: &str,
+        draft: ReceiptDraft<'_>,
     ) -> Result<santi_model::receipt::Status, String> {
-        receipt::advance(&self.core, inbox, state, turn, incident, rebuilt, occurred).await?;
+        let inbox = draft.inbox;
+        receipt::advance(&self.core, draft).await?;
         self.receipt(inbox)
             .await?
             .ok_or_else(|| "advanced receipt missing".to_string())

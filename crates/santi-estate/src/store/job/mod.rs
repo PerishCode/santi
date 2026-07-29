@@ -49,7 +49,8 @@ impl Store {
             .batch(async |tx| write::prepare(tx, capability_sha256, draft, now_millis).await)
             .await
             .map_err(read::error)?;
-        let record = projection::record(self, &tag)
+        let record = projection::Projection::new(self)
+            .record(&tag)
             .await?
             .ok_or_else(|| "prepared job missing".to_string())?;
         if created {
@@ -73,7 +74,7 @@ impl Store {
         draft: TransitionDraft<'_>,
     ) -> Result<JobRecord, String> {
         self.core
-            .batch(async |tx| write::transition(tx, tag, draft).await)
+            .batch(async |tx| write::Writer::new(tx).transition(tag, draft).await)
             .await
             .map_err(read::error)?;
         self.need_job(tag).await
@@ -81,25 +82,27 @@ impl Store {
 
     pub async fn acknowledge_job(&self, tag: &str, occurred: &str) -> Result<JobRecord, String> {
         self.core
-            .batch(async |tx| write::acknowledge(tx, tag, occurred).await)
+            .batch(async |tx| write::Writer::new(tx).acknowledge(tag, occurred).await)
             .await
             .map_err(read::error)?;
         self.need_job(tag).await
     }
 
     pub async fn job(&self, soul: &str, tag: &str) -> Result<Option<job::Job>, String> {
-        Ok(projection::record(self, tag)
+        Ok(projection::Projection::new(self)
+            .record(tag)
             .await?
             .filter(|record| record.job.origin.soul == soul)
             .map(|record| record.job))
     }
 
     pub async fn job_record(&self, tag: &str) -> Result<Option<JobRecord>, String> {
-        projection::record(self, tag).await
+        projection::Projection::new(self).record(tag).await
     }
 
     pub async fn jobs(&self, soul: &str) -> Result<Vec<job::Job>, String> {
-        Ok(projection::jobs(self, soul)
+        Ok(projection::Projection::new(self)
+            .jobs(soul)
             .await?
             .into_iter()
             .map(|record| record.job)
@@ -107,7 +110,7 @@ impl Store {
     }
 
     pub async fn active_jobs(&self) -> Result<Vec<JobRecord>, String> {
-        projection::active(self).await
+        projection::Projection::new(self).active().await
     }
 
     pub async fn expired_jobs(
@@ -115,7 +118,9 @@ impl Store {
         cutoff: &str,
         limit: usize,
     ) -> Result<Vec<ExpiredJob>, String> {
-        projection::expired(self, cutoff, limit).await
+        projection::Projection::new(self)
+            .expired(cutoff, limit)
+            .await
     }
 
     pub async fn retained_job(&self, key: &str) -> Result<bool, String> {
@@ -154,7 +159,8 @@ impl Store {
     }
 
     async fn need_job(&self, tag: &str) -> Result<JobRecord, String> {
-        projection::record(self, tag)
+        projection::Projection::new(self)
+            .record(tag)
             .await?
             .ok_or_else(|| "job not found".to_string())
     }

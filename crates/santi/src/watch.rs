@@ -6,20 +6,22 @@ use anyhow::{Context, Result};
 use futures_util::{Stream, StreamExt};
 
 use crate::cli::WatchFormat;
+use crate::client::Target;
 
 const WATCH_IDLE_GRACE: Duration = Duration::from_millis(1500);
 
 pub(crate) struct Watch<'a> {
-    pub(crate) client: &'a reqwest::Client,
-    pub(crate) base: &'a str,
-    pub(crate) strand: &'a str,
+    pub(crate) target: Target<'a>,
     pub(crate) initial: Option<String>,
-    pub(crate) format: WatchFormat,
 }
 
 pub(crate) async fn watch_until_idle(watch: Watch<'_>) -> Result<()> {
-    let url = format!("{}/api/v1/strands/{}/events", watch.base, watch.strand);
+    let url = format!(
+        "{}/api/v1/strands/{}/events",
+        watch.target.base, watch.target.strand
+    );
     let response = watch
+        .target
         .client
         .get(&url)
         .send()
@@ -52,7 +54,7 @@ pub(crate) async fn watch_until_idle(watch: Watch<'_>) -> Result<()> {
         let Some((event, data)) = frame else {
             break;
         };
-        write_frame(&mut stdout, watch.format, &event, &data);
+        write_frame(&mut stdout, watch.target.format, &event, &data);
         track_frame(&event, &data, &mut inflight, &mut seeded);
     }
     Ok(())

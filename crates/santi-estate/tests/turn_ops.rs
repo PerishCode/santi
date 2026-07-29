@@ -50,15 +50,27 @@ async fn contracts() {
         .await
         .expect("complete three");
 
-    let one = event("event_one", "turn_one", &worker.id, "worker/thread", FIRST);
-    let two = event("event_two", "turn_two", &other.id, "other/thread", LATER);
-    let three = event(
-        "event_three",
-        "turn_three",
-        &worker.id,
-        "worker/thread",
-        LAST,
-    );
+    let one = event(Draft {
+        id: "event_one",
+        turn: "turn_one",
+        strand: &worker.id,
+        label: "worker/thread",
+        completed: FIRST,
+    });
+    let two = event(Draft {
+        id: "event_two",
+        turn: "turn_two",
+        strand: &other.id,
+        label: "other/thread",
+        completed: LATER,
+    });
+    let three = event(Draft {
+        id: "event_three",
+        turn: "turn_three",
+        strand: &worker.id,
+        label: "worker/thread",
+        completed: LAST,
+    });
     for event in [&one, &two, &three] {
         store
             .queue_outbox(OutboxDraft {
@@ -75,13 +87,13 @@ async fn contracts() {
         })
         .await
         .expect("replay queue");
-    let conflict = event(
-        "event_conflict",
-        "turn_one",
-        &worker.id,
-        "worker/thread",
-        FIRST,
-    );
+    let conflict = event(Draft {
+        id: "event_conflict",
+        turn: "turn_one",
+        strand: &worker.id,
+        label: "worker/thread",
+        completed: FIRST,
+    });
     assert!(
         store
             .queue_outbox(OutboxDraft {
@@ -185,13 +197,21 @@ async fn create_turn(store: &Store, tag: &str, strand: &str) {
         .expect("turn");
 }
 
-fn event(id: &str, turn: &str, strand: &str, label: &str, completed: &str) -> event::Event {
+struct Draft<'a> {
+    id: &'a str,
+    turn: &'a str,
+    strand: &'a str,
+    label: &'a str,
+    completed: &'a str,
+}
+
+fn event(draft: Draft<'_>) -> event::Event {
     event::Event {
-        id: id.to_string(),
-        strand: strand.to_string(),
-        turn: turn.to_string(),
-        label: label.to_string(),
-        text: format!("completed {turn}"),
-        completed: completed.to_string(),
+        id: draft.id.to_string(),
+        strand: draft.strand.to_string(),
+        turn: draft.turn.to_string(),
+        label: draft.label.to_string(),
+        text: format!("completed {}", draft.turn),
+        completed: draft.completed.to_string(),
     }
 }

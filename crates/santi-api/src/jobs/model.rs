@@ -55,13 +55,7 @@ impl Spec {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub(super) struct Record {
-    pub state: job::State,
-    pub reason: Option<String>,
-    #[serde(rename = "exit_code")]
-    pub exit: Option<i32>,
-}
+pub(super) type Record = JobTerminal;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -82,16 +76,6 @@ impl Snapshot {
         Self {
             schema: "santi.job.state.v1".to_string(),
             phase,
-        }
-    }
-}
-
-impl From<Record> for JobTerminal {
-    fn from(record: Record) -> Self {
-        Self {
-            state: record.state,
-            reason: record.reason,
-            exit: record.exit,
         }
     }
 }

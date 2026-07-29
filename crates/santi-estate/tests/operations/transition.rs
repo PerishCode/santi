@@ -15,8 +15,10 @@ CREATE INDEX idx_r_soul_session_messages_seq ON r_soul_session_messages(id);
 CREATE INDEX idx_r_soul_session_messages_target_lookup ON r_soul_session_messages(id);
 "#;
 
+struct Estate<'a>(&'a Path);
+
 #[tokio::test]
-async fn quarantines_exact_legacy_store() {
+async fn legacy() {
     let temp = tempfile::tempdir().expect("temp");
     let path = temp.path().join("estate.sqlite");
     fixture(&path, VERSION).await;
@@ -35,7 +37,7 @@ async fn quarantines_exact_legacy_store() {
 }
 
 #[tokio::test]
-async fn quarantines_retired_im_shape() {
+async fn retired() {
     let temp = tempfile::tempdir().expect("temp");
     let path = temp.path().join("estate.sqlite");
     fixture(&path, VERSION).await;
@@ -52,7 +54,7 @@ async fn quarantines_retired_im_shape() {
 }
 
 #[tokio::test]
-async fn refuses_unknown_legacy_shapes() {
+async fn unknown() {
     let temp = tempfile::tempdir().expect("temp");
     let path = temp.path().join("drift.sqlite");
     fixture(&path, VERSION).await;
@@ -75,11 +77,11 @@ async fn refuses_unknown_legacy_shapes() {
 }
 
 #[tokio::test]
-async fn resumes_interrupted_moves() {
+async fn resumes() {
     let temp = tempfile::tempdir().expect("temp");
     let path = temp.path().join("estate.sqlite");
     fixture(&path, VERSION).await;
-    let root = root(&path);
+    let root = Estate(&path).root();
     let moving = root.join(".moving-legacy-v39-test");
     std::fs::create_dir_all(&moving).expect("moving");
     let source = std::fs::canonicalize(temp.path())
@@ -108,7 +110,7 @@ async fn resumes_interrupted_moves() {
 }
 
 #[tokio::test]
-async fn refuses_orphan_sidecars() {
+async fn orphans() {
     let temp = tempfile::tempdir().expect("temp");
     let path = temp.path().join("estate.sqlite");
     std::fs::write(path.with_file_name("estate.sqlite-wal"), b"orphan").expect("sidecar");
@@ -149,7 +151,7 @@ async fn execute(path: &Path, sql: &str) {
 }
 
 fn quarantines(path: &Path) -> Vec<PathBuf> {
-    std::fs::read_dir(root(path))
+    std::fs::read_dir(Estate(path).root())
         .expect("quarantine")
         .map(|entry| entry.expect("entry").path())
         .filter(|path| {
@@ -167,9 +169,11 @@ fn manifest(dir: &Path) -> serde_json::Value {
     .expect("transition manifest")
 }
 
-fn root(path: &Path) -> PathBuf {
-    path.with_file_name(format!(
-        "{}.quarantine",
-        path.file_name().expect("filename").to_string_lossy()
-    ))
+impl Estate<'_> {
+    fn root(&self) -> PathBuf {
+        self.0.with_file_name(format!(
+            "{}.quarantine",
+            self.0.file_name().expect("filename").to_string_lossy()
+        ))
+    }
 }

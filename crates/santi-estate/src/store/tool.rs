@@ -226,7 +226,11 @@ pub(in crate::store) async fn put_call(
         ],
     )
     .await?;
-    write::append(tx, &strand, "tool_call", draft.tag, draft.created).await?;
+    write::append(
+        tx,
+        write::Entry::new(&strand, "tool_call", draft.tag, draft.created),
+    )
+    .await?;
     Ok(())
 }
 
@@ -285,6 +289,10 @@ pub(in crate::store) async fn put_reply(
         }
         _ => unreachable!("tool reply outcome was validated"),
     }
-    write::append(tx, &strand, "tool_result", draft.tag, draft.created).await?;
+    write::append(
+        tx,
+        write::Entry::new(&strand, "tool_result", draft.tag, draft.created),
+    )
+    .await?;
     Ok(())
 }

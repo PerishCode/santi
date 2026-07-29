@@ -19,11 +19,14 @@ impl Service {
         let capability = self
             .permit(origin.strand, origin.turn, origin.call, origin.effect)
             .await?;
+        let environment = self.resolved_environment(&origin).await?;
         let mut command = shell::shell(&args.command);
         #[cfg(unix)]
         command.process_group(0);
+        command.current_dir(&cwd).env_clear();
+        crate::environment::allow(&mut command);
         command
-            .current_dir(&cwd)
+            .envs(environment)
             .env("SANTI_SOUL_MEMORY_DIR", self.soulhome(origin.soul))
             .env("SANTI_STRAND_MEMORY_DIR", self.strandhome(origin.strand))
             .env("SANTI_SOUL_ID", origin.soul)

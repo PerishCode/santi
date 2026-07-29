@@ -2,7 +2,9 @@ use super::{InboxDraft, Store, read, write as inbox};
 use keel::{Op, Rank, form};
 use santi_model::{downstream, ingest, webhook};
 
+mod support;
 mod types;
+use support::{conflict, exact, text};
 pub use types::{Accepted, DownstreamDraft, ReplayDraft, WebhookDraft};
 
 impl Store {
@@ -17,7 +19,7 @@ impl Store {
                     .one(&form("Webhook").when("name", Op::Eq, draft.name))
                     .await?
                 {
-                    if exact_webhook(&row, &draft, soul) {
+                    if exact(&row, &draft, soul) {
                         return Ok(());
                     }
                     return Err(keel::adapt::Error::Adapt(format!(
@@ -193,11 +195,20 @@ impl Store {
                     if row.text("request_sha256") != Some(digest) {
                         return Err(keel::adapt::Error::Adapt(conflict(replay).into()));
                     }
-                    let strand = need_text(&row, "strand")?;
-                    let inbox = need_text(&row, "inbox")?;
+                    let strand = text(&row, "strand")?;
+                    let inbox = text(&row, "inbox")?;
                     return Ok((strand, inbox, false));
                 }
-                inbox::accept(tx, &draft, gate, &content, metadata.as_deref()).await?;
+                inbox::accept(
+                    tx,
+                    inbox::Acceptance {
+                        draft: &draft,
+                        gate,
+                        content: &content,
+                        metadata: metadata.as_deref(),
+                    },
+                )
+                .await?;
                 let mut fields = vec![
                     (identity, value),
                     ("request_sha256", digest),
@@ -269,24 +280,4 @@ async fn replay_shape<'a>(
             digest,
         )),
     }
-}
-
-fn exact_webhook(row: &keel::Row, draft: &WebhookDraft<'_>, soul: i64) -> bool {
-    row.text("adaptor") == Some(draft.adaptor)
-        && row.text("strategy") == Some(draft.strategy)
-        && row.text("credential") == Some(draft.credential)
-        && row.int("soul") == Some(soul)
-}
-
-fn conflict(replay: ReplayDraft<'_>) -> &'static str {
-    match replay {
-        ReplayDraft::Webhook { .. } => "webhook delivery conflicts with an accepted payload",
-        ReplayDraft::Downstream { .. } => "downstream request conflicts with an accepted payload",
-    }
-}
-
-fn need_text(row: &keel::Row, field: &str) -> Result<String, keel::adapt::Error> {
-    row.text(field)
-        .map(str::to_string)
-        .ok_or_else(|| keel::adapt::Error::Adapt(format!("replay {field} missing")))
 }

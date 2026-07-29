@@ -5,17 +5,42 @@ use crate::cli::WatchFormat;
 use crate::watch::{Watch, watch_until_idle};
 
 pub struct Request<'a> {
+    pub target: Target<'a>,
+    pub body: serde_json::Value,
+    pub watch: bool,
+}
+
+#[derive(Clone, Copy)]
+pub struct Target<'a> {
     pub client: &'a reqwest::Client,
     pub base: &'a str,
     pub strand: &'a str,
-    pub body: serde_json::Value,
-    pub watch: bool,
     pub format: WatchFormat,
 }
 
+impl<'a> Target<'a> {
+    pub fn new(
+        client: &'a reqwest::Client,
+        base: &'a str,
+        strand: &'a str,
+        format: WatchFormat,
+    ) -> Self {
+        Self {
+            client,
+            base,
+            strand,
+            format,
+        }
+    }
+}
+
 pub async fn send(request: Request<'_>) -> Result<()> {
-    let url = format!("{}/api/v1/strands/{}/send", request.base, request.strand);
+    let url = format!(
+        "{}/api/v1/strands/{}/send",
+        request.target.base, request.target.strand
+    );
     let response = request
+        .target
         .client
         .post(&url)
         .timeout(TIMEOUT)
@@ -51,11 +76,8 @@ pub async fn send(request: Request<'_>) -> Result<()> {
         .and_then(serde_json::Value::as_str)
         .map(str::to_string);
     watch_until_idle(Watch {
-        client: request.client,
-        base: request.base,
-        strand: request.strand,
+        target: request.target,
         initial: seed_turn,
-        format: request.format,
     })
     .await
 }

@@ -79,7 +79,7 @@ pub fn state(unit: &str) -> String {
 }
 
 #[cfg(target_os = "windows")]
-pub fn state(_unit: &str) -> String {
+pub fn state(_: &str) -> String {
     "not-found".to_string()
 }
 

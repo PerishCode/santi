@@ -65,3 +65,19 @@ pub(crate) struct DownstreamIngest {
     #[field(string)]
     inbox: string,
 }
+
+#[resource]
+pub(crate) struct Environ {
+    #[field(string, values = ("soul", "strand"))]
+    scope: string,
+    #[field(string)]
+    owner: string,
+    #[field(string, unique = (scope, owner))]
+    name: string,
+    #[field(string)]
+    value: string,
+    #[field(string)]
+    created: string,
+    #[field(string)]
+    updated: string,
+}

@@ -160,6 +160,7 @@ async fn open_service(temp: &tempfile::TempDir, provider: Arc<FailureProvider>) 
             execution: temp.path().join("execution").display().to_string(),
             bind: Some("127.0.0.1:0".to_string()),
             constitution: None,
+            environment: Default::default(),
         },
         provider,
     )

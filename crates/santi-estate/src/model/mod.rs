@@ -37,6 +37,7 @@ pub(super) fn graph() -> Graph {
         .plug::<edge::WebhookDelivery>()
         .plug::<edge::Downstream>()
         .plug::<edge::DownstreamIngest>()
+        .plug::<edge::Environ>()
         .plug::<ops::JobCapability>()
         .plug::<ops::TraceRecord>()
         .plug::<ops::OutboxStream>()

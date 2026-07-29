@@ -83,6 +83,7 @@ fn runtime_under(root: &Path, budget: Option<usize>) -> Runtime {
         port: 0,
         provider: "openai".to_string(),
         providers: file.providers,
+        environment: Default::default(),
         paths: paths_under(root),
         grace: Duration::from_secs(600),
         retention: Duration::from_secs(santi_api::RETENTION),

@@ -47,8 +47,10 @@ async fn vertical() {
         )
         .await
         .expect("accept job");
+    #[cfg(unix)]
     let stamp = stamp(&database, &accepted.job.id).await;
     let guard = Unit {
+        #[cfg(unix)]
         unit: format!("santi-{}.service", stamp.replace('_', "-")),
     };
     assert_eq!(accepted.job.state, job::State::Accepted);
@@ -141,8 +143,10 @@ async fn restarts() {
         )
         .await
         .expect("accept job");
+    #[cfg(unix)]
     let stamp = stamp(&database, &accepted.job.id).await;
     let guard = Unit {
+        #[cfg(unix)]
         unit: format!("santi-{}.service", stamp.replace('_', "-")),
     };
     drop(runtime);

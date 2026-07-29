@@ -1,6 +1,7 @@
+#[cfg(unix)]
+use std::process::Command;
 use std::{
     path::PathBuf,
-    process::Command,
     sync::Arc,
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -45,6 +46,7 @@ pub struct Guard<'a> {
 }
 
 pub struct Unit {
+    #[cfg(unix)]
     pub unit: String,
 }
 

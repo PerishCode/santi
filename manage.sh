@@ -74,6 +74,12 @@ Usage:
   manage.sh install [--channel stable|beta] [--version vX.Y.Z] [--retain[=true|false]]
   manage.sh uninstall [--version vX.Y.Z]
 
+install leaves exactly one version on disk. Earlier versions are removed once
+the new binaries are linked and answer --version, and each removal is named.
+Rolling back is install --version <older>, which fetches that version again;
+released artifacts are immutable and always retrievable. Pass --retain to keep
+what is already there.
+
 Environment:
   SANTI_RELEASES_PUBLIC_URL  # default: https://releases.santi.perish.uk
   SANTI_CHANNEL
@@ -142,17 +148,7 @@ retain_old_versions() {
     normalize_bool "$RETAIN"
     return
   fi
-  if [ -t 0 ]; then
-    printf 'santi: remove previously installed versions after install? [y/N] ' >&2
-    IFS= read -r answer || answer=
-    case "$answer" in
-      y|Y|yes|YES|Yes) printf '%s' false ;;
-      *) printf '%s' true ;;
-    esac
-    return
-  fi
-  echo "santi: preserving previous versions; pass --retain=false to prune after install" >&2
-  printf '%s' true
+  printf '%s' false
 }
 
 install_santi() {

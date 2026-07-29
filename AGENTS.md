@@ -86,3 +86,16 @@ rejected, not silently created). To address a soul ad hoc without a default:
 - Runtime secrets live in `santi.toml`; local release credentials live in
   `.forgejo/release.env`. Both are gitignored. Never commit live credentials;
   `santi.example.toml` and `.forgejo/release.env.example` are tracked templates.
+
+## Release
+
+- `manage.sh` leaves exactly one version under the install root. Earlier
+  versions are removed once the new binary is linked and answers `--version`,
+  and each removal is named. The versioned root was never a rollback cache:
+  `install --version <older>` refetches, so nothing ever read what accumulated.
+- A stable release refuses to publish without
+  `docs/CHANGELOG/v<version>/{en,zh}/{INDEX.md,MIGRATION.md}`, enforced by the
+  `Changelog` step in `release-stable.yml` before anything irreversible.
+  `plumb doctor` does not check this: a changelog is owed by a release, not by a
+  working tree. A release requiring nothing of anyone still writes MIGRATION.md
+  saying so. See `plumb/docs/changelog.md`.

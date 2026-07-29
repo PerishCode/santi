@@ -54,6 +54,11 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           deno run --allow-all --config .runseal/deno.json .runseal/wrappers/guard.ts
 
+      - name: Changelog
+        env:
+          RELEASE_VERSION: ${{ steps.meta.outputs.release_version }}
+        run: plumb changelog . --version "$RELEASE_VERSION"
+
       - name: Package Linux release
         env:
           RELEASE_VERSION: ${{ steps.meta.outputs.release_version }}

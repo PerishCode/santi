@@ -5,6 +5,8 @@ mod model;
 mod process;
 #[cfg(target_os = "linux")]
 mod systemd;
+#[cfg(target_os = "windows")]
+mod windows;
 
 #[cfg(target_os = "macos")]
 pub use launchd::Launchd;
@@ -14,6 +16,10 @@ pub use launchd::Launchd as Native;
 pub use systemd::Systemd;
 #[cfg(target_os = "linux")]
 pub use systemd::Systemd as Native;
+#[cfg(target_os = "windows")]
+pub use windows::Windows;
+#[cfg(target_os = "windows")]
+pub use windows::Windows as Native;
 
 use std::{
     path::Path,

@@ -2,7 +2,7 @@ use std::{
     fs::File,
     io::{Read, Write},
     path::PathBuf,
-    process::{Command, Stdio},
+    process::Stdio,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -10,8 +10,8 @@ use std::{
 };
 
 use santi_core::job;
-use std::os::unix::process::CommandExt;
 
+mod command;
 mod control;
 
 use control::Halt;
@@ -29,17 +29,17 @@ pub(super) fn run() -> Result<(), String> {
     let errlog = files::log(&directory, "stderr.log")?;
     let remaining = Arc::new(AtomicU64::new(spec.output));
     let exceeded = Arc::new(AtomicBool::new(false));
+    #[cfg(target_os = "windows")]
+    let _lease = files::lease(&directory)?;
     files::advance(&directory, Phase::Claimed)?;
 
-    let mut command = Command::new("/bin/bash");
+    let mut command = command::build(&spec);
     command
-        .args(["-lc", &spec.command])
         .current_dir(&spec.cwd)
         .env_clear()
-        .process_group(0)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    allow(&mut command);
+    command::allow(&mut command);
     command
         .env("SANTI_SOUL_ID", &spec.origin.soul)
         .env("SANTI_STRAND_ID", &spec.origin.strand)
@@ -244,24 +244,4 @@ fn finish(directory: &std::path::Path, terminal: &Record) -> Result<(), String> 
         files::advance(directory, Phase::Terminal)?;
     }
     Ok(())
-}
-
-fn allow(command: &mut Command) {
-    for name in [
-        "HOME",
-        "USER",
-        "LOGNAME",
-        "PATH",
-        "LANG",
-        "LC_ALL",
-        "TERM",
-        "TMPDIR",
-        "XDG_RUNTIME_DIR",
-        "DBUS_SESSION_BUS_ADDRESS",
-        "SHELL",
-    ] {
-        if let Some(value) = std::env::var_os(name) {
-            command.env(name, value);
-        }
-    }
 }

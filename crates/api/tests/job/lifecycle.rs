@@ -38,7 +38,7 @@ async fn vertical() {
             capability,
             JobDraft {
                 description: "vertical slice probe".to_string(),
-                command: "printf 'vertical-ok\\n'".to_string(),
+                command: vertical_command().to_string(),
                 cwd: None,
                 timeout: Some(30),
                 output: Some(4096),
@@ -132,7 +132,7 @@ async fn restarts() {
             capability,
             JobDraft {
                 description: "restart reconciliation probe".to_string(),
-                command: "sleep 0.2; printf 'after-restart\\n'".to_string(),
+                command: restart_command().to_string(),
                 cwd: None,
                 timeout: Some(30),
                 output: Some(4096),
@@ -183,4 +183,24 @@ async fn restarts() {
         .expect("ack")
         .expect("job");
     std::mem::forget(guard);
+}
+
+#[cfg(unix)]
+fn vertical_command() -> &'static str {
+    "printf 'vertical-ok\\n'"
+}
+
+#[cfg(target_os = "windows")]
+fn vertical_command() -> &'static str {
+    r#"Write-Output "vertical-ok""#
+}
+
+#[cfg(unix)]
+fn restart_command() -> &'static str {
+    "sleep 0.2; printf 'after-restart\\n'"
+}
+
+#[cfg(target_os = "windows")]
+fn restart_command() -> &'static str {
+    r#"Start-Sleep -Milliseconds 200; Write-Output "after-restart""#
 }

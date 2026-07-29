@@ -56,3 +56,4 @@ toml = "1.1.2"
 tower-http = { version = "0.6.11", features = ["cors", "trace"] }
 utoipa = { version = "5.5.0", features = ["axum_extras"] }
 uuid = { version = "1.23.3", features = ["v4"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }

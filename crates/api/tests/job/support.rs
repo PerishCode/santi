@@ -16,6 +16,10 @@ use santi_estate::{CallDraft, CapabilityDraft, EffectDraft, TurnDraft};
 use santi_provider::{Event, Metadata, Provider, Request, Streaming};
 use sha2::{Digest, Sha256};
 
+mod native;
+
+pub use native::{alive, available, state};
+
 pub struct Silent;
 
 #[async_trait]
@@ -129,60 +133,6 @@ pub fn terminal(supervisor: &santi_api::jobs::Native, launch: &JobLaunch) -> Job
             }
         })
         .expect("terminal evidence")
-}
-
-pub fn available() -> bool {
-    #[cfg(target_os = "linux")]
-    let mut command = {
-        let mut command = Command::new("systemctl");
-        command.args(["--user", "show-environment"]);
-        command
-    };
-    #[cfg(target_os = "macos")]
-    let mut command = {
-        let mut command = Command::new("launchctl");
-        command.args(["print", &domain()]);
-        command
-    };
-    command
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
-}
-
-pub fn alive(pid: &str) -> bool {
-    Command::new("kill")
-        .args(["-0", pid])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
-}
-
-pub fn state(unit: &str) -> String {
-    #[cfg(target_os = "linux")]
-    {
-        let output = Command::new("systemctl")
-            .args(["--user", "show", unit, "--property=LoadState", "--value"])
-            .output()
-            .expect("inspect load state");
-        String::from_utf8_lossy(&output.stdout).trim().to_string()
-    }
-    #[cfg(target_os = "macos")]
-    {
-        if Command::new("launchctl")
-            .args(["print", &target(unit)])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|status| status.success())
-        {
-            "loaded".to_string()
-        } else {
-            "not-found".to_string()
-        }
-    }
 }
 
 pub async fn seed(database: &std::path::Path, token: &str, soul: &str, strand: &str) {

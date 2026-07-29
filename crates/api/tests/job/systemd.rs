@@ -18,6 +18,10 @@ fn retains() {
     let stamp = format!("stamp_{}", uuid::Uuid::new_v4().simple());
     let sidecar = format!("santi-{}.service", stamp.replace('_', "-"));
     let supervisor = santi_api::jobs::Native::new(env!("CARGO_BIN_EXE_santi-api"));
+    #[cfg(unix)]
+    let command = r#"printf 'capability=%s\nsoul=%s\n' "${SANTI_JOB_CREATE_CAPABILITY-unset}" "$SANTI_SOUL_ID"; printf 'stderr-probe\n' >&2; exit 7"#;
+    #[cfg(target_os = "windows")]
+    let command = r#"Write-Output "capability=$env:SANTI_JOB_CREATE_CAPABILITY"; Write-Output "soul=$env:SANTI_SOUL_ID"; [Console]::Error.WriteLine("stderr-probe"); exit 7"#;
     let launch = JobLaunch {
         job: job::Job {
             id: id.clone(),
@@ -29,7 +33,7 @@ fn retains() {
                 effect: "effect_probe".to_string(),
             },
             description: "native production adapter probe".to_string(),
-            command: r#"printf 'capability=%s\nsoul=%s\n' "${SANTI_JOB_CREATE_CAPABILITY-unset}" "$SANTI_SOUL_ID"; printf 'stderr-probe\n' >&2; exit 7"#.to_string(),
+            command: command.to_string(),
             cwd: None,
             timeout_seconds: 30,
             output_limit_bytes: 4096,
@@ -63,7 +67,10 @@ fn retains() {
 
     let stdout = std::fs::read_to_string(path(&launch).join("stdout.log")).expect("stdout");
     let stderr = std::fs::read_to_string(path(&launch).join("stderr.log")).expect("stderr");
+    #[cfg(unix)]
     assert!(stdout.contains("capability=unset"), "{stdout}");
+    #[cfg(target_os = "windows")]
+    assert!(stdout.contains("capability="), "{stdout}");
     assert!(stdout.contains("soul=soul_probe"), "{stdout}");
     assert_eq!(stderr, "stderr-probe\n");
 
@@ -81,12 +88,11 @@ fn bounds() {
         return;
     }
     let temp = tempfile::tempdir().expect("temp dir");
-    let (supervisor, launch) = launch(
-        &temp,
-        "output limit probe",
-        "while true; do printf '0123456789abcdef'; done",
-        1024,
-    );
+    #[cfg(unix)]
+    let command = "while true; do printf '0123456789abcdef'; done";
+    #[cfg(target_os = "windows")]
+    let command = r#"while($true){[Console]::Out.Write("0123456789abcdef")}"#;
+    let (supervisor, launch) = launch(&temp, "output limit probe", command, 1024);
     let guard = Guard {
         supervisor: &supervisor,
         launch: &launch,
@@ -113,7 +119,11 @@ fn times() {
         return;
     }
     let temp = tempfile::tempdir().expect("temp dir");
-    let (supervisor, mut launch) = launch(&temp, "runtime limit probe", "sleep 30", 4096);
+    #[cfg(unix)]
+    let command = "sleep 30";
+    #[cfg(target_os = "windows")]
+    let command = "Start-Sleep -Seconds 30";
+    let (supervisor, mut launch) = launch(&temp, "runtime limit probe", command, 4096);
     launch.job.timeout_seconds = 1;
     let guard = Guard {
         supervisor: &supervisor,
@@ -137,7 +147,10 @@ fn cancels() {
         return;
     }
     let temp = tempfile::tempdir().expect("temp dir");
+    #[cfg(unix)]
     let command = r#"printf '%s\n' $$ > main.pid; bash -c 'printf "%s\n" $$ > child.pid; sleep 300 & printf "%s\n" $! > grandchild.pid; wait' & wait"#;
+    #[cfg(target_os = "windows")]
+    let command = r#"Set-Content -NoNewline main.pid $PID; $child=Start-Process powershell.exe -ArgumentList "-NoLogo","-NoProfile","-NonInteractive","-Command","Start-Sleep -Seconds 300" -PassThru; Set-Content -NoNewline child.pid $child.Id; Wait-Process -Id $child.Id"#;
     let (supervisor, launch) = launch(&temp, "process tree probe", command, 4096);
     let guard = Guard {
         supervisor: &supervisor,
@@ -145,18 +158,25 @@ fn cancels() {
     };
     supervisor.detach(&launch).expect("detach transient job");
     let cwd = std::path::PathBuf::from(&launch.cwd);
+    #[cfg(unix)]
+    let names = ["main.pid", "child.pid", "grandchild.pid"].as_slice();
+    #[cfg(target_os = "windows")]
+    let names = ["main.pid", "child.pid"].as_slice();
     for _ in 0..100 {
-        if cwd.join("grandchild.pid").is_file() {
+        if names.iter().all(|name| cwd.join(name).is_file()) {
             break;
         }
         thread::sleep(Duration::from_millis(50));
     }
-    let pids = ["main.pid", "child.pid", "grandchild.pid"].map(|name| {
-        std::fs::read_to_string(cwd.join(name))
-            .expect("pid file")
-            .trim()
-            .to_string()
-    });
+    let pids = names
+        .iter()
+        .map(|name| {
+            std::fs::read_to_string(cwd.join(name))
+                .expect("pid file")
+                .trim()
+                .to_string()
+        })
+        .collect::<Vec<_>>();
 
     supervisor.stop(&launch).expect("stop process tree");
     let terminal = terminal(&supervisor, &launch);

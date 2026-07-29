@@ -34,7 +34,7 @@ pub(super) fn wait(
             None
         };
         if let Some(halt) = halt {
-            terminate(child.id())?;
+            terminate(child)?;
             return child
                 .wait()
                 .map(|status| (status, Some(halt)))
@@ -64,7 +64,9 @@ fn timeout() -> Result<Option<Duration>, String> {
     }
 }
 
-fn terminate(pid: u32) -> Result<(), String> {
+#[cfg(unix)]
+fn terminate(child: &mut Child) -> Result<(), String> {
+    let pid = child.id();
     let pid = i32::try_from(pid).map_err(|_| "job process id is out of range".to_string())?;
     let result = unsafe { libc::kill(-pid, libc::SIGKILL) };
     if result == 0 {
@@ -75,5 +77,29 @@ fn terminate(pid: u32) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("failed to terminate job process group: {error}"))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn terminate(child: &mut Child) -> Result<(), String> {
+    let system = std::env::var_os("SYSTEMROOT")
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| "SYSTEMROOT is unavailable".to_string())?;
+    let output = std::process::Command::new(system.join("System32").join("taskkill.exe"))
+        .args(["/PID", &child.id().to_string(), "/T", "/F"])
+        .output()
+        .map_err(|error| format!("failed to invoke taskkill: {error}"))?;
+    if output.status.success()
+        || child
+            .try_wait()
+            .map_err(|error| error.to_string())?
+            .is_some()
+    {
+        Ok(())
+    } else {
+        Err(format!(
+            "failed to terminate job process tree: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
     }
 }

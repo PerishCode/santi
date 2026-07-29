@@ -12,6 +12,8 @@ pub(super) const RESULT: &str = "result.json";
 const TERMINAL: &str = "terminal.json";
 pub(super) const CANCEL: &str = "cancel.requested";
 pub(super) const LIMIT: &str = "output_limit.reached";
+#[cfg(target_os = "windows")]
+const LEASE: &str = "sidecar.lock";
 
 pub(super) fn prepare(path: &Path) -> Result<(), String> {
     fs::create_dir_all(path).map_err(|error| error.to_string())?;
@@ -122,6 +124,45 @@ pub(super) fn log(directory: &Path, name: &str) -> Result<File, String> {
         .map_err(|error| error.to_string())
 }
 
+#[cfg(target_os = "windows")]
+pub(super) fn lease(directory: &Path) -> Result<File, String> {
+    use fs2::FileExt;
+
+    let file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(directory.join(LEASE))
+        .map_err(|error| error.to_string())?;
+    file.try_lock_exclusive()
+        .map_err(|error| format!("job sidecar lease is held: {error}"))?;
+    Ok(file)
+}
+
+#[cfg(target_os = "windows")]
+pub(super) fn active(directory: &Path) -> Result<bool, String> {
+    use fs2::FileExt;
+
+    let file = match OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(directory.join(LEASE))
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.to_string()),
+    };
+    match file.try_lock_exclusive() {
+        Ok(()) => {
+            fs2::FileExt::unlock(&file).map_err(|error| error.to_string())?;
+            Ok(false)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(true),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
 #[cfg(target_os = "macos")]
 pub(super) fn artifact(path: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
     replace(&path.join(name), bytes)
@@ -132,7 +173,7 @@ fn replace(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let mut file = create(&temporary)?;
     file.write_all(bytes).map_err(|error| error.to_string())?;
     file.sync_all().map_err(|error| error.to_string())?;
-    fs::rename(&temporary, path).map_err(|error| error.to_string())?;
+    replace_file(&temporary, path)?;
     sync(path)
 }
 
@@ -167,6 +208,43 @@ fn create(path: &Path) -> Result<File, String> {
     options.open(path).map_err(|error| error.to_string())
 }
 
+#[cfg(unix)]
+fn replace_file(temporary: &Path, path: &Path) -> Result<(), String> {
+    fs::rename(temporary, path).map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn replace_file(temporary: &Path, path: &Path) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    let source = temporary
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let target = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let moved = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            target.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved == 0 {
+        Err(std::io::Error::last_os_error().to_string())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
 fn sync(path: &Path) -> Result<(), String> {
     let parent = path
         .parent()
@@ -174,4 +252,9 @@ fn sync(path: &Path) -> Result<(), String> {
     File::open(parent)
         .and_then(|directory| directory.sync_all())
         .map_err(|error| error.to_string())
+}
+
+#[cfg(not(unix))]
+fn sync(_path: &Path) -> Result<(), String> {
+    Ok(())
 }

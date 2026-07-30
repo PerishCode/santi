@@ -83,19 +83,30 @@ rejected, not silently created). To address a soul ad hoc without a default:
 - Santi's runtime boundary stops at its executables. Existing packaging,
   recovery, and system-service artifacts are operator-owned and are not runtime
   architecture. Infra owns only generic host, k3s, DNS, and shared middleware.
-- Runtime secrets live in `santi.toml`; local release credentials live in
-  `.forgejo/release.env`. Both are gitignored. Never commit live credentials;
-  `santi.example.toml` and `.forgejo/release.env.example` are tracked templates.
+- Runtime secrets live in `santi.toml`; local release escrow lives under
+  `.local/secrets/releases/`. Both are gitignored. Never commit live
+  credentials; `santi.example.toml` is the tracked runtime template.
 
 ## Release
 
-- `manage.sh` leaves exactly one version under the install root. Earlier
-  versions are removed once the new binary is linked and answers `--version`,
-  and each removal is named. The versioned root was never a rollback cache:
-  `install --version <older>` refetches, so nothing ever read what accumulated.
+- Canonical-authority stable owns the root manager, moving pointer, default
+  install root, and default bin directory. It is the only release admitted to
+  those consensus surfaces.
+- Every non-stable channel requires an exact version plus explicit install and
+  bin paths disjoint from stable. Non-stable has no pointer or activation.
+- `plumb.toml` is the product-owned release declaration. Stable Plumb owns
+  target builds, archives, Debian assembly, managers and records, exact
+  objects, public readback, and manager smoke.
+- Publishing and stable activation use separate commands and credentials.
+  Exact seals are create-only; stable activation compare-and-swaps the sole
+  moving pointer.
+- Stable is rebuilt from the same commit as one exact candidate and embeds its
+  complete seal plus digest as proof.
+- Live deploys require one exact beta. The host transaction resolves its Debian
+  asset from that candidate's immutable seal.
 - A stable release refuses to publish without
   `docs/CHANGELOG/v<version>/{en,zh}/{INDEX.md,MIGRATION.md}`, enforced by the
-  `Changelog` step in `release-stable.yml` before anything irreversible.
+  stable capsule compiler before anything irreversible.
   `plumb doctor` does not check this: a changelog is owed by a release, not by a
   working tree. A release requiring nothing of anyone still writes MIGRATION.md
   saying so. See `plumb/docs/changelog.md`.

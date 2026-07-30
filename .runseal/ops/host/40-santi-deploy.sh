@@ -78,16 +78,16 @@ require_deb_identity() {
 
 json_string() {
   local file=$1 field=$2 value
-  value=$(tr -d '\n' <"$file" |
-    sed -n "s/.*\"$field\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p")
+  value=$(sed -n "s/.*\"$field\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$file" |
+    head -n 1)
   [[ -n $value ]] || fail "JSON field unavailable: $field in $file"
   printf '%s\n' "$value"
 }
 
 json_number() {
   local file=$1 field=$2 value
-  value=$(tr -d '\n' <"$file" |
-    sed -n "s/.*\"$field\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p")
+  value=$(sed -n "s/.*\"$field\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p" "$file" |
+    head -n 1)
   [[ $value =~ ^[0-9]+$ ]] || fail "JSON number unavailable: $field in $file"
   printf '%s\n' "$value"
 }
@@ -127,10 +127,30 @@ load_source() {
 }
 
 fetch_candidate() {
-  local url package
-  url=${SANTI_DEPLOY_DEB_URL:-"$SANTI_DEPLOY_PUBLIC_URL/beta/versions/$VERSION/santi-x86_64-unknown-linux-gnu.deb"}
+  local artifact="$WORK/artifact.json" expected_bytes expected_sha package seal="$WORK/seal.json" url
   CANDIDATE_DEB="$WORK/candidate.deb"
+  curl -fsSL \
+    "$SANTI_DEPLOY_PUBLIC_URL/v1/releases/beta/$VERSION/seal.json" \
+    -o "$seal"
+  [[ $(json_string "$seal" product) == santi ]] || fail "release seal product mismatch"
+  [[ $(json_string "$seal" channel) == beta ]] || fail "release seal channel mismatch"
+  [[ $(json_string "$seal" version) == "$VERSION" ]] || fail "release seal version mismatch"
+  awk '
+      /^[[:space:]]*"linux-x64-deb":[[:space:]]*\{/ { held = 1 }
+      held { print }
+      held && /^[[:space:]]*\}[,]?[[:space:]]*$/ { exit }
+    ' "$seal" >"$artifact"
+  url=$(json_string "$artifact" url)
+  expected_sha=$(json_string "$artifact" sha256)
+  expected_bytes=$(json_number "$artifact" size)
+  [[ $(json_string "$artifact" name) == santi-x86_64-unknown-linux-gnu.deb ]] ||
+    fail "release seal Debian asset mismatch"
+  [[ $expected_sha =~ ^[0-9a-f]{64}$ ]] || fail "release seal Debian hash is invalid"
   curl -fsSL "$url" -o "$CANDIDATE_DEB"
+  [[ $(sha256_file "$CANDIDATE_DEB") == "$expected_sha" ]] ||
+    fail "candidate package hash disagrees with release seal"
+  [[ $(bytes_file "$CANDIDATE_DEB") == "$expected_bytes" ]] ||
+    fail "candidate package size disagrees with release seal"
   require_deb_identity "$CANDIDATE_DEB" "$CANDIDATE_VERSION"
   package=$(deb_field "$CANDIDATE_DEB" Package)
   [[ $package == santi ]] || fail "candidate package is not santi"

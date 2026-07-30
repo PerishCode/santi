@@ -66,21 +66,47 @@ EOF
 
 cat >"$FAKE_BIN/curl" <<'EOF'
 #!/usr/bin/env bash
-for argument in "$@"; do
-  if [[ $argument == test://candidate ]]; then
-    destination=""
-    previous=""
-    for item in "$@"; do
-      if [[ $previous == -o ]]; then destination=$item; fi
-      previous=$item
-    done
+destination=""
+previous=""
+url=""
+for item in "$@"; do
+  if [[ $previous == -o ]]; then destination=$item; fi
+  if [[ $item == *://* ]]; then url=$item; fi
+  previous=$item
+done
+case "$url" in
+  */v1/releases/beta/v0.1.0-beta.55/seal.json)
+    hash=$(sha256sum "$SANTI_DEPLOY_TEST_CANDIDATE" | awk '{print $1}')
+    bytes=$(stat -c '%s' "$SANTI_DEPLOY_TEST_CANDIDATE")
+    cat >"$destination" <<JSON
+{
+  "schema": 1,
+  "product": "santi",
+  "channel": "beta",
+  "version": "v0.1.0-beta.55",
+  "artifacts": {
+    "linux-x64-deb": {
+      "name": "santi-x86_64-unknown-linux-gnu.deb",
+      "mime": "application/vnd.debian.binary-package",
+      "sha256": "$hash",
+      "size": $bytes,
+      "url": "test://candidate"
+    }
+  }
+}
+JSON
+    exit 0
+    ;;
+  test://candidate)
     cp "$SANTI_DEPLOY_TEST_CANDIDATE" "$destination"
     exit 0
-  fi
-done
-[[ $(cat "$SANTI_DEPLOY_TEST_STATE/service") == active ]] || exit 1
-installed=$(cat "$SANTI_DEPLOY_TEST_STATE/installed")
-[[ ${SANTI_DEPLOY_TEST_FAIL_CANDIDATE:-0} != 1 || $installed != 0.1.0-beta.55 ]]
+    ;;
+  *)
+    [[ $(cat "$SANTI_DEPLOY_TEST_STATE/service") == active ]] || exit 1
+    installed=$(cat "$SANTI_DEPLOY_TEST_STATE/installed")
+    [[ ${SANTI_DEPLOY_TEST_FAIL_CANDIDATE:-0} != 1 || $installed != 0.1.0-beta.55 ]]
+    ;;
+esac
 EOF
 
 cat >"$FAKE_BIN/santi-api" <<'EOF'
@@ -119,7 +145,6 @@ invoke() {
     SANTI_DEPLOY_TEST_CANDIDATE="$CANDIDATE" \
     SANTI_DEPLOY_HOME="$home" \
     SANTI_DEPLOY_API="$FAKE_BIN/santi-api" \
-    SANTI_DEPLOY_DEB_URL=test://candidate \
     SANTI_DEPLOY_HEALTH_ATTEMPTS=1 \
     SANTI_DEPLOY_HEALTH_DELAY=0 \
     bash "$PROGRAM" v0.1.0-beta.55 "$@"

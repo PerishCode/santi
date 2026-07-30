@@ -6,7 +6,7 @@ const BASE: &str = "http://127.0.0.1:43307";
 #[derive(Parser)]
 #[command(
     name = "santi",
-    version,
+    version = plumb::version!("SANTI"),
     about = "HTTP client for a running santi runtime"
 )]
 pub struct Cli {

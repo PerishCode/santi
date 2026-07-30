@@ -10,9 +10,9 @@ k3s, DNS, and shared middleware substrate. Nothing here depends on an infra chec
 - `runseal :ssh <host> [-- <cmd>...]` — reach a santi-operated host.
 - `runseal :scp <source> <destination>` — copy through the same declared-host SSH boundary.
 - `runseal :santi <args...>` — the santi HTTP client against the live edge.
-- `runseal :deploy [<version>]` — fetch the latest (or given) beta `.deb` on the box and run the
-  streamed host transaction, then verify schema + soul-memory continuity + health and arm a recovery
-  capsule. (Cut the release first: `runseal :release` / the release-beta workflow.)
+- `runseal :deploy <version>` — fetch one exact beta `.deb` on the box and run the streamed host
+  transaction, then verify schema + soul-memory continuity + health and arm a recovery capsule.
+  Dispatch the exact release workflow first; the host resolves the package from its immutable seal.
 - `.runseal/ops/` — cold, idempotent host access wiring and edge manifests/recipes. These are
   intentionally service-owned even though they operate platform APIs.
 

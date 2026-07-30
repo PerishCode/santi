@@ -81,9 +81,9 @@ healthy candidate and closes the rollback window without deleting the capsule. I
 capsule construction was interrupted, inspect `status`, then use `runseal :rollback repair` to
 reconstruct it from the still-retained artifacts.
 
-Runtime release and upgrade remain `runseal :release` and `runseal :deploy` respectively. Apply the
-edge configuration separately; retired `/panel` routes intentionally stay absent so a runtime
-rollback cannot resurrect the old embedded chat surface.
+Dispatch releases through Forgejo and upgrade with `runseal :deploy`. Apply the edge configuration
+separately; retired `/panel` routes intentionally stay absent so a runtime rollback cannot resurrect
+the old embedded chat surface.
 
 ## Webhook subscriptions
 

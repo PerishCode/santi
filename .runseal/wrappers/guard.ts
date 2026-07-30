@@ -3,7 +3,9 @@ import { assertDebLinger, assertWebhookBoundary } from "@perish/sealkit/operator
 import ingress from "../ops/edge/ingress.yaml" with { type: "text" };
 import nginx from "../ops/edge/resources/nginx.conf" with { type: "text" };
 import postinst from "../packaging/deb/postinst" with { type: "text" };
-import service from "../packaging/deb/santi.service" with { type: "text" };
+import service from "../packaging/deb/root/lib/systemd/system/santi.service" with {
+  type: "text",
+};
 
 assertWebhookBoundary({ ingress, nginx, collection: "/api/v1/webhooks" });
 assertDebLinger({ service, postinst, user: "santi", unit: "santi.service" });
@@ -35,7 +37,14 @@ await guard(
     { label: "plumb doctor", runs: [["plumb", ["doctor", "."]]] },
     {
       label: "deno fmt",
-      runs: [["deno", ["fmt", "--config", ".runseal/deno.json", "--check", ".runseal"]]],
+      runs: [["deno", [
+        "fmt",
+        "--config",
+        ".runseal/deno.json",
+        "--check",
+        ".runseal",
+        ".forgejo/scripts",
+      ]]],
     },
     {
       label: "deno lint",
@@ -56,8 +65,6 @@ await guard(
         ".runseal/wrappers/guard.ts",
         ".runseal/wrappers/init.ts",
         ".runseal/wrappers/land.ts",
-        ".runseal/wrappers/release-ci.ts",
-        ".runseal/wrappers/release.ts",
         ".runseal/wrappers/rollback.ts",
         ".runseal/wrappers/santi.ts",
         ".runseal/wrappers/scp.ts",

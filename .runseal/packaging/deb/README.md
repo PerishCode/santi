@@ -6,12 +6,12 @@ entry, and `santi.service`. Host deployment belongs to the streamed operator pro
 
 ## Package files
 
-| File                          | Installs to            | Purpose                                      |
-| ----------------------------- | ---------------------- | -------------------------------------------- |
-| `santi.service`               | `/lib/systemd/system/` | Runtime service using `santi-api serve`      |
-| `santi.env.example`           | `/etc/santi/`          | Seed for operator-managed environment values |
-| `control`                     | `DEBIAN/`              | Package identity and version                 |
-| `postinst`, `prerm`, `postrm` | `DEBIAN/`              | User, directory, and systemd lifecycle       |
+| Source                                  | Installs to            | Purpose                                      |
+| --------------------------------------- | ---------------------- | -------------------------------------------- |
+| `root/lib/systemd/system/santi.service` | `/lib/systemd/system/` | Runtime service using `santi-api serve`      |
+| `root/etc/santi/santi.env.example`      | `/etc/santi/`          | Seed for operator-managed environment values |
+| `control`                               | `DEBIAN/`              | Package identity and version                 |
+| `postinst`, `prerm`, `postrm`           | `DEBIAN/`              | User, directory, and systemd lifecycle       |
 
 Both binaries install under `/usr/bin`. Maintainer scripts never delete `/home/santi/.santi`.
 

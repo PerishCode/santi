@@ -5,7 +5,7 @@ use crate::config::ConfigArgs;
 #[derive(Parser)]
 #[command(
     name = "santi-api",
-    version,
+    version = plumb::version!("SANTI"),
     about = "santi runtime API server and local operator"
 )]
 pub struct Cli {

@@ -233,12 +233,26 @@ declarations.
 
 ## Distribution
 
-The current release gate supports Linux x86_64 only. R2 publishes both a
-standalone tarball and the Debian package used by the streamed host deployment
-path:
+The declared release shape supports Linux x86_64 only. `plumb.toml` names the
+two binaries and the Debian payload root; stable Plumb owns target builds,
+archives, package assembly, managers, and sealed delivery. Santi has not
+entered formal publication yet. Once it does, the host path will resolve the
+immutable Debian object from the candidate's exact seal.
 
 ```sh
-curl -fsSL https://releases.santi.perish.uk/manage.sh | sh -s -- install --channel beta
+curl -fsSL https://releases.santi.perish.uk/manage.sh | sh
+```
+
+Canonical stable is the only moving install and the only release admitted to
+the default seat. Beta validation is always exact and isolated:
+
+```sh
+curl -fsSL https://releases.santi.perish.uk/manage.sh | sh -s -- \
+  install \
+  --channel beta \
+  --version vX.Y.Z-beta.N \
+  --install-root "$HOME/.local/share/santi-beta" \
+  --bin-dir "$HOME/.local/santi-beta/bin"
 ```
 
 Forgejo `PerishFire/santi` is the canonical source and automation target. The

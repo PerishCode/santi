@@ -1,4 +1,4 @@
-name: release-stable
+name: release-exact
 
 on:
   workflow_dispatch:
@@ -8,39 +8,29 @@ on:
         required: true
         default: main
         type: string
-      version:
-        description: Exact stable version
-        required: true
-        type: string
-      promotion_channel:
-        description: Exact source channel
+      channel:
+        description: Exact non-stable channel
         required: true
         default: beta
         type: string
-      promotion_version:
-        description: Exact source version
+      version:
+        description: Exact non-stable version
         required: true
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   release:
     uses: PerishLab/actions/.forgejo/workflows/release-binary.yml@main
     with:
       ref: ${{ inputs.ref }}
-      channel: stable
+      channel: ${{ inputs.channel }}
       version: ${{ inputs.version }}
-      promotion_channel: ${{ inputs.promotion_channel }}
-      promotion_version: ${{ inputs.promotion_version }}
     secrets:
       publish_access: ${{ secrets.RELEASE_PUBLISH_S3_ACCESS_KEY }}
       publish_secret: ${{ secrets.RELEASE_PUBLISH_S3_SECRET_KEY }}
       publish_bucket: ${{ secrets.RELEASE_PUBLISH_S3_BUCKET }}
       publish_endpoint: ${{ secrets.RELEASE_PUBLISH_S3_ENDPOINT }}
-      activate_access: ${{ secrets.RELEASE_ACTIVATE_S3_ACCESS_KEY }}
-      activate_secret: ${{ secrets.RELEASE_ACTIVATE_S3_SECRET_KEY }}
-      activate_bucket: ${{ secrets.RELEASE_ACTIVATE_S3_BUCKET }}
-      activate_endpoint: ${{ secrets.RELEASE_ACTIVATE_S3_ENDPOINT }}
       registry_token: ${{ secrets.RELEASE_REGISTRY_TOKEN }}

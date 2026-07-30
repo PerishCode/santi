@@ -203,6 +203,11 @@ file > defaults):
 | `SANTI_LISTEN_HOST` / `SANTI_LISTEN_PORT` | `127.0.0.1` / `43307` | Bind address |
 | `SANTI_API_KEY` | unset | Transitional static bearer sent by the CLI (`--api-key` overrides). The runtime has no global API-key gate; edge Authentik protects management paths, while downstream data paths use registered zone credentials. |
 | `SANTI_API_URL` | `http://127.0.0.1:43307` | Client target (`--base-url` overrides) |
+| `SANTI_CAPABILITY_ISSUER` | unset | Runtime capability issuer; configuring any capability field requires the complete authority |
+| `SANTI_CAPABILITY_AUDIENCE` | unset | Exact downstream audience carried by each runtime capability |
+| `SANTI_CAPABILITY_KEY_ID` | unset | Active Ed25519 key id |
+| `SANTI_CAPABILITY_PRIVATE_KEY` | unset | Unpadded base64url Ed25519 32-byte private seed; never inherited by a shell |
+| `SANTI_CAPABILITY_TTL_SECONDS` | `120` | Capability lifetime, from 1 through 300 seconds |
 
 A `.env` in the working directory is loaded and overrides the process
 environment (via `dotenvy::dotenv_override`).
@@ -216,20 +221,39 @@ strand declarations, and Santi's reserved `SANTI_*` runtime variables.
 
 Values can be literals or `env://NAME` references into the server process
 environment. An unresolved reference is passed to the shell unchanged and
-recorded as a `SantiSystem` message, so a missing secret is visible without
-writing that secret into the estate:
+recorded as a `SantiSystem` message, so a missing value is visible without
+writing it into the estate.
 
 ```sh
 santi env set soul soul_default STIM_BASE_URL https://stim.example.com:43309
-santi env set soul soul_default STIM_REPLY_TOKEN env://STIM_REPLY_TOKEN
 santi env list soul soul_default
-santi env end soul soul_default STIM_REPLY_TOKEN
 ```
+
+When `[capability]` is configured, Santi signs a fresh
+`SANTI_RUNTIME_CAPABILITY` immediately before each shell effect. Its claims bind
+issuer, audience, key id, soul, strand, turn, tool call, effect, issue time, and
+expiry. The reserved value overlays declared environment and is not persisted.
+The private key remains in typed server config and is excluded by the child
+environment wall.
+
+Generate a 32-byte seed outside the estate, configure the authority, and derive
+the public material for downstream trust without printing the private key:
+
+```sh
+export SANTI_CAPABILITY_PRIVATE_KEY="$(
+  openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n'
+)"
+santi-api capability public
+```
+
+Rotation adds the new public key to downstream trust first, switches Santi's
+`key_id` and private key second, then removes the retired public key after the
+maximum TTL.
 
 Soul and strand declarations are intentionally limited to the synchronous turn
 shell in v1. Detached `santi job create` payloads retain their existing host
-allowlist plus reserved engine variables; they do not receive these
-declarations.
+allowlist plus reserved engine variables; they receive neither these
+declarations nor `SANTI_RUNTIME_CAPABILITY`.
 
 ## Distribution
 

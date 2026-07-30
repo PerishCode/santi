@@ -56,6 +56,7 @@ pub async fn serve() -> Result<(), String> {
         supervisor,
     )
     .await?
+    .authorized(held.capability.clone())
     .retain(held.retention)?;
     let address: SocketAddr = bind
         .parse()

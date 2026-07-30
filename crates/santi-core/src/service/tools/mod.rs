@@ -2,6 +2,7 @@ use santi_provider::{Call, Function, Tool};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::capability::Origin;
 use crate::service::address::Address;
 use crate::{SOULSPACE, STRANDSPACE, soulward, strandward};
 
@@ -45,14 +46,6 @@ struct Shell<'a> {
     call: &'a Call,
     effect: &'a str,
     limit: Option<usize>,
-}
-
-struct Origin<'a> {
-    strand: &'a str,
-    turn: &'a str,
-    soul: &'a str,
-    call: &'a str,
-    effect: &'a str,
 }
 
 impl Service {

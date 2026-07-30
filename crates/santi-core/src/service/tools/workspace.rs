@@ -16,9 +16,14 @@ impl Service {
             .map_err(|error| error.to_string())?;
         let cwd = self.situated(origin.strand, origin.soul, args.cwd.as_deref())?;
         std::fs::create_dir_all(&cwd).map_err(|error| error.to_string())?;
-        let capability = self
+        let permit = self
             .permit(origin.strand, origin.turn, origin.call, origin.effect)
             .await?;
+        let capability = self
+            .capability
+            .as_ref()
+            .map(|issuer| issuer.issue(origin))
+            .transpose()?;
         let environment = self.resolved_environment(&origin).await?;
         let mut command = shell::shell(&args.command);
         #[cfg(unix)]
@@ -34,9 +39,11 @@ impl Service {
             .env("SANTI_TURN_ID", origin.turn)
             .env("SANTI_TOOL_CALL_ID", origin.call)
             .env("SANTI_EFFECT_ID", origin.effect)
-            .env("SANTI_JOB_CREATE_CAPABILITY", capability)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .env("SANTI_JOB_CREATE_CAPABILITY", permit);
+        if let Some(capability) = capability {
+            command.env("SANTI_RUNTIME_CAPABILITY", capability);
+        }
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
         Ok(shell::Prepared { command, cwd })
     }
 

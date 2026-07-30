@@ -5,7 +5,7 @@ pub mod text;
 use anyhow::Result;
 use clap::Parser;
 
-use cli::{Cli, Command, InboxCommand, Job};
+use cli::{Capability, Cli, Command, InboxCommand, Job};
 
 pub async fn run() -> Result<()> {
     config::load();
@@ -80,6 +80,21 @@ pub async fn run() -> Result<()> {
                         .unwrap_or_default()
                 );
             }
+            Ok(())
+        }
+        Command::Capability(Capability::Public) => {
+            config::boot(config.as_deref(), over.partial()).map_err(anyhow::Error::msg)?;
+            let issuer = santi_api::runtime::held()
+                .capability
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("runtime capability authority is not configured"))?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "key_id": issuer.id(),
+                    "public_key": issuer.public(),
+                })
+            );
             Ok(())
         }
         Command::Job(Job::Run) => santi_api::jobs::run().map_err(anyhow::Error::msg),

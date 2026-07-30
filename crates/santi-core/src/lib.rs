@@ -1,4 +1,5 @@
 mod assembly;
+pub mod capability;
 mod context;
 pub mod environment;
 

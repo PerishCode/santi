@@ -51,6 +51,26 @@ GLOBAL_REFERENCE = "env://HOST_VALUE"
 }
 
 #[test]
+fn capability() {
+    let held = read(
+        r#"
+[capability]
+issuer = "santi.example"
+audience = "stim.reply"
+key_id = "key-2026"
+private_key = "private-material"
+ttl_seconds = 120
+"#,
+    );
+    assert_eq!(held.capability.issuer, "santi.example");
+    assert_eq!(held.capability.audience, "stim.reply");
+    assert_eq!(held.capability.key_id, "key-2026");
+    let shown = format!("{:?}", held.capability);
+    assert!(shown.contains("[redacted]"));
+    assert!(!shown.contains("private-material"));
+}
+
+#[test]
 fn legacy() {
     let held = read(
         r#"

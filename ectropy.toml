@@ -2,7 +2,9 @@
 allow = false
 
 [[grant]]
-paths = ["crates/*/tests/**/*.rs"]
+paths = [
+  "crates/*/tests/**/*.rs",
+]
 syntax = "test"
 
 [[grant]]
@@ -45,6 +47,9 @@ term = [
   { name = "reasoning_effort", description = "The OpenAI request parameter is a vendor-fixed wire field." },
   { name = "max_output_tokens", description = "The OpenAI Responses request parameter is a vendor-fixed wire field." },
   { name = "max_tokens", description = "The Chat Completions request parameter is a fixed wire field." },
+  { name = "key_id", description = "Runtime capability configuration and JSON expose the signing key identifier." },
+  { name = "private_key", description = "Runtime capability configuration names the Ed25519 private seed." },
+  { name = "ttl_seconds", description = "Runtime capability configuration exposes its lifetime in seconds." },
   { name = "encrypt_key", description = "The Feishu webhook parameter is a vendor-fixed wire field." },
   { name = "AcceptedWarning", description = "Established Santi API or domain type; the compound is one Rust namespace atom." },
   { name = "ApiDoc", description = "Established Santi API or domain type; the compound is one Rust namespace atom." },

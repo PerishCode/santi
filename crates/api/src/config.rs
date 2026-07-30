@@ -24,6 +24,8 @@ pub struct Config {
     pub paths: Paths,
     #[cascade(section)]
     pub webhooks: Webhooks,
+    #[cascade(section)]
+    pub capability: Capability,
     pub environment: BTreeMap<String, String>,
     pub providers: BTreeMap<String, Profile>,
 }
@@ -41,6 +43,7 @@ impl Default for Config {
             jobs: Jobs::default(),
             paths: Paths::default(),
             webhooks: Webhooks::default(),
+            capability: Capability::default(),
             environment: BTreeMap::new(),
             providers: BTreeMap::new(),
         }
@@ -112,6 +115,67 @@ pub struct Github {
 pub struct Feishu {
     pub encrypt_key: Option<String>,
     pub allow: Option<String>,
+}
+
+#[derive(Cascade)]
+#[cascade(section)]
+pub struct Capability {
+    pub issuer: String,
+    pub audience: String,
+    pub key_id: String,
+    pub private_key: String,
+    pub ttl_seconds: u64,
+}
+
+impl Default for Capability {
+    fn default() -> Self {
+        Self {
+            issuer: String::new(),
+            audience: String::new(),
+            key_id: String::new(),
+            private_key: String::new(),
+            ttl_seconds: 120,
+        }
+    }
+}
+
+impl std::fmt::Debug for Capability {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Capability")
+            .field("issuer", &self.issuer)
+            .field("audience", &self.audience)
+            .field("key_id", &self.key_id)
+            .field("private_key", &"[redacted]")
+            .field("ttl_seconds", &self.ttl_seconds)
+            .finish()
+    }
+}
+
+impl Capability {
+    fn issuer(&self) -> Result<Option<santi_core::capability::Issuer>, String> {
+        let configured = [
+            self.issuer.as_str(),
+            self.audience.as_str(),
+            self.key_id.as_str(),
+            self.private_key.as_str(),
+        ]
+        .iter()
+        .any(|value| !value.trim().is_empty());
+        if !configured {
+            return Ok(None);
+        }
+        santi_core::capability::Issuer::new(
+            &self.issuer,
+            &self.audience,
+            santi_core::capability::Key {
+                id: &self.key_id,
+                private: &self.private_key,
+            },
+            self.ttl_seconds,
+        )
+        .map(Some)
+    }
 }
 
 pub fn path(over: Option<&str>) -> PathBuf {
@@ -192,6 +256,7 @@ fn runtime(held: Config) -> Result<Runtime, String> {
             secret: held.webhooks.feishu.encrypt_key,
             allow: held.webhooks.feishu.allow,
         },
+        capability: held.capability.issuer()?,
         constitution: held.paths.charter,
     })
 }

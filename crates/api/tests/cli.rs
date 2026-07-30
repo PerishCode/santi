@@ -1,4 +1,4 @@
-use api::cli::{Cli, Command, InboxCommand};
+use api::cli::{Capability, Cli, Command, InboxCommand};
 use clap::Parser;
 
 #[test]
@@ -41,6 +41,11 @@ fn local() {
             limit: 7,
             after: None,
         }) if turn == "turn_one"
+    ));
+    let parsed = Cli::try_parse_from(["santi-api", "capability", "public"]).unwrap();
+    assert!(matches!(
+        parsed.command,
+        Some(Command::Capability(Capability::Public))
     ));
 }
 

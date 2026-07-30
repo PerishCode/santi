@@ -50,6 +50,7 @@ pub struct Service {
     supervisor: Arc<dyn jobs::Supervisor>,
     handoffs: Arc<Mutex<HashSet<String>>>,
     retention: Duration,
+    pub(crate) capability: Option<Arc<crate::capability::Issuer>>,
 }
 
 #[derive(Debug, Clone)]
@@ -117,7 +118,13 @@ impl Service {
             supervisor,
             handoffs: Arc::new(Mutex::new(HashSet::new())),
             retention: Duration::from_secs(RETENTION),
+            capability: None,
         })
+    }
+
+    pub fn authorized(mut self, issuer: Option<crate::capability::Issuer>) -> Self {
+        self.capability = issuer.map(Arc::new);
+        self
     }
 
     pub async fn ration(&self, strand: &str, budget: budget::Execution) -> Result<(), String> {

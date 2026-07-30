@@ -3,6 +3,15 @@ provider = "openai"
 [jobs]
 acknowledged_retention_seconds = 604800
 
+# Optional Ed25519 authority for short-lived, per-effect runtime capabilities.
+# Supply private_key through SANTI_CAPABILITY_PRIVATE_KEY in production.
+[capability]
+issuer = ""
+audience = ""
+key_id = ""
+private_key = ""
+ttl_seconds = 120
+
 # Lowest explicit layer for every turn shell. Values may be literals or env://
 # references. Soul and strand environment resources override this map.
 [environment]

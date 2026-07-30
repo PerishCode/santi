@@ -64,7 +64,7 @@ fn precedence() {
 
 #[test]
 fn portability() {
-    assert!(environment::legal("STIM_REPLY_TOKEN").is_ok());
+    assert!(environment::legal("STIM_BASE_URL").is_ok());
     assert!(environment::legal("_STIM_1").is_ok());
     assert!(environment::legal("").is_err());
     assert!(environment::legal("NOT-PORTABLE").is_err());
@@ -102,7 +102,7 @@ impl Provider for ShellProvider {
         };
         if round == 0 {
             let arguments = json!({
-                "command": "printf '%s|%s|%s|%s' \"$SHARED\" \"$STRAND_ONLY\" \"$GLOBAL_ONLY\" \"$BROKEN\""
+                "command": "printf '%s|%s|%s|%s|%s|%s' \"$SHARED\" \"$STRAND_ONLY\" \"$GLOBAL_ONLY\" \"$BROKEN\" \"${SANTI_RUNTIME_CAPABILITY%%.*}\" \"${SANTI_CAPABILITY_PRIVATE_KEY-unset}\""
             });
             Ok(Box::pin(stream::iter(vec![
                 Ok(Event::Called(Call {
@@ -150,7 +150,19 @@ async fn cascade() {
         provider.clone(),
     )
     .await
-    .expect("open service");
+    .expect("open service")
+    .authorized(Some(
+        santi_core::capability::Issuer::new(
+            "santi.example",
+            "stim.reply",
+            santi_core::capability::Key {
+                id: "test-2026",
+                private: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+            },
+            120,
+        )
+        .expect("test issuer"),
+    ));
     service
         .set_environ(
             environ::Scope::Soul,
@@ -220,7 +232,7 @@ async fn cascade() {
             item,
             Item::Output { output, .. }
                 if output.contains(
-                    "strand|strand-only|global-only|env://SANTI_TEST_REFERENCE_THAT_DOES_NOT_EXIST"
+                    "strand|strand-only|global-only|env://SANTI_TEST_REFERENCE_THAT_DOES_NOT_EXIST|santi1|unset"
                 )
         )
     }));

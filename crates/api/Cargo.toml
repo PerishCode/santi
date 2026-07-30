@@ -14,13 +14,13 @@ clap.workspace = true
 dotenvy.workspace = true
 plumb.workspace = true
 santi-api.workspace = true
+santi-core.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true
 futures-util.workspace = true
-santi-core.workspace = true
 santi-estate.workspace = true
 santi-provider.workspace = true
 sha2.workspace = true

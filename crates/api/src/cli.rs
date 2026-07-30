@@ -49,9 +49,18 @@ pub enum Command {
     #[command(about = "Operate directly on local runtime state")]
     #[command(subcommand)]
     Inbox(InboxCommand),
+    #[command(about = "Inspect configured runtime capability authority")]
+    #[command(subcommand)]
+    Capability(Capability),
     #[command(name = "__job", hide = true)]
     #[command(subcommand)]
     Job(Job),
+}
+
+#[derive(Subcommand)]
+pub enum Capability {
+    #[command(about = "Print the active key id and Ed25519 public key")]
+    Public,
 }
 
 #[derive(Subcommand)]

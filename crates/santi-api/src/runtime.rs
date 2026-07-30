@@ -17,6 +17,7 @@ pub struct Runtime {
     pub retention: Duration,
     pub github: Github,
     pub feishu: Feishu,
+    pub capability: Option<santi_core::capability::Issuer>,
     pub constitution: Option<PathBuf>,
 }
 

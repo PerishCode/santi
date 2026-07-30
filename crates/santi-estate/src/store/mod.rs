@@ -21,7 +21,7 @@ pub use inbox::{
 pub use job::{
     AttentionDraft, CapabilityDraft, ExpiredJob, JobDraft, JobRecord, Prepared, TransitionDraft,
 };
-pub use support::{EnvironDraft, TraceDraft};
+pub use support::{Bootstrap, EnvironDraft, Status, TraceDraft};
 use support::{read, write};
 pub use thinking::ThinkingDraft;
 pub use timeline::{CompactDraft, ForkDraft, MessageDraft};
@@ -47,18 +47,7 @@ pub struct StrandDraft<'a> {
 
 impl Store {
     pub async fn open(path: impl AsRef<Path>) -> Result<Self, String> {
-        if let Some(parent) = path.as_ref().parent()
-            && !parent.as_os_str().is_empty()
-        {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        if let Some(quarantine) = support::transition::prepare(path.as_ref()).await? {
-            eprintln!(
-                "santi-estate: quarantined legacy database at {}",
-                quarantine.display()
-            );
-        }
-        let wire = Sqlite::file(path).await.map_err(read::error)?;
+        let wire = support::wire(path.as_ref()).await?;
         let core = bind(crate::graph(), wire)
             .await
             .map_err(read::error)?

@@ -14,6 +14,15 @@ pub(crate) use santi_provider::{Event, Item, Metadata, Provider, Request, Stream
 pub(crate) use std::sync::{Arc, Mutex};
 pub(crate) use tokio::time::{Duration, sleep};
 
+pub(crate) async fn bootstrap(temp: &tempfile::TempDir) {
+    santi_core::Store::bootstrap(
+        temp.path().join("santi.sqlite"),
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    )
+    .await
+    .expect("bootstrap");
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct FakeProvider {
     pub(crate) requests: Arc<Mutex<Vec<Request>>>,

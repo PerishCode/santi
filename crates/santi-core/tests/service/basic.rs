@@ -5,6 +5,7 @@ use santi_core::{message, strand};
 #[tokio::test]
 async fn sends() {
     let temp = tempfile::tempdir().expect("temp dir");
+    bootstrap(&temp).await;
     let provider = Arc::new(FakeProvider::default());
     let service = Service::open(
         service::Config {

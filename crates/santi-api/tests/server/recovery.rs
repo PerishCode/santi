@@ -4,6 +4,7 @@ use santi_core::{message, strand};
 #[tokio::test]
 async fn locks() {
     let temp = tempfile::tempdir().expect("temp dir");
+    super::support::bootstrap(&temp.path().join("santi.sqlite")).await;
     let service = Service::open(
         service::Config {
             database: temp.path().join("santi.sqlite").display().to_string(),

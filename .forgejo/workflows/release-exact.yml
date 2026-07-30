@@ -3,11 +3,6 @@ name: release-exact
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: Git ref to release
-        required: true
-        default: main
-        type: string
       channel:
         description: Exact non-stable channel
         required: true
@@ -25,7 +20,6 @@ jobs:
   release:
     uses: PerishLab/actions/.forgejo/workflows/release-binary.yml@main
     with:
-      ref: ${{ inputs.ref }}
       channel: ${{ inputs.channel }}
       version: ${{ inputs.version }}
     secrets:

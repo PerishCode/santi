@@ -5,6 +5,7 @@ use santi_core::service::{self, Service};
 #[tokio::test]
 async fn scopes() {
     let temp = tempfile::tempdir().expect("temp dir");
+    bootstrap(&temp).await;
     let service = Service::open(
         service::Config {
             database: temp.path().join("santi.sqlite").display().to_string(),
@@ -68,6 +69,7 @@ async fn scopes() {
 #[tokio::test]
 async fn rejects() {
     let temp = tempfile::tempdir().expect("temp dir");
+    bootstrap(&temp).await;
     let service = Service::open(
         service::Config {
             database: temp.path().join("santi.sqlite").display().to_string(),

@@ -2,7 +2,7 @@
 //! points. The host script owns validation and all state transitions.
 
 import { runRecoveryRemote } from "@/lib/recovery/remote.ts";
-import { parseCommand } from "@perish/sealkit/operator";
+import { command } from "@perish/sealkit/operator";
 
 export type RecoveryRequest =
   | { action: "status" }
@@ -26,7 +26,7 @@ const COMMANDS = [
 ] as const;
 
 export function parseRecoveryRequest(argv: string[]): RecoveryRequest {
-  const request = parseCommand(argv, COMMANDS);
+  const request = command.parse(argv, COMMANDS);
   if (request.action === "status") {
     return { action: "status" };
   }

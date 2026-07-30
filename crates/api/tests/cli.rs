@@ -47,6 +47,8 @@ fn local() {
         parsed.command,
         Some(Command::Capability(Capability::Public))
     ));
+    let parsed = Cli::try_parse_from(["santi-api", "bootstrap"]).unwrap();
+    assert!(matches!(parsed.command, Some(Command::Bootstrap)));
 }
 
 #[test]

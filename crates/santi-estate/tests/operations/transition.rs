@@ -23,7 +23,7 @@ async fn legacy() {
     let path = temp.path().join("estate.sqlite");
     fixture(&path, VERSION).await;
 
-    let store = Store::open(&path).await.expect("transition");
+    let store = super::support::bootstrap(&path).await;
     assert!(store.souls().await.expect("souls").is_empty());
     drop(store);
 
@@ -43,7 +43,7 @@ async fn retired() {
     fixture(&path, VERSION).await;
     execute(&path, RETIRED).await;
 
-    let store = Store::open(&path).await.expect("transition");
+    let store = super::support::bootstrap(&path).await;
     assert!(store.souls().await.expect("souls").is_empty());
     drop(store);
 
@@ -102,7 +102,7 @@ async fn resumes() {
     .expect("manifest");
     std::fs::rename(&path, moving.join("estate.sqlite")).expect("partial move");
 
-    Store::open(&path).await.expect("resume");
+    super::support::bootstrap(&path).await;
     let ready = root.join("legacy-v39-test");
     assert_eq!(manifest(&ready)["state"], "ready");
     assert!(ready.join("estate.sqlite").exists());

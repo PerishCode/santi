@@ -132,6 +132,7 @@ impl Provider for ShellProvider {
 #[tokio::test]
 async fn cascade() {
     let temp = tempfile::tempdir().expect("temp dir");
+    bootstrap(&temp).await;
     let provider = Arc::new(ShellProvider::default());
     let service = Service::open(
         service::Config {

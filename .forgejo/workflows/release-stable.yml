@@ -3,11 +3,6 @@ name: release-stable
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: Git ref to release
-        required: true
-        default: main
-        type: string
       version:
         description: Exact stable version
         required: true
@@ -29,7 +24,6 @@ jobs:
   release:
     uses: PerishLab/actions/.forgejo/workflows/release-binary.yml@main
     with:
-      ref: ${{ inputs.ref }}
       channel: stable
       version: ${{ inputs.version }}
       promotion_channel: ${{ inputs.promotion_channel }}

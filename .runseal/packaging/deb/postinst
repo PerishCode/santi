@@ -3,7 +3,8 @@
 # Deliberately does NOT auto-START the service — starting needs operator-provided
 # secrets in /etc/santi/santi.env, and the streamed deploy program owns the
 # stop/start around dpkg. We only install + enable; the
-# estate bootstrap (or the orchestrator) starts it once config is present.
+# operator runs `santi-api bootstrap`, then the orchestrator starts it once
+# config is present.
 set -e
 
 case "$1" in

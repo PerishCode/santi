@@ -1,6 +1,7 @@
 use santi_estate::{OutboxDraft, Store, StrandDraft, TurnDraft};
 use santi_model::{event, turn};
 
+const SUDO: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const FIRST: &str = "2026-07-28T00:00:00.000Z";
 const LATER: &str = "2026-07-28T00:01:00.000Z";
 const LAST: &str = "2026-07-28T00:02:00.000Z";
@@ -9,7 +10,7 @@ const LAST: &str = "2026-07-28T00:02:00.000Z";
 async fn contracts() {
     let temp = tempfile::tempdir().expect("temp");
     let path = temp.path().join("estate.sqlite");
-    let store = Store::open(&path).await.expect("open");
+    let store = Store::bootstrap(&path, SUDO).await.expect("open");
     store.seed("soul_test", FIRST).await.expect("seed");
     let worker = store
         .create_strand(StrandDraft {

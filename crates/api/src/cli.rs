@@ -22,6 +22,8 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Command {
     Serve,
+    #[command(about = "Initialize the local Keel estate and keep its sudo custody")]
+    Bootstrap,
     #[command(name = "export-openapi")]
     Export,
     #[command(

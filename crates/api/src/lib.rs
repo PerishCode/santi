@@ -1,3 +1,4 @@
+mod bootstrap;
 pub mod cli;
 pub mod config;
 pub mod text;
@@ -19,6 +20,14 @@ pub async fn run() -> Result<()> {
         Command::Serve => {
             config::boot(config.as_deref(), over.partial()).map_err(anyhow::Error::msg)?;
             santi_api::serve().await.map_err(anyhow::Error::msg)
+        }
+        Command::Bootstrap => {
+            config::boot(config.as_deref(), over.partial()).map_err(anyhow::Error::msg)?;
+            let report = bootstrap::run(&santi_api::runtime::held().paths)
+                .await
+                .map_err(anyhow::Error::msg)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
         }
         Command::Export => {
             let document = santi_api::export_openapi_json().map_err(anyhow::Error::msg)?;

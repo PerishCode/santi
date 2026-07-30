@@ -4,13 +4,13 @@
 
 import { join } from "@/lib/std/fs.ts";
 import { repoRoot } from "@/lib/std/repo.ts";
-import { remoteCommand } from "@perish/sealkit/operator";
+import { command } from "@perish/sealkit/operator";
 
 const HOST = "hk-03.zxiyun";
 const SSH_CONFIG = ".local/ssh/config";
 const SCRIPT = ".runseal/ops/host/30-santi-recovery.sh";
 export function recoveryRemoteCommand(argv: string[]): string {
-  return remoteCommand(["bash", "-s", "--"], argv);
+  return command.remote(["bash", "-s", "--"], argv);
 }
 
 export async function runRecoveryRemote(argv: string[]): Promise<number> {

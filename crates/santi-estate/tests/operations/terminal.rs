@@ -9,7 +9,7 @@ const LAST: &str = "2026-07-28T00:02:00.000Z";
 async fn terminal_ceremonies() {
     let temp = tempfile::tempdir().expect("temp");
     let path = temp.path().join("estate.sqlite");
-    let store = Store::open(&path).await.expect("open");
+    let store = super::support::bootstrap(&path).await;
     store.seed("soul_test", FIRST).await.expect("seed");
 
     running(&store, "interrupt").await;

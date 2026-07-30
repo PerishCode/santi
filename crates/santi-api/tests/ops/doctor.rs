@@ -9,9 +9,7 @@ use santi_api::runtime::Runtime;
 async fn reports() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
-    let store = santi_core::Store::open(&paths.database)
-        .await
-        .expect("open store");
+    let store = super::support::bootstrap(&paths.database).await;
     store
         .seed(santi_core::GENESIS, &santi_core::now())
         .await
@@ -32,9 +30,7 @@ async fn reports() {
 async fn rejects() {
     let temp = tempfile::tempdir().expect("temp dir");
     let paths = paths_under(temp.path());
-    let store = santi_core::Store::open(&paths.database)
-        .await
-        .expect("open store");
+    let store = super::support::bootstrap(&paths.database).await;
     store
         .seed(santi_core::GENESIS, &santi_core::now())
         .await

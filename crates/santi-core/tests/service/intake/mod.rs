@@ -5,6 +5,7 @@ use santi_core::service::{self, Service};
 #[tokio::test]
 async fn ingests() {
     let temp = tempfile::tempdir().expect("temp dir");
+    bootstrap(&temp).await;
     let provider = Arc::new(FakeProvider::default());
     let service = Service::open(
         service::Config {
@@ -78,6 +79,7 @@ async fn ingests() {
 #[tokio::test]
 async fn drains() {
     let temp = tempfile::tempdir().expect("temp dir");
+    bootstrap(&temp).await;
     let config = service::Config {
         database: temp.path().join("santi.sqlite").display().to_string(),
         runtime: temp.path().join("runtime").display().to_string(),

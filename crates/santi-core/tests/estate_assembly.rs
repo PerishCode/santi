@@ -10,9 +10,12 @@ const LATER: &str = "2026-07-28T00:01:00.000Z";
 #[tokio::test]
 async fn assembles_ordered_estate() {
     let temp = tempfile::tempdir().expect("temp");
-    let store = Store::open(temp.path().join("estate.sqlite"))
-        .await
-        .expect("open");
+    let store = Store::bootstrap(
+        temp.path().join("estate.sqlite"),
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    )
+    .await
+    .expect("open");
     store.seed("soul_test", FIRST).await.expect("seed");
     store
         .create_strand(StrandDraft {

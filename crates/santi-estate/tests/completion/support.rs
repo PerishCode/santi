@@ -4,6 +4,15 @@ use santi_model::{message, receipt, turn};
 
 pub(super) const FIRST: &str = "2026-07-28T00:00:00.000Z";
 
+pub(super) async fn bootstrap(path: impl AsRef<std::path::Path>) -> Store {
+    Store::bootstrap(
+        path,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    )
+    .await
+    .expect("bootstrap")
+}
+
 pub(super) async fn create_strand(store: &Store, tag: &str, label: Option<&str>) {
     store
         .create_strand(StrandDraft {

@@ -168,6 +168,12 @@ impl PromptHarness {
     async fn open() -> Self {
         let temp = tempfile::tempdir().expect("temp dir");
         let runtime = temp.path().join("runtime");
+        santi_core::Store::bootstrap(
+            temp.path().join("santi.sqlite"),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
+        .await
+        .expect("bootstrap");
         let service = Service::open(
             service::Config {
                 database: temp.path().join("santi.sqlite").display().to_string(),

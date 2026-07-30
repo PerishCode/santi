@@ -5,7 +5,7 @@ use santi_core::{
     service::{self, JobDraft, JobRead, Service},
 };
 
-use super::support::{Silent, Unit, available, seed, service, stamp};
+use super::support::{Silent, Unit, available, bootstrap, seed, service, stamp};
 
 #[tokio::test]
 async fn vertical() {
@@ -15,6 +15,7 @@ async fn vertical() {
     }
     let temp = tempfile::tempdir().expect("temp dir");
     let database = temp.path().join("santi.sqlite");
+    bootstrap(&database).await;
     let supervisor = santi_api::jobs::Native::new(env!("CARGO_BIN_EXE_santi-api"));
     let service = Service::supervised(
         service::Config {

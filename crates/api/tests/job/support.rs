@@ -205,7 +205,17 @@ pub async fn stamp(database: &std::path::Path, job: &str) -> String {
         .generation
 }
 
+pub async fn bootstrap(database: &std::path::Path) {
+    santi_core::Store::bootstrap(
+        database,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    )
+    .await
+    .expect("bootstrap");
+}
+
 pub async fn service(temp: &tempfile::TempDir, database: &std::path::Path) -> Service {
+    bootstrap(database).await;
     Service::supervised(
         service::Config {
             database: database.display().to_string(),

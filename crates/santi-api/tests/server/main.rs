@@ -14,7 +14,7 @@ use santi_api::{
     send_strand_handler,
 };
 use santi_core::service::{self, Service};
-use santi_core::{Ruled, Store, budget, drive, engine};
+use santi_core::{Ruled, budget, drive, engine};
 use santi_core::{effect, message};
 use santi_estate::{CallDraft, DrainDraft, EffectDraft, InboxDraft, Opening, StrandDraft};
 use santi_provider::{Cap, Event, Metadata, Provider, Request, Streaming};
@@ -149,7 +149,7 @@ mod effects {
     async fn roundtrip() {
         let temp = tempfile::tempdir().expect("temp dir");
         let database = temp.path().join("santi.sqlite");
-        let store = Store::open(&database).await.expect("open store");
+        let store = support::bootstrap(&database).await;
         store
             .seed(santi_core::GENESIS, &santi_core::now())
             .await
@@ -286,6 +286,7 @@ mod effects {
 mod environment;
 mod jobs;
 mod recovery;
+mod support;
 
 fn status(message: &str) -> StatusCode {
     ApiError::from_service(message.to_string()).status()

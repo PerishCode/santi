@@ -5,6 +5,7 @@ use santi_core::environ;
 #[tokio::test]
 async fn roundtrips() {
     let temp = tempfile::tempdir().expect("temp dir");
+    super::support::bootstrap(&temp.path().join("santi.sqlite")).await;
     let service = Service::open(
         service::Config {
             database: temp.path().join("santi.sqlite").display().to_string(),

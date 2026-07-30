@@ -41,6 +41,7 @@ impl JobSupervisor for FakeSupervisor {
 async fn accepts() {
     let temp = tempfile::tempdir().expect("temp dir");
     let database = temp.path().join("santi.sqlite");
+    super::support::bootstrap(&database).await;
     let supervisor = Arc::new(FakeSupervisor {
         launches: Mutex::new(0),
     });

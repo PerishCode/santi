@@ -17,9 +17,7 @@ mod runtime {
     async fn reads() {
         let temp = tempfile::tempdir().expect("temp dir");
         let paths = paths_under(temp.path());
-        let store = santi_core::Store::open(&paths.database)
-            .await
-            .expect("open store");
+        let store = super::support::bootstrap(&paths.database).await;
         store
             .seed(santi_core::GENESIS, &santi_core::now())
             .await
@@ -60,9 +58,7 @@ mod runtime {
     async fn handles() {
         let temp = tempfile::tempdir().expect("temp dir");
         let paths = paths_under(temp.path());
-        let store = santi_core::Store::open(&paths.database)
-            .await
-            .expect("open store");
+        let store = super::support::bootstrap(&paths.database).await;
         store
             .seed(santi_core::GENESIS, &santi_core::now())
             .await
@@ -89,11 +85,7 @@ mod runtime {
     async fn binds() {
         let temp = tempfile::tempdir().expect("temp dir");
         let paths = paths_under(temp.path());
-        drop(
-            santi_core::Store::open(&paths.database)
-                .await
-                .expect("open store"),
-        );
+        drop(super::support::bootstrap(&paths.database).await);
 
         let report = paths.doctor().await.expect("doctor");
         assert!(report.estate_bound);
@@ -108,9 +100,7 @@ mod runtime {
     async fn serializes() {
         let temp = tempfile::tempdir().expect("temp dir");
         let paths = paths_under(temp.path());
-        let store = santi_core::Store::open(&paths.database)
-            .await
-            .expect("open store");
+        let store = super::support::bootstrap(&paths.database).await;
         store
             .seed(santi_core::GENESIS, &santi_core::now())
             .await
@@ -132,9 +122,7 @@ mod seed {
         let temp = tempfile::tempdir().expect("temp dir");
         let paths = paths_under(temp.path());
         let strand = {
-            let store = santi_core::Store::open(&paths.database)
-                .await
-                .expect("open");
+            let store = super::support::bootstrap(&paths.database).await;
             store
                 .seed(santi_core::GENESIS, &santi_core::now())
                 .await
@@ -168,9 +156,7 @@ mod seed {
     async fn labels() {
         let temp = tempfile::tempdir().expect("temp dir");
         let paths = paths_under(temp.path());
-        let store = santi_core::Store::open(&paths.database)
-            .await
-            .expect("open");
+        let store = super::support::bootstrap(&paths.database).await;
         store
             .seed(santi_core::GENESIS, &santi_core::now())
             .await
@@ -195,9 +181,7 @@ mod seed {
     async fn unknown() {
         let temp = tempfile::tempdir().expect("temp dir");
         let paths = paths_under(temp.path());
-        let store = santi_core::Store::open(&paths.database)
-            .await
-            .expect("open");
+        let store = super::support::bootstrap(&paths.database).await;
         store
             .seed(santi_core::GENESIS, &santi_core::now())
             .await
@@ -219,9 +203,7 @@ mod audit {
     async fn projects() {
         let temp = tempfile::tempdir().expect("temp dir");
         let paths = paths_under(temp.path());
-        let store = santi_core::Store::open(&paths.database)
-            .await
-            .expect("open");
+        let store = super::support::bootstrap(&paths.database).await;
         store
             .seed(santi_core::GENESIS, &santi_core::now())
             .await
@@ -294,3 +276,4 @@ fn query(failed: bool) -> santi_api::ops::Audit<'static> {
 }
 
 mod doctor;
+mod support;

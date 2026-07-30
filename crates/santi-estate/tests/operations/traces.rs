@@ -8,7 +8,7 @@ const LATER: &str = "2026-07-28T00:01:00.000Z";
 async fn trace_records() {
     let temp = tempfile::tempdir().expect("temp");
     let path = temp.path().join("estate.sqlite");
-    let store = Store::open(&path).await.expect("open");
+    let store = super::support::bootstrap(&path).await;
     let turn = trace::Tag {
         key: "turn".to_string(),
         value: "turn_test".to_string(),

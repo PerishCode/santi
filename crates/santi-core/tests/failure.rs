@@ -153,6 +153,12 @@ fn turn(response: &santi_core::strand::Posted) -> &santi_core::turn::Turn {
 }
 
 async fn open_service(temp: &tempfile::TempDir, provider: Arc<FailureProvider>) -> Service {
+    santi_core::Store::bootstrap(
+        temp.path().join("santi.sqlite"),
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    )
+    .await
+    .expect("bootstrap");
     Service::open(
         service::Config {
             database: temp.path().join("santi.sqlite").display().to_string(),

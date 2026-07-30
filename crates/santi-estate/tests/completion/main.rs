@@ -13,7 +13,7 @@ const LATER: &str = "2026-07-28T00:01:00.000Z";
 async fn ceremonies() {
     let temp = tempfile::tempdir().expect("temp");
     let path = temp.path().join("estate.sqlite");
-    let store = Store::open(&path).await.expect("open");
+    let store = bootstrap(&path).await;
     store.seed("soul_test", FIRST).await.expect("seed");
     create_strand(&store, "strand_complete", Some("worker/thread")).await;
     driven(&store, "complete").await;

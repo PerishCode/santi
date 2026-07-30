@@ -3,12 +3,13 @@ use santi_estate::{
 };
 use santi_model::{message, thinking, turn};
 
+const SUDO: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const NOW: &str = "2026-07-28T00:00:00.000Z";
 
 #[tokio::test]
 async fn ledger() {
     let temp = tempfile::tempdir().expect("temp");
-    let store = Store::open(temp.path().join("estate.sqlite"))
+    let store = Store::bootstrap(temp.path().join("estate.sqlite"), SUDO)
         .await
         .expect("open");
     let genesis = store.seed("soul_default", NOW).await.expect("seed");

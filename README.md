@@ -42,12 +42,19 @@ workspace/memory. The only way into the runtime is HTTP.
 cp santi.example.toml santi.toml   # fill in a provider api_key + model
 cp .env.example .env               # SANTI_PATHS_DATABASE / SANTI_LISTEN_HOST / SANTI_LISTEN_PORT
 
+cargo run -p api -- bootstrap
 cargo run -p api -- serve
 ```
 
-With no `.env`/config at all, santi-api runs zero-config from its home directory
-(`SANTI_HOME`, default `~/.santi`): it reads `~/.santi/santi.toml` and creates
-`~/.santi/{runtime,execution}` automatically.
+Bootstrap is explicit and idempotent. It initializes the Keel estate and keeps
+its sudo custody at `$SANTI_HOME/runtime/sudo` with owner-only permissions.
+Keep that file with the estate in every backup or move: bootstrap refuses an
+occupied estate whose sudo custody is absent. Ordinary `serve` only binds an
+already initialized estate and never mints replacement custody.
+
+With no `.env`/config at all, santi-api resolves paths from its home directory
+(`SANTI_HOME`, default `~/.santi`): it reads `~/.santi/santi.toml`, while
+bootstrap creates the required runtime directories.
 
 Then, against a running server:
 
@@ -208,6 +215,10 @@ file > defaults):
 | `SANTI_CAPABILITY_KEY_ID` | unset | Active Ed25519 key id |
 | `SANTI_CAPABILITY_PRIVATE_KEY` | unset | Unpadded base64url Ed25519 32-byte private seed; never inherited by a shell |
 | `SANTI_CAPABILITY_TTL_SECONDS` | `120` | Capability lifetime, from 1 through 300 seconds |
+
+The sudo custody path is deliberately derived from the runtime root rather than
+configured independently. The default pair is `runtime/db` plus `runtime/sudo`,
+so the existing runtime snapshot remains the atomic recovery unit.
 
 A `.env` in the working directory is loaded and overrides the process
 environment (via `dotenvy::dotenv_override`).

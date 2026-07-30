@@ -32,6 +32,20 @@ grace = 0
 }
 
 #[test]
+fn listen() {
+    let held = read(
+        r#"
+[listen]
+host = "0.0.0.0"
+port = 43308
+prefix = "/santi"
+"#,
+    );
+    assert_eq!(held.listen.address(), "0.0.0.0:43308");
+    assert_eq!(held.listen.prefix, "/santi");
+}
+
+#[test]
 fn environment() {
     let held = read(
         r#"

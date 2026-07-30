@@ -1,7 +1,9 @@
+mod bootstrap;
 mod compact;
 mod environment;
 mod fork;
 mod projection;
+mod support;
 mod terminal;
 mod traces;
 mod transition;

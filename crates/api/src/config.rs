@@ -2,12 +2,36 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use plumb::config::{Cascade, Listen};
+use plumb::config::Cascade;
 use santi_api::config::{Layout, Profile, env, home};
 use santi_api::runtime::{self, Runtime};
 
 pub fn load() {
     dotenvy::dotenv().ok();
+}
+
+#[derive(Debug, Cascade)]
+#[cascade(section)]
+pub struct Listen {
+    pub host: String,
+    pub port: u16,
+    pub prefix: String,
+}
+
+impl Default for Listen {
+    fn default() -> Self {
+        Self {
+            host: "127.0.0.1".to_string(),
+            port: 43307,
+            prefix: String::new(),
+        }
+    }
+}
+
+impl Listen {
+    pub fn address(&self) -> String {
+        format!("{}:{}", self.host, self.port)
+    }
 }
 
 #[derive(Debug, Cascade)]
@@ -34,11 +58,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             provider: "openai".to_string(),
-            listen: Listen {
-                host: "127.0.0.1".to_string(),
-                port: 43307,
-                prefix: String::new(),
-            },
+            listen: Listen::default(),
             server: Server::default(),
             jobs: Jobs::default(),
             paths: Paths::default(),

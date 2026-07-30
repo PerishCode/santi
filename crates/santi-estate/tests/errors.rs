@@ -1,6 +1,7 @@
 use santi_error::{Draft, Kind, Scope, Source, Status, catalog};
 use santi_estate::Store;
 
+const SUDO: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const FIRST: &str = "2026-07-28T00:00:00.000Z";
 const LATER: &str = "2026-07-28T00:01:00.000Z";
 const RESOLVED: &str = "2026-07-28T00:02:00.000Z";
@@ -10,7 +11,7 @@ const REOPENED: &str = "2026-07-28T00:03:00.000Z";
 async fn lifecycle() {
     let temp = tempfile::tempdir().expect("temp");
     let path = temp.path().join("estate.sqlite");
-    let store = Store::open(&path).await.expect("open");
+    let store = Store::bootstrap(&path, SUDO).await.expect("open");
     let scope = Scope::new("strand", "strand_test");
 
     let first = store

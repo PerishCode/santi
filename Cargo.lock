@@ -93,7 +93,7 @@ dependencies = [
  "clap",
  "dotenvy",
  "futures-util",
- "plumb 0.4.0",
+ "plumb",
  "santi-api",
  "santi-core",
  "santi-estate",
@@ -627,7 +627,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1239,13 +1239,13 @@ dependencies = [
 
 [[package]]
 name = "keel"
-version = "0.8.0"
+version = "0.10.2"
 source = "sparse+https://git.perish.top/api/packages/PerishLab/cargo/"
-checksum = "f14c795591d34f74915658d3c10483ac245d6308fd70b5f2ea5d80032a27045b"
+checksum = "8e05914b1604629210dc6874b82a1ce93a9377ce4f9f7e1c19f7b38817aac284"
 dependencies = [
  "axum",
+ "getrandom 0.3.4",
  "keel-macro",
- "plumb 0.5.0",
  "serde",
  "serde_json",
  "sha2",
@@ -1255,9 +1255,9 @@ dependencies = [
 
 [[package]]
 name = "keel-macro"
-version = "0.8.0"
+version = "0.10.2"
 source = "sparse+https://git.perish.top/api/packages/PerishLab/cargo/"
-checksum = "baec26ff6e3d603744ee97a0c0071cf5fa67dd7146bb50038edbe3f80a3a5643"
+checksum = "45114f8b9b88fe9d489dddfd6bee06dfe79e2236b43eb1876efeb7aedcb7e76c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1429,46 +1429,22 @@ checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
 name = "plumb"
-version = "0.4.0"
+version = "0.18.5"
 source = "sparse+https://git.perish.top/api/packages/PerishLab/cargo/"
-checksum = "b42c19cf29ee094dd67c6c183f8a26bb64a9792c7d94af75a97505469740fb00"
+checksum = "90a22c67f485a12439b8dccaab56729e0bfb9370df28b0c3bc7b7ab8a3d26acd"
 dependencies = [
  "clap",
  "pin-project-lite",
- "plumb-macro 0.4.0",
- "serde",
- "toml 0.9.12+spec-1.1.0",
-]
-
-[[package]]
-name = "plumb"
-version = "0.5.0"
-source = "sparse+https://git.perish.top/api/packages/PerishLab/cargo/"
-checksum = "fedabb48658b60f98a000b984bb0c9875f2730bbb541564513f2cc08bdd8fa6c"
-dependencies = [
- "clap",
- "pin-project-lite",
- "plumb-macro 0.5.0",
+ "plumb-macro",
  "serde",
  "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
 name = "plumb-macro"
-version = "0.4.0"
+version = "0.18.5"
 source = "sparse+https://git.perish.top/api/packages/PerishLab/cargo/"
-checksum = "c352fddd25143d3d7aeb0d9cbc23fc6f04f531ed8bd3d9933a485debbd450d87"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "plumb-macro"
-version = "0.5.0"
-source = "sparse+https://git.perish.top/api/packages/PerishLab/cargo/"
-checksum = "efbb080626ce128eb20e22ee6ef5e5b418f7a09d801ae86d347e00dc480faea2"
+checksum = "5408ec5dafabab8e2f405ce1e386c822c86b9a9d11af40392d054acac813bd6d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1771,7 +1747,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1828,7 +1804,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1878,7 +1854,7 @@ dependencies = [
  "clap",
  "dotenvy",
  "futures-util",
- "plumb 0.4.0",
+ "plumb",
  "reqwest",
  "serde_json",
  "sha2",
@@ -1903,7 +1879,7 @@ dependencies = [
  "hex",
  "hmac",
  "libc",
- "plumb 0.4.0",
+ "plumb",
  "santi-core",
  "santi-estate",
  "santi-provider",
@@ -1934,7 +1910,7 @@ dependencies = [
  "jiff",
  "keel",
  "libc",
- "plumb 0.4.0",
+ "plumb",
  "santi-error",
  "santi-estate",
  "santi-model",
@@ -2380,7 +2356,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2879,7 +2855,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

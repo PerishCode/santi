@@ -1,12 +1,10 @@
-use santi_estate::{EnvironDraft, Store, StrandDraft};
+use santi_estate::{EnvironDraft, StrandDraft};
 use santi_model::environ;
 
 #[tokio::test]
 async fn ownership() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let store = Store::open(temp.path().join("santi.sqlite"))
-        .await
-        .expect("open store");
+    let store = super::support::bootstrap(temp.path().join("santi.sqlite")).await;
     store
         .seed("soul_default", "2026-07-29T00:00:00.000Z")
         .await

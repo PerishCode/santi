@@ -68,19 +68,19 @@ async fn identified() {
     ])
     .await;
 
-    assert!(matches!(
-        events.as_slice(),
-        [
-            Event::Started {
-                response: Some(response),
-            },
-            Event::Called(call),
-        ]
-            if response == "resp_tool"
-                && call.response == "resp_tool"
-                && call.call == "call_shell"
-                && call.name == "shell"
-    ));
+    let [
+        Event::Started {
+            response: Some(response),
+        },
+        Event::Called(call),
+    ] = events.as_slice()
+    else {
+        panic!("unexpected identified event sequence");
+    };
+    assert_eq!(response, "resp_tool");
+    assert_eq!(call.response, "resp_tool");
+    assert_eq!(call.call, "call_shell");
+    assert_eq!(call.name, "shell");
 }
 
 #[tokio::test]

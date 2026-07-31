@@ -93,22 +93,23 @@ async fn reasoned() {
     ])
     .await;
 
-    assert!(matches!(
-        events.as_slice(),
-        [
-            Event::Started {
-                response: Some(response),
-            },
-            Event::Thinking(reasoning),
-            Event::Text(text),
-            Event::Completed {
-                response: Some(completed_id),
-            },
-        ] if reasoning == "thinking"
-            && text == "ok"
-            && response == "chatcmpl_1"
-            && completed_id == "chatcmpl_1"
-    ));
+    let [
+        Event::Started {
+            response: Some(response),
+        },
+        Event::Thinking(reasoning),
+        Event::Text(text),
+        Event::Completed {
+            response: Some(completed_id),
+        },
+    ] = events.as_slice()
+    else {
+        panic!("unexpected reasoned event sequence");
+    };
+    assert_eq!(reasoning, "thinking");
+    assert_eq!(text, "ok");
+    assert_eq!(response, "chatcmpl_1");
+    assert_eq!(completed_id, "chatcmpl_1");
 }
 
 #[tokio::test]
@@ -120,16 +121,13 @@ async fn streamed() {
     ])
     .await;
 
-    assert!(matches!(
-        events.as_slice(),
-        [
-            Event::Started { .. },
-            Event::Called(call),
-        ] if call.response == "chatcmpl_tool"
-                && call.call == "call_shell"
-                && call.name == "shell"
-                && call.arguments["command"] == "pwd"
-    ));
+    let [Event::Started { .. }, Event::Called(call)] = events.as_slice() else {
+        panic!("unexpected streamed event sequence");
+    };
+    assert_eq!(call.response, "chatcmpl_tool");
+    assert_eq!(call.call, "call_shell");
+    assert_eq!(call.name, "shell");
+    assert_eq!(call.arguments["command"], "pwd");
 }
 
 #[tokio::test]

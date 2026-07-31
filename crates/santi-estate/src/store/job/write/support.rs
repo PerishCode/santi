@@ -8,13 +8,39 @@ pub(super) struct Origin<'a> {
     pub effect: &'a Row,
 }
 
+#[derive(PartialEq, Eq)]
+struct Lineage {
+    soul: Option<i64>,
+    strand: Option<i64>,
+    turn: Option<i64>,
+    effect: Option<i64>,
+    call: Option<i64>,
+}
+
+impl Lineage {
+    fn read(origin: &Origin<'_>) -> Self {
+        Self {
+            soul: origin.strand.int("soul"),
+            strand: origin.turn.int("strand"),
+            turn: origin.call.int("turn"),
+            effect: origin.effect.int("turn"),
+            call: origin.effect.int("call"),
+        }
+    }
+
+    fn expected(origin: &Origin<'_>) -> Self {
+        Self {
+            soul: Some(origin.soul.key()),
+            strand: Some(origin.strand.key()),
+            turn: Some(origin.turn.key()),
+            effect: Some(origin.turn.key()),
+            call: Some(origin.call.key()),
+        }
+    }
+}
+
 pub(super) fn validate(origin: Origin<'_>) -> Result<(), keel::adapt::Error> {
-    if origin.strand.int("soul") != Some(origin.soul.key())
-        || origin.turn.int("strand") != Some(origin.strand.key())
-        || origin.call.int("turn") != Some(origin.turn.key())
-        || origin.effect.int("turn") != Some(origin.turn.key())
-        || origin.effect.int("call") != Some(origin.call.key())
-    {
+    if Lineage::read(&origin) != Lineage::expected(&origin) {
         return Err(adapt("job capability origin is inconsistent"));
     }
     Ok(())

@@ -8,6 +8,25 @@ pub struct OutboxDraft<'a> {
     pub event: &'a event::Event,
 }
 
+#[derive(PartialEq, Eq)]
+struct Fingerprint<'a> {
+    tag: &'a str,
+    label: &'a str,
+    payload: &'a str,
+    stream: i64,
+}
+
+impl<'a> Fingerprint<'a> {
+    fn read(row: &'a keel::Row) -> Option<Self> {
+        Some(Self {
+            tag: row.text("tag")?,
+            label: row.text("label")?,
+            payload: row.text("payload")?,
+            stream: row.int("stream")?,
+        })
+    }
+}
+
 impl Store {
     pub async fn queue_outbox(&self, draft: OutboxDraft<'_>) -> Result<(), String> {
         let payload = serde_json::to_string(draft.event).map_err(|error| error.to_string())?;
@@ -123,11 +142,13 @@ pub(in crate::store) async fn queue(
         .one(&form("TurnOutbox").when("turn", Op::Eq, &turn.to_string()))
         .await?
     {
-        if existing.text("tag") == Some(draft.event.id.as_str())
-            && existing.text("label") == Some(draft.event.label.as_str())
-            && existing.text("payload") == Some(payload)
-            && existing.int("stream") == Some(stream)
-        {
+        let requested = Fingerprint {
+            tag: draft.event.id.as_str(),
+            label: draft.event.label.as_str(),
+            payload,
+            stream,
+        };
+        if Fingerprint::read(&existing) == Some(requested) {
             return Ok(());
         }
         return Err(keel::adapt::Error::Adapt(

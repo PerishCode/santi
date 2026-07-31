@@ -20,6 +20,18 @@ pub(super) struct Spec {
     pub output: u64,
 }
 
+#[derive(PartialEq, Eq)]
+struct Identity<'a> {
+    id: &'a str,
+    origin: &'a job::Origin,
+    stamp: &'a str,
+    sidecar: &'a str,
+    description: &'a str,
+    command: &'a str,
+    cwd: &'a str,
+    output: u64,
+}
+
 impl Spec {
     pub(super) fn from(launch: &JobLaunch) -> Self {
         Self {
@@ -40,18 +52,20 @@ impl Spec {
     }
 
     pub(super) fn matches(&self, other: &Self) -> bool {
-        self.id == other.id
-            && self.origin.soul == other.origin.soul
-            && self.origin.strand == other.origin.strand
-            && self.origin.turn == other.origin.turn
-            && self.origin.call == other.origin.call
-            && self.origin.effect == other.origin.effect
-            && self.stamp == other.stamp
-            && self.sidecar == other.sidecar
-            && self.description == other.description
-            && self.command == other.command
-            && self.cwd == other.cwd
-            && self.output == other.output
+        self.identity() == other.identity()
+    }
+
+    fn identity(&self) -> Identity<'_> {
+        Identity {
+            id: &self.id,
+            origin: &self.origin,
+            stamp: &self.stamp,
+            sidecar: &self.sidecar,
+            description: &self.description,
+            command: &self.command,
+            cwd: &self.cwd,
+            output: self.output,
+        }
     }
 }
 

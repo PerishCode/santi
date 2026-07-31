@@ -4,6 +4,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::*;
 use santi_estate::{JobRecord, Prepared};
 
+#[derive(PartialEq, Eq)]
+struct Status<'a> {
+    state: &'a job::State,
+    reason: Option<&'a str>,
+    exit: Option<i32>,
+    complete: bool,
+}
+
 impl Service {
     pub(crate) async fn permit(
         &self,
@@ -231,11 +239,19 @@ impl Service {
             return Ok(record);
         };
         let incomplete = state == job::State::Running && record.started_millis.is_none();
-        if record.job.state == state
-            && record.job.reason == reason
-            && record.job.exit_code == exit
-            && !incomplete
-        {
+        let current = Status {
+            state: &record.job.state,
+            reason: record.job.reason.as_deref(),
+            exit: record.job.exit_code,
+            complete: !incomplete,
+        };
+        let desired = Status {
+            state: &state,
+            reason: reason.as_deref(),
+            exit,
+            complete: true,
+        };
+        if current == desired {
             return Ok(record);
         }
         self.store

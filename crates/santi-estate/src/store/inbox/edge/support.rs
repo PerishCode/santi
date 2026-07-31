@@ -1,10 +1,32 @@
 use super::{ReplayDraft, WebhookDraft};
 
+#[derive(PartialEq, Eq)]
+struct Identity<'a> {
+    adaptor: &'a str,
+    strategy: &'a str,
+    credential: &'a str,
+    soul: i64,
+}
+
+impl<'a> Identity<'a> {
+    fn read(row: &'a keel::Row) -> Option<Self> {
+        Some(Self {
+            adaptor: row.text("adaptor")?,
+            strategy: row.text("strategy")?,
+            credential: row.text("credential")?,
+            soul: row.int("soul")?,
+        })
+    }
+}
+
 pub(super) fn exact(row: &keel::Row, draft: &WebhookDraft<'_>, soul: i64) -> bool {
-    row.text("adaptor") == Some(draft.adaptor)
-        && row.text("strategy") == Some(draft.strategy)
-        && row.text("credential") == Some(draft.credential)
-        && row.int("soul") == Some(soul)
+    Identity::read(row)
+        == Some(Identity {
+            adaptor: draft.adaptor,
+            strategy: draft.strategy,
+            credential: draft.credential,
+            soul,
+        })
 }
 
 pub(super) fn conflict(replay: ReplayDraft<'_>) -> &'static str {

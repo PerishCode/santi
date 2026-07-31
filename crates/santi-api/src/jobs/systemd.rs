@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Output},
 };
 
 use santi_core::{
@@ -217,18 +217,34 @@ pub(super) fn control(arguments: &[&str], strict: bool) -> Result<(), String> {
         .args(arguments)
         .output()
         .map_err(|error| format!("failed to invoke systemctl: {error}"))?;
-    if output.status.success()
-        || !strict
-            && (String::from_utf8_lossy(&output.stderr).contains("not loaded")
-                || String::from_utf8_lossy(&output.stderr).contains("not found"))
-    {
-        Ok(())
-    } else {
-        Err(format!(
+    match outcome(&output, strict) {
+        Outcome::Success | Outcome::Missing => Ok(()),
+        Outcome::Failure => Err(format!(
             "systemctl {} failed: {}",
             arguments.join(" "),
             String::from_utf8_lossy(&output.stderr).trim()
-        ))
+        )),
+    }
+}
+
+enum Outcome {
+    Success,
+    Missing,
+    Failure,
+}
+
+fn outcome(output: &Output, strict: bool) -> Outcome {
+    if output.status.success() {
+        return Outcome::Success;
+    }
+    if strict {
+        return Outcome::Failure;
+    }
+    let error = String::from_utf8_lossy(&output.stderr);
+    if error.contains("not loaded") || error.contains("not found") {
+        Outcome::Missing
+    } else {
+        Outcome::Failure
     }
 }
 

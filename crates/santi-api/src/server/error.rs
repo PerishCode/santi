@@ -8,6 +8,120 @@ pub struct ApiError {
     error: Fault,
 }
 
+enum Kind {
+    Unauthorized,
+    Unavailable,
+    Missing,
+    Conflict,
+    Invalid,
+    Internal,
+}
+
+enum Rule {
+    Exact(&'static str),
+    Starts(&'static str),
+    Contains(&'static str),
+    Ends(&'static str),
+    Around {
+        start: &'static str,
+        fragment: &'static str,
+    },
+}
+
+impl Rule {
+    fn accepts(&self, text: &str) -> bool {
+        match self {
+            Self::Exact(value) => text == *value,
+            Self::Starts(value) => text.starts_with(value),
+            Self::Contains(value) => text.contains(value),
+            Self::Ends(value) => text.ends_with(value),
+            Self::Around { start, fragment } => text.starts_with(start) && text.contains(fragment),
+        }
+    }
+}
+
+const AUTH: &[Rule] = &[
+    Rule::Exact("invalid job capability"),
+    Rule::Exact("job capability expired"),
+];
+
+const UNAVAILABLE: &[Rule] = &[
+    Rule::Starts("job supervisor is unavailable"),
+    Rule::Starts("systemd did not accept job"),
+    Rule::Starts("launchd did not accept job"),
+    Rule::Contains("sidecar did not claim"),
+    Rule::Contains("sidecar failed before claimed"),
+];
+
+const MISSING: &[Rule] = &[
+    Rule::Exact("strand not found"),
+    Rule::Exact("soul not found"),
+    Rule::Ends("not found"),
+];
+
+const CONFLICT: &[Rule] = &[
+    Rule::Starts("downstream request conflicts"),
+    Rule::Starts("downstream id conflicts"),
+    Rule::Starts("webhook delivery conflicts"),
+    Rule::Around {
+        start: "webhook ",
+        fragment: " conflicts ",
+    },
+    Rule::Starts("job capability conflicts"),
+    Rule::Starts("job execution spec conflicts"),
+    Rule::Contains("sidecar stamp conflicts"),
+    Rule::Contains("overlaps an existing registration"),
+    Rule::Ends("is already registered"),
+];
+
+const INVALID: &[Rule] = &[
+    Rule::Starts("unknown soul"),
+    Rule::Contains("must not be empty"),
+    Rule::Around {
+        start: "downstream ",
+        fragment: " must ",
+    },
+    Rule::Contains("must contain text"),
+    Rule::Starts("strategy must be"),
+    Rule::Starts("fork"),
+    Rule::Contains(" is past parent end "),
+    Rule::Contains("object key"),
+    Rule::Contains("object uri"),
+    Rule::Contains("path segment"),
+    Rule::Contains("path separators"),
+    Rule::Starts("only an unknown effect"),
+    Rule::Starts("effect resolution evidence"),
+    Rule::Around {
+        start: "job ",
+        fragment: " must ",
+    },
+    Rule::Starts("environment "),
+    Rule::Starts("only a terminal job"),
+];
+
+fn accepts(text: &str, rules: &[Rule]) -> bool {
+    rules.iter().any(|rule| rule.accepts(text))
+}
+
+fn kind(text: &str) -> Kind {
+    if accepts(text, AUTH) {
+        return Kind::Unauthorized;
+    }
+    if accepts(text, UNAVAILABLE) {
+        return Kind::Unavailable;
+    }
+    if accepts(text, MISSING) {
+        return Kind::Missing;
+    }
+    if accepts(text, CONFLICT) {
+        return Kind::Conflict;
+    }
+    if accepts(text, INVALID) {
+        return Kind::Invalid;
+    }
+    Kind::Internal
+}
+
 impl ApiError {
     pub fn status(&self) -> StatusCode {
         self.status
@@ -108,52 +222,13 @@ impl ApiError {
     }
 
     pub fn from_service(message: String) -> Self {
-        let text = message.as_str();
-        if text == "invalid job capability" || text == "job capability expired" {
-            Self::unauthorized(message)
-        } else if text.starts_with("job supervisor is unavailable")
-            || text.starts_with("systemd did not accept job")
-            || text.starts_with("launchd did not accept job")
-            || text.contains("sidecar did not claim")
-            || text.contains("sidecar failed before claimed")
-        {
-            Self::unavailable(message)
-        } else if text == "strand not found"
-            || text == "soul not found"
-            || text.ends_with("not found")
-        {
-            Self::not_found(message)
-        } else if text.starts_with("downstream request conflicts")
-            || text.starts_with("downstream id conflicts")
-            || text.starts_with("webhook delivery conflicts")
-            || text.starts_with("webhook ") && text.contains(" conflicts ")
-            || text.starts_with("job capability conflicts")
-            || text.starts_with("job execution spec conflicts")
-            || text.contains("sidecar stamp conflicts")
-            || text.contains("overlaps an existing registration")
-            || text.ends_with("is already registered")
-        {
-            Self::conflict(message)
-        } else if text.starts_with("unknown soul")
-            || text.contains("must not be empty")
-            || text.starts_with("downstream ") && text.contains(" must ")
-            || text.contains("must contain text")
-            || text.starts_with("strategy must be")
-            || text.starts_with("fork")
-            || text.contains(" is past parent end ")
-            || text.contains("object key")
-            || text.contains("object uri")
-            || text.contains("path segment")
-            || text.contains("path separators")
-            || text.starts_with("only an unknown effect")
-            || text.starts_with("effect resolution evidence")
-            || text.starts_with("job ") && text.contains(" must ")
-            || text.starts_with("environment ")
-            || text.starts_with("only a terminal job")
-        {
-            Self::bad_request(message)
-        } else {
-            Self::internal(message)
+        match kind(message.as_str()) {
+            Kind::Unauthorized => Self::unauthorized(message),
+            Kind::Unavailable => Self::unavailable(message),
+            Kind::Missing => Self::not_found(message),
+            Kind::Conflict => Self::conflict(message),
+            Kind::Invalid => Self::bad_request(message),
+            Kind::Internal => Self::internal(message),
         }
     }
 }

@@ -27,7 +27,7 @@ impl State {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[schema(as = job::Origin)]
 pub struct Origin {
     pub soul: String,

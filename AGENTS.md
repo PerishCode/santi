@@ -14,6 +14,7 @@ crates/
   santi-api/       # HTTP/SSE/OpenAPI server library over santi-core
   santi/           # the `santi` transport-only HTTP client binary
 .runseal/ops/       # retained operator-owned host/edge artifacts
+docs/integration/v1/ # versioned owner contract and exact external-delivery assets
 ```
 
 ## Boundaries
@@ -83,6 +84,12 @@ rejected, not silently created). To address a soul ad hoc without a default:
 - Santi's runtime boundary stops at its executables. Existing packaging,
   recovery, and system-service artifacts are operator-owned and are not runtime
   architecture. Infra owns only generic host, k3s, DNS, and shared middleware.
+- `docs/integration/v1/` is Santi-owned delivery truth. Its strict manifest binds one
+  exact package release to pinned window assets, identity intent, and route
+  semantics without generated IDs, credentials, or production endpoints.
+  Consumers bind these tracked bytes through immutable commit URLs and exact
+  SHA-256 plus byte-count identities; provisional live observations never amend
+  the owner contract.
 - Runtime secrets live in `santi.toml`; local release escrow lives under
   `.local/secrets/releases/`. Both are gitignored. Never commit live
   credentials; `santi.example.toml` is the tracked runtime template.

@@ -1,0 +1,49 @@
+schema = "santi.integration/v1"
+
+[package]
+version = "0.1.0-beta.67"
+sha256 = "66e2548c95132c6de0e5246f544d059e57a947aed9a39a8128b06117096a850a"
+
+[window]
+image = "docker.io/library/nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10"
+port = 8088
+
+[window.html]
+path = "window/index.html"
+sha256 = "073cba4663fd2c7c58edd6319d7a24649ec4342064bddde764c8734f82ccc49f"
+bytes = 14724
+
+[window.configuration]
+path = "window/default.conf.tmpl"
+sha256 = "63066b1cf5735f66612527bfc5e7e2013a6800f5f3309e81232c38337f3a8f7e"
+bytes = 4862
+
+[identity]
+application = "santi-window"
+service_account = "santi-window-cli"
+mode = "forward_domain"
+grants = ["authorization_code", "client_credentials", "password"]
+
+[[route]]
+name = "window"
+matcher = "prefix"
+paths = ["/"]
+access = "forward_auth"
+backend = "window"
+priority = 10
+
+[[route]]
+name = "webhooks"
+matcher = "prefix"
+paths = ["/api/v1/webhooks/"]
+access = "anonymous"
+backend = "window"
+priority = 20
+
+[[route]]
+name = "downstreams"
+matcher = "exact"
+paths = ["/api/v1/ingest", "/api/v1/turn-events", "/api/v1/turn-events/stream"]
+access = "anonymous"
+backend = "window"
+priority = 30

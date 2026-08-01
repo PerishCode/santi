@@ -1,0 +1,269 @@
+<!doctype html>
+<!--
+  santi window — a read-only glass wall onto a soul's occurrence stream.
+
+  Strictly a PROJECTION. It consumes santi's existing read API only:
+    GET /api/v1/strands                        → list strands
+    GET /api/v1/strands/{id}/runtime           → full state for history replay
+    GET /api/v1/strands/{id}/events  (SSE)     → live occurrences
+  No own query-model. It renders OCCURRENCES (messages, thinking, tool
+  calls/results, turn markers) — not chat bubbles. It is strictly read-only.
+
+  Same-origin: it talks to /api/* which the fronting nginx bare-proxies to santi
+  (127.0.0.1). The browser holds no santi credential; access is gated upstream by
+  authentik forward-auth. Single file, no build, no external requests — the styling
+  is hand-written CSS, everything else is vanilla JS + native fetch/EventSource.
+-->
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>santi · window</title>
+  <style>
+    :root {
+      --bg:#0a0f1a; --panel:#0d1424; --line:#1e293b; --line-soft:#1e293b66;
+      --ink:#cbd5e1; --ink-dim:#64748b; --ink-bright:#e2e8f0;
+      --soul:#38bdf8; --system:#f59e0b; --think:#a78bfa; --tool:#2dd4bf;
+      --result:#5eead4; --turn:#64748b; --fail:#fb7185; --compact:#818cf8; --ok:#34d399;
+    }
+    * { box-sizing:border-box; }
+    html,body { height:100%; margin:0; }
+    body {
+      background:var(--bg); color:var(--ink); overflow:hidden;
+      font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      display:flex;
+    }
+    .scroll::-webkit-scrollbar { width:8px; height:8px; }
+    .scroll::-webkit-scrollbar-thumb { background:#334155; border-radius:4px; }
+    aside {
+      width:20rem; flex:0 0 auto; border-right:1px solid var(--line);
+      display:flex; flex-direction:column; background:var(--panel);
+    }
+    .brand {
+      padding:.7rem 1rem; border-bottom:1px solid var(--line);
+      display:flex; align-items:center; justify-content:space-between;
+    }
+    .brand b { color:var(--ink-bright); font-weight:600; letter-spacing:.03em; }
+    .sub { padding:.4rem 1rem; font-size:11px; color:var(--ink-dim); border-bottom:1px solid var(--line-soft); }
+    #strands { flex:1; overflow-y:auto; list-style:none; margin:0; padding:0; }
+    #strands li { padding:.55rem 1rem; border-bottom:1px solid var(--line-soft); cursor:pointer; }
+    #strands li:hover { background:#111a2e; }
+    #strands li.active { background:#132038; box-shadow:inset 2px 0 0 var(--soul); }
+    #strands .sid { color:var(--ink-bright); font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    #strands .smeta { color:var(--ink-dim); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:1px; }
+    main { flex:1; min-width:0; display:flex; flex-direction:column; }
+    header.bar {
+      padding:.65rem 1.25rem; border-bottom:1px solid var(--line);
+      display:flex; align-items:center; gap:.75rem; background:var(--panel);
+    }
+    header.bar .title { color:var(--ink-bright); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    header.bar .st { font-size:11px; color:var(--ink-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; }
+    .pill { font-size:11px; padding:.1rem .5rem; border-radius:999px; background:#1e293b; color:var(--ink-dim); white-space:nowrap; }
+    .pill.live { background:#064e3b; color:var(--ok); }
+    .pill.off { background:#3f1d2b; color:var(--fail); }
+    .pill.act { background:#3b2f10; color:var(--system); }
+    #timeline { flex:1; overflow-y:auto; padding:1rem 1.25rem; }
+    .empty { color:var(--ink-dim); padding:2rem 1rem; text-align:center; }
+    .occ {
+      border-left:2px solid var(--turn); padding:.4rem 0 .5rem .75rem; margin:.55rem 0;
+    }
+    .occ .k { font-size:10px; text-transform:uppercase; letter-spacing:.08em; opacity:.65; margin-bottom:.15rem; }
+    .occ .t { color:var(--ink-dim); font-size:10px; }
+    .occ pre { margin:.15rem 0 0; white-space:pre-wrap; word-break:break-word; font-size:12.5px; line-height:1.55; }
+    .occ.soul     { border-color:var(--soul); }    .occ.soul .k    { color:var(--soul); }    .occ.soul pre    { color:#e0f2fe; }
+    .occ.system   { border-color:var(--system); }  .occ.system .k  { color:var(--system); }  .occ.system pre  { color:#fef3c7; }
+    .occ.thinking { border-color:var(--think); }    .occ.thinking .k{ color:var(--think); }    .occ.thinking pre{ color:#ddd6fe; opacity:.85; }
+    .occ.tool     { border-color:var(--tool); }      .occ.tool .k    { color:var(--tool); }      .occ.tool pre    { color:#ccfbf1; }
+    .occ.result   { border-color:var(--result); }    .occ.result .k  { color:var(--result); }    .occ.result pre  { color:#99f6e4; }
+    .occ.turn     { border-color:var(--turn); }      .occ.turn .k    { color:var(--turn); }
+    .occ.fail     { border-color:var(--fail); }      .occ.fail .k    { color:var(--fail); }      .occ.fail pre    { color:#fecdd3; }
+    .occ.compact  { border-color:var(--compact); }   .occ.compact .k { color:var(--compact); }   .occ.compact pre { color:#c7d2fe; }
+  </style>
+</head>
+<body>
+  <aside>
+    <div class="brand"><b>santi · window</b><span id="conn" class="pill">–</span></div>
+    <div class="sub">只读 occurrence 观察窗 · 不介入</div>
+    <ul id="strands" class="scroll"></ul>
+  </aside>
+  <main>
+    <header class="bar">
+      <span id="title" class="title">选择一条 strand</span>
+      <span id="st" class="st"></span>
+      <span id="act" class="pill" hidden></span>
+    </header>
+    <div id="timeline" class="scroll"><div class="empty">左侧选择一条 strand 观看其发生流</div></div>
+  </main>
+  <script>
+  (() => {
+    const $ = (s, r = document) => r.querySelector(s);
+    const eln = (tag, cls, txt) => { const n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; };
+    const conn = $('#conn'), act = $('#act');
+    const setConn = (t, k) => { conn.textContent = t; conn.className = 'pill' + (k ? ' ' + k : ''); };
+    const timeline = $('#timeline');
+
+    async function api(path) {
+      const r = await fetch(path, { headers: { Accept: 'application/json' } });
+      if (!r.ok) throw new Error(path + ' → ' + r.status);
+      return r.json();
+    }
+    const short = (s, n = 10) => (s && s.length > n ? s.slice(0, n) + '…' : s || '');
+    const clock = (iso) => { try { return new Date(iso).toLocaleTimeString('zh-CN', { hour12: false }); } catch { return ''; } };
+
+    // ---------- strand list ----------
+    let active = null;
+    async function loadStrands() {
+      try {
+        const strands = await api('/api/v1/strands');
+        strands.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+        const list = $('#strands'); list.innerHTML = '';
+        for (const s of strands) {
+          const li = eln('li', s.id === active ? 'active' : '');
+          li.appendChild(eln('div', 'sid', s.id));
+          const meta = (s.external_label ? s.external_label + ' · ' : '') + 'soul ' + short(s.soul_id, 12) + ' · seq ' + s.next_seq;
+          li.appendChild(eln('div', 'smeta', meta));
+          li.onclick = () => selectStrand(s);
+          list.appendChild(li);
+        }
+        if (!active) setConn('connected', '');
+      } catch { setConn('offline', 'off'); }
+    }
+
+    // ---------- occurrence rows ----------
+    const seen = new Set();               // dedupe by stable key
+    const rows = new Map();               // key -> row element (for in-place updates)
+    let stick = true;
+    timeline.addEventListener('scroll', () => {
+      stick = timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 48;
+    });
+    function place(row) { timeline.appendChild(row); if (stick) timeline.scrollTop = timeline.scrollHeight; }
+    function removeRow(key) { const r = rows.get(key); if (r) { r.remove(); rows.delete(key); } }
+
+    function row(key, kind, label, ts) {
+      let r = rows.get(key);
+      if (!r) {
+        r = eln('div', 'occ ' + kind); if (key) r.dataset.k = key;
+        const head = eln('div', 'k'); head.appendChild(document.createTextNode(label));
+        if (ts) { const t = eln('span', 't', '  ' + clock(ts)); head.appendChild(t); }
+        r.appendChild(head);
+        rows.set(key, r); place(r);
+      }
+      return r;
+    }
+    function setBody(r, text) {
+      let pre = r.querySelector('pre');
+      if (text == null || text === '') { if (pre) pre.remove(); return; }
+      if (!pre) { pre = eln('pre'); r.appendChild(pre); }
+      pre.textContent = text;
+    }
+    const jstr = (v) => v == null ? '' : (typeof v === 'string' ? v : JSON.stringify(v, null, 2));
+
+    // renderers keyed off the shared record shapes
+    function rMessage(m) {
+      if (!m || !m.message) return;
+      const kind = m.message.actor_type === 'system' ? 'system' : 'soul';
+      const r = row('msg:' + m.message.id, kind, kind, (m.relation && m.relation.created_at) || m.message.created_at);
+      setBody(r, m.content_text != null ? m.content_text : '');
+    }
+    function rThinking(t, phase) {
+      const r = row('think:' + t.id, 'thinking', 'thinking' + (phase ? ' · ' + phase : ''), t.created_at);
+      const fallback = t.state === 'running' ? '(思考中…)' : '(无摘要)';
+      setBody(r, t.summary || fallback);
+    }
+    function rToolCall(tc) {
+      const r = row('tool:' + tc.id, 'tool', 'tool · ' + tc.tool_name, tc.created_at);
+      setBody(r, jstr(tc.arguments));
+    }
+    function rToolResult(tr) {
+      const r = row('result:' + tr.id, 'result', 'tool result', tr.created_at);
+      setBody(r, tr.error_text ? 'ERROR: ' + tr.error_text : jstr(tr.output));
+    }
+    function rCompact(c) {
+      const r = row('compact:' + c.id, 'compact', 'compact', null);
+      setBody(r, c.summary || '');
+    }
+    function rTurnMark(kind, label, text, ts) {
+      const r = eln('div', 'occ ' + kind);
+      const head = eln('div', 'k', label);
+      if (ts) head.appendChild(eln('span', 't', '  ' + clock(ts)));
+      r.appendChild(head);
+      if (text) { const pre = eln('pre'); pre.textContent = text; r.appendChild(pre); }
+      place(r);
+    }
+
+    // ---------- select a strand: replay /runtime then subscribe ----------
+    let es = null;
+    async function selectStrand(s) {
+      active = s.id; seen.clear(); rows.clear(); timeline.innerHTML = ''; stick = true;
+      $('#title').textContent = s.id;
+      $('#st').textContent = (s.external_label ? s.external_label + '  ' : '') + 'soul ' + s.soul_id;
+      act.hidden = true;
+      loadStrands();
+      if (es) { es.close(); es = null; }
+      try {
+        const snap = await api('/api/v1/strands/' + encodeURIComponent(s.id) + '/runtime');
+        replay(snap);
+      } catch (e) { timeline.appendChild(eln('div', 'empty', '空 strand,或读取失败')); }
+      subscribe(s.id);
+    }
+
+    // build one chronological occurrence stream from the runtime snapshot
+    function replay(snap) {
+      const items = [];
+      for (const m of (snap.messages || [])) items.push({ ts: (m.relation && m.relation.created_at) || m.message.created_at, seq: m.relation ? m.relation.strand_seq : 0, f: () => rMessage(m) });
+      for (const t of (snap.thinking_spans || [])) items.push({ ts: t.created_at, seq: 0, f: () => rThinking(t, t.state === 'running' ? '进行中' : '完成') });
+      for (const c of (snap.tool_calls || [])) items.push({ ts: c.created_at, seq: 0, f: () => rToolCall(c) });
+      for (const r of (snap.tool_results || [])) items.push({ ts: r.created_at, seq: 0, f: () => rToolResult(r) });
+      for (const k of (snap.compacts || [])) items.push({ ts: '', seq: -1, f: () => rCompact(k) });
+      items.sort((a, b) => (a.ts || '').localeCompare(b.ts || '') || (a.seq - b.seq));
+      if (!items.length) { timeline.appendChild(eln('div', 'empty', '这条 strand 还没有发生任何事')); return; }
+      for (const it of items) it.f();
+    }
+
+    // ---------- live SSE (events are NAMED; envelope carries payload.type) ----------
+    const NAMES = ['stream_open','message_created','message_delta','message_completed',
+      'tool_call_created','tool_result_created','thinking_created','thinking_updated',
+      'thinking_completed','material_updated','turn_started','turn_activity','turn_completed','turn_failed'];
+    function subscribe(id) {
+      es = new EventSource('/api/v1/strands/' + encodeURIComponent(id) + '/events');
+      es.onopen = () => setConn('live', 'live');
+      es.onerror = () => setConn('reconnecting…', 'off');
+      for (const n of NAMES) es.addEventListener(n, (e) => handle(e.data));
+    }
+    function handle(data) {
+      let env; try { env = JSON.parse(data); } catch { return; }
+      const p = env.payload || env;
+      switch (p.type) {
+        case 'message_created':   rMessage(p.message); break;
+        case 'message_delta': {
+          // provisional streaming row, keyed by turn (the synthetic delta id differs
+          // from the final message id); replaced by the real message on completion.
+          const kind = p.role === 'system' ? 'system' : 'soul';
+          const r = row('live:' + p.turn_id, kind, kind + ' · …', env.created_at);
+          const pre = r.querySelector('pre') || r.appendChild(eln('pre'));
+          pre.textContent = (pre.textContent || '') + (p.text || '');
+          if (stick) timeline.scrollTop = timeline.scrollHeight;
+          break;
+        }
+        case 'message_completed': removeRow('live:' + p.turn_id); rMessage(p.message); break;
+        case 'thinking_created':  rThinking(p.thinking, '进行中'); break;
+        case 'thinking_updated':  rThinking(p.thinking, '进行中'); break;
+        case 'thinking_completed':rThinking(p.thinking, '完成'); break;
+        case 'tool_call_created': rToolCall(p.tool_call); break;
+        case 'tool_result_created': rToolResult(p.tool_result); break;
+        case 'turn_started':      act.hidden = false; act.className = 'pill act'; act.textContent = 'turn…'; break;
+        case 'turn_activity':     act.hidden = false; act.className = 'pill act'; act.textContent = (p.activity && p.activity.state) || 'active'; break;
+        case 'turn_completed':    act.hidden = true; rTurnMark('turn', 'turn completed', '', env.created_at); loadStrands(); break;
+        case 'turn_failed':       act.hidden = true; rTurnMark('fail', 'turn failed', p.error || '', env.created_at); loadStrands(); break;
+        // stream_open / material_updated: no-op in the occurrence view
+      }
+    }
+
+    loadStrands();
+    setInterval(() => { if (!active) loadStrands(); }, 15000);
+  })();
+
+  </script>
+</body>
+</html>
